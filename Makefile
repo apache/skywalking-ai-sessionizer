@@ -19,10 +19,12 @@ BINARY      := asz
 BIN_DIR     := bin
 GO          := go
 
-# The version the binary reports. A tagged checkout says v0.1.0, anything
+# The version the binary reports. A tagged checkout says 0.1.0, anything
 # else says the nearest tag and commit, and -dirty when the tree has changes.
+# The tag carries a v, as Go modules require; the version does not, so that
+# a local build, a release build and the image all print the same thing.
 # Pass VERSION=0.1.0 to override, which is also what a release does.
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo dev)
 LDFLAGS     := -X main.version=$(VERSION)
 
 RELEASE_NAME := apache-skywalking-ai-sessionizer-$(VERSION)-src
