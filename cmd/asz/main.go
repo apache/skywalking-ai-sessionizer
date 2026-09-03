@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -49,6 +50,7 @@ Usage:
   asz view [-config FILE] [ADDR]       serve the conversations as a page (default 127.0.0.1:8787)
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
+  asz version                          print the version
 
 Flags:
   -config FILE   configuration file (default: ./asz.yaml when present, else built-in defaults)
@@ -59,6 +61,10 @@ Flags:
 // positional holds the command's non-flag arguments, filled once flags parse.
 // defaultConfig is read from the working directory when no -config is given.
 const defaultConfig = "asz.yaml"
+
+// version is set at build time from the tag or the commit. A binary built
+// with plain go build says dev.
+var version = "dev"
 
 var positional []string
 
@@ -79,6 +85,10 @@ func main() {
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
+	if cmd == "version" {
+		fmt.Printf("asz %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		return
+	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 	cfgPath := fs.String("config", "", "configuration file")
 	once := fs.Bool("once", false, "single pass, then exit")

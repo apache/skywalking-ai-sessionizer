@@ -23,6 +23,17 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # A GitHub release is published only after the Apache vote has passed, so
+  # this is the event that attaches version tags to the image.
+  release:
+    types: [published]
+  # By hand: promote a tag whose release predates this workflow, or retry a
+  # publish that failed.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to promote, for example v0.1.0'
+        required: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -101,32 +112,74 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A promotion by hand builds the tag it names. Every other event
+          # builds the ref that triggered it. Tags are needed to decide
+          # whether a promoted version is the newest release.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
       - name: Set up buildx
         run: docker buildx create --use --name asz
       - name: Image tags
         id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
+          set -eu
           image=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
-          tags="$image:sha-${GITHUB_SHA::8}"
-          if [ "$GITHUB_REF" = "refs/heads/main" ]; then tags="$tags,$image:latest"; fi
-          case "$GITHUB_REF" in refs/tags/v*) tags="$tags,$image:${GITHUB_REF#refs/tags/}" ;; esac
+          sha=$(git rev-parse HEAD)
+          tags="$image:sha-${sha::8}"
+          version="sha-${sha::8}"
+          ref="$GITHUB_REF"
+          if [ "$EVENT" = "workflow_dispatch" ]; then ref="refs/tags/$INPUT_TAG"; fi
+          case "$EVENT:$ref" in
+            push:refs/heads/main)
+              # The development head. latest is reserved for releases.
+              tags="$tags,$image:main" ;;
+            push:refs/tags/v*)
+              # A tag is a release candidate until the vote passes, so a tag
+              # push publishes the immutable sha tag and nothing else.
+              echo "::notice::${ref#refs/tags/} is a candidate; version tags are attached when its GitHub release is published" ;;
+            release:refs/tags/v*|workflow_dispatch:refs/tags/v*)
+              version="${ref#refs/tags/v}"
+              tags="$tags,$image:$version"
+              case "$version" in
+                *-*)
+                  # A pre-release such as 0.2.0-rc1 moves no floating tag.
+                  ;;
+                *)
+                  tags="$tags,$image:${version%.*}"
+                  # latest must name the newest release, so promoting a patch
+                  # of an older line must not drag it backwards.
+                  highest=$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-' | head -1)
+                  if [ "v$version" = "$highest" ]; then tags="$tags,$image:latest"; fi ;;
+              esac ;;
+          esac
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "::notice::tags: $tags"
       - name: Build
         if: github.event_name == 'pull_request'
-        run: docker buildx build --platform linux/amd64 --load -t asz:pr .
+        run: docker buildx build --platform linux/amd64 --load --build-arg VERSION=pr -t asz:pr .
       - name: Smoke test
         if: github.event_name == 'pull_request'
-        run: docker run --rm asz:pr glossary | head -c 400
+        run: docker run --rm asz:pr version && docker run --rm asz:pr glossary | head -c 400
       - name: Log in to GHCR
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build and push
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: |
           set -eu
           args=""
           for t in $(echo "${{ steps.meta.outputs.tags }}" | tr ',' ' '); do args="$args -t $t"; done
-          docker buildx build --platform linux/amd64,linux/arm64 $args --push .
+          docker buildx build --platform linux/amd64,linux/arm64 $args \
+            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
+            --label org.opencontainers.image.revision="${{ steps.meta.outputs.sha }}" \
+            --label org.opencontainers.image.version="${{ steps.meta.outputs.version }}" \
+            --push .
 
   # Single fan-in job so branch protection needs only one required check.
   result:

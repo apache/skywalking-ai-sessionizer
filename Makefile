@@ -19,6 +19,14 @@ BINARY      := asz
 BIN_DIR     := bin
 GO          := go
 
+# The version the binary reports. A tagged checkout says v0.1.0, anything
+# else says the nearest tag and commit, and -dirty when the tree has changes.
+# Pass VERSION=0.1.0 to override, which is also what a release does.
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS     := -X main.version=$(VERSION)
+
+RELEASE_NAME := apache-skywalking-ai-sessionizer-$(VERSION)-src
+
 GOLANGCI_LINT_VERSION := v1.64.8
 LICENSE_EYE_VERSION   := v0.9.0
 
@@ -30,7 +38,7 @@ $(BIN_DIR):
 ## build: compile the binary into ./bin
 .PHONY: build
 build: $(BIN_DIR)
-	$(GO) build -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
 
 ## test: run the whole suite, unit and end-to-end
 .PHONY: test
@@ -94,7 +102,18 @@ tidy:
 ## check: everything CI runs
 .PHONY: check
 docker: ## Build the container image, as CI builds and publishes it
-	docker build -t skywalking-ai-sessionizer:dev .
+	docker build --build-arg VERSION=$(VERSION) -t skywalking-ai-sessionizer:dev .
+
+## release: build the source release for a vote into dist/: tarball, sha512 and GPG signature. Needs VERSION=x.y.z and the tag vx.y.z
+.PHONY: release
+release:
+	@case "$(VERSION)" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "set the version, for example: make release VERSION=0.1.0"; exit 2 ;; esac
+	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "tag v$(VERSION) does not exist"; exit 2; }
+	@mkdir -p dist
+	git archive --format=tar --prefix=$(RELEASE_NAME)/ v$(VERSION) | gzip -n > dist/$(RELEASE_NAME).tgz
+	cd dist && shasum -a 512 $(RELEASE_NAME).tgz > $(RELEASE_NAME).tgz.sha512
+	cd dist && gpg --armor --detach-sign $(RELEASE_NAME).tgz
+	@ls -la dist/$(RELEASE_NAME).tgz*
 
 check: vet lint license-check dep-check test
 

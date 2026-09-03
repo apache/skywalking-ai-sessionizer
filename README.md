@@ -103,16 +103,27 @@ cannot retain their source evidence and resolution state.
 
 Apache SkyWalking, SkyWalking, and the Apache feather logo are trademarks of The Apache Software Foundation.
 
-## Docker
+## Container image
 
-CI publishes a multi-platform image to GHCR on every push to `main` and on
-every `v*` tag. It carries the `asz` binary only. Mount a storage root at
-`/asz/data`; by default the container serves the page on port 8787.
+CI publishes a multi-platform image to GHCR. It carries the `asz` binary only.
+Mount a storage root at `/asz/data`; by default the container serves the page
+on port 8787.
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
   ghcr.io/apache/skywalking-ai-sessionizer:latest
 ```
 
-Any `asz` command runs the same way: put it after the image name.
+| Tag | Points at |
+| --- | --- |
+| `0.1.0` | that release, never moved |
+| `0.1` | the newest patch of that line |
+| `latest` | the newest release |
+| `main` | the development head |
+| `sha-<commit>` | one commit, never moved |
+
+A `v*` tag is a release candidate until the Apache vote passes, so pushing one
+publishes only its `sha-` tag. The version tags are attached when the GitHub
+release is published. Any `asz` command runs the same way: put it after the
+image name. See [Container Image](docs/en/setup/container-image.md).
 `make docker` builds the image locally.
