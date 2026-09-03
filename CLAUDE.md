@@ -119,6 +119,9 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 ## Invariants worth knowing before changing collector code
 
 - **Landed files are write-once.** temp → fsync → rename → `chmod 0444`. Never appended.
+- **Platform-specific calls live in one file per platform.** The session lock is `flock` on Unix
+  and an exclusive open on Windows; a file's identity is an inode on Unix and a volume serial plus
+  file index on Windows. Relative source paths are written with forward slashes everywhere.
 - **Payload bytes are the source bytes**, byte-for-byte. `json.RawMessage` both directions.
 - **Land before committing the cursor.** At-least-once is intentional; the reverse loses data.
 - **`next_seq` is monotonic across all streams in a session**, so a session is processed

@@ -45,6 +45,7 @@ header:
   paths-ignore:
     - '.git/**'
     - '.gitignore'
+    - '.gitattributes'
     - '.dockerignore'
     - 'LICENSE'
     - 'NOTICE'

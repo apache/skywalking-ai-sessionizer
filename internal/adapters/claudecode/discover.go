@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -186,7 +187,7 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 				}
 				add(id, projName, Source{
 					Kind: SrcMainTranscript, Path: filepath.Join(projPath, name),
-					Rel: filepath.Join(projName, name), Session: id, Stream: storage.StreamMain,
+					Rel: relPath(projName, name), Session: id, Stream: storage.StreamMain,
 				})
 			case it.IsDir():
 				// Non-session directories live here too - "memory" is a sibling of
@@ -203,7 +204,7 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 	for _, s := range byID {
 		for _, src := range s.Sources {
 			if src.Kind == SrcMainTranscript {
-				s.Primary = filepath.Dir(src.Rel)
+				s.Primary = path.Dir(src.Rel)
 				break
 			}
 		}
@@ -235,14 +236,14 @@ func discoverSessionDir(projPath, projName, session string) []Source {
 			if agentID, ok := agentTranscript(name); ok {
 				out = append(out, Source{
 					Kind: SrcAgentTranscript, Path: filepath.Join(subDir, name),
-					Rel: filepath.Join(relBase, "subagents", name), Session: session, Stream: agentID,
+					Rel: relPath(relBase, "subagents", name), Session: session, Stream: agentID,
 				})
 				continue
 			}
 			if agentID, ok := agentMeta(name); ok {
 				out = append(out, Source{
 					Kind: SrcAgentMeta, Path: filepath.Join(subDir, name),
-					Rel: filepath.Join(relBase, "subagents", name), Session: session, Stream: agentID,
+					Rel: relPath(relBase, "subagents", name), Session: session, Stream: agentID,
 				})
 			}
 		}
@@ -265,7 +266,7 @@ func discoverSessionDir(projPath, projName, session string) []Source {
 			}
 			out = append(out, Source{
 				Kind: SrcWorkflowManifest, Path: filepath.Join(wfDir, name),
-				Rel: filepath.Join(relBase, "workflows", name), Session: session,
+				Rel: relPath(relBase, "workflows", name), Session: session,
 				RunID: strings.TrimSuffix(name, ".json"),
 			})
 		}
@@ -290,7 +291,7 @@ func discoverScripts(dir, rel, session string) []Source {
 		}
 		out = append(out, Source{
 			Kind: SrcWorkflowScript, Path: filepath.Join(dir, it.Name()),
-			Rel: filepath.Join(rel, it.Name()), Session: session, RunID: runID,
+			Rel: relPath(rel, it.Name()), Session: session, RunID: runID,
 		})
 	}
 	return out
@@ -324,18 +325,18 @@ func discoverWorkflowAgents(subDir, relSub, session string) []Source {
 			case name == "journal.jsonl":
 				out = append(out, Source{
 					Kind: SrcJournal, Path: filepath.Join(runPath, name),
-					Rel: filepath.Join(relRun, name), Session: session, RunID: runID,
+					Rel: relPath(relRun, name), Session: session, RunID: runID,
 				})
 			default:
 				if agentID, ok := agentTranscript(name); ok {
 					out = append(out, Source{
 						Kind: SrcAgentTranscript, Path: filepath.Join(runPath, name),
-						Rel: filepath.Join(relRun, name), Session: session, Stream: agentID,
+						Rel: relPath(relRun, name), Session: session, Stream: agentID,
 					})
 				} else if agentID, ok := agentMeta(name); ok {
 					out = append(out, Source{
 						Kind: SrcAgentMeta, Path: filepath.Join(runPath, name),
-						Rel: filepath.Join(relRun, name), Session: session, Stream: agentID,
+						Rel: relPath(relRun, name), Session: session, Stream: agentID,
 					})
 				}
 			}
@@ -368,3 +369,9 @@ func contains(xs []string, v string) bool {
 	}
 	return false
 }
+
+// relPath builds a source path relative to the adapter root with forward slashes
+// on every platform. It is written into cursors and landed headers, and a
+// storage root must read the same on the machine that collected it and on
+// any other, including one with a different path separator.
+func relPath(parts ...string) string { return filepath.ToSlash(filepath.Join(parts...)) }

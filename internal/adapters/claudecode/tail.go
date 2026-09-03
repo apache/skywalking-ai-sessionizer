@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"syscall"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
@@ -79,28 +78,12 @@ type Chunk struct {
 }
 
 // statInfo carries the identity and size checks a cursor is validated against.
+// statSource fills it and lives in one file per platform, because a file's
+// identity is an inode on Unix and a volume serial plus file index on Windows.
 type statInfo struct {
 	dev, ino uint64
 	size     int64
 	mtime    int64
-}
-
-func statSource(path string) (statInfo, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return statInfo{}, ErrSourceGone
-		}
-		return statInfo{}, err
-	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return statInfo{size: fi.Size(), mtime: fi.ModTime().Unix()}, nil
-	}
-	return statInfo{
-		dev: uint64(st.Dev), ino: uint64(st.Ino),
-		size: fi.Size(), mtime: fi.ModTime().Unix(),
-	}, nil
 }
 
 // TailAppend reads new complete lines from an append-only source.

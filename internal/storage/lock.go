@@ -19,16 +19,15 @@ package storage
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
-	"syscall"
 )
 
 // ErrSessionBusy means another collector holds this session.
 var ErrSessionBusy = errors.New("storage: session is locked by another collector")
 
-// SessionLock is an exclusive advisory lock over one session directory.
+// SessionLock is an exclusive lock over one directory, held through an open
+// file. The platform files supply lockDir and unlock; this file is what every
+// platform shares.
 //
 // A session is the unit of work precisely because its landed sequence must be
 // monotonic across every stream in it. Two collectors sharing a storage root
@@ -58,32 +57,12 @@ func LockChain(chainDir string) (*SessionLock, error) {
 	return l, err
 }
 
-func lockDir(dir string) (*SessionLock, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, PermState)
-	if err != nil {
-		return nil, err
-	}
-	// Advisory rather than a pid file: the kernel releases it if we are killed,
-	// so a crash cannot leave a session permanently unlockable.
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, ErrSessionBusy
-		}
-		return nil, fmt.Errorf("storage: lock %s: %w", dir, err)
-	}
-	return &SessionLock{f: f}, nil
-}
-
 // Unlock releases the lock.
 func (l *SessionLock) Unlock() error {
 	if l == nil || l.f == nil {
 		return nil
 	}
-	err := syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+	err := unlock(l.f)
 	if cerr := l.f.Close(); err == nil {
 		err = cerr
 	}
