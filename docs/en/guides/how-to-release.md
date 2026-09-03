@@ -16,7 +16,9 @@ shows.
 ## Prerequisites
 
 1. Close every issue in the milestone, or move what is unfinished to the next one.
-2. Write the changes page, `docs/en/changes/changes-<version>.md`, and add it to `docs/menu.yml`.
+2. Turn the changelog's current-version page into the version's page: rename
+   `docs/en/changes/changes.md` to `changes-$VERSION.md`, remove its "in development" note, list
+   it under Changelog in `docs/menu.yml`, and start a new `changes.md` for the next version.
 3. Run `make check`. It includes the dependency license check.
 4. Have a GPG key. Upload its public key to a key server, add its fingerprint at
    [id.apache.org](https://id.apache.org/), and add it to the
@@ -138,8 +140,10 @@ Thank you for voting, I will continue the release process.
           -m "Release Apache SkyWalking AI Sessionizer $VERSION"
    ```
 
-2. Create the GitHub release for tag `v$VERSION`, with the changes page as its notes, and release
-   it: not a draft, not a prerelease. Releasing it is what publishes the container image under
+2. Create the GitHub release for tag `v$VERSION`, named `$VERSION`, with the output of
+   `make release-notes VERSION=$VERSION` as its text, and release it: not a draft, not a
+   prerelease. The text is the version's changelog page followed by the download, documentation
+   and image links, so the page never carries a second copy of the changes. Releasing it is what publishes the container image under
    `$VERSION`, its `major.minor` line, and `latest` when it is the newest release. The release
    carries no binary assets; the packages are distributed through dist.apache.org and the
    downloads page, like every SkyWalking project. A release that predates this workflow, or a

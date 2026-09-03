@@ -16,7 +16,8 @@ runtime owns, and builds the conversation structure as a chain of immutable, ver
 - [Adapters](en/adapters/claude-code.md). How a specific agent runtime maps onto the model, and
   what it can and cannot supply.
 - [Guides](en/guides/contributing.md). Contributing and releasing.
-- [Changes](en/changes/changes-0.1.0.md). What each version contains.
+- [Changelog](en/changes/changes.md). What the version in development contains, and one page per
+  released version.
 
 We're always looking for help improving our documentation and codebase, so please don't hesitate to
 [file an issue](https://github.com/apache/skywalking-ai-sessionizer/issues/new) if you see any problem.

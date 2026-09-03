@@ -135,6 +135,17 @@ binaries:
 checksums:
 	@cd $(DIST) && for f in *.tgz *.zip; do [ -f "$$f" ] && shasum -a 512 "$$f" > "$$f.sha512"; done; ls *.sha512
 
+## release-notes: print the text for the GitHub release page of VERSION, from its changelog page
+.PHONY: release-notes
+release-notes:
+	@f=docs/en/changes/changes-$(VERSION).md; [ -f "$$f" ] || f=docs/en/changes/changes.md; \
+	tail -n +2 "$$f" | sed '/^> In development/,/^$$/d'; \
+	printf '%s\n' '' '#### Downloads and documentation' \
+	  '- Downloads, with a checksum and a signature beside each package: https://skywalking.apache.org/downloads/' \
+	  '- Documentation: https://skywalking.apache.org/docs/skywalking-ai-sessionizer/v$(VERSION)/readme/' \
+	  '- Container image: `ghcr.io/apache/skywalking-ai-sessionizer:$(VERSION)`' \
+	  '- Full changelog: https://github.com/apache/skywalking-ai-sessionizer/blob/v$(VERSION)/docs/en/changes/changes-$(VERSION).md'
+
 ## release: build everything a vote needs into dist/: the source package, every binary package, sha512 files and GPG signatures. Needs VERSION=x.y.z with the tag vx.y.z checked out
 .PHONY: release
 release:

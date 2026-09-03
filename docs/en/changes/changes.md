@@ -1,5 +1,8 @@
 # Changes in 0.1.0
 
+> In development, not yet released. This page collects the changes for the next version. At
+> release time it is renamed to `changes-0.1.0.md`, this note is removed, and a new page starts.
+
 The first release. It establishes the conversation model, one adapter that fills it from local
 Claude Code files, the two public data formats, and a local page to read the result.
 
