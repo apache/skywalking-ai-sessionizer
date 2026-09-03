@@ -40,6 +40,12 @@ be.
 - **Say why, not what.** The code already says what it does. A comment earns its place by recording
   the reason, the measurement, or the failure that forced the choice.
 
+## Commits
+
+- **No AI attribution.** Never add a `Co-Authored-By` trailer, a "Generated with" line, or any other
+  mention of an AI tool to a commit message or a pull request description. The person who commits is
+  the author. This is an Apache project and its history records people.
+
 ## Structure
 
 ```
