@@ -35,7 +35,7 @@ PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
 DIST      := dist
 PKG_BASE  := apache-skywalking-ai-sessionizer-$(VERSION)-bin
 
-GOLANGCI_LINT_VERSION := v1.64.8
+GOLANGCI_LINT_VERSION := v2.13.2
 LICENSE_EYE_VERSION   := v0.9.0
 
 .DEFAULT_GOAL := check
@@ -75,7 +75,7 @@ vet:
 
 $(BIN_DIR)/golangci-lint: $(BIN_DIR)
 	@echo "installing golangci-lint $(GOLANGCI_LINT_VERSION)"
-	@GOBIN=$(CURDIR)/$(BIN_DIR) $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@GOBIN=$(CURDIR)/$(BIN_DIR) $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 ## lint: run golangci-lint
 .PHONY: lint

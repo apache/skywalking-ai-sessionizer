@@ -98,7 +98,7 @@ make docker         # the container image, as CI builds and publishes it
 make help           # all targets
 ```
 
-Go 1.25+. One dependency: `gopkg.in/yaml.v3`.
+Go 1.27+. One dependency: `gopkg.in/yaml.v3`.
 
 Every source file carries the Apache-2.0 header; `make license-fix` inserts missing ones.
 `license-eye` is pinned to v0.9.0 — v0.7.0 does not build under Go 1.26.

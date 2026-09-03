@@ -28,7 +28,7 @@ Or build it yourself.
 
 ## Build
 
-Go 1.25 or later. The module has one dependency, a YAML parser.
+Go 1.27 or later. The module has one dependency, a YAML parser.
 
 ```sh
 git clone https://github.com/apache/skywalking-ai-sessionizer.git

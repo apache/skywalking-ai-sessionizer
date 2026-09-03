@@ -321,8 +321,8 @@ func discoverWorkflowAgents(subDir, relSub, session string) []Source {
 			if it.IsDir() {
 				continue
 			}
-			switch {
-			case name == "journal.jsonl":
+			switch name {
+			case "journal.jsonl":
 				out = append(out, Source{
 					Kind: SrcJournal, Path: filepath.Join(runPath, name),
 					Rel: relPath(relRun, name), Session: session, RunID: runID,

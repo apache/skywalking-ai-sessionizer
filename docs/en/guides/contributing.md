@@ -7,7 +7,7 @@ pull requests against `main`.
 
 ## Build and test
 
-Go 1.25 or later. The module has one dependency, a YAML parser, and adding another needs a reason.
+Go 1.27 or later. The module has one dependency, a YAML parser, and adding another needs a reason.
 
 ```sh
 make build          # -> ./bin/asz

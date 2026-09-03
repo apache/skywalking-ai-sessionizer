@@ -18,7 +18,7 @@
 # The binary is cross-compiled on the build host: Go builds every target
 # platform from one machine, so a multi-platform image needs no emulation
 # and no third-party build action.
-FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27 AS build
 ARG TARGETOS
 ARG TARGETARCH
 # The version the binary reports. CI passes the release version or the

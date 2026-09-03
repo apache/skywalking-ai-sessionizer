@@ -15,22 +15,32 @@
 # specific language governing permissions and limitations
 # under the License.
 
-run:
-  timeout: 5m
+
+# golangci-lint v2 configuration. errcheck, govet, ineffassign, staticcheck and
+# unused are on by default in v2; the list below adds to them. gofmt and
+# goimports are formatters in v2, not linters. The exclusion presets keep the
+# v1 defaults this project was linted with.
+version: "2"
 linters:
   enable:
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-    - gofmt
-    - goimports
-    - misspell
-    - revive
     - bodyclose
     - errorlint
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters: [errcheck]
+    - misspell
+    - revive
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
