@@ -88,12 +88,15 @@ jobs:
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
 
   # Builds every platform on every run so a broken cross-compile is caught
-  # at once, and keeps the packages as an artifact for comparison. Nothing is
-  # attached to a GitHub release: the packages a release ships are built and
-  # signed by the release manager and distributed through dist.apache.org.
+  # at once, and keeps the packages as an artifact. When a release is
+  # released on GitHub, after the vote where there is one, the packages and
+  # their checksums are attached to it: that is where people download them
+  # until the project distributes through dist.apache.org.
   binaries:
     name: Binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -129,6 +132,12 @@ jobs:
             dist/*.zip
             dist/*.sha512
           if-no-files-found: error
+      - name: Attach to the GitHub release
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*.tgz dist/*.zip dist/*.sha512 --clobber
 
   lint:
     name: Lint

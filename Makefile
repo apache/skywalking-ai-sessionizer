@@ -140,10 +140,11 @@ checksums:
 release-notes:
 	@f=docs/en/changes/changes-$(VERSION).md; [ -f "$$f" ] || { echo "$$f not found"; exit 2; }; \
 	tail -n +2 "$$f" | sed '/^> In development/,/^$$/d' | sed '1{/^$$/d;}'; \
-	printf '%s\n' '' '#### Downloads and documentation' \
-	  '- Downloads, with a checksum and a signature beside each package: https://skywalking.apache.org/downloads/' \
-	  '- Documentation: https://skywalking.apache.org/docs/skywalking-ai-sessionizer/v$(VERSION)/readme/' \
+	printf '%s\n' '' '#### Where to get it' \
+	  '- Binary packages for macOS, Linux and Windows, with a sha512 beside each: attached to this release' \
 	  '- Container image: `ghcr.io/apache/skywalking-ai-sessionizer:$(VERSION)`' \
+	  '- From source: `git checkout v$(VERSION) && make build`, or `make binaries` for every platform' \
+	  '- Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v$(VERSION)/docs/README.md' \
 	  '- Full changelog: https://github.com/apache/skywalking-ai-sessionizer/blob/v$(VERSION)/docs/en/changes/changes-$(VERSION).md'
 
 ## release: build everything a vote needs into dist/: the source package, every binary package, sha512 files and GPG signatures. Needs VERSION=x.y.z with the tag vx.y.z checked out

@@ -1,6 +1,6 @@
 # Changes in 0.1.0
 
-> In development, not yet released. `tools/release.sh release 0.1.0` removes this note.
+> In development, not yet released. `tools/release.sh prepare 0.1.0` removes this note.
 
 The first release. It establishes the conversation model, one adapter that fills it from local
 Claude Code files, the two public data formats, and a local page to read the result.
@@ -61,8 +61,8 @@ Claude Code files, the two public data formats, and a local page to read the res
 - A Linux container image for amd64 and arm64 on the GitHub container registry, tagged by version
   once a release is released on GitHub after the vote.
 - Binary packages for macOS on Apple silicon and Intel, Linux on x86-64 and ARM 64, and Windows on
-  x86-64, each with `LICENSE` and `NOTICE`, built by `make release` for the vote and published on
-  the downloads page. On Windows the session lock is an exclusive open rather than a file lock,
+  x86-64, each with `LICENSE` and `NOTICE`, attached to the GitHub release by CI with a checksum
+  beside each. On Windows the session lock is an exclusive open rather than a file lock,
   and a file's identity is its volume serial and file index rather than an inode.
 - The collector side and the assembly and read side meet only at the storage root. A test fails
   when either imports the other, so a later split into two binaries is packaging, not a refactor.

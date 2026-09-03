@@ -19,28 +19,66 @@ shows.
 2. Make sure the changelog is complete. The version has had its own page,
    `docs/en/changes/changes-$VERSION.md`, since its development started, and Current Version in
    the menu points at it.
-3. Run `make check`. It includes the dependency license check.
-4. Have a GPG key. Upload its public key to a key server, add its fingerprint at
-   [id.apache.org](https://id.apache.org/), and add it to the
-   [SkyWalking KEYS file](https://dist.apache.org/repos/dist/release/skywalking/KEYS). Only a PMC
-   member can commit to that file.
+3. `make check` passes on `main`.
 
-## Finalise, tag and build the candidate
+## Prepare
 
 ```sh
-export VERSION=0.1.0
-git clone git@github.com:apache/skywalking-ai-sessionizer.git && cd skywalking-ai-sessionizer
-tools/release.sh release $VERSION --tag
-git push origin main
-git push origin "v$VERSION"
-make release VERSION=$VERSION
+git checkout main && git pull
+tools/release.sh prepare
 ```
 
-`tools/release.sh release` refuses a dirty tree and an existing tag, checks the license headers,
-runs `make check`, removes the in-development note from the version's changelog page, lists the
-version under Changelog and in `CHANGES.md`, and commits. With `--tag` it puts the annotated tag on
-that commit, so the tag carries the finished changelog of its version and nothing about the next
-one. `--dry-run` shows the plan without writing; `--skip-check` leaves out `make check`.
+It asks for the version to release and the version development moves to, or takes them as
+arguments. On a branch `release/$VERSION` cut from `main` it then, in this order:
+
+1. refuses a dirty tree, an existing tag or branch, and a next version that does not advance;
+2. checks the license headers and runs `make check` (`--skip-check` leaves that out);
+3. removes the in-development note from the version's changelog page, lists the version under
+   Changelog and in `CHANGES.md`, writes the release notes to
+   `docs/en/changes/release-notes-$VERSION.md`, commits "Release $VERSION", and puts the annotated
+   tag `v$VERSION` on that commit, so the tag carries the finished changelog and the notes;
+4. opens the next version in a second commit: its changelog page with the in-development note,
+   Current Version pointed at it, and its entry in `CHANGES.md` and on the welcome page;
+5. pushes the branch and the tag, and opens the pull request against `main`.
+
+`main` is never pushed to directly. `--dry-run` prints the plan and writes nothing; `--no-push`
+stops after the commits and prints the push and pull request commands.
+
+Review and merge the pull request.
+
+## Complete
+
+```sh
+tools/release.sh complete
+```
+
+It asks for the version, or takes it as an argument, checks that the tag is on GitHub and carries
+the release notes, and creates the GitHub release: tag `v$VERSION`, title `$VERSION`, the notes as
+stored in the tag, not a draft, not a prerelease. That is all it does. CI publishes the container
+image under `$VERSION`, its `major.minor` line, and `latest` when it is the newest release, when
+the released event fires, and attaches the binary packages for every platform, with their
+checksums, to the release, which is where people download them.
+
+A release that predates this workflow, or a publish that failed, is published by running the CI
+workflow by hand with the tag as its input.
+
+## Apache release
+
+Not in use yet. The project is not making Apache releases at this stage, and what the two commands
+above produce is a GitHub release and an image, which is not one. When Apache releases start, these
+are the steps, between Prepare and Complete, that make a version official.
+
+### Build and sign the candidate
+
+Have a GPG key: upload its public key to a key server, add its fingerprint at
+[id.apache.org](https://id.apache.org/), and add it to the
+[SkyWalking KEYS file](https://dist.apache.org/repos/dist/release/skywalking/KEYS), which only a PMC
+member can commit to. Then, with the tag checked out:
+
+```sh
+git checkout v$VERSION
+make release VERSION=$VERSION
+```
 
 `make release` refuses to run unless the tag is checked out and the tree is clean, because the
 binaries are built from the working tree. It writes into `dist/`:
@@ -56,9 +94,7 @@ The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon a
 x86-64 and ARM 64, and Windows on x86-64. Every one is cross-compiled from the release manager's
 machine, with the Go version the module declares.
 
-Pushing the tag publishes nothing. The image and the packages a release ships wait for the vote.
-
-## Upload the candidate
+### Upload the candidate
 
 ```sh
 svn co https://dist.apache.org/repos/dist/dev/skywalking/ skywalking-dev
@@ -67,7 +103,7 @@ cp dist/apache-skywalking-ai-sessionizer-$VERSION-*.tgz* dist/apache-skywalking-
 cd skywalking-dev/ai-sessionizer && svn add $VERSION && svn commit -m "Draft Apache SkyWalking AI Sessionizer release $VERSION"
 ```
 
-## Call the vote
+### Call the vote
 
 Send to `dev@skywalking.apache.org`. Check every link before sending.
 
@@ -107,7 +143,7 @@ Voting will start now and will remain open for at least 72 hours. All PMC member
 Thanks.
 ```
 
-## Check the candidate
+### Check the candidate
 
 Everyone voting should check these before a +1:
 
@@ -137,7 +173,7 @@ Subject: [RESULT][VOTE] Release Apache SkyWalking AI Sessionizer version $VERSIO
 Thank you for voting, I will continue the release process.
 ```
 
-## Publish
+### Publish
 
 1. Move the candidate to the release directory. Only a PMC member can do this.
 
@@ -147,43 +183,15 @@ Thank you for voting, I will continue the release process.
           -m "Release Apache SkyWalking AI Sessionizer $VERSION"
    ```
 
-2. Create the GitHub release for tag `v$VERSION`, named `$VERSION`, with the output of
-   `make release-notes VERSION=$VERSION` as its text, and release it: not a draft, not a
-   prerelease. From the terminal:
-
-   ```sh
-   make release-notes VERSION=$VERSION > /tmp/release-notes-$VERSION.md
-   gh release create "v$VERSION" --verify-tag --title "$VERSION" \
-     --notes-file /tmp/release-notes-$VERSION.md
-   gh run list --event release --limit 1        # the run that publishes the image
-   ```
-
-   The text is the version's changelog page followed by the download, documentation and image
-   links, so the page never carries a second copy of the changes. `--verify-tag` refuses to
-   create the release unless the tag is already on GitHub. Releasing it is what publishes the
-   container image under `$VERSION`, its `major.minor` line, and `latest` when it is the newest
-   release; once the run is green, check with
-   `docker manifest inspect ghcr.io/apache/skywalking-ai-sessionizer:$VERSION`. The release
-   carries no binary assets; the packages are distributed through dist.apache.org and the
-   downloads page, like every SkyWalking project. A release that predates this workflow, or a
-   publish that failed, is published by running the CI workflow by hand with the tag as its
-   input.
+2. Run `tools/release.sh complete` for the GitHub release, the image and the attached packages,
+   as above. The signed packages are also distributed through dist.apache.org and the downloads
+   page, like every SkyWalking project.
 
 3. Update the [website](https://github.com/apache/skywalking-website): add the version and its
    commit to the project's entry in `data/docs.yml` so the documentation is published for it, and
    add the download link.
 
-4. Open the next version, as a pull request against `main`:
-
-   ```sh
-   tools/release.sh next 0.2.0 --pr
-   ```
-
-   It creates the next version's changelog page with its in-development note, points Current
-   Version at it, lists it in `CHANGES.md`, commits on a branch named `open-0.2.0`, pushes it and
-   opens the pull request. The released version keeps its own page and its entry.
-
-5. Announce to `dev@skywalking.apache.org` and `announce@apache.org` from an Apache address.
+4. Announce to `dev@skywalking.apache.org` and `announce@apache.org` from an Apache address.
 
    ```text
    Subject: [ANNOUNCEMENT] Apache SkyWalking AI Sessionizer $VERSION Released
