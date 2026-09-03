@@ -8,7 +8,11 @@ ghcr.io/apache/skywalking-ai-sessionizer
 ```
 
 It carries the `asz` binary and nothing else. The base is distroless, there is no shell, and the
-process runs as a non-root user. Its working directory is `/asz`, so the default storage root is
+process runs as a non-root user.
+
+The image is a Linux image. On Windows, Docker Desktop runs it as a Linux container, so the same
+image and the same commands work there. No native Windows container image is built; on Windows
+without Docker, use the binary package from the [quick start](quick-start.md). Its working directory is `/asz`, so the default storage root is
 `/asz/data`, which is declared as a volume, and a configuration file placed at `/asz/asz.yaml` is
 read the same way it is on a host.
 

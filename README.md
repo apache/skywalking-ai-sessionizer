@@ -110,9 +110,10 @@ Apache SkyWalking, SkyWalking, and the Apache feather logo are trademarks of The
 
 ## Container image
 
-CI publishes a multi-platform image to GHCR. It carries the `asz` binary only.
-Mount a storage root at `/asz/data`; by default the container serves the page
-on port 8787.
+CI publishes a Linux image for amd64 and arm64 to GHCR. It carries the `asz`
+binary only. Docker Desktop on Windows runs it as a Linux container; the
+Windows binary package is the path without Docker. Mount a storage root at
+`/asz/data`; by default the container serves the page on port 8787.
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
