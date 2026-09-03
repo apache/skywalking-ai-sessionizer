@@ -4,6 +4,15 @@ This guide is for the release manager, and for anyone checking a release candida
 Apache SkyWalking AI Sessionizer follows the Apache release process: a source release is voted on
 by the SkyWalking PMC, and only after the vote passes is anything published as a release.
 
+## What counts as a release
+
+A release is the vote, the signed packages in the release directory on dist.apache.org, and the
+announcement on the website and the announce list. Nothing else is. A git tag is a candidate. A
+GitHub release page, a container image tag and a binaries artifact are conveniences this
+project's CI produces, and the GitHub release is only the trigger that publishes the image after
+the vote. Until the website announces a version, it is not an official release, whatever GitHub
+shows.
+
 ## Prerequisites
 
 1. Close every issue in the milestone, or move what is unfinished to the next one.
