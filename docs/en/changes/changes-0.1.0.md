@@ -1,6 +1,6 @@
 # Changes in 0.1.0
 
-> In development, not yet released. `tools/release.sh` removes this note when 0.1.0 is released.
+> In development, not yet released. `tools/release.sh release 0.1.0` removes this note.
 
 The first release. It establishes the conversation model, one adapter that fills it from local
 Claude Code files, the two public data formats, and a local page to read the result.

@@ -138,7 +138,7 @@ checksums:
 ## release-notes: print the text for the GitHub release page of VERSION, from its changelog page
 .PHONY: release-notes
 release-notes:
-	@f=docs/en/changes/changes-$(VERSION).md; [ -f "$$f" ] || f=docs/en/changes/changes.md; \
+	@f=docs/en/changes/changes-$(VERSION).md; [ -f "$$f" ] || { echo "$$f not found"; exit 2; }; \
 	tail -n +2 "$$f" | sed '/^> In development/,/^$$/d' | sed '1{/^$$/d;}'; \
 	printf '%s\n' '' '#### Downloads and documentation' \
 	  '- Downloads, with a checksum and a signature beside each package: https://skywalking.apache.org/downloads/' \

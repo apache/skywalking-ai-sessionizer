@@ -61,6 +61,4 @@ catalog:
     - name: Changelog
       catalog:
         - name: Current Version
-          path: /en/changes/changes
-        - name: 0.1.0
           path: /en/changes/changes-0.1.0

@@ -16,36 +16,31 @@ shows.
 ## Prerequisites
 
 1. Close every issue in the milestone, or move what is unfinished to the next one.
-2. Make sure the changelog is complete. The version being released has its own page,
-   `docs/en/changes/changes-$VERSION.md`, from the start of its development; the next version
-   collects on `docs/en/changes/changes.md`.
-3. Run the preparation script:
-
-   ```sh
-   tools/release.sh $VERSION $NEXT_VERSION
-   ```
-
-   It refuses a dirty tree and an existing tag, checks the license headers, runs `make check`,
-   removes the in-development note from the version's changelog page, starts the rolling page
-   for the next version if it is not started, lists the version under Changelog in
-   `docs/menu.yml` and in `CHANGES.md`, and commits all of that as one commit. `--dry-run` shows
-   the plan without writing; `--skip-check` leaves out `make check`. It does not tag, build or
-   push.
+2. Make sure the changelog is complete. The version has had its own page,
+   `docs/en/changes/changes-$VERSION.md`, since its development started, and Current Version in
+   the menu points at it.
+3. Run `make check`. It includes the dependency license check.
 4. Have a GPG key. Upload its public key to a key server, add its fingerprint at
    [id.apache.org](https://id.apache.org/), and add it to the
    [SkyWalking KEYS file](https://dist.apache.org/repos/dist/release/skywalking/KEYS). Only a PMC
    member can commit to that file.
 
-## Tag and build the candidate
+## Finalise, tag and build the candidate
 
 ```sh
 export VERSION=0.1.0
 git clone git@github.com:apache/skywalking-ai-sessionizer.git && cd skywalking-ai-sessionizer
-git push origin main                    # the preparation commit
-git tag -a "v$VERSION" -m "Release Apache SkyWalking AI Sessionizer v$VERSION"
+tools/release.sh release $VERSION --tag
+git push origin main
 git push origin "v$VERSION"
 make release VERSION=$VERSION
 ```
+
+`tools/release.sh release` refuses a dirty tree and an existing tag, checks the license headers,
+runs `make check`, removes the in-development note from the version's changelog page, lists the
+version under Changelog and in `CHANGES.md`, and commits. With `--tag` it puts the annotated tag on
+that commit, so the tag carries the finished changelog of its version and nothing about the next
+one. `--dry-run` shows the plan without writing; `--skip-check` leaves out `make check`.
 
 `make release` refuses to run unless the tag is checked out and the tree is clean, because the
 binaries are built from the working tree. It writes into `dist/`:
@@ -166,7 +161,17 @@ Thank you for voting, I will continue the release process.
    commit to the project's entry in `data/docs.yml` so the documentation is published for it, and
    add the download link.
 
-4. Announce to `dev@skywalking.apache.org` and `announce@apache.org` from an Apache address.
+4. Open the next version, as a pull request against `main`:
+
+   ```sh
+   tools/release.sh next 0.2.0 --pr
+   ```
+
+   It creates the next version's changelog page with its in-development note, points Current
+   Version at it, lists it in `CHANGES.md`, commits on a branch named `open-0.2.0`, pushes it and
+   opens the pull request. The released version keeps its own page and its entry.
+
+5. Announce to `dev@skywalking.apache.org` and `announce@apache.org` from an Apache address.
 
    ```text
    Subject: [ANNOUNCEMENT] Apache SkyWalking AI Sessionizer $VERSION Released
