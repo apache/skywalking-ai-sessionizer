@@ -17,9 +17,8 @@ Each release ships one package per platform, with the binary, `LICENSE` and `NOT
 | Linux, ARM 64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-arm64.tgz` |
 | Windows, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-windows-amd64.zip` |
 
-They are on the [downloads page](https://skywalking.apache.org/downloads/) and attached to the
-[GitHub release](https://github.com/apache/skywalking-ai-sessionizer/releases). Unpack one, put
-`asz` on your path, and check it:
+They are on the [downloads page](https://skywalking.apache.org/downloads/), with a checksum and a
+signature beside each. Unpack one, put `asz` on your path, and check it:
 
 ```sh
 asz version

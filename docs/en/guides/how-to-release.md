@@ -38,9 +38,7 @@ The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon a
 x86-64 and ARM 64, and Windows on x86-64. Every one is cross-compiled from the release manager's
 machine, with the Go version the module declares.
 
-Pushing the tag builds the container image and publishes it under its commit id only, and builds
-the same binary packages as a workflow artifact. The version tags and the release assets wait for
-the vote.
+Pushing the tag publishes nothing. The image and the packages a release ships wait for the vote.
 
 ## Upload the candidate
 
@@ -131,11 +129,12 @@ Thank you for voting, I will continue the release process.
           -m "Release Apache SkyWalking AI Sessionizer $VERSION"
    ```
 
-2. Publish the GitHub release for tag `v$VERSION`, with the changes page as its notes. Publishing
-   the release is what attaches the version tags to the container image, `$VERSION`, its
-   `major.minor` line, and `latest` when it is the newest release, and what attaches the binary
-   packages and their checksums to the release as assets. A release that predates this workflow,
-   or a publish that failed, is promoted by running the CI workflow by hand with the tag as its
+2. Create the GitHub release for tag `v$VERSION`, with the changes page as its notes, and release
+   it: not a draft, not a prerelease. Releasing it is what publishes the container image under
+   `$VERSION`, its `major.minor` line, and `latest` when it is the newest release. The release
+   carries no binary assets; the packages are distributed through dist.apache.org and the
+   downloads page, like every SkyWalking project. A release that predates this workflow, or a
+   publish that failed, is published by running the CI workflow by hand with the tag as its
    input.
 
 3. Update the [website](https://github.com/apache/skywalking-website): add the version and its

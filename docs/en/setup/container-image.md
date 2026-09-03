@@ -26,9 +26,10 @@ read the same way it is on a host.
 | `main` | the development head | on each push to `main` |
 | `<commit id>` | one commit, by its complete 40-character id | never |
 
-A `v*` tag is a release candidate until the Apache vote has passed. Pushing one publishes only its
-commit tag. The version tags are attached when the GitHub release is published, which happens after
-the vote. A pre-release version such as `0.2.0-rc1` gets its own tag and moves nothing else.
+A `v*` tag is a release candidate until the Apache vote has passed, and pushing one publishes
+nothing. The GitHub release is created after the vote, and releasing it is what publishes the
+image under its version. A draft or a prerelease on GitHub publishes nothing either. A pre-release
+version such as `0.2.0-rc1`, if one is ever released, gets its own tag and moves nothing else.
 
 Every image carries `org.opencontainers.image.version` and `org.opencontainers.image.revision`
 labels, and `asz version` inside it prints the same version: the release version, or the complete

@@ -128,8 +128,7 @@ docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
 | `main` | the development head |
 | `<commit id>` | one commit, by its complete id, never moved |
 
-A `v*` tag is a release candidate until the Apache vote passes, so pushing one
-publishes only its commit tag. The version tags are attached when the GitHub
-release is published. Any `asz` command runs the same way: put it after the
-image name. See [Container Image](docs/en/setup/container-image.md).
+A `v*` tag is a release candidate until the Apache vote passes and publishes
+nothing. Releasing it on GitHub, after the vote, publishes the version tags.
+Any `asz` command runs the same way: put it after the image name. See [Container Image](docs/en/setup/container-image.md).
 `make docker` builds the image locally.

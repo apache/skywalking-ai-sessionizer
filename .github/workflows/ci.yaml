@@ -20,19 +20,20 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
-  # A GitHub release is published only after the Apache vote has passed, so
-  # this is the event that attaches version tags to the image.
+  # A tag is a release candidate and publishes nothing. The GitHub release
+  # is created after the Apache vote has passed, so it is the event that
+  # publishes the image under its version. released, not published: a draft
+  # or a prerelease must not publish either.
   release:
-    types: [published]
-  # By hand: promote a tag whose release predates this workflow, or retry a
+    types: [released]
+  # By hand: publish a release that predates this workflow, or retry a
   # publish that failed.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to promote, for example v0.1.0'
+        description: 'Release tag to publish, for example v0.1.0'
         required: true
 
 concurrency:
@@ -86,11 +87,13 @@ jobs:
       - name: End-to-end adapter tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
 
+  # Builds every platform on every run so a broken cross-compile is caught
+  # at once, and keeps the packages as an artifact for comparison. Nothing is
+  # attached to a GitHub release: the packages a release ships are built and
+  # signed by the release manager and distributed through dist.apache.org.
   binaries:
     name: Binaries
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,14 +129,6 @@ jobs:
             dist/*.zip
             dist/*.sha512
           if-no-files-found: error
-      # Only a published release, which follows the vote, gets the packages
-      # attached. A tag push is a candidate and its packages stay artifacts.
-      - name: Attach to the GitHub release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
-        run: gh release upload "$TAG" dist/*.tgz dist/*.zip dist/*.sha512 --clobber
 
   lint:
     name: Lint
@@ -186,10 +181,6 @@ jobs:
             push:refs/heads/main)
               # The development head. latest is reserved for releases.
               tags="$tags,$image:main" ;;
-            push:refs/tags/v*)
-              # A tag is a release candidate until the vote passes, so a tag
-              # push publishes the commit tag and nothing else.
-              echo "::notice::${ref#refs/tags/} is a candidate; version tags are attached when its GitHub release is published" ;;
             release:refs/tags/v*|workflow_dispatch:refs/tags/v*)
               version="${ref#refs/tags/v}"
               tags="$tags,$image:$version"
