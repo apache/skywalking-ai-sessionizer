@@ -33,12 +33,7 @@ github:
     merge: false
     rebase: false
   dependabot_updates: true
-  protected_branches:
-    main:
-      required_status_checks:
-        strict: true
-        contexts:
-          - Required
-      required_pull_request_reviews:
-        dismiss_stale_reviews: true
-        required_approving_review_count: 1
+  # No branch protection and no required review. The project is new and has one
+  # committer, so there is nobody to review a pull request. Null is the form the
+  # ASF documentation gives for removing every protection rule.
+  protected_branches: ~
