@@ -44,7 +44,7 @@ func getStatus(t *testing.T, s *Server) Status {
 // A server nobody refreshes must say so, with no refresh times at all. The
 // page hides its refresh strip on this answer.
 func TestStatusDefaultsToStatic(t *testing.T) {
-	s := New(storage.NewZone(t.TempDir()))
+	s := New(storage.NewZone(t.TempDir()), nil)
 	st := getStatus(t, s)
 	if st.Mode != ModeStatic {
 		t.Fatalf("mode %q, want %q", st.Mode, ModeStatic)
@@ -56,7 +56,7 @@ func TestStatusDefaultsToStatic(t *testing.T) {
 
 // What a refresher records is what the page gets back, field for field.
 func TestStatusRoundTrips(t *testing.T) {
-	s := New(storage.NewZone(t.TempDir()))
+	s := New(storage.NewZone(t.TempDir()), nil)
 	want := Status{
 		Mode: "watch", Adapter: "claude-code-local", Source: "/src",
 		IntervalMS: 5000, LastRefresh: 1000, NextRefresh: 6000,
@@ -71,7 +71,7 @@ func TestStatusRoundTrips(t *testing.T) {
 // Both images are served from the embedded bytes, as valid XML from the
 // first byte: a declaration after a comment is rejected by strict renderers.
 func TestImagesServed(t *testing.T) {
-	s := New(storage.NewZone(t.TempDir()))
+	s := New(storage.NewZone(t.TempDir()), nil)
 	for _, path := range []string{"/favicon.svg", "/logo.svg"} {
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

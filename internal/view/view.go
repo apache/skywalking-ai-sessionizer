@@ -52,12 +52,18 @@ type Server struct {
 
 	statusMu sync.Mutex
 	status   Status
+
+	// glossary says what the runtime calls each name the model uses. It is
+	// supplied by whoever wires the server, never imported from an adapter,
+	// so the side that reads never depends on the side that collects.
+	glossary *model.Glossary
 }
 
 // New returns a server over a zone. Nothing refreshes it until a caller says
-// so through SetStatus.
-func New(z *storage.Zone) *Server {
-	return &Server{zone: z, loaded: map[string]*Conversation{}, status: Status{Mode: ModeStatic}}
+// so through SetStatus. A nil glossary means the runtime's words are not
+// available to the page.
+func New(z *storage.Zone, glossary *model.Glossary) *Server {
+	return &Server{zone: z, loaded: map[string]*Conversation{}, status: Status{Mode: ModeStatic}, glossary: glossary}
 }
 
 // Conversation is one folded chain, with the times its rounds do not carry.

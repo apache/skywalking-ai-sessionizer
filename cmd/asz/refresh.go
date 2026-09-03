@@ -114,9 +114,7 @@ func (r *refresher) pass() {
 	}
 	rounds := 0
 	for _, id := range sessions {
-		res, perr := parse.Session(r.zone, parse.Options{
-			Conversation: id, Session: id, Reindex: claudecode.RebuildIndex,
-		})
+		res, perr := parse.Session(r.zone, parse.Options{Conversation: id, Session: id})
 		if perr != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", id, perr))
 			continue

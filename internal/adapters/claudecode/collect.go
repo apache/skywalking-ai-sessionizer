@@ -179,7 +179,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	// Re-reading the landed files is the only way to close it.
 	reindexed := false
 	if landedTo := state.NextSeq - 1; ixState.IndexedSeq < landedTo {
-		n, rerr := RebuildIndex(c.Zone, s.ID, ix, ixState.IndexedSeq)
+		n, rerr := index.Rebuild(c.Zone, s.ID, ix, ixState.IndexedSeq)
 		if rerr != nil {
 			return rerr
 		}

@@ -84,9 +84,9 @@ type Options struct {
 	// an archive, a bundle sent to someone else, a restored backup - could be
 	// read but never parsed again, even though every byte needed is present.
 	//
-	// It is a function rather than a direct call because interpreting a landed
-	// record is the adapter's job, and the adapter that produced it is named in
-	// the file's own header. Parse itself stays free of any runtime's vocabulary.
+	// Nil means index.Rebuild, which reads the converted records and needs no
+	// adapter. A transport that keeps landed data somewhere other than the
+	// zone supplies its own.
 	Reindex func(z *storage.Zone, session string, ix *index.Index, afterSeq uint64) (int, error)
 }
 
@@ -120,6 +120,9 @@ func (r *Round) Changed() bool { return r.Number != 0 }
 // difference and no round is written, so a watch loop does not grow the chain
 // with empty rounds.
 func Session(z *storage.Zone, opt Options) (*Round, error) {
+	if opt.Reindex == nil {
+		opt.Reindex = index.Rebuild
+	}
 	if opt.Conversation == "" {
 		return nil, fmt.Errorf("parse: conversation identity is supplied, never inferred")
 	}

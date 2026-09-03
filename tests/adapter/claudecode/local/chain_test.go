@@ -440,7 +440,7 @@ func TestLandedFilesAndRoundsAreSelfSufficient(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := parse.Options{
-		Conversation: x.session, Session: x.session, Reindex: claudecode.RebuildIndex,
+		Conversation: x.session, Session: x.session, Reindex: index.Rebuild,
 	}
 	if _, err := parse.Session(z, opts); err != nil {
 		t.Fatal(err)

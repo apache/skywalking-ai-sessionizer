@@ -68,6 +68,14 @@ tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
 `pkg/` is public because third-party adapters and consumers need it. Built-in adapters stay in
 `internal/`.
 
+**Two sides, one contract.** The collector side (`internal/adapters/...`) lands Session Data. The
+server side (`internal/assemble`, `internal/parse`, `internal/view`, `internal/verify`,
+`pkg/sessionflow`) assembles and serves it. They share `internal/storage`, `internal/index`,
+`pkg/sessiondata` and `pkg/model`, and they meet only at the storage root. Neither imports the
+other; `tests/boundary` fails when one does. `cmd/asz` is the only place that wires them together.
+This is what keeps a later split into a collector binary and a server binary, talking over a
+network, a packaging change rather than a refactor.
+
 **Phase 1 (implemented):** pull collection from local Claude Code files, plus a derived index built
 while landing. No configuration of Claude Code required, and it works on history that already exists.
 **Phase 2 (implemented):** assembly into a conversation, published as an append-only chain of

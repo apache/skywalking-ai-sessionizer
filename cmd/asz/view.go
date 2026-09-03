@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
@@ -46,7 +47,7 @@ func cmdView(cfg *config.Config, ad config.Adapter, once bool) error {
 		addr = "127.0.0.1:8787"
 	}
 	zone := storage.NewZone(zoneRoot)
-	srv := view.New(zone)
+	srv := view.New(zone, claudecode.Glossary())
 
 	var ref *refresher
 	if ad.Name == config.AdapterClaudeCodeLocal {

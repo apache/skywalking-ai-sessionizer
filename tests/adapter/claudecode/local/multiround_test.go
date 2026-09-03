@@ -49,7 +49,7 @@ func TestMultiRoundChain(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
 	x := newTranscript(t, src)
 	opts := parse.Options{
-		Conversation: growSession, Session: growSession, Reindex: claudecode.RebuildIndex,
+		Conversation: growSession, Session: growSession, Reindex: index.Rebuild,
 	}
 	collect := func() {
 		t.Helper()
@@ -271,7 +271,7 @@ func TestConcurrentParseDoesNotForkTheChain(t *testing.T) {
 			defer wg.Done()
 			results[i], errs[i] = parse.Session(z, parse.Options{
 				Conversation: growSession, Session: growSession,
-				Reindex: claudecode.RebuildIndex,
+				Reindex: index.Rebuild,
 			})
 		}()
 	}

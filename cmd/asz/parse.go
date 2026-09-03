@@ -59,12 +59,7 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 		if want != "" && id != want {
 			continue
 		}
-		r, err := parse.Session(z, parse.Options{
-			Conversation: id, Session: id,
-			// Landed files name the adapter that wrote them, so an index can be
-			// rebuilt from them alone - no source files, no collector.
-			Reindex: claudecode.RebuildIndex,
-		})
+		r, err := parse.Session(z, parse.Options{Conversation: id, Session: id})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", id, err)
 			failed++

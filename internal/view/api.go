@@ -27,7 +27,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -136,7 +135,11 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 // runtime's word for it. The rest are the landed envelope's own fields, and
 // the format describes those itself.
 func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
-	g := claudecode.Glossary()
+	g := s.glossary
+	if g == nil {
+		writeJSONStatus(w, http.StatusNotFound, map[string]string{"error": "no glossary was supplied for this storage root"})
+		return
+	}
 	terms := map[string]map[string]string{}
 	for _, t := range g.Terms() {
 		terms[t.Unified] = map[string]string{

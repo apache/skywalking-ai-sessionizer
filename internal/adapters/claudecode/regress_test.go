@@ -395,7 +395,7 @@ func TestIndexRebuildsFromLandedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	rebuilt := index.New(tSess)
-	n, err := claudecode.RebuildIndex(z, tSess, rebuilt, 0)
+	n, err := index.Rebuild(z, tSess, rebuilt, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
