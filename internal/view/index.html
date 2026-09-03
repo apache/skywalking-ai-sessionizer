@@ -1,0 +1,206 @@
+<!--
+  ~ Licensed to the Apache Software Foundation (ASF) under one
+  ~ or more contributor license agreements.  See the NOTICE file
+  ~ distributed with this work for additional information
+  ~ regarding copyright ownership.  The ASF licenses this file
+  ~ to you under the Apache License, Version 2.0 (the
+  ~ "License"); you may not use this file except in compliance
+  ~ with the License.  You may obtain a copy of the License at
+  ~
+  ~   http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing,
+  ~ software distributed under the License is distributed on an
+  ~ "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  ~ KIND, either express or implied.  See the License for the
+  ~ specific language governing permissions and limitations
+  ~ under the License.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyWalking AI Sessionizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #07111f; --surface: #0d1929; --surface-2: #111f32; --surface-3: #17283d;
+  --line: #263b55; --line-soft: #1b2d43;
+  --text: #e9f0f8; --muted: #9cb0c7; --faint: #6f859f;
+  --green: #35c980; --teal: #31c7bd; --blue: #58a8ff; --orange: #f4a641;
+  --purple: #ac8cff; --pink: #ef6eae; --red: #ff6f78; --focus: #b8d8ff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); }
+button, input { font: inherit; }
+button { color: inherit; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.kicker { color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+
+.compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  min-height: 50px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: #0b1727; }
+.compact-brand { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.compact-status { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+.compact-status strong { color: var(--text); font-weight: 650; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 26px 20px 60px; }
+h1 { margin: 0 0 4px; font-size: clamp(22px, 3vw, 30px); font-weight: 650; letter-spacing: -.01em; }
+.lede { max-width: 68ch; margin: 0 0 22px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.toolbar input { flex: 1; min-width: 180px; max-width: 340px; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 13px; }
+.segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.segmented button { min-height: 30px; padding: 4px 11px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+.segmented button[aria-pressed="true"] { background: var(--surface-3); color: var(--text); }
+.count { margin-left: auto; color: var(--faint); font-size: 12px; }
+
+table { width: 100%; border-collapse: collapse; }
+thead th { position: sticky; top: 0; z-index: 1; padding: 9px 10px; border-bottom: 1px solid var(--line);
+  background: var(--bg); color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; text-align: right; white-space: nowrap; }
+thead th:first-child { text-align: left; }
+tbody td { padding: 11px 10px; border-bottom: 1px solid var(--line-soft);
+  font-size: 13px; text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: var(--muted); }
+tbody td:first-child { text-align: left; white-space: normal; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: rgba(88,168,255,.05); }
+.title { display: block; color: var(--text); font-size: 14px; font-weight: 600; }
+.sub { display: block; margin-top: 3px; color: var(--faint); font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.big { color: var(--text); font-weight: 600; }
+.warn { color: var(--orange); }
+.bar { display: inline-block; width: 74px; height: 5px; margin-left: 8px; border-radius: 3px;
+  background: var(--line-soft); vertical-align: middle; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--blue); }
+.empty { padding: 60px 20px; color: var(--muted); text-align: center; }
+.empty code { padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2); }
+
+@media (max-width: 820px) {
+  .hide-narrow { display: none; }
+  .wrap { padding-inline: 12px; }
+}
+</style>
+</head>
+<body>
+<header class="compact-header">
+  <span class="compact-brand">SkyWalking AI Sessionizer</span>
+  <div class="compact-status" id="totals"></div>
+</header>
+
+<div class="wrap">
+  <h1>Conversations</h1>
+  <p class="lede">Every conversation assembled from the landing zone. A conversation is the durable
+    ownership boundary — its identity is supplied by the adapter, never guessed from timestamps.
+    Open one to read its talks, streams and evidence.</p>
+
+  <div class="toolbar">
+    <input id="filter" type="search" placeholder="Filter by title or session id" aria-label="Filter conversations">
+    <div class="segmented" role="group" aria-label="Sort order">
+      <button type="button" data-sort="to" aria-pressed="true">Recent</button>
+      <button type="button" data-sort="steps" aria-pressed="false">Largest</button>
+      <button type="button" data-sort="title" aria-pressed="false">Name</button>
+    </div>
+    <span class="count" id="count"></span>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>Conversation</th>
+      <th>Talks</th>
+      <th class="hide-narrow">Steps</th>
+      <th class="hide-narrow">Streams</th>
+      <th class="hide-narrow">Segments</th>
+      <th>Span</th>
+      <th>Last activity</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="empty"></div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+const num = n => (n ?? 0).toLocaleString();
+function dur(ms) {
+  if (!ms || ms < 0) return "—";
+  if (ms < 60000) return `${Math.round(ms / 1000)} s`;
+  if (ms < 3600000) return `${Math.round(ms / 60000)} min`;
+  if (ms < 86400000) return `${(ms / 3600000).toFixed(1)} h`;
+  return `${(ms / 86400000).toFixed(ms < 864000000 ? 1 : 0)} d`;
+}
+const when = ms => ms ? new Date(ms).toLocaleString(undefined,
+  { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+
+const state = { rows: [], sort: "to", filter: "" };
+
+fetch("/api/conversations").then(r => r.json()).then(rows => {
+  state.rows = rows;
+  const steps = rows.reduce((a, r) => a + r.steps, 0);
+  const talks = rows.reduce((a, r) => a + r.talks, 0);
+  $("totals").innerHTML =
+    `<span><strong>${num(rows.length)}</strong> conversations</span>
+     <span><strong>${num(talks)}</strong> talks</span>
+     <span><strong>${num(steps)}</strong> steps</span>`;
+  draw();
+});
+
+function draw() {
+  const f = state.filter.toLowerCase();
+  let rows = state.rows.filter(r =>
+    !f || (r.title || "").toLowerCase().includes(f) || (r.id || "").toLowerCase().includes(f));
+  rows.sort((a, b) =>
+    state.sort === "title" ? (a.title || "").localeCompare(b.title || "")
+      : state.sort === "steps" ? b.steps - a.steps
+        : (b.to || 0) - (a.to || 0));
+  const most = Math.max(1, ...rows.map(r => r.steps));
+
+  $("count").textContent = rows.length === state.rows.length
+    ? `${num(rows.length)} shown`
+    : `${num(rows.length)} of ${num(state.rows.length)}`;
+
+  $("rows").innerHTML = rows.map(r => `
+    <tr data-id="${esc(r.id)}" tabindex="0">
+      <td><span class="title">${esc(r.title || "(untitled)")}</span>
+        <span class="sub">${esc(r.id)}${r.unresolved ? ` · <span class="warn">${r.unresolved} unresolved</span>` : ""}</span></td>
+      <td><span class="big">${num(r.talks)}</span></td>
+      <td class="hide-narrow"><span class="big">${num(r.steps)}</span>
+        <span class="bar"><i style="width:${Math.round(r.steps / most * 100)}%"></i></span></td>
+      <td class="hide-narrow">${num(r.streams)}</td>
+      <td class="hide-narrow">${num(r.segments)}</td>
+      <td>${esc(dur(r.to - r.from))}</td>
+      <td>${esc(when(r.to))}</td>
+    </tr>`).join("");
+
+  $("empty").innerHTML = rows.length ? "" : state.rows.length
+    ? `<div class="empty">No conversation matches that filter.</div>`
+    : `<div class="empty">Nothing assembled yet. Run <code>asz collect</code>, then <code>asz parse</code>.</div>`;
+
+  const open = id => { location.href = "/c/" + encodeURIComponent(id); };
+  $("rows").querySelectorAll("[data-id]").forEach(tr => {
+    tr.onclick = () => open(tr.dataset.id);
+    tr.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(tr.dataset.id); } };
+  });
+}
+
+$("filter").oninput = e => { state.filter = e.target.value; draw(); };
+document.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => {
+  state.sort = b.dataset.sort;
+  document.querySelectorAll("[data-sort]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  draw();
+});
+</script>
+</body>
+</html>

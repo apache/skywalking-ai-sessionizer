@@ -1,0 +1,23 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.txt
+
+# Go workspace
+go.work
+go.work.sum
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Collected conversation data. /data is the DEFAULT storage root, so running
+# `asz collect` in a checkout would otherwise stage private transcripts.
+/data/
+/.sf/
+/.local/
+*.wal

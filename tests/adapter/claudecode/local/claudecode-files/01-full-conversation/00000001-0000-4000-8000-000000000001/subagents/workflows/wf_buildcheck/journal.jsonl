@@ -1,0 +1,2 @@
+{"type":"started","key":"v2:buildcheck","agentId":"a0000001bbbb00002"}
+{"type":"result","key":"v2:buildcheck","agentId":"a0000001bbbb00002","result":{"cacheHit":true}}

@@ -1,0 +1,12 @@
+.git
+.github
+bin
+dist
+data
+.sf
+.local
+*.wal
+docs
+design-notes
+tests
+*.md

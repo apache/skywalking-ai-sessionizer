@@ -1,0 +1,142 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Every action used here is in the apache/*, actions/* or github/* namespace.
+# The ASF GitHub Actions policy allows only those without a reviewed SHA pin,
+# so docker login, buildx and the push are plain shell steps rather than
+# third-party actions.
+jobs:
+  license:
+    name: License
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check license headers
+        uses: apache/skywalking-eyes/header@v0.9.0
+      - name: Check dependency licenses
+        uses: apache/skywalking-eyes/dependency@v0.9.0
+
+  build:
+    name: Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: Vet
+        run: make vet
+      - name: Build
+        run: make build
+      # `make test` covers ./... including the end-to-end adapter suite under
+      # tests/. It is split out here so a failure names which layer broke.
+      - name: Unit tests
+        run: go test -race -count=1 ./pkg/... ./internal/...
+      - name: End-to-end adapter tests
+        run: go test -race -count=1 ./tests/...
+      - name: Full suite
+        run: make test
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Lint
+        run: make lint
+
+  # The container image. A pull request builds it; a push to main or a
+  # version tag builds it for both platforms and publishes it to GHCR under
+  # this repository's name.
+  docker:
+    name: Docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up buildx
+        run: docker buildx create --use --name asz
+      - name: Image tags
+        id: meta
+        run: |
+          image=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          tags="$image:sha-${GITHUB_SHA::8}"
+          if [ "$GITHUB_REF" = "refs/heads/main" ]; then tags="$tags,$image:latest"; fi
+          case "$GITHUB_REF" in refs/tags/v*) tags="$tags,$image:${GITHUB_REF#refs/tags/}" ;; esac
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+      - name: Build
+        if: github.event_name == 'pull_request'
+        run: docker buildx build --platform linux/amd64 --load -t asz:pr .
+      - name: Smoke test
+        if: github.event_name == 'pull_request'
+        run: docker run --rm asz:pr glossary | head -c 400
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        if: github.event_name == 'push'
+        run: |
+          set -eu
+          args=""
+          for t in $(echo "${{ steps.meta.outputs.tags }}" | tr ',' ' '); do args="$args -t $t"; done
+          docker buildx build --platform linux/amd64,linux/arm64 $args --push .
+
+  # Single fan-in job so branch protection needs only one required check.
+  result:
+    name: Required
+    if: always()
+    needs: [license, build, lint, docker]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any job failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - name: Success
+        run: echo "all required checks passed"

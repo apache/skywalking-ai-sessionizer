@@ -1,0 +1,1 @@
+{"sessionId":"00000001-0000-4000-8000-000000000001","version":"2.1.245","userType":"external","entrypoint":"cli","cwd":"/Users/dev/01-full-conversation","gitBranch":"main","isSidechain":true,"type":"user","uuid":"wfstep-prompt","parentUuid":null,"agentId":"a0000001bbbb00002","timestamp":"2026-01-01T00:00:11.000Z","message":{"role":"user","content":"inspect the build cache"}}

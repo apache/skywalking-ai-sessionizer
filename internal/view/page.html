@@ -1,0 +1,2023 @@
+<!--
+  ~ Licensed to the Apache Software Foundation (ASF) under one
+  ~ or more contributor license agreements.  See the NOTICE file
+  ~ distributed with this work for additional information
+  ~ regarding copyright ownership.  The ASF licenses this file
+  ~ to you under the Apache License, Version 2.0 (the
+  ~ "License"); you may not use this file except in compliance
+  ~ with the License.  You may obtain a copy of the License at
+  ~
+  ~   http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing,
+  ~ software distributed under the License is distributed on an
+  ~ "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+  ~ KIND, either express or implied.  See the License for the
+  ~ specific language governing permissions and limitations
+  ~ under the License.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyWalking AI Sessionizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #07111f;
+  --surface: #0d1929;
+  --surface-2: #111f32;
+  --surface-3: #17283d;
+  --line: #263b55;
+  --line-soft: #1b2d43;
+  --text: #e9f0f8;
+  --muted: #9cb0c7;
+  --faint: #6f859f;
+  --green: #35c980;
+  --teal: #31c7bd;
+  --blue: #58a8ff;
+  --orange: #f4a641;
+  --purple: #ac8cff;
+  --pink: #ef6eae;
+  --red: #ff6f78;
+  --focus: #b8d8ff;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); }
+button, input, select { font: inherit; }
+button { color: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.app { min-height: 100vh; }
+.kicker { color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+
+/* ---------- header ---------- */
+.compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 50px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: #0b1727; }
+.compact-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.compact-brand { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
+.compact-brand:hover { color: var(--text); }
+.compact-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
+.compact-divider { color: var(--line); }
+.compact-status { display: flex; align-items: center; justify-content: flex-end; gap: 9px; min-width: 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.compact-status strong { color: var(--text); font-weight: 650; }
+.badge { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.badge.live { color: #8ce7b5; border-color: #246546; background: #0b2c21; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.overview-toggle { min-height: 30px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--muted); cursor: pointer; }
+.overview-toggle:hover { color: var(--text); background: var(--surface-3); }
+.overview-toggle .chevron { display: inline-block; margin-left: 5px; transition: transform .16s ease; }
+.overview-toggle[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+.overview-panel { border-bottom: 1px solid var(--line); }
+.overview-panel[hidden] { display: none; }
+
+/* ---------- overview ---------- */
+.summary-strip { display: grid; grid-template-columns: minmax(260px, 1.7fr) repeat(4, minmax(110px, .6fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+.summary-cell { min-height: 74px; padding: 14px 18px; background: var(--surface); }
+.summary-cell strong { display: block; margin-top: 5px; font-size: 18px; font-weight: 620; }
+.cell-sub { margin-top: 3px; color: var(--faint); font-size: 10px; line-height: 1.35; }
+.summary-cell.primary strong { font-size: 13px; line-height: 1.45; font-weight: 500; }
+.picker { display: grid; gap: 1px; background: var(--line); }
+.picker-col { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.picker-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.picker-head input { flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 11px; }
+.picker-list { height: 232px; overflow-y: auto; overscroll-behavior: contain; }
+.pick { display: block; width: 100%; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; text-align: left; cursor: pointer; }
+.pick:hover { background: var(--surface-2); }
+.pick.on { background: var(--surface-3); }
+.pick b { display: block; overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pick small { display: block; margin-top: 2px; color: var(--faint); font-size: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.pick.child b { padding-left: 12px; color: #d5c8ff; font-weight: 500; }
+
+/* ---------- workbench ---------- */
+main { padding: 8px; }
+.workbench { display: grid; grid-template-rows: minmax(160px, 1fr) 7px var(--dock, 47%); height: calc(100dvh - 66px); min-height: 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); box-shadow: 0 18px 60px rgba(0,0,0,.18); }
+.overview-open .workbench { height: calc(100dvh - 432px); min-height: 420px; }
+.editor-main { display: grid; grid-template-columns: minmax(0, 1fr) 7px var(--inspector, 350px); min-height: 0; overflow: hidden; }
+.editor-main > .transcript { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.editor-main > .inspector { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.editor-main .inspector-body { flex: 1; height: auto; min-height: 0; }
+
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-height: 44px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: #0b1727; }
+.control-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.control-label { margin-right: 3px; color: var(--faint); font-size: 11px; }
+.segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.segmented button, .plain-button, .tab-button, .stream-button { min-height: 29px; padding: 4px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+.segmented button[aria-pressed="true"], .tab-button[aria-selected="true"], .stream-button.active { background: var(--surface-3); color: var(--text); }
+.plain-button { border: 1px solid var(--line); background: var(--surface-2); }
+.plain-button:hover, .tab-button:hover, .stream-button:hover { color: var(--text); background: var(--surface-3); }
+.checkbox { display: inline-flex; min-height: 29px; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; cursor: pointer; }
+.checkbox input { accent-color: var(--blue); }
+.zoom-output { width: 38px; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100px; accent-color: var(--blue); }
+
+.timeline-dock { position: relative; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; overflow: hidden; border-top: 1px solid var(--line); background: #081421; }
+.timeline-heading { display: flex; flex-direction: column; min-width: 145px; margin-right: 8px; }
+.timeline-heading strong { font-size: 11px; letter-spacing: .09em; text-transform: uppercase; }
+.timeline-heading small { margin-top: 2px; color: var(--faint); font-size: 10px; }
+.timeline-panel { min-width: 0; min-height: 0; overflow: hidden; }
+.timeline-layout { display: grid; grid-template-columns: 156px minmax(0, 1fr); height: 100%; min-height: 0; overflow: hidden; }
+.lane-labels { position: relative; height: 100%; overflow: hidden; scrollbar-width: none; background: #0b1726; border-right: 1px solid var(--line); }
+.lane-labels::-webkit-scrollbar { display: none; }
+.stream-label { position: absolute; left: 8px; right: 8px; display: flex; align-items: center; justify-content: space-between; color: var(--text); font-size: 12px; font-weight: 650; }
+.stream-label.child { padding-left: 13px; color: #d5c8ff; }
+.stream-label small { color: var(--faint); font-size: 10px; font-weight: 500; }
+.lane-label { position: absolute; left: 25px; color: var(--faint); font-size: 11px; line-height: 28px; }
+.lane-label.child { left: 38px; }
+.stream-focus { padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-focus:hover { background: var(--surface-3); }
+.timeline-scroll { height: 100%; overflow: auto; background: #081421; scrollbar-color: var(--line) var(--bg); }
+.timeline-canvas { position: relative; min-width: 920px; isolation: isolate; }
+.lane-extent { position: absolute; left: 0; width: 1px; height: 1px; }
+.segment-band { position: absolute; top: 0; bottom: 0; border-inline: 1px solid rgba(88,168,255,.18); background: rgba(88,168,255,.035); z-index: 0; }
+.segment-band.alt { background: rgba(172,140,255,.035); border-color: rgba(172,140,255,.18); }
+.segment-title { position: absolute; top: 50px; padding: 2px 6px; color: var(--faint); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; z-index: 2; }
+.gap-band { position: absolute; top: 0; bottom: 0; z-index: 0; background: repeating-linear-gradient(135deg, rgba(244,166,65,.02) 0 7px, rgba(244,166,65,.08) 7px 8px); border-inline: 1px dashed rgba(244,166,65,.35); }
+.gap-label { position: absolute; top: 20px; transform: translateX(-50%); color: #c4b37b; font-size: 10px; white-space: nowrap; z-index: 4; }
+/* The times live inside the flow: a full-height line under the clips,
+   with its stamp floating at the top of the canvas. */
+.tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); z-index: 1; }
+.tick span { position: absolute; top: 3px; left: 4px; color: var(--faint); font-size: 10px; white-space: nowrap; }
+.track-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-soft); z-index: 1; }
+.edge-layer { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 2; }
+.relation-edge { fill: none; stroke: #8ea8c5; stroke-width: 1.5; opacity: .68; marker-end: url(#arrowExact); }
+.relation-edge.inferred { stroke: var(--orange); stroke-dasharray: 6 5; marker-end: url(#arrowInferred); }
+.relation-edge.weak { stroke: var(--faint); stroke-dasharray: 2 5; marker-end: url(#arrowWeak); }
+.relation-edge.selected { stroke-width: 2.6; opacity: 1; }
+.child-about { display: block; overflow: hidden; margin-top: 4px; color: var(--muted); font-size: 11px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+/* The drop into a child ends at the child's own top edge. An arrowhead
+   there scales with the selected stroke and reads as a blot, and the
+   direction is already told by where the line ends. It is drawn plain and
+   solid, like the lines between the lanes above it - the join quality
+   stays in the tooltip and the inspector, not on the stroke. */
+.relation-edge.drop { marker-end: none; stroke: #8ea8c5; stroke-dasharray: none; }
+.owns { fill: none; stroke: #4d6d92; stroke-width: 1.1; opacity: .5; marker-end: url(#arrowOwns); }
+.owns.selected { stroke: var(--focus); stroke-width: 2; opacity: 1; }
+.event-clip { position: absolute; z-index: 5; height: 28px; min-width: 6px; overflow: hidden; padding: 0 8px; border: 1px solid color-mix(in srgb, currentColor 45%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 17%, #0d1929); color: var(--text); font-size: 10px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; text-align: left; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,.18); }
+.event-clip::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 2px; background: currentColor; vertical-align: 1px; }
+.event-clip.user { color: var(--green); }
+.event-clip.assistant { color: var(--teal); }
+.event-clip.subagent-response { color: var(--purple); }
+.event-clip.model { color: var(--blue); }
+.event-clip.tool { color: var(--orange); }
+.event-clip.agent { color: var(--purple); }
+.event-clip.instruction { color: var(--pink); }
+.event-clip.annotation { color: var(--pink); }
+.event-clip.error { color: var(--red); }
+.event-clip.nested-stream { height: 32px; border-width: 2px; border-radius: 7px; background: linear-gradient(180deg, rgba(172,140,255,.28), rgba(172,140,255,.13)); box-shadow: inset 0 0 0 1px rgba(216,205,255,.12), 0 4px 12px rgba(0,0,0,.24); }
+.event-clip.nested-stream::before { width: 9px; height: 7px; border-radius: 2px 2px 1px 1px; box-shadow: 3px -3px 0 -1px currentColor; }
+/* Selection is the outline. The clip keeps its own colour, because the
+   colour says what kind of step it is and that does not change by being
+   looked at. */
+.event-clip.selected { z-index: 8; outline: 2px solid var(--focus); outline-offset: 2px; }
+/* What is not related to the selection is faded, not hidden: it is still
+   there to be seen and clicked, it just stops competing. */
+.event-clip.dim { opacity: .2; }
+.event-clip.dim:hover { opacity: 1; }
+.transcript-card.dim { opacity: .34; }
+/* A picked nested stream marks the result it produced, inside the card of
+   the call that opened it. The call itself is not what was picked. */
+.result-block { display: block; border-radius: 6px; }
+.transcript-card.on-result { outline: 1px dashed rgba(172,140,255,.5); outline-offset: 2px; }
+.transcript-card.on-result .result-block { outline: 2px solid var(--purple); outline-offset: 3px;
+  background: rgba(172,140,255,.09); }
+.transcript-card.on-result .result-label { color: #d9d0ff; }
+.transcript-card.dim:hover { opacity: 1; }
+.playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(184,216,255,.65); pointer-events: none; z-index: 4; }
+.playhead::before { content: ""; position: absolute; top: 0; left: -4px; border: 4px solid transparent; border-top-color: var(--focus); }
+
+/* ---------- inspector ---------- */
+.inspector { min-width: 0; background: #0d1929; }
+.inspector-header { padding: 8px 10px 7px; border-bottom: 1px solid var(--line); }
+.inspector-heading-inline { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.inspector-header h2 { min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.node-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tablist { display: flex; gap: 2px; padding: 5px 8px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab-button { min-height: 29px; padding-inline: 8px; font-size: 11px; white-space: nowrap; }
+.inspector-body { padding: 14px; overflow: auto; }
+.definition { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px 10px; margin: 0; font-size: 12px; }
+.definition dt { color: var(--faint); }
+.definition dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.definition dd.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.structure-path { margin-bottom: 13px; padding: 9px 10px; border-left: 3px solid var(--purple); background: var(--surface-2); color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.content-block { margin: 15px 0 0; padding: 11px; border-left: 3px solid var(--blue); background: var(--surface-2); color: #d8e4f2; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.evidence-warning { margin-top: 12px; padding: 10px; border: 1px dashed #80672f; border-radius: 7px; color: #d7c586; background: #241f12; font-size: 11px; line-height: 1.45; }
+.provenance { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }
+.source-badge { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: var(--surface-2); font-size: 10px; }
+.relation-list { display: grid; gap: 8px; }
+.relation-card { padding: 9px; border-left: 3px solid #8ea8c5; background: var(--surface-2); }
+.relation-card.inferred { border-color: var(--orange); }
+.relation-card.weak { border-color: var(--faint); }
+.relation-card button { padding: 0; border: 0; background: transparent; color: var(--text); cursor: pointer; text-align: left; font-size: 12px; }
+.relation-card small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.4; }
+.dive { display: flex; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.plain-button.primary { border-color: var(--purple); background: rgba(172,140,255,.14); color: #e3daff; }
+.plain-button.primary:hover { background: rgba(172,140,255,.24); }
+.hint { color: var(--faint); font-size: 10px; }
+.linkish { padding: 0; border: 0; background: transparent; color: var(--blue); cursor: pointer; text-align: left; font-size: 12px; }
+.linkish:hover { text-decoration: underline; }
+.ref-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.ref-chip { display: flex; flex-direction: column; gap: 2px; padding: 6px 9px; border: 1px solid var(--line);
+  border-radius: 7px; background: var(--surface-2); color: var(--muted); cursor: pointer; text-align: left; }
+.ref-chip:hover { background: var(--surface-3); color: var(--text); }
+.ref-chip.on { border-color: var(--blue); background: rgba(88,168,255,.12); color: var(--text); }
+.ref-chip b { font-size: 11px; font-weight: 650; }
+.ref-chip span { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+
+.explain { margin: 12px 0 4px; border: 1px solid rgba(88,168,255,.34); border-radius: 8px;
+  background: rgba(88,168,255,.07); overflow: hidden; }
+.explain-head { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid rgba(88,168,255,.22); background: rgba(88,168,255,.08); }
+.explain-title { color: var(--text); font-size: 12px; font-weight: 650;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.explain-rows { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 7px 10px;
+  margin: 0; padding: 10px; font-size: 11px; }
+.explain-rows dt { color: var(--faint); }
+.explain-rows dd { margin: 0; min-width: 0; color: #d8e4f2; line-height: 1.45; overflow-wrap: anywhere; }
+.explain-rows .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+.explain-rows .none { color: var(--faint); font-style: normal; }
+.explain-close { padding: 0 6px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.explain-close:hover { background: var(--surface-3); color: var(--text); }
+
+.jkey { color: #8fd0ff; }
+.jkey.plain { color: var(--faint); }
+.q { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
+  margin: 0 1px 0 3px; padding: 0; border: 1px solid rgba(88,168,255,.5); border-radius: 50%;
+  background: rgba(88,168,255,.12); color: var(--blue); font-size: 9px; font-weight: 700;
+  line-height: 1; vertical-align: 1px; cursor: pointer; font-family: Inter, sans-serif; }
+.q:hover { background: var(--blue); border-color: var(--blue); color: #06121f; }
+.q.on { background: var(--blue); border-color: var(--blue); color: #06121f; }
+.jstr { color: #b9e6a8; } .jnum { color: #f0c274; } .jbool { color: #c8a6ff; } .jnull { color: var(--faint); }
+
+.raw { margin: 0; color: #c9d8e8; font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------- legend ---------- */
+.legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-swatch { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.legend-line { width: 25px; border-top: 2px solid currentColor; }
+.legend-line.dashed { border-top-style: dashed; color: var(--orange); }
+
+/* ---------- transcript ---------- */
+.transcript { background: #0b1727; }
+.transcript-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.transcript-header h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.panel-heading-inline { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.talk-caption { overflow: hidden; color: var(--faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.stream-tabs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 60%; overflow: hidden; }
+.stream-button { min-height: 29px; padding: 4px 9px; border: 1px solid transparent; font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stream-button.active { border-color: var(--line); }
+.stream-button.up { border-color: rgba(172,140,255,.4); background: rgba(172,140,255,.1); color: #d9d0ff; }
+.stream-button.up:hover { background: rgba(172,140,255,.22); color: #fff; }
+select.stream-button { border: 1px solid var(--line); background: var(--surface-2); max-width: 220px; }
+.transcript-list { position: relative; flex: 1; width: 100%; max-width: 1100px; min-height: 0; margin: 0 auto; padding: 14px 18px 28px; overflow: auto; }
+.transcript-separator { display: flex; align-items: center; gap: 10px; padding: 13px 8px 7px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.transcript-separator::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+.transcript-separator.dormant { color: #c4b37b; }
+/* The work between an input and the reply, folded. */
+.fold { display: flex; align-items: center; gap: 9px; width: calc(100% - 24px); margin: 2px 0 8px 22px;
+  padding: 6px 10px; border: 1px dashed var(--line); border-radius: 7px; background: transparent;
+  color: var(--faint); font-size: 11px; cursor: pointer; text-align: left; }
+.fold:hover { border-color: var(--blue); color: var(--text); background: rgba(88,168,255,.05); }
+.fold-mark { color: var(--blue); }
+.fold-label { color: var(--muted); }
+.fold-stat { margin-left: auto; font-variant-numeric: tabular-nums; }
+.fold-body { position: relative; margin-left: 22px; padding-left: 10px; border-left: 1px solid var(--line-soft); }
+.transcript-card { position: relative; display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; width: 100%; margin: 0 0 8px; padding: 11px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.transcript-card:hover { background: rgba(88,168,255,.04); }
+.transcript-card.selected { outline: 2px solid var(--focus); outline-offset: 2px; }
+.message-card { width: min(82%, 820px); padding-block: 14px; }
+/* One axis, read left to right: the right edge is what came from outside,
+   everything to the left of it is the agent and the work it did. Depth off
+   the left edge is ownership - a tool sits under the call that ran it. */
+.human-message { margin-left: auto; grid-template-columns: minmax(0, 1fr) 104px;
+  grid-template-areas: "content meta"; border-color: rgba(53,201,128,.3);
+  border-right: 4px solid var(--green); background: rgba(53,201,128,.08); }
+.human-message .transcript-time { grid-area: meta; text-align: right; }
+.human-message .transcript-content { grid-area: content; }
+.agent-message { margin-right: auto; border-color: rgba(49,199,189,.3);
+  border-left: 4px solid var(--teal); background: rgba(49,199,189,.08); }
+.subagent-message { margin-right: auto; border-color: rgba(172,140,255,.34);
+  border-left: 4px solid var(--purple); background: rgba(172,140,255,.09); }
+.instruction-message { margin-right: auto; border-color: rgba(172,140,255,.3);
+  border-left: 4px solid var(--purple); background: rgba(172,140,255,.065); }
+.activity-card { position: relative; width: calc(100% - 64px); margin-left: 32px; padding-block: 7px;
+  border-radius: 4px; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
+/* An indented card is owned by the one above it. The rail says so without
+   costing a row. */
+.transcript-card[style*="--indent"]::before { content: ""; position: absolute; left: -11px; top: 0; bottom: 0;
+  width: 1px; background: var(--line); }
+.activity-card { margin-left: 0; width: auto; }
+.activity-card.child { margin-left: 54px; width: calc(100% - 86px); }
+.handoff-card { border: 1px solid rgba(172,140,255,.28); border-left: 4px solid var(--purple); border-radius: 8px; background: rgba(172,140,255,.065); }
+.stream-context-link { display: block; width: fit-content; margin: -3px 32px 10px auto; padding: 4px 7px; border: 0; border-radius: 5px; background: transparent; color: #c8b9ff; font-size: 10px; cursor: pointer; }
+.stream-context-link:hover { background: rgba(172,140,255,.12); color: #eee9ff; }
+.stream-context-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 10px; padding: 8px 10px; border: 1px solid rgba(172,140,255,.25); border-radius: 7px; background: rgba(172,140,255,.055); color: var(--muted); font-size: 10px; }
+.stream-context-banner strong { color: #d9d0ff; font-size: 11px; }
+.stream-context-banner button { padding: 4px 7px; border: 0; border-radius: 5px; background: rgba(172,140,255,.11); color: #d9d0ff; cursor: pointer; }
+.role-label { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.human-message .role-label { color: var(--green); }
+.agent-message .role-label { color: var(--teal); }
+.subagent-message .role-label, .instruction-message .role-label { color: var(--purple); }
+.activity-card .role-label { margin-bottom: 3px; color: var(--faint); font-size: 9px; }
+.handoff-card .role-label { color: var(--purple); }
+.transcript-time { color: var(--faint); font-size: 10px; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.transcript-time strong { display: block; color: var(--muted); font-weight: 600; }
+.transcript-content { min-width: 0; }
+.transcript-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 12px; font-weight: 650; }
+.type-mark { width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
+.transcript-text { display: block; position: relative; margin-top: 5px; max-height: 8.9em; overflow: hidden; color: #c8d6e6; font-size: 12px; line-height: 1.48; white-space: pre-wrap; overflow-wrap: anywhere; }
+.transcript-text.clamped::after { content: ""; position: absolute; inset: auto 0 0 0; height: 2.2em; background: linear-gradient(180deg, transparent, #0b1727); }
+.message-card .transcript-text.clamped::after { background: linear-gradient(180deg, transparent, #101f2c); }
+.more { display: block; margin-top: 4px; color: var(--faint); font-size: 10px; }
+.result-label { display: block; margin-top: 8px; color: var(--faint); font-size: 9px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.transcript-text.result { margin-top: 3px; padding-left: 8px; border-left: 2px solid var(--line); color: #a9bccf; }
+.transcript-text.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.mini-source { color: var(--faint); font-size: 9px; font-weight: 500; }
+.empty { padding: 30px; color: var(--muted); text-align: center; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+@media (max-width: 1080px) {
+  .summary-strip { grid-template-columns: minmax(240px, 1.6fr) repeat(2, 1fr); }
+  .editor-main { grid-template-columns: minmax(0, 1fr) 7px min(var(--inspector, 300px), 40vw); }
+}
+@media (max-width: 860px) {
+  .workbench { display: block; height: auto; min-height: 0; overflow: visible; }
+  .editor-main { grid-template-columns: 1fr; }
+  .splitter { display: none; }
+  .editor-main > .transcript { border-right: 0; }
+  .editor-main > .inspector { border-top: 1px solid var(--line); }
+  .transcript-list { max-height: 560px; }
+  .timeline-dock { display: block; overflow: visible; }
+  .timeline-layout { height: 330px; }
+  .picker { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="compact-header">
+    <div class="compact-identity">
+      <a class="compact-brand" href="/" title="All conversations">SkyWalking AI Sessionizer</a>
+      <span class="compact-divider">/</span>
+      <span class="compact-title" id="convTitle">loading…</span>
+    </div>
+    <div class="compact-status" id="convStatus">
+      <button type="button" id="overviewToggle" class="overview-toggle" aria-expanded="false" aria-controls="overviewPanel">Overview <span class="chevron" aria-hidden="true">⌄</span></button>
+    </div>
+  </header>
+
+  <div id="overviewPanel" class="overview-panel" hidden>
+    <section class="summary-strip" id="summaryStrip" aria-label="Conversation overview"></section>
+    <div class="picker">
+      <div class="picker-col">
+        <div class="picker-head"><span class="kicker">Talks</span><input id="talkFilter" type="search" placeholder="filter" aria-label="Filter talks"></div>
+        <div class="picker-list" id="talkList"></div>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <section class="workbench" aria-label="Conversation timeline workbench">
+      <div class="editor-main">
+        <section class="transcript" aria-label="Talk window">
+          <div class="transcript-header">
+            <div class="panel-heading-inline"><h2>Talk</h2><span id="talkCaption" class="talk-caption"></span></div>
+            <div id="streamTabs" class="stream-tabs" role="tablist" aria-label="Talk stream filter"></div>
+          </div>
+          <div id="transcriptList" class="transcript-list"></div>
+        </section>
+
+        <div class="splitter vertical" id="splitInspector" role="separator"
+             aria-orientation="vertical" aria-label="Resize the inspector" tabindex="0"></div>
+
+        <aside class="inspector" aria-label="Selected node inspector">
+          <div class="inspector-header">
+            <div class="inspector-heading-inline"><span class="kicker">Inspector</span><h2 id="inspectorTitle">—</h2></div>
+            <div id="inspectorMeta" class="node-meta"></div>
+          </div>
+          <div class="tablist" role="tablist" aria-label="Inspector sections">
+            <button class="tab-button" type="button" role="tab" data-tab="details" aria-selected="true">Details</button>
+            <button class="tab-button" type="button" role="tab" data-tab="relations" aria-selected="false">Relations</button>
+            <button class="tab-button" type="button" role="tab" data-tab="evidence" aria-selected="false">Evidence</button>
+          </div>
+          <div id="inspectorBody" class="inspector-body" role="tabpanel"></div>
+        </aside>
+      </div>
+
+      <div class="splitter horizontal" id="splitDock" role="separator"
+           aria-orientation="horizontal" aria-label="Resize the flow timeline" tabindex="0"></div>
+
+      <section class="timeline-dock" aria-label="Conversation flow timeline">
+        <div class="toolbar">
+          <div class="control-group">
+            <div class="timeline-heading">
+              <strong>Flow timeline <button type="button" class="q" id="dockHelp"
+                aria-label="What is the flow timeline?" title="What is this panel for?">?</button></strong>
+              <small id="timelineScope">—</small>
+            </div>
+            <button type="button" id="timelineBack" class="plain-button" hidden>← Parent timeline</button>
+            <label class="checkbox" title="Fade the steps that the selected one does not touch"><input id="focusRelated" type="checkbox" checked> Fade unrelated</label>
+          </div>
+          <div class="control-group">
+            <label for="zoom" class="control-label">Zoom</label>
+            <input id="zoom" type="range" min="10" max="200" step="10" value="100">
+            <output id="zoomOutput" class="zoom-output" for="zoom">100%</output>
+            <button type="button" id="fitSelection" class="plain-button" title="Scroll the timeline to the selected step">Center selected</button>
+          </div>
+        </div>
+
+        <div class="dock-help" id="dockHelpBox" hidden>
+          <div class="explain-head">
+            <span class="explain-title">The flow timeline</span>
+            <button type="button" class="explain-close" id="dockHelpClose" aria-label="Close">×</button>
+          </div>
+          <dl class="explain-rows">
+            <dt>what it shows</dt><dd>One talk, on a time axis. Each row is a lane: the messages, the
+              model calls, the tools it ran, its agent activity, and the nested streams it started.
+              The line above the lanes is the whole conversation, one cell per segment.</dd>
+            <dt>the heading</dt><dd>Which stream the lanes belong to, how many steps are in this talk,
+              and how many nested streams it touches.</dd>
+            <dt>the axis</dt><dd>Busy stretches take the width. A long pause is cut to a short gap
+              marked with how long it was, so a talk with an hour of waiting still reads.</dd>
+            <dt>links</dt><dd>The lines between lanes, drawn for the step you select. A solid line is
+              an exact join, a dashed one was inferred, and a faint curve is ownership: the model
+              call that produced a step.</dd>
+            <dt>fade unrelated</dt><dd>After you click a step, fade everything it does not touch.</dd>
+          </dl>
+        </div>
+
+        <div class="timeline-panel">
+          <div class="timeline-layout">
+            <div id="laneLabels" class="lane-labels" aria-label="Stream track hierarchy"></div>
+            <div id="timelineScroll" class="timeline-scroll">
+              <div id="timelineCanvas" class="timeline-canvas" aria-label="Current talk events on a common time axis"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="legend" aria-label="Timeline legend">
+          <span class="legend-item" style="color:var(--green)"><span class="legend-swatch"></span>External input</span>
+          <span class="legend-item" style="color:var(--teal)"><span class="legend-swatch"></span>Agent response</span>
+          <span class="legend-item" style="color:var(--blue)"><span class="legend-swatch"></span>Model call</span>
+          <span class="legend-item" style="color:var(--orange)"><span class="legend-swatch"></span>Tool</span>
+          <span class="legend-item" style="color:var(--purple)"><span class="legend-swatch"></span>Agent / nested stream</span>
+          <span class="legend-item" style="color:var(--pink)"><span class="legend-swatch"></span>Context / annotation</span>
+          <span class="legend-item" style="color:#4d6d92"><span class="legend-line"></span>Emitted by (ownership)</span>
+          <span class="legend-item"><span class="legend-line" style="color:#8ea8c5"></span>Exact join</span>
+          <span class="legend-item"><span class="legend-line dashed"></span>Strong inference</span>
+        </div>
+      </section>
+    </section>
+  </main>
+  <div id="selectionStatus" class="sr-only" aria-live="polite"></div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Vocabulary. A node kind decides its lane and its colour; it is
+   never guessed from the text. Kinds come from pkg/model.
+   ============================================================ */
+const KIND = {
+  "message.external":     { track: "input",    type: "user",               title: "External input" },
+  "message.assistant":    { track: "messages", type: "assistant",          title: "Agent response" },
+  "message.synthetic":    { track: "messages", type: "error",              title: "Client-made message" },
+  "context.injection":    { track: "context",  type: "instruction",        title: "Context injection" },
+  "agent.output":         { track: "messages", type: "subagent-response",  title: "Child output" },
+  "llm.call":             { track: "model",    type: "model",              title: "Model call" },
+  "thinking":             { track: "model",    type: "model",              title: "Reasoning" },
+  "tool":                 { track: "tools",    type: "tool",               title: "Tool use" },
+  "agent.call":           { track: "agents",   type: "agent",              title: "Agent call" },
+  "agent.launch_ack":     { track: "agents",   type: "agent",              title: "Launch acknowledgement" },
+  "runtime.notification": { track: "agents",   type: "agent",              title: "Runtime notification" },
+  "epoch.boundary":       { track: "annotation", type: "annotation",       title: "Context reset" },
+  "epoch.summary":        { track: "annotation", type: "annotation",       title: "Carried-forward summary" },
+  "turn.duration":        { track: "annotation", type: "annotation",       title: "Turn duration" },
+  "error.api":            { track: "annotation", type: "error",            title: "Provider error" },
+  "control.interrupt":    { track: "annotation", type: "error",            title: "Interruption" },
+  "control.permission":   { track: "annotation", type: "annotation",       title: "Permission decision" },
+  "control.command":      { track: "annotation", type: "annotation",       title: "Runtime command" },
+  "control.notice":       { track: "annotation", type: "annotation",       title: "Runtime notice" },
+};
+const kindOf = k => KIND[k] || { track: "annotation", type: "annotation", title: k };
+
+// What the harness put into the model's context, said plainly.
+//
+// An injection arrives as a small object with a type, and the type is the
+// only part a reader needs. Measured over 358 of them, two thirds are the
+// remaining token budget and a sixth is the task list restated; showing the
+// object instead of the name hides that.
+const INJECTION = {
+  total_tokens: "the remaining token budget",
+  todo_reminder: "the task list, restated",
+  task_reminder: "a reminder about the running task",
+  edited_text_file: "a file changed on disk",
+  queued_command: "a message sent while the agent was working",
+  ultra_effort_enter: "effort mode turned on",
+  ultra_effort_exit: "effort mode turned off",
+  deferred_tools_delta: "the tool list changed",
+  agent_listing_delta: "the list of agents changed",
+  nested_memory: "memory loaded from another file",
+  date_change: "the date changed",
+  command_permissions: "a permission decision",
+  compact_file_reference: "a pointer left behind by compaction",
+  read_truncation_notice: "a file read was cut short",
+  invoked_skills: "a skill was loaded",
+  auto_mode: "auto mode changed",
+  file: "a file was attached",
+  system_reminder: "a reminder from the harness",
+  command_message: "a command was run in line",
+};
+// The type is read from the text, because that is where the runtime puts it.
+function injectionKind(text) {
+  if (!text) return null;
+  const t = text.trim();
+  const m = t.match(/^\{"type"\s*:\s*"([A-Za-z_]+)"/);
+  if (m) return m[1];
+  const tag = t.match(/^<([a-z_-]+)>/);
+  if (tag) return tag[1].replace(/-/g, "_");
+  return null;
+}
+function injectionSays(text) {
+  const k = injectionKind(text);
+  if (k) return { key: k, says: INJECTION[k] || k.replace(/_/g, " ") };
+  // Some injections are plain text with no type - a listing, a memory file,
+  // a set of instructions. Its own first line describes it better than a
+  // word this page would have to invent.
+  const first = (text || "").trim().split("\n").find(l => l.trim());
+  if (!first) return null;
+  return { key: "", says: first.replace(/^[-*#\s]+/, "").slice(0, 60) };
+}
+// One lane: a 28px clip with room to breathe. The canvas and the label gutter
+// are two coordinate systems showing the same rows, so both are laid out from
+// this and from layout() below, and both are given the same total height.
+const LANE_H = 36;
+const TRACKS = ["input", "messages", "context", "model", "tools", "agents", "annotation"];
+const TRACK_NAME = { input: "External input", messages: "Responses", context: "Context put in", model: "Model calls",
+  tools: "Tools", agents: "Agent activity", annotation: "Runtime notices" };
+// The canvas and the label gutter are two coordinate systems showing the same
+// rows. They only stay aligned while they scroll together, and they only
+// scroll together while both are exactly this tall.
+
+/* A quiet stretch inside a talk is drawn as a gap rather than as empty
+   width. Two minutes is the shortest pause that is visibly a pause and
+   not just a slow tool. */
+const QUIET = 120 * 1000;
+
+const state = {
+  conv: null, talk: null, tree: null, flow: null,
+  stream: null, sel: null, rawRef: null,
+  folder: null,
+  zoom: 1,
+  focus: true, picked: false,
+  tab: "details", navStack: [], childTrees: new Map(), glossary: null, explain: null,
+  openTalks: new Set(), autoOpen: new Set(), trees: new Map(),
+};
+
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+const num = n => (n ?? 0).toLocaleString();
+const get = u => fetch(u).then(r => r.json());
+const hhmmss = ms => ms ? new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "--:--:--";
+const hhmm = ms => ms ? new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }) : "--:--";
+const dayOf = ms => ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "2-digit" }) : "";
+function dur(ms) {
+  if (!Number.isFinite(ms)) return "unavailable";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)} s`;
+  if (ms < 3600000) return `${Math.round(ms / 60000)} min`;
+  if (ms < 86400000) return `${(ms / 3600000).toFixed(1)} h`;
+  return `${(ms / 86400000).toFixed(ms < 864000000 ? 1 : 0)} d`;
+}
+
+/* ============================================================
+   Load
+   ============================================================ */
+async function boot() {
+  // What each name means, and what the runtime calls it. Fetched once.
+  try { state.glossary = await get("/api/glossary"); } catch (_) { state.glossary = null; }
+  const id = decodeURIComponent(location.pathname.replace(/^\/c\//, ""));
+  if (!id) { location.href = "/"; return; }
+  await openConv(id, new URLSearchParams(location.search).get("talk"));
+}
+
+async function openConv(id, wantTalk) {
+  const c = await get("/api/c/" + encodeURIComponent(id));
+  c.id = id;
+  c.byId = new Map(c.talks.map(t => [t.id, t]));
+  c.streamByName = new Map(c.streams.map(s => [s.name, s]));
+  c.segById = new Map(c.segments.map(s => [s.id, s]));
+  state.conv = c;
+  state.flow = null;
+  // Every step of the stream, without content: enough to draw the whole
+  // flow, far too little to read. Reading stays in the talk panel, which
+  // loads a talk's text only when that talk is opened.
+  get(`/api/c/${encodeURIComponent(id)}/flow`).then(f => {
+    state.flow = f.map(x => ({ ...x, ...kindOf(x.kind) }));
+    if (state.conv && state.conv.id === id) drawTimeline();
+  }).catch(() => {});
+  state.childTrees.clear();
+  state.navStack = [];
+  drawHeader(); drawOverview(); drawTalkList();
+  const first = (wantTalk && c.byId.get(wantTalk)) || c.talks.find(t => !t.child) || c.talks[0];
+  if (first) await openTalk(first.id);
+}
+
+async function openTalk(tid, keepStack) {
+  const t = state.conv.byId.get(tid);
+  if (!t) return;
+  state.talk = t;
+  if (!keepStack) state.navStack = [];
+  state.stream = t.stream;
+  state.tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(tid)}`);
+  state.childTrees.clear();
+  state.picked = false;
+  state.openTalks.clear(); state.autoOpen.clear(); state.trees.clear();
+  const ev = eventsFor(state.stream);
+  state.sel = ev.length ? ev[0].id : null;
+  drawTalkList(); renderAll(true);
+}
+
+/* ============================================================
+   Events. The talk tree is nested; the timeline and transcript
+   both want it flat, each node keeping the run it belongs to.
+   ============================================================ */
+function flatten(root, streamFallback) {
+  const out = [];
+  let order = 0;
+  const walk = (n, run, talk, depth) => {
+    if (n.kind === "run") run = n.id;
+    if (n.kind === "talk") talk = n.id;
+    if (!["talk", "run", "stream", "segment", "session", "epoch"].includes(n.kind)) {
+      const meta = kindOf(n.kind);
+      out.push({
+        id: n.id, kind: n.kind, at: n.at, parent: n.parent,
+        stream: n.stream || streamFallback, run, talk,
+        track: meta.track, type: meta.type, title: meta.title,
+        name: n.name, text: n.text, state: n.state, bytes: n.bytes,
+        result: n.result, resultState: n.result_state, resultBytes: n.result_bytes,
+        durationMs: n.duration_ms, durationHow: n.duration_measured_by,
+        reqToRes: n.request_to_result_ms, reqToResJoin: n.request_to_result_join,
+        failed: n.failed, ref: n.ref, refs: n.refs, attrs: n.attrs,
+        edges: n.edges || [], order: order++, depth,
+      });
+    }
+    (n.children || []).forEach(k => walk(k, run, talk, depth + 1));
+  };
+  walk(root, null, null, 0);
+  return out;
+}
+
+function allEvents() {
+  const base = state.tree ? flatten(state.tree, state.talk.stream) : [];
+  // Talks opened from the transcript folds carry their detail too, so their
+  // steps answer clicks with content and relations, not just a position.
+  state.trees.forEach((tree, tid) => {
+    if (!tree || (state.talk && tid === state.talk.id)) return;
+    const t = state.conv.byId.get(tid);
+    if (t) base.push(...flatten(tree, t.stream));
+  });
+  state.childTrees.forEach((tree, stream) => base.push(...flatten(tree, stream)));
+  return base;
+}
+
+// What the timeline draws: every step of the stream, from the flow. A step
+// whose talk is open is taken from that talk instead, because it carries
+// the relations and the content the timeline and the inspector want.
+function flowFor(stream) {
+  const rich = new Map(allEvents().filter(e => e.stream === stream).map(e => [e.id, e]));
+  if (!state.flow) return eventsFor(stream);   // the flow is still loading
+  return state.flow.filter(e => e.stream === stream)
+    .map(e => rich.get(e.id) || e)
+    .sort((a, b) => (a.at || 0) - (b.at || 0) || (a.order || 0) - (b.order || 0));
+}
+// Reading order is the order the records were written, which is the landed
+// position - not the timestamp.
+//
+// A runtime stamps a whole batch at once and does not always stamp it in
+// write order. In this corpus a talk's opening human message is row 4 and
+// carries a millisecond LATER than the six injections at rows 5 to 10, so
+// sorting by time buries the line that starts the talk six cards down.
+// Within one stream the position is monotonic in write order, so it is the
+// only ordering that reproduces the source.
+function readOrder(a, b) {
+  if (a.ref && b.ref) return a.ref.seq - b.ref.seq || a.ref.row - b.ref.row;
+  return (a.at || 0) - (b.at || 0) || a.order - b.order;
+}
+function eventsFor(stream) {
+  return allEvents().filter(e => e.stream === stream).sort(readOrder);
+}
+function eventById(id) { return allEvents().find(e => e.id === id) || null; }
+
+/* Child streams this talk starts. The assembler may link one call to
+   several candidate streams and refuses to choose; every candidate is
+   shown, never one of them silently. */
+function foldersFor(stream) {
+  const seen = new Map();
+  // A stream reaches a talk two ways: a call starts it, or a notification says
+  // it finished. Those land in different turns - measured on this corpus, no
+  // talk holds both - so a talk that only hears the ending would otherwise
+  // show nothing at all of the stream that ended.
+  eventsFor(stream).forEach(e => (e.edges || []).forEach(g => {
+    if (g.dir !== "out") return;
+    if (g.type !== "starts" && g.type !== "reports") return;
+    const st = state.conv.streams.find(s => s.id === g.other);
+    if (!st) return;
+    const prev = seen.get(st.name);
+    if (prev && !prev.back) return;   // a call is the better anchor
+    seen.set(st.name, { stream: st, from: e, quality: g.quality, candidates: 0,
+                        back: g.type === "reports" });
+  }));
+  const calls = new Map();
+  eventsFor(stream).forEach(e => (e.edges || []).forEach(g => {
+    if (g.type === "starts" && g.dir === "out") calls.set(e.id, (calls.get(e.id) || 0) + 1);
+  }));
+  seen.forEach(f => { f.candidates = calls.get(f.from.id) || 1; });
+  return [...seen.values()];
+}
+
+/* ============================================================
+   Header and overview
+   ============================================================ */
+function drawHeader() {
+  const c = state.conv;
+  $("convTitle").textContent = c.title || "(untitled)";
+  $("convTitle").title = c.id;
+  const span = c.talks.length ? dur(Math.max(...c.talks.map(t => t.to)) - Math.min(...c.talks.filter(t => t.from).map(t => t.from))) : "—";
+  $("convStatus").innerHTML =
+    `<span class="badge live"><span class="dot"></span>round ${c.rounds}</span>` +
+    `<span><strong>${num(c.segments.length)}</strong> segments</span>` +
+    `<span><strong>${num(c.streams.length)}</strong> streams</span>` +
+    `<span><strong>${num(c.talks.length)}</strong> talks</span>` +
+    `<span>${esc(span)} span</span>` +
+    (c.unresolved.length ? `<span style="color:var(--orange)">${c.unresolved.length} unresolved</span>` : "") +
+    $("convStatus").querySelector("#overviewToggle").outerHTML;
+  bindOverviewToggle();
+}
+function bindOverviewToggle() {
+  const b = $("overviewToggle");
+  b.onclick = () => {
+    const open = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", String(open));
+    $("overviewPanel").hidden = !open;
+    document.body.classList.toggle("overview-open", open);
+  };
+}
+function drawOverview() {
+  const c = state.conv;
+  const containers = ["session", "segment", "stream", "epoch", "talk", "run"];
+  const steps = Object.entries(c.kinds || {})
+    .filter(([k]) => !containers.includes(k)).reduce((a, [, n]) => a + n, 0);
+  const runs = (c.kinds || {}).run || 0;
+  const child = c.streams.filter(s => s.role !== "main").length;
+  const q = c.quality || {};
+  const parts = Object.entries(q).sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${num(n)} ${k.replace(/_/g, " ")}`).join(" · ");
+  $("summaryStrip").innerHTML = `
+    <div class="summary-cell primary"><div class="kicker">Session</div><strong>${esc(c.session)}</strong></div>
+    <div class="summary-cell"><div class="kicker">Steps</div><strong>${num(steps)}</strong>
+      <div class="cell-sub">in ${num(c.talks.length)} talks · ${num(runs)} runs</div></div>
+    <div class="summary-cell"><div class="kicker">Child streams</div><strong>${num(child)}</strong>
+      <div class="cell-sub">subagents, each its own context</div></div>
+    <div class="summary-cell"><div class="kicker">Relations</div><strong>${num(c.relations)}</strong>
+      <div class="cell-sub">${esc(parts)}</div></div>
+    <div class="summary-cell"><div class="kicker">Segments</div><strong>${num(c.segments.length)}</strong>
+      <div class="cell-sub">activity windows, ${esc(c.policy.replace(/^.*idle=/, "idle "))}</div></div>`;
+}
+
+function drawTalkList() {
+  const f = ($("talkFilter").value || "").toLowerCase();
+  // A child stream's talk is not a talk of this conversation - it is work
+  // inside one. It is reached from the nested lane and the stream tabs, not
+  // from a list that is meant to be what was asked and answered.
+  const rows = state.conv.talks.filter(t => !t.child && (!f || (t.label || "").toLowerCase().includes(f)));
+  $("talkList").innerHTML = rows.map(t => `<button class="pick ${t.child ? "child" : ""} ${state.talk && t.id === state.talk.id ? "on" : ""}" data-t="${esc(t.id)}">
+      <b>${esc(t.label || (t.child ? "delegated work" : "(no opening line)"))}</b>
+      <small>${hhmmss(t.from)} · ${t.steps} steps · ${t.runs}r${t.tools ? ` · ${t.tools} tools` : ""}</small></button>`).join("")
+    || `<div class="empty">No talk matches.</div>`;
+  $("talkList").querySelectorAll("[data-t]").forEach(b => b.onclick = () => openTalk(b.dataset.t));
+}
+
+/* ============================================================
+   Geometry. Gap-compressed lays out only the stretches where
+   something happened; wall-clock is linear.
+   ============================================================ */
+function geometry() {
+  const ev = flowFor(state.stream).filter(e => e.at).sort((a, b) => a.at - b.at);
+  // At 100% one step has about 104px of room - readable on its own.
+  const width = Math.round(Math.max(1280, ev.length * 104) * state.zoom);
+  const usable = width - 42, left = 20;
+  if (!ev.length) return { width, bands: [], gaps: [], x: () => left };
+  const lo = ev[0].at;
+  // Runs of activity, split wherever nothing happened for a while.
+  const runs = [];
+  let cur = { from: lo, to: lo };
+  for (const e of ev) {
+    if (e.at - cur.to > QUIET) { runs.push(cur); cur = { from: e.at, to: e.at }; }
+    else cur.to = e.at;
+  }
+  runs.push(cur);
+  const active = runs.reduce((a, r) => a + Math.max(1, r.to - r.from), 0);
+  const gapW = runs.length > 1 ? Math.min(90, usable * .07) : 0;
+  const forBands = usable - gapW * (runs.length - 1);
+  let x = left; const bands = [], gaps = [];
+  runs.forEach((r, i) => {
+    const w = Math.max(24, forBands * Math.max(1, r.to - r.from) / active);
+    bands.push({ from: r.from, to: r.to, left: x, width: w });
+    x += w;
+    if (i < runs.length - 1) { gaps.push({ left: x, width: gapW, ms: runs[i + 1].from - r.to }); x += gapW; }
+  });
+  return { width: Math.max(width, x + 20), bands, gaps,
+    x(t) {
+      for (const b of bands) {
+        if (t <= b.to) return b.left + (b.to === b.from ? 0 : ((t - b.from) / (b.to - b.from)) * b.width);
+      }
+      const last = bands[bands.length - 1];
+      return last.left + last.width;
+    } };
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+function renderAll(recenter) {
+  drawStreamTabs(); drawTimeline(); drawTranscript(); drawInspector();
+  if (recenter) centerOn(state.sel, "auto");
+  const p = new URLSearchParams();
+  if (state.talk) p.set("talk", state.talk.id);
+  try { history.replaceState(null, "", `/c/${encodeURIComponent(state.conv.id)}?${p}`); } catch (_) { /* ignore */ }
+}
+
+// What opened a stream, and where to go to see it.
+function openerOf(streamName) {
+  const st = state.conv.streamByName.get(streamName);
+  const o = st && (st.opened_by || [])[0];
+  return o && o.step ? o : null;
+}
+
+function streamsInPlay() {
+  if (!state.talk) return [];
+  const own = state.conv.streamByName.get(state.talk.stream);
+  const out = [];
+  // A child stream is read on its own, but the way back to the stream that
+  // opened it has to be somewhere a reader can see without scrolling.
+  const up = own && own.role !== "main" ? openerOf(own.name) : null;
+  if (up) {
+    const parent = state.conv.streamByName.get(up.stream);
+    if (parent) out.push({ ...parent, isParent: true, opener: up });
+  }
+  if (own) out.push(own);
+  foldersFor(state.talk.stream).forEach(f => { if (!out.some(s => s.name === f.stream.name)) out.push(f.stream); });
+  return out;
+}
+
+function drawStreamTabs() {
+  const list = streamsInPlay();
+  const own = state.conv.streamByName.get(state.stream);
+  const name = s => s.role === "main" ? "Main agent" : (s.label || "child " + s.name.slice(1, 7));
+  // A talk that fans out to forty children cannot have forty tabs. The stream
+  // in view keeps a tab; the rest become one list.
+  const tabs = list.filter(s => s.role === "main" || s.name === state.stream);
+  const rest = list.filter(s => !tabs.includes(s));
+  let html = tabs.map(s => s.isParent
+    ? `<button type="button" class="stream-button up" data-up-stream="${esc(s.name)}"
+        data-up-step="${esc(s.opener.step)}" data-up-talk="${esc(s.opener.talk || "")}"
+        title="Back to ${esc(s.name)}, at the step that opened this stream">↰ ${esc(name(s))}</button>`
+    : `<button type="button" role="tab" class="stream-button ${state.stream === s.name ? "active" : ""}"
+        aria-selected="${state.stream === s.name}" data-tab-stream="${esc(s.name)}" title="${esc(s.name)}">${s.role === "main" ? "" : "↳ "}${esc(name(s))}</button>`).join("");
+  if (rest.length) {
+    html += `<select class="stream-button" id="childPick" title="Child streams started in this talk">
+      <option value="">↳ ${rest.length} child stream${rest.length === 1 ? "" : "s"}…</option>
+      ${rest.map(s => `<option value="${esc(s.name)}">${esc(s.label || "child " + s.name.slice(1, 7))} · ${s.steps} steps</option>`).join("")}</select>`;
+  }
+  $("streamTabs").innerHTML = html;
+  $("streamTabs").querySelectorAll("[data-tab-stream]").forEach(b =>
+    b.onclick = () => switchStream(b.dataset.tabStream));
+  $("streamTabs").querySelectorAll("[data-up-stream]").forEach(b =>
+    b.onclick = () => goToOpener(b.dataset.upStream, b.dataset.upStep, b.dataset.upTalk));
+  const pick = $("streamTabs").querySelector("#childPick");
+  if (pick) pick.onchange = () => { if (pick.value) { state.navStack.push({ stream: state.stream, sel: state.sel }); switchStream(pick.value); } };
+  const t = state.talk;
+  // What this talk is, not what it says. The opening line is the first card
+  // below, and the talk list needs it to tell talks apart; saying it here too
+  // just says the same thing twice.
+  const bits = [];
+  if (t) {
+    bits.push(own && own.role === "main" ? "main stream, child work folded" : "child stream");
+    if (t.steps) bits.push(`${num(t.steps)} steps`);
+    if (t.runs) bits.push(`${t.runs} run${t.runs === 1 ? "" : "s"}`);
+    if (t.tools) bits.push(`${num(t.tools)} tools`);
+    if (t.to > t.from) bits.push(dur(t.to - t.from));
+  }
+  $("talkCaption").textContent = bits.join(" · ");
+  $("talkCaption").title = t ? t.id : "";
+}
+
+async function switchStream(name) {
+  if (state.stream === name) return;
+  const st = state.conv.streamByName.get(name);
+  if (!st) return;
+  if (st.role !== "main" && !state.childTrees.has(name) && st.talk) {
+    state.childTrees.set(name, await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(st.talk)}`));
+  }
+  state.stream = name;
+  const ev = eventsFor(name);
+  if (ev.length && !ev.some(e => e.id === state.sel)) state.sel = ev[0].id;
+  renderAll(true);
+}
+
+// Where each lane sits, for the stream being read.
+//
+// A lane is only given room when something is on it. A talk with no
+// subagents should not reserve an empty band for them, and reserving one
+// pushed the nested lane out of view entirely.
+function layout(stream) {
+  const used = new Set(flowFor(stream).map(e => e.track));
+  const nested = foldersFor(stream).length > 0;
+  const lanes = [];
+  let y = 24;                    // room for the time stamps floating above
+  const streamY = y; y += 30;
+  let nestedY = null;
+  const addNested = () => {
+    nestedY = y; lanes.push({ key: "nested", label: "Nested streams", y, color: "#c8b9ff", indent: true }); y += LANE_H;
+  };
+  TRACKS.forEach(k => {
+    if (used.has(k)) {
+      lanes.push({ key: k, label: TRACK_NAME[k], y, indent: true });
+      y += LANE_H;
+    }
+    // The nested lane sits directly under the agents lane, because the calls
+    // that start child streams live there. Appended after whatever lane came
+    // last, it read as if that lane had started the child agents.
+    if (k === "agents" && nested) addNested();
+  });
+  if (nested && nestedY === null) addNested();
+  const rows = {};
+  lanes.forEach(l => { rows[l.key] = l.y; });
+  return { lanes, rows, streamY, nestedY, height: y + 10 };
+}
+
+function drawLanes() {
+  const st = state.conv.streamByName.get(state.stream);
+  if (!st) { $("laneLabels").innerHTML = ""; return; }
+  const child = st.role === "main" ? "" : " child";
+  const L = layout(state.stream);
+  // No heading row. The stream row below already names the agent, and the
+  // times float inside the flow itself, so a dedicated band above the lanes
+  // only pushed the flow down.
+  let html = `<div class="stream-label${child}" style="top:${L.streamY}px">
+    <button type="button" class="stream-focus" title="${esc(st.name)}">${st.role === "main" ? "▾ " : "↳ "}${esc(st.role === "main" ? "Main agent" : (st.label || "child " + st.name.slice(1, 7)))}</button>
+    <small>${esc(st.name.slice(0, 8))}</small></div>`;
+  L.lanes.forEach(l => {
+    html += `<div class="lane-label${l.indent ? child : ""}" style="top:${l.y}px${l.color ? `;color:${l.color}` : ""}">${esc(l.label)}</div>`;
+  });
+  html += `<div class="lane-extent" style="top:${L.height - 1}px" aria-hidden="true"></div>`;
+  $("laneLabels").innerHTML = html;
+}
+
+function drawTimeline() {
+  // The label gutter and the canvas are two views of the same rows, and a
+  // lane can appear or vanish as talks open. Drawn from separate calls the
+  // two drifted one lane apart. Drawing the labels here, from the same
+  // layout, keeps that impossible.
+  drawLanes();
+  const keepLeft = $("timelineScroll").scrollLeft;
+  const g = geometry();
+  const canvas = $("timelineCanvas");
+  const ev = flowFor(state.stream);
+  const folders = foldersFor(state.stream);
+  const st = state.conv.streamByName.get(state.stream);
+  const L = layout(state.stream);
+  $("timelineScope").textContent = st
+    ? `${st.role === "main" ? "Main agent" : (st.label || "child")} · ${ev.length} events${folders.length ? ` · ${folders.length} nested` : ""}`
+    : "—";
+  // Visible whenever this stream was opened by another, not only when the
+  // reader walked in from it. Landing on a child talk directly is the common
+  // way to get here, and it leaves no history to go back through.
+  const up = st && st.role !== "main" ? openerOf(st.name) : null;
+  const backBtn = $("timelineBack");
+  backBtn.hidden = !up && !state.navStack.length;
+  if (up) {
+    backBtn.textContent = `↰ ${up.stream === "main" ? "Main agent" : up.stream.slice(0, 10)}`;
+    backBtn.title = "Back to the step that opened this stream";
+    backBtn.dataset.up = JSON.stringify(up);
+  } else {
+    backBtn.textContent = "← Parent timeline";
+    delete backBtn.dataset.up;
+  }
+
+  let html = "";
+  // Every candidate time on the axis is collected first, then labelled with a
+  // pass that keeps them apart. Deciding per band cannot see the band next to
+  // it, which is how two bands put their times in the same place.
+  const marks = [];
+  g.bands.forEach((b, i) => {
+    html += `<div class="segment-band${i % 2 ? " alt" : ""}" style="left:${b.left}px;width:${Math.max(1, b.width)}px"></div>`;
+    // Ticks land on real clock marks, not on a pixel rule, so a label reads
+    // 09:10 and not 09:13:47. The interval steps up when a smaller one would
+    // put its labels too close to read, which is what zooming out means for
+    // a clock.
+    const perMs = b.width / Math.max(1, b.to - b.from);
+    const LADDER = [1, 2, 5, 10, 15, 30, 60, 120, 360, 720, 1440].map(m => m * 60000);
+    const every = LADDER.find(ms => ms * perMs >= 100) || LADDER[LADDER.length - 1];
+    for (let t = Math.ceil(b.from / every) * every; t <= b.to; t += every) {
+      const prev = t - every;
+      marks.push({ x: b.left + (t - b.from) * perMs, t, every,
+                   newDay: prev < b.from || dayOf(t) !== dayOf(prev) });
+    }
+  });
+  // A tick line is cheap and always drawn. A label is only drawn where the
+  // last one is far enough behind to leave it readable.
+  marks.sort((a, b2) => a.x - b2.x);
+  let lastLabel = -1e9;
+  marks.forEach(m => {
+    const label = m.x - lastLabel >= 92;
+    if (label) lastLabel = m.x;
+    // A tick on a whole minute has no seconds worth printing.
+    const stamp = m.every >= 60000 ? hhmm(m.t) : hhmmss(m.t);
+    html += `<div class="tick" style="left:${m.x}px">${
+      label ? `<span>${m.newDay ? `${esc(dayOf(m.t))} ` : ""}${esc(stamp)}</span>` : ""}</div>`;
+  });
+
+  g.gaps.forEach(gp => {
+    html += `<div class="gap-band" style="left:${gp.left}px;width:${gp.width}px"></div>`;
+    html += `<div class="gap-label" style="left:${gp.left + gp.width / 2}px">${esc(dur(gp.ms))} quiet</div>`;
+  });
+  L.lanes.forEach(l => { html += `<div class="track-line" style="top:${l.y - 5}px"></div>`; });
+
+  // Positions, then trim any clip that would run into the next one on its lane.
+  const pos = new Map();
+  ev.forEach(e => {
+    const x = g.x(e.at), y = L.rows[e.track] ?? L.streamY;
+    pos.set(e.id, { x, w: 110, y, cx: x + 55, cy: y + 14 });
+  });
+  const lanes = new Map();
+  ev.forEach(e => { const k = e.track; (lanes.get(k) || lanes.set(k, []).get(k)).push(e); });
+  // Several steps can carry the same moment - a model call and the reasoning
+  // it produced are written in one batch - and time alone puts them in the
+  // same place, one hiding the other. Each lane is walked in order and a
+  // clip that would land on its neighbour is moved just far enough to be
+  // seen. The overlap is taken out, never the time.
+  lanes.forEach(group => {
+    group.sort((a, b) => (a.at || 0) - (b.at || 0) || (a.order || 0) - (b.order || 0));
+    let right = -1e9;
+    group.forEach(e => {
+      const q = pos.get(e.id);
+      if (q.x < right) { q.x = right; q.cx = q.x + q.w / 2; }
+      right = q.x + 24;         // the least footprint a clip keeps
+    });
+  });
+  // Reading order is by position; a clip only collides with the clip drawn
+  // next to it, so trimming has to walk the lane in x order.
+  lanes.forEach(group => group.sort((a, b) => pos.get(a.id).x - pos.get(b.id).x));
+  lanes.forEach(group => group.forEach((e, i) => {
+    const next = group[i + 1]; if (!next) return;
+    const a = pos.get(e.id), b = pos.get(next.id);
+    // Never trim below the width of a short name. Clips that would still
+    // collide are readable once zoomed, which is what the zoom is for.
+    const room = b.x - a.x - 3;
+    if (a.w > room) { a.w = Math.max(30, room); a.cx = a.x + a.w / 2; }
+  }));
+
+  // One call that starts a pool of agents is one thing on this lane, not a
+  // queue. Laid out one clip per child, agents born together read as born
+  // one after another, which is not what happened. The clip says how many;
+  // which one to enter is picked in the inspector after clicking it.
+  const groups = new Map();
+  folders.forEach(f => {
+    const k = f.from.id;
+    (groups.get(k) || groups.set(k, []).get(k)).push(f);
+  });
+  const shownFolders = [...groups.values()].map(list =>
+    ({ ...list[0], count: list.length, key: list.length > 1 ? "group:" + list[0].from.id : list[0].stream.name }));
+  const fpos = new Map();
+  let packed = 0;
+  shownFolders.sort((a, b) => (a.from.at || 0) - (b.from.at || 0)).forEach(f => {
+    const w = 132;
+    const x = Math.max(f.from.at ? g.x(f.from.at) + 24 : 20, packed);
+    packed = x + w + 5;
+    fpos.set(f.key, { x, w, y: L.nestedY, cx: x + w / 2, cy: L.nestedY + 16 });
+  });
+
+  // The edge layer and the clips must measure in the same box. An SVG with a
+  // viewBox narrower than its viewport centres its contents, so every edge
+  // drifted right by half the difference while the clips, being plain CSS
+  // pixels, stayed put.
+  //
+  // The box also has to reach past the last clip. The axis ends at the last
+  // step's time, but the clip drawn there still has its width, so the last
+  // node of a stream overflowed the canvas and was cut off at the edge
+  // instead of sitting where its time is.
+  let canvasW = Math.max(g.width, packed + 40);
+  pos.forEach(q => { canvasW = Math.max(canvasW, q.x + q.w + 40); });
+  fpos.forEach(q => { canvasW = Math.max(canvasW, q.x + q.w + 40); });
+
+  // Relation edges between events that are both on screen.
+  const onScreen = new Set(ev.map(e => e.id));
+  const drawn = new Set();
+  html += `<svg class="edge-layer" viewBox="0 0 ${canvasW} ${L.height}"><defs>
+    <marker id="arrowExact" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8ea8c5"></path></marker>
+    <marker id="arrowInferred" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f4a641"></path></marker>
+    <marker id="arrowWeak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f859f"></path></marker>
+    <marker id="arrowOwns" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4d6d92"></path></marker></defs>`;
+  // A model call owns the tools it ran, the reasoning it produced and the
+  // message it wrote. That is containment, not a relation, so it carries no
+  // edge - but it is exactly the dependency a reader is looking for between
+  // one lane and the next, so it is drawn from the tree.
+  const byId = new Map(ev.map(e => [e.id, e]));
+  ev.forEach(e => {
+    const parent = e.parent && byId.get(e.parent);
+    if (!parent || parent.track === e.track) return;
+    if (e.id !== state.sel && parent.id !== state.sel) return;
+    const a = pos.get(parent.id), b = pos.get(e.id);
+    if (!a || !b) return;
+    const on = (e.id === state.sel || parent.id === state.sel) ? " selected" : "";
+    const sx = a.cx, sy = a.cy + (a.cy < b.cy ? 14 : -14), ex = b.cx, ey = b.cy + (a.cy < b.cy ? -14 : 14);
+    const lift = Math.max(10, Math.abs(ey - sy) * .5);
+    html += `<path class="owns${on}" d="M ${sx} ${sy} C ${sx} ${sy + (a.cy < b.cy ? lift : -lift)}, ${ex} ${ey - (a.cy < b.cy ? lift : -lift)}, ${ex} ${ey}"></path>`;
+  });
+  ev.forEach(e => (e.edges || []).forEach(rel => {
+    if (rel.dir !== "out" || !onScreen.has(rel.other)) return;
+    if (e.id !== state.sel && rel.other !== state.sel) return;
+    const exact = rel.quality === "exact_unique";
+    const key = `${e.id}>${rel.other}`; if (drawn.has(key)) return; drawn.add(key);
+    const a = pos.get(e.id), b = pos.get(rel.other); if (!a || !b) return;
+    const sx = f.back ? b.x + b.w : a.x + a.w, sy = f.back ? b.cy : a.cy;
+    const ex = f.back ? a.x : b.x, ey = f.back ? a.cy : b.cy;
+    const bend = Math.max(18, Math.abs(ex - sx) * .42);
+    const cls = exact ? "" : rel.quality === "strong_inference" ? " inferred" : " weak";
+    const on = (e.id === state.sel || rel.other === state.sel) ? " selected" : "";
+    html += `<path class="relation-edge${cls}${on}" d="M ${sx} ${sy} C ${sx + bend} ${sy}, ${ex - bend} ${ey}, ${ex} ${ey}"></path>`;
+  }));
+  // One call can open many streams, so "the edges of the selected step" would
+  // draw an arrow to every sibling. When a nested stream is picked, only its
+  // own link is drawn: the call that opened it, and nothing else that call
+  // opened.
+  shownFolders.forEach(f => {
+    // What is selected: the stream itself, or the step that is its other end.
+    if (state.folder) { if (state.folder !== f.stream.name) return; }
+    else if (f.from.id !== state.sel) return;
+    const a = pos.get(f.from.id), b = fpos.get(f.key);
+    if (!a || !b) return;
+    // The child lane sits directly under the call, and the child clip begins
+    // at the call's own moment. Drawn sideways the line had no run to cross,
+    // so all that was left of it was an arrowhead jammed against the clip's
+    // border. It drops out of the bottom of the call into the top of the
+    // child instead - and climbs the other way for a stream reporting back.
+    const sx = f.back ? b.x + 26 : a.cx, sy = f.back ? b.y : a.y + 28;
+    const ex = f.back ? a.cx : b.x + 26, ey = f.back ? a.y + 28 : b.y;
+    const lift = Math.max(12, Math.abs(ey - sy) * .5);
+    const down = sy < ey ? 1 : -1;
+    const on = state.folder === f.stream.name || f.from.id === state.sel ? " selected" : "";
+    // The line follows the evidence, exactly as every other edge does. It was
+    // hardcoded as inferred, so an exact join would still have been drawn as
+    // a guess.
+    const cls = f.quality === "exact_unique" ? "" : f.quality === "strong_inference" ? " inferred" : " weak";
+    html += `<path class="relation-edge drop${cls}${on}" d="M ${sx} ${sy} C ${sx} ${sy + down * lift}, ${ex} ${ey - down * lift}, ${ex} ${ey}"></path>`;
+  });
+  html += `</svg>`;
+
+  canvas.style.width = `${canvasW}px`;
+  canvas.style.height = `${L.height}px`;
+  const near = relatedTo(ev);
+  ev.forEach(e => {
+    const p = pos.get(e.id);
+    html += `<button type="button" class="event-clip ${e.type}${e.id === state.sel ? " selected" : ""}${
+      near && !near.has(e.id) ? " dim" : ""}"
+      data-node="${esc(e.id)}" data-talk="${esc(e.talk || "")}"
+      title="${esc(e.at ? `${hhmmss(e.at)} · ` : "")}${esc(e.title)}${e.name ? " · " + esc(e.name) : ""}"
+      style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${
+        esc(e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
+            : (e.name || e.title))}</button>`;
+  });
+  shownFolders.forEach(f => {
+    const p = fpos.get(f.key);
+    if (f.count > 1) {
+      html += `<button type="button" class="event-clip agent nested-stream${f.from.id === state.sel ? " selected" : ""}"
+        data-group="${esc(f.from.id)}"
+        title="This call started ${f.count} child agents at nearly the same moment. Click, then pick one in the inspector."
+        style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${f.count} agents created</button>`;
+      return;
+    }
+    html += `<button type="button" class="event-clip agent nested-stream${state.folder === f.stream.name ? " selected" : ""}${
+      near && state.folder && state.folder !== f.stream.name ? " dim" : ""}" data-folder="${esc(f.stream.name)}"
+      title="${esc(f.stream.label || f.stream.name)} — ${esc(f.quality)}. ${
+        f.back ? "It reported finishing in this talk." : "Click to see what opened it."}"
+      style="left:${p.x}px;top:${p.y}px;width:${p.w}px">${esc(f.stream.label || "child " + f.stream.name.slice(1, 7))}</button>`;
+  });
+  const ph = pos.get(state.sel); if (ph) html += `<div class="playhead" style="left:${ph.cx}px"></div>`;
+
+  canvas.innerHTML = html;
+  $("timelineScroll").scrollLeft = keepLeft;
+  // A clip drawn from the flow has no content yet. Its talk does, and the
+  // flow says which talk that is, so the talk is opened before the step is
+  // shown. The step's card only exists while the talk's work is unfolded,
+  // so the fold is opened too, and the transcript scrolls to the card.
+  canvas.querySelectorAll("[data-node]").forEach(b => b.onclick = async () => {
+    const tid = b.dataset.talk;
+    if (tid && (!state.talk || state.talk.id !== tid)) await openTalk(tid, true);
+    // Folds this handler opened earlier are closed again: the reader asked
+    // about one step, not about every talk they ever clicked through. Folds
+    // opened by hand stay - they belong to the reader.
+    state.autoOpen.forEach(id => {
+      if (id !== tid) { state.openTalks.delete(id); state.autoOpen.delete(id); }
+    });
+    if (tid && !state.openTalks.has(tid)) {
+      state.openTalks.add(tid);
+      state.autoOpen.add(tid);
+      if (state.talk && state.talk.id === tid && state.tree) state.trees.set(tid, state.tree);
+      else openWork(tid);
+    }
+    select(b.dataset.node, true);
+    // The opening input and the closing answer have no step card - the
+    // talk's own cards stand for them, so the scroll goes to the right one.
+    if (!$("transcriptList").querySelector(`[data-card="${CSS.escape(b.dataset.node)}"]`)) {
+      const reply = b.classList.contains("assistant") || b.classList.contains("subagent-response");
+      const box = (reply && $("transcriptList").querySelector(`[data-talk="${CSS.escape(tid)}"][data-end="reply"]`))
+        || $("transcriptList").querySelector(`[data-talk="${CSS.escape(tid)}"]`);
+      box?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  });
+  // Selecting a nested stream is not the same as entering it. Selecting
+  // shows which step opened it and offers the way in; only "Dive in" leaves
+  // the stream you are reading.
+  canvas.querySelectorAll("[data-folder]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    selectFolder(b.dataset.folder);
+  });
+  // The pool clip stands for the call, so clicking it selects the call.
+  // The inspector then lists every agent it created, and the pick is made
+  // there - the clip cannot know which one the reader wants.
+  canvas.querySelectorAll("[data-group]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    select(b.dataset.group, true);
+    showTab("relations");   // the question a pool clip answers is "which children"
+  });
+}
+
+// Everything that has something to do with the selection: the step itself,
+// whatever a relation joins it to, the step that owns it, and the steps it
+// owns. A nested stream adds the call that opened it.
+//
+// Returning null means nothing is selected, so nothing is faded - a reader
+// scrolling a talk should see the talk, not a mostly blank timeline.
+function relatedTo(ev) {
+  // Opening a talk selects its first step so the inspector has something to
+  // show. That is not a reader asking about it, so nothing is faded until
+  // one is actually picked.
+  if (!state.focus || !state.picked) return null;
+  const sel = state.sel;
+  if (!sel) return null;
+  const byId = new Map(ev.map(e => [e.id, e]));
+  const here = byId.get(sel);
+  if (!here && !state.folder) return null;
+
+  // A nested stream is related to the call that opened it. Its siblings are
+  // not: sharing a caller is not a relationship between them.
+  if (state.folder) return new Set([sel]);
+
+  const set = new Set([sel]);
+  if (here) {
+    (here.edges || []).forEach(r => set.add(r.other));
+    if (here.parent) set.add(here.parent);
+    ev.forEach(e => { if (e.parent === sel) set.add(e.id); });
+  }
+  return set;
+}
+
+/* How one event presents itself in the transcript. */
+function present(e) {
+  const st = state.conv.streamByName.get(e.stream);
+  const agent = !st ? "Agent" : st.role === "main" ? "Main agent" : (st.label || "Child agent");
+  const c = st && st.role !== "main" ? " child" : "";
+  switch (e.kind) {
+    case "message.external":     return { cls: "message-card human-message", role: "External · Input", color: "green" };
+    case "message.assistant":    return { cls: "message-card agent-message", role: `${agent} · Response`, color: "teal" };
+    case "agent.output":         return { cls: "message-card subagent-message", role: `${agent} · Stream output`, color: "purple" };
+    case "message.synthetic":    return { cls: "message-card agent-message", role: "Client-made message · not from the provider", color: "red" };
+    case "context.injection": {
+      const w = injectionSays(e.text);
+      return { cls: "activity-card instruction-message",
+        role: `Context put in${w && w.key ? ` · ${w.key}` : ""}`, color: "purple" };
+    }
+    case "agent.call":           return { cls: "activity-card handoff-card", role: `Agent call · ${agent} → child`, color: "purple" };
+    case "runtime.notification": return { cls: "activity-card handoff-card", role: `Runtime notification · child → ${agent}`, color: "purple" };
+    case "agent.launch_ack":     return { cls: `activity-card${c}`, role: `${agent} · Launch acknowledged`, color: "purple" };
+    case "llm.call":             return { cls: `activity-card${c}`, role: `${agent} · Model call`, color: "blue" };
+    case "thinking":             return { cls: `activity-card${c}`, role: `${agent} · Reasoning`, color: "blue" };
+    case "tool":                 return { cls: `activity-card${c}`, role: `${agent} → Tool · ${e.name || "call"}`, color: "orange" };
+    default:                     return { cls: `activity-card${c}`, role: `${agent} · ${kindOf(e.kind).title}`, color: "pink" };
+  }
+}
+
+// One step, as a card. Used inside an opened talk.
+function stepCard(e, prev, near) {
+  let sep = "";
+  if (prev && e.at && prev.at && e.at - prev.at > QUIET)
+    sep = `<div class="transcript-separator dormant">${esc(dur(e.at - prev.at))} quiet</div>`;
+  const p = present(e);
+  const mono = e.kind === "tool" || e.kind === "context.injection";
+  const indent = Math.max(0, (e.depth || 1) - 1);
+  const folder = (e.edges || []).find(g => g.type === "starts" && g.dir === "out");
+  const link = folder ? (() => {
+    const fs = state.conv.streams.find(x => x.id === folder.other);
+    return fs ? `<button type="button" class="stream-context-link" data-open="${esc(fs.name)}" data-from="${esc(e.id)}">Open ${esc(fs.label || fs.name.slice(0, 10))} →</button>` : "";
+  })() : "";
+  const unavailable = e.state && e.state !== "available"
+    ? `<span class="mini-source" style="color:var(--orange)">[${esc(e.state)}]</span>` : "";
+  return `${sep}<button type="button" class="transcript-card ${p.cls}${e.id === state.sel ? " selected" : ""}${
+    near && !near.has(e.id) ? " dim" : ""}" data-card="${esc(e.id)}" title="Locate in the flow timeline"${
+    indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
+    <span class="transcript-time"><strong>${esc(hhmmss(e.at))}</strong>${esc(e.kind)}</span>
+    <span class="transcript-content">
+      <span class="role-label">${esc(p.role)}</span>
+      <span class="transcript-title" style="color:var(--${p.color})"><span class="type-mark"></span>${
+        esc(e.durationMs ? `${dur(e.durationMs)} turn`
+          : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says
+          : (e.name || e.title))}
+        <span class="mini-source">${e.bytes ? num(e.bytes) + " B" : ""}</span> ${unavailable}</span>
+      ${e.text ? `${e.result ? `<span class="result-label">input${e.bytes ? ` · ${num(e.bytes)} B` : ""}</span>` : ""}
+        <span class="transcript-text ${mono ? "mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
+      ${e.result ? `<span class="result-block"><span class="result-label">result${e.failed ? " · failed" : ""}${
+        e.resultBytes ? ` · ${num(e.resultBytes)} B` : ""}${
+        e.reqToRes != null ? ` · ${esc(dur(e.reqToRes))} to return` : ""}</span>
+        <span class="transcript-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span></span>` : ""}
+    </span></button>${link}`;
+}
+
+function talksForStream() { return state.conv.talks.filter(t => t.stream === state.stream); }
+
+// Load a talk's steps, once, and redraw when they arrive.
+async function openWork(id) {
+  if (state.trees.has(id)) return;
+  state.trees.set(id, null);
+  const tree = await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(id)}`);
+  state.trees.set(id, tree);
+  drawTranscript();
+}
+
+// The whole conversation, one talk after another: what was asked, what came
+// back, and the work between them folded away until it is wanted.
+//
+// A conversation has hundreds of talks and tens of thousands of steps, so the
+// list is built from what the overview already carries - the opening line, the
+// answer, and the counts - and a talk's steps are fetched only when opened.
+function drawTranscript() {
+  const talks = talksForStream();
+  const st = state.conv.streamByName.get(state.stream);
+  if (!talks.length) { $("transcriptList").innerHTML = `<div class="empty">No talks in this stream.</div>`; return; }
+  const opened = (st && (st.opened_by || [])[0]) || null;
+  const banner = st && st.role !== "main"
+    ? `<div class="stream-context-banner"><span><strong>${esc(st.label || st.name)}</strong><br>
+        Independent stream context. Its messages are not merged into the parent.
+        ${opened ? `Opened from <b>${esc(opened.stream)}</b> · ${esc(opened.quality)}.` : "No relation records what opened it."}</span>
+        ${opened ? `<button type="button" data-opener-stream="${esc(opened.stream)}" data-opener-step="${esc(opened.step)}"
+          data-opener-talk="${esc(opened.talk || "")}">← Back to the step that opened this</button>` : ""}</div>`
+    : "";
+
+  let prevTo = null;
+  $("transcriptList").innerHTML = banner + talks.map(t => {
+    const isOpen = state.openTalks.has(t.id);
+    const tree = state.trees.get(t.id);
+    const focused = state.talk && state.talk.id === t.id;
+    let html = "";
+    if (prevTo && t.from && t.from - prevTo > QUIET)
+      html += `<div class="transcript-separator dormant">${esc(dur(t.from - prevTo))} quiet</div>`;
+    prevTo = t.to || prevTo;
+
+    html += `<button type="button" class="transcript-card message-card human-message${focused ? " focused" : ""}"
+      data-talk="${esc(t.id)}" title="Show this talk in the flow timeline">
+      <span class="transcript-time"><strong>${esc(hhmmss(t.from))}</strong>${esc(dayOf(t.from))}</span>
+      <span class="transcript-content"><span class="role-label">External · Input</span>
+        <span class="transcript-text${t.label && t.label.length > 380 ? " clamped" : ""}">${
+          esc(t.label || (t.child ? "delegated work" : "no opening line"))}</span></span></button>`;
+
+    if (t.steps) {
+      const bits = [`${num(t.steps)} steps`];
+      if (t.runs) bits.push(`${t.runs} run${t.runs === 1 ? "" : "s"}`);
+      if (t.tools) bits.push(`${num(t.tools)} tools`);
+      if (t.to > t.from) bits.push(dur(t.to - t.from));
+      html += `<button type="button" class="fold" data-work="${esc(t.id)}" aria-expanded="${isOpen}">
+        <span class="fold-mark">${isOpen ? "▾" : "▸"}</span>
+        <span class="fold-label">${isOpen ? "hide" : "show"} what the agent did</span>
+        <span class="fold-stat">${esc(bits.join(" · "))}</span></button>`;
+      if (isOpen) {
+        if (!tree) html += `<div class="fold-body"><div class="empty">reading…</div></div>`;
+        else {
+          const ev = flatten(tree, t.stream).sort(readOrder);
+          const near = relatedTo(ev);
+          // The opening input and the closing answer each have a card of
+          // their own outside the fold. Inside it they would say the same
+          // thing twice. Answers along the way stay: only the last one is
+          // what the reply card below already shows.
+          const closing = t.reply ? [...ev].reverse().find(e =>
+            e.kind === "message.assistant" || e.kind === "agent.output") : null;
+          const work = ev.filter(e => e.kind !== "message.external" && e !== closing);
+          html += `<div class="fold-body">` + work.map((w, i) => stepCard(w, work[i - 1], near)).join("") + `</div>`;
+          // A long fold ends screens away from the button that opened it,
+          // so its end carries the same button again.
+          html += `<button type="button" class="fold" data-work="${esc(t.id)}" aria-expanded="true">
+            <span class="fold-mark">▴</span>
+            <span class="fold-label">hide what the agent did</span></button>`;
+        }
+      }
+    }
+
+    if (t.reply) {
+      html += `<button type="button" class="transcript-card message-card agent-message${focused ? " focused" : ""}"
+        data-talk="${esc(t.id)}" data-end="reply" title="Show this talk's answer in the flow timeline">
+        <span class="transcript-time"><strong>${esc(hhmmss(t.to))}</strong></span>
+        <span class="transcript-content">
+          <span class="role-label">${esc(st && st.role === "main" ? "Main agent" : "Child agent")} · Response</span>
+          <span class="transcript-text${t.reply.length > 380 ? " clamped" : ""}">${esc(t.reply)}</span>
+        </span></button>`;
+    }
+    return html;
+  }).join("");
+
+  $("transcriptList").querySelectorAll("[data-work]").forEach(b => b.onclick = e => {
+    e.stopPropagation();
+    const id = b.dataset.work;
+    state.autoOpen.delete(id);
+    if (state.openTalks.has(id)) state.openTalks.delete(id);
+    else { state.openTalks.add(id); openWork(id); }
+    focusTalk(id); drawTranscript();
+  });
+  $("transcriptList").querySelectorAll("[data-talk]").forEach(b => b.onclick = () => focusTalk(b.dataset.talk, b.dataset.end));
+  $("transcriptList").querySelectorAll("[data-card]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); select(b.dataset.card, true, false);
+  });
+  $("transcriptList").querySelectorAll("[data-open]").forEach(b => b.onclick = e => {
+    e.stopPropagation(); selectFolder(b.dataset.open);
+  });
+  $("transcriptList").querySelector("[data-opener-stream]")?.addEventListener("click", e => {
+    const b = e.currentTarget;
+    goToOpener(b.dataset.openerStream, b.dataset.openerStep, b.dataset.openerTalk);
+  });
+}
+
+// Point the flow timeline at a talk, without moving the reader off it.
+async function focusTalk(id, end) {
+  const t = state.conv.byId.get(id);
+  if (!t) return;
+  state.talk = t;
+  state.stream = t.stream;
+  if (!state.trees.get(id))
+    state.trees.set(id, await get(`/api/c/${encodeURIComponent(state.conv.id)}/talk/${encodeURIComponent(id)}`));
+  state.tree = state.trees.get(id);
+  state.picked = false;
+  // The click asked to see one end of this talk in the flow: the input
+  // card points at the step that opened it, the reply card at the answer
+  // that closed it. Only the timeline moves: the reader stays on the card.
+  let steps = (state.flow || []).filter(e => e.talk === id);
+  if (!steps.length) steps = flatten(state.tree, t.stream).sort(readOrder);
+  let op;
+  if (end === "reply") {
+    // The same rule the server reads the answer by: the last thing the
+    // agent said, and in a child stream that is its output record.
+    const replies = steps.filter(e => e.kind === "message.assistant" || e.kind === "agent.output");
+    op = replies[replies.length - 1] || steps[steps.length - 1] || null;
+  } else {
+    op = steps.find(e => e.kind === "message.external") || steps[0] || null;
+  }
+  if (op) state.sel = op.id;
+  drawStreamTabs(); drawTimeline(); drawTranscript(); drawInspector();
+  if (op) centerOn(op.id,
+    matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", false);
+}
+function selectFolder(name) {
+  const f = foldersFor(state.stream).find(x => x.stream.name === name);
+  if (!f) return;
+  state.folder = name;
+  state.picked = true;
+  state.sel = f.from.id;      // the step that opened it, highlighted in place
+  state.rawRef = null;
+  drawTimeline(); drawTranscript(); drawInspector();
+  centerOn(f.from.id, "smooth");
+  // The nested lane is the bottom one, so bring it into view rather than
+  // leaving the thing just selected below the fold.
+  const clip = $("timelineCanvas").querySelector(`[data-folder="${CSS.escape(name)}"]`);
+  if (clip) {
+    const sc = $("timelineScroll");
+    const want = Math.max(0, clip.offsetTop + clip.offsetHeight - sc.clientHeight + 12);
+    if (want > sc.scrollTop) { sc.scrollTop = want; $("laneLabels").scrollTop = want; }
+  }
+  $("selectionStatus").textContent = `Selected nested stream ${f.stream.label || name}, opened by ${f.from.kind}. Press Enter to dive in, Escape to clear.`;
+}
+// Back to nothing selected: no folder, no step, and nothing faded on
+// account of one. Escape does this, and so does a click on empty canvas.
+function clearSelection() {
+  if (!state.folder && !state.sel && !state.picked) return;
+  state.folder = null; state.sel = null; state.picked = false; state.rawRef = null;
+  drawTimeline(); drawTranscript(); drawInspector();
+  $("selectionStatus").textContent = "Selection cleared.";
+}
+function clearFolder() {
+  if (!state.folder) return;
+  state.folder = null;
+  state.picked = false;
+  drawTimeline(); drawTranscript(); drawInspector();
+}
+function diveIn() {
+  const name = state.folder;
+  if (!name) return;
+  state.navStack.push({ stream: state.stream, sel: state.sel });
+  state.folder = null;
+  switchStream(name);
+}
+
+// Go to the exact step in the parent stream that opened the stream being read.
+async function goToOpener(stream, step, talk) {
+  // The talk is what the page loads, so the opener's talk has to be opened.
+  // Switching stream alone leaves a stream whose talk was never fetched, and
+  // the reader lands on an empty timeline.
+  if (talk && (!state.talk || talk !== state.talk.id)) await openTalk(talk, true);
+  else if (stream !== state.stream) await switchStream(stream);
+  state.folder = null;
+  select(step, true);
+}
+
+function goBack() {
+  const t = state.navStack.pop();
+  if (!t) return;
+  state.stream = t.stream; state.sel = t.sel;
+  renderAll(true);
+}
+
+/* ============================================================
+   Inspector
+   ============================================================ */
+function field(dt, dd, mono) { return `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`; }
+
+function drawInspector() {
+  if (state.folder) { drawFolderPanel(); return; }
+  const e = eventById(state.sel);
+  // A tab with nothing behind it is noise: the Relations tab shows only
+  // while the selected step is touched by a relation.
+  const relTab = document.querySelector('[data-tab="relations"]');
+  const hasRels = !!(e && (e.edges || []).length);
+  if (relTab) relTab.hidden = !hasRels;
+  if (!hasRels && state.tab === "relations") { showTab("details"); return; }
+  if (!e) { $("inspectorTitle").textContent = "—"; $("inspectorMeta").textContent = ""; $("inspectorBody").innerHTML = `<div class="empty">Select a step.</div>`; return; }
+  $("inspectorTitle").textContent = e.name ? `${e.kind} · ${e.name}` : e.title;
+  $("inspectorMeta").textContent = `${(e.stream || "").slice(0, 12)} · ${hhmmss(e.at)}${e.bytes ? ` · ${num(e.bytes)} B` : ""}`;
+  const body = $("inspectorBody");
+  if (state.tab === "details") drawDetails(body, e);
+  else if (state.tab === "relations") drawRelations(body, e);
+  else drawEvidence(body, e);
+}
+
+// What is known about a nested stream, and what opened it.
+function drawFolderPanel() {
+  const f = foldersFor(state.stream).find(x => x.stream.name === state.folder);
+  if (!f) { state.folder = null; drawInspector(); return; }
+  const st = f.stream, opener = f.from;
+  $("inspectorTitle").textContent = st.label || `child ${st.name.slice(1, 7)}`;
+  $("inspectorMeta").textContent = `nested stream · ${st.steps} steps · ${esc(f.quality)}`;
+  const many = f.candidates > 1;
+  $("inspectorBody").innerHTML = `
+    <div class="structure-path">stream ${esc(st.name)} › opened from ${esc(opener.kind)} in ${esc(state.stream)}</div>
+    <dl class="definition">
+      ${field("Stream", esc(st.name), true)}
+      ${field("Role", esc(st.role))}
+      ${field("Steps", num(st.steps))}
+      ${field(f.back ? "Reported here by" : "Opened by",
+        `<button type="button" class="linkish" data-goto="${esc(opener.id)}">${esc(opener.kind)}${opener.name ? " · " + esc(opener.name) : ""}</button>`)}
+      ${f.back ? field("Note", `<span style="color:var(--faint)">this talk hears the ending. The call that
+        started it is in an earlier talk, because a launch and its completion land in different turns.</span>`) : ""}
+      ${field("Join quality", esc(f.quality))}
+      ${field("Opened at", opener.at ? esc(hhmmss(opener.at)) : "unavailable")}
+      ${field("Its answer", `<span style="color:var(--faint)">not in this stream. A child's output belongs to the
+        child, so the parent holds a boundary that refers to it, never a copy. Dive in to read it.</span>`)}
+      ${(() => {
+        // What this stream went on to open. Those streams are not on this
+        // canvas - they belong to the child's own timeline - so they are
+        // named here rather than drawn as links from a stream that is folded.
+        const own = state.conv.streams.filter(x =>
+          (x.opened_by || []).some(o => o.stream === st.name));
+        return field("Opens in turn", own.length
+          ? own.slice(0, 6).map(x => `<button type="button" class="linkish" data-dive="${esc(x.name)}">${
+              esc(x.label || "child " + x.name.slice(1, 7))}</button>`).join("<br>")
+            + (own.length > 6 ? `<br><span style="color:var(--faint)">and ${own.length - 6} more</span>` : "")
+          : `<span style="color:var(--faint)">nothing — it opened no stream of its own</span>`);
+      })()}
+    </dl>
+    ${many ? `<div class="evidence-warning"><strong>this call started ${f.candidates} streams</strong><br>
+      A workflow call starts a run, and the run starts a pool of agents. They are all its children,
+      not competing guesses at one child.</div>` : ""}
+    <div class="dive">
+      <button type="button" class="plain-button primary" id="diveIn">Dive in →</button>
+      <span class="hint">Enter to dive in · Escape to clear</span>
+    </div>`;
+  $("inspectorBody").querySelector("#diveIn").onclick = diveIn;
+  // Going to a grandchild means entering the child first; its own timeline is
+  // where that stream is drawn.
+  $("inspectorBody").querySelectorAll("[data-dive]").forEach(b => b.onclick = () => diveIn());
+  $("inspectorBody").querySelector("[data-goto]")?.addEventListener("click",
+    ev => select(ev.currentTarget.dataset.goto, true));
+}
+
+function drawDetails(body, e) {
+  const st = state.conv.streamByName.get(e.stream);
+  const seg = state.talk && state.conv.segById.get(state.talk.segment);
+  const path = [`conversation ${state.conv.id.slice(0, 8)}`];
+  if (seg) path.push(`segment ${seg.id.replace(/^segment\//, "")}`);
+  path.push(`stream ${(e.stream || "").slice(0, 10)}`);
+  if (e.talk) path.push(`talk ${e.talk.replace(/^talk\//, "").slice(0, 14)}`);
+  if (e.run) path.push(`run ${e.run.replace(/^run\//, "").slice(0, 14)}`);
+  path.push(`${e.kind} ${e.id.slice(0, 20)}`);
+
+  let html = `<div class="structure-path">${path.map(esc).join(" › ")}</div><dl class="definition">`;
+  html += field("Node kind", esc(e.kind));
+  html += field("Lane", esc(e.track));
+  html += field("Stream", `${esc(e.stream)}${st ? ` · ${esc(st.role)}` : ""}`, true);
+  html += field("Segment", seg ? esc(seg.id.replace(/^segment\//, "")) : "—");
+  html += field("Talk", e.talk ? esc(e.talk.replace(/^talk\//, "")) : "—", true);
+  html += field("Run", e.run ? esc(e.run.replace(/^run\//, "")) : "—", true);
+  html += field("Direct parent", e.parent ? esc(e.parent) : "—", true);
+  html += field("Observed at", e.at ? `${esc(dayOf(e.at))} ${esc(hhmmss(e.at))}` : "unavailable");
+  if (e.reqToRes != null) {
+    html += field("Request to result",
+      `${esc(dur(e.reqToRes))} <span style="color:var(--faint)">· ${esc(e.reqToResJoin)}</span>`);
+  }
+  html += field("Duration", e.durationMs
+    ? `${esc(dur(e.durationMs))}${e.durationHow ? ` <span style="color:var(--faint)">· ${esc(e.durationHow)}</span>` : ""}`
+    : `<span style="color:var(--faint)">unavailable — the runtime does not report how long this ran</span>`);
+  if (e.reqToRes != null)
+    html += `<dt></dt><dd><div class="evidence-warning" style="margin:0">
+      <strong>What "request to result" is</strong><br>
+      The time between the record carrying the request and the record carrying the result.
+      An exact identifier ties those two records together, so the interval belongs to this call.
+      It is not how long the tool ran, and the runtime does not report that.</div></dd>`;
+  if (e.name) html += field("Name", esc(e.name));
+  if (e.failed !== undefined) html += field("Failed", e.failed ? "yes" : "no");
+  if (e.state) html += field("Content state", esc(e.state));
+  if (e.bytes) html += field("Content bytes", num(e.bytes));
+  html += `</dl>`;
+
+  if (e.text) html += `<div class="content-block">${esc(e.text)}</div>`;
+  if (e.result) html += `<div class="kicker" style="margin-top:14px">result${e.failed ? " · failed" : ""}${
+    e.resultBytes ? ` · ${num(e.resultBytes)} bytes` : ""}</div><div class="content-block">${esc(e.result)}</div>`;
+  else if (e.state && e.state !== "available")
+    html += `<div class="evidence-warning"><strong>Content ${esc(e.state)}</strong><br>
+      The source did not supply readable content for this step. It is reported as it was found, not filled in.</div>`;
+
+  // The child agents this call started are relations, and they are read in
+  // the Relations tab. Details only says they exist.
+  const folders = (e.edges || []).filter(g => g.type === "starts" && g.dir === "out");
+  if (folders.length)
+    html += `<button type="button" class="linkish" id="toRelations" style="margin-top:14px">${
+      folders.length === 1 ? "1 child agent" : `${folders.length} child agents`} — open the Relations tab →</button>`;
+  if (state.navStack.length)
+    html += `<button type="button" class="plain-button" style="margin-top:12px" id="backParent">← Back to parent stream</button>`;
+  body.innerHTML = html;
+  body.querySelector("#toRelations")?.addEventListener("click", () => showTab("relations"));
+  body.querySelector("#backParent")?.addEventListener("click", goBack);
+}
+
+function drawRelations(body, e) {
+  const rels = e.edges || [];
+  if (!rels.length) { body.innerHTML = `<div class="empty">No relation touches this step.</div>`; return; }
+  const streamOf = id => state.conv.streams.find(x => x.id === id);
+  const children = rels.filter(r => streamOf(r.other));
+  let html = "";
+  if (children.length > 1)
+    html += `<div class="evidence-warning"><strong>${children.length} agents created by this call</strong><br>
+      A workflow call starts a run, and the run starts a pool of agents. Every one of them is a child
+      of this call, not a competing guess at one child. Pick the one to read.</div>`;
+  html += `<div class="relation-list">${rels.map(r => {
+    const cls = r.quality === "exact_unique" ? "" : r.quality === "strong_inference" ? " inferred" : " weak";
+    // A relation to a stream is a child agent. It is named and opened, not
+    // shown as a raw id with nowhere to go.
+    const st = streamOf(r.other);
+    if (st) {
+      // The child's name is what it was about. A child named by its run
+      // journal says so; one with no name of its own shows what was first
+      // put into its context instead, which is at least what it read.
+      const about = !st.label && st.talk && state.conv.byId.get(st.talk);
+      return `<div class="relation-card${cls}">
+      <button type="button" data-open-child="${esc(st.name)}">
+        <strong>${esc(r.type)} · child ${esc(st.name.slice(1, 7))}</strong><br>${
+          st.label ? `${esc(st.label)} →` : `Open →`}</button>
+      ${about && about.label ? `<small class="child-about">${esc(about.label.slice(0, 200))}</small>` : ""}
+      <small>${esc(r.quality)}${r.via ? ` — joined on ${esc(r.via)}` : ""}${
+        st.named_by === "journal" ? " — named from its run journal" : ""}</small></div>`;
+    }
+    const known = allEvents().some(x => x.id === r.other);
+    return `<div class="relation-card${cls}">
+      <button type="button" ${known ? `data-rel="${esc(r.other)}"` : "disabled"}>
+        <strong>${esc(r.dir === "out" ? "outgoing" : "incoming")} · ${esc(r.type)}</strong><br>${esc(r.other)}</button>
+      <small>${esc(r.quality)}${r.via ? ` — joined on ${esc(r.via)}` : ""}${known ? "" : "<br>the other end is outside this talk"}</small></div>`;
+  }).join("")}</div>`;
+  body.innerHTML = html;
+  body.querySelectorAll("[data-rel]").forEach(b => b.onclick = () => select(b.dataset.rel, true));
+  body.querySelectorAll("[data-open-child]").forEach(b => b.onclick = () => {
+    state.navStack.push({ stream: state.stream, sel: state.sel });
+    switchStream(b.dataset.openChild);
+  });
+}
+
+// Evidence: where this step was read from, and the record that was read.
+//
+// These were two tabs saying the same thing twice - the position, then the
+// same position again above the record it names. One tab now: the positions,
+// then whichever of them you are looking at.
+async function drawEvidence(body, e) {
+  const refs = (e.ref ? [e.ref] : []).concat(e.refs || []);
+  const seen = new Set();
+  const list = refs.filter(r => {
+    const k = `${r.seq}/${r.row}/${r.block ?? ""}`;
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+  if (!list.length) {
+    body.innerHTML = `<div class="empty">This step was derived by assembly. It cites no landed record.</div>`;
+    return;
+  }
+  const pick = state.rawRef && list.find(r => r.seq === state.rawRef.seq && r.row === state.rawRef.row) || list[0];
+  const role = (r, i) => e.kind === "tool" || e.kind === "agent.call"
+    ? (i === 0 ? "request" : "result") : (list.length > 1 ? `part ${i + 1}` : "record");
+
+  body.innerHTML = `
+    <div class="kicker">landed positions</div>
+    <div class="ref-row">${list.map((r, i) => `
+      <button type="button" class="ref-chip ${r === pick ? "on" : ""}" data-ref="${r.seq}/${r.row}">
+        <b>${esc(role(r, i))}</b><span>seq ${r.seq} · row ${r.row}${r.block != null ? ` · block ${r.block}` : ""}</span>
+      </button>`).join("")}</div>
+    <div id="explainBox"></div>
+    <div id="recordBox"><div class="empty">reading…</div></div>`;
+
+  body.querySelectorAll("[data-ref]").forEach(b => b.onclick = () => {
+    const [seq, row] = b.dataset.ref.split("/").map(Number);
+    state.rawRef = { seq, row }; state.explain = null; drawInspector();
+  });
+
+  const d = await get(`/api/c/${encodeURIComponent(state.conv.id)}/record/${pick.seq}/${pick.row}`);
+  const rec = d.record || {};
+  const drop = (rec.dropped || []).map(x =>
+    `<div class="evidence-warning">dropped ${esc(x.what)} · ${num(x.bytes)} bytes<br>${esc(x.why || "")}</div>`).join("");
+  const box = body.querySelector("#recordBox");
+  if (!box) return;
+  box.innerHTML = drop +
+    `<div class="kicker" style="margin-top:14px">the landed record</div>
+     <pre class="raw">${renderJSON(rec, 0)}</pre>`;
+  box.querySelectorAll("[data-term]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    state.explain = state.explain === b.dataset.term ? null : b.dataset.term;
+    box.querySelectorAll("[data-term]").forEach(x =>
+      x.classList.toggle("on", x.dataset.term === state.explain));
+    drawExplain(body);
+  });
+  drawExplain(body);
+}
+
+// A name that can be explained carries a question mark. Everything else is
+// printed plainly, so the marks mark something.
+function explainable(key) {
+  const g = state.glossary;
+  if (!g) return null;
+  if (g.terms && g.terms[key]) return "term";
+  if (g.fields && g.fields[key]) return "field";
+  return null;
+}
+
+function renderJSON(v, depth, key) {
+  const pad = "  ".repeat(depth);
+  const label = key == null ? "" :
+    (explainable(key)
+      ? `<span class="jkey">"${esc(key)}"</span><button type="button" class="q" data-term="${esc(key)}"
+           aria-label="What does ${esc(key)} mean?" title="What does ${esc(key)} mean?">?</button>: `
+      : `<span class="jkey plain">"${esc(key)}"</span>: `);
+  if (v === null) return `${pad}${label}<span class="jnull">null</span>\n`;
+  if (Array.isArray(v)) {
+    if (!v.length) return `${pad}${label}[]\n`;
+    return `${pad}${label}[\n` + v.map(x => renderJSON(x, depth + 1)).join("") + `${pad}]\n`;
+  }
+  if (typeof v === "object") {
+    const ks = Object.keys(v);
+    if (!ks.length) return `${pad}${label}{}\n`;
+    return `${pad}${label}{\n` + ks.map(k => renderJSON(v[k], depth + 1, k)).join("") + `${pad}}\n`;
+  }
+  const cls = typeof v === "number" ? "jnum" : typeof v === "boolean" ? "jbool" : "jstr";
+  const text = typeof v === "string" ? `"${clipText(v)}"` : String(v);
+  return `${pad}${label}<span class="${cls}">${esc(text)}</span>\n`;
+}
+function clipText(t) { return t.length > 300 ? t.slice(0, 300) + "…" : t; }
+
+// The explanation for whichever name was asked about.
+//
+// It says everything there is to say about the name: which vocabulary it
+// belongs to, what it means, what the runtime calls it and where that appears,
+// and anything needed to not misread the pairing. Where the runtime has no
+// word for something, it says so rather than leaving the row empty.
+function drawExplain(body) {
+  const host = body.querySelector("#explainBox");
+  if (!host) return;
+  const key = state.explain, g = state.glossary;
+  if (!key || !g) { host.innerHTML = ""; return; }
+
+  const t = g.terms && g.terms[key];
+  const rows = [];
+  if (t) {
+    rows.push(["vocabulary", `the model's own word · <span class="mono">asz term</span>`]);
+    rows.push(["asz term", `<span class="mono">${esc(key)}</span>`]);
+    rows.push(["runtime word", t.native
+      ? `<span class="mono">${esc(t.native)}</span>`
+      : `<span class="none">none — this is derived here, the runtime has no word for it</span>`]);
+    rows.push(["where to look", t.where
+      ? esc(t.where)
+      : `<span class="none">nowhere in the source; it is produced by assembly</span>`]);
+    if (t.note) rows.push(["read it carefully", esc(t.note)]);
+    rows.push(["dialect", `<span class="mono">${esc(g.dialect)}</span>`]);
+  } else {
+    rows.push(["vocabulary", `a field of the landed record · <span class="mono">.sd</span>`]);
+    rows.push(["asz field", `<span class="mono">${esc(key)}</span>`]);
+    rows.push(["what it is", esc(g.fields[key])]);
+    rows.push(["runtime word", `<span class="none">not applicable — this describes the landed record, not the source</span>`]);
+  }
+
+  host.innerHTML = `<div class="explain">
+    <div class="explain-head">
+      <span class="explain-title">${esc(key)}</span>
+      <button type="button" class="explain-close" aria-label="Close explanation">×</button>
+    </div>
+    <dl class="explain-rows">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>
+  </div>`;
+  host.querySelector(".explain-close").onclick = () => { state.explain = null; drawExplain(body); };
+  host.scrollIntoView({ block: "nearest" });
+}
+
+/* ============================================================
+   Selection
+   ============================================================ */
+function select(id, center, alsoTranscript = true) {
+  const e = eventById(id);
+  if (!e) return;
+  if (e.stream && e.stream !== state.stream) { switchStream(e.stream).then(() => select(id, center, alsoTranscript)); return; }
+  state.sel = id; state.rawRef = null; state.folder = null; state.picked = true;
+  drawTimeline(); drawTranscript(); drawInspector();
+  const behavior = matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+  if (center) centerOn(id, behavior, alsoTranscript);
+  $("selectionStatus").textContent = `Selected ${e.kind}${e.name ? " " + e.name : ""}`;
+}
+
+function centerOn(id, behavior, alsoTranscript = true) {
+  const clip = $("timelineCanvas").querySelector(`[data-node="${CSS.escape(id)}"]`);
+  if (clip) {
+    const sc = $("timelineScroll");
+    sc.scrollTo({ left: Math.max(0, clip.offsetLeft + clip.offsetWidth / 2 - sc.clientWidth / 2), behavior });
+  }
+  if (!alsoTranscript) return;
+  const card = $("transcriptList").querySelector(`[data-card="${CSS.escape(id)}"]`);
+  if (card) {
+    const list = $("transcriptList");
+    // Measured through rectangles, not offsetTop: the card sits inside the
+    // fold's own box, so offsetTop answers against that box and the list
+    // barely moved.
+    const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+    list.scrollTo({ top: Math.max(0, top - list.clientHeight / 2 + card.offsetHeight / 2), behavior });
+  }
+}
+
+/* ============================================================
+   Controls
+   ============================================================ */
+function showTab(name) {
+  state.tab = name;
+  if (name !== "raw") state.rawRef = null;
+  document.querySelectorAll("[data-tab]").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === name)));
+  drawInspector();
+}
+document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$("dockHelp").onclick = () => { $("dockHelpBox").hidden = !$("dockHelpBox").hidden; };
+$("dockHelpClose").onclick = () => { $("dockHelpBox").hidden = true; };
+$("focusRelated").onchange = e => { state.focus = e.target.checked; drawTimeline(); drawTranscript(); };
+$("zoom").oninput = e => { state.zoom = Number(e.target.value) / 100; $("zoomOutput").textContent = `${e.target.value}%`; drawTimeline(); };
+$("fitSelection").onclick = () => centerOn(state.sel, "smooth");
+$("timelineBack").onclick = () => {
+  const up = $("timelineBack").dataset.up;
+  if (up) { const o = JSON.parse(up); goToOpener(o.stream, o.step, o.talk); }
+  else goBack();
+};
+$("talkFilter").oninput = drawTalkList;
+// A click on empty canvas is the mouse's Escape. A click on anything
+// interactive is that thing's own action and stays out of this.
+$("timelineScroll").addEventListener("click", e => {
+  if (e.target.closest("[data-node], [data-folder], [data-group], button, a, select")) return;
+  clearSelection();
+});
+$("transcriptList").addEventListener("click", e => {
+  if (!e.target.closest("[data-open]")) clearFolder();
+});
+$("timelineScroll").addEventListener("scroll", () => { $("laneLabels").scrollTop = $("timelineScroll").scrollTop; });
+// A wheel over the label gutter drives the canvas, so the two never diverge.
+$("laneLabels").addEventListener("wheel", e => {
+  if (!e.deltaY) return;
+  e.preventDefault();
+  $("timelineScroll").scrollTop += e.deltaY;
+}, { passive: false });
+
+/* ============================================================
+   Panel boundaries
+   ============================================================ */
+
+// Both sizes are stored per browser and read back on load. A stored value
+// from a much larger window is clamped, so a page opened on a small screen
+// cannot start with a panel wider than the screen.
+const PANELS = [
+  { key: "asz.inspector", cssVar: "--inspector", el: "splitInspector", axis: "x",
+    min: 260, max: () => Math.max(280, innerWidth - 420), fallback: 350,
+    measure: e => document.querySelector(".workbench").getBoundingClientRect().right - e.clientX },
+  { key: "asz.dock", cssVar: "--dock", el: "splitDock", axis: "y",
+    min: 150, max: () => Math.max(160, innerHeight - 260), fallback: null,
+    measure: e => document.querySelector(".workbench").getBoundingClientRect().bottom - e.clientY },
+];
+
+function setPanel(p, px) {
+  const v = Math.round(Math.min(p.max(), Math.max(p.min, px)));
+  document.documentElement.style.setProperty(p.cssVar, v + "px");
+  try { localStorage.setItem(p.key, String(v)); } catch (_) { /* private window */ }
+  return v;
+}
+function currentPanel(p) {
+  const el = p.el === "splitInspector" ? document.querySelector(".inspector") : $("timelineCanvas").closest(".timeline-dock");
+  const r = el.getBoundingClientRect();
+  return p.axis === "x" ? r.width : r.height;
+}
+
+PANELS.forEach(p => {
+  // A stored size wins over the stylesheet default, once it fits.
+  let stored = null;
+  try { stored = Number(localStorage.getItem(p.key)); } catch (_) { /* ignore */ }
+  if (stored > 0) setPanel(p, stored);
+  else if (p.fallback) setPanel(p, p.fallback);
+
+  const bar = $(p.el);
+  bar.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const move = ev => setPanel(p, p.measure(ev));
+    const up = ev => {
+      bar.releasePointerCapture(ev.pointerId);
+      bar.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      bar.removeEventListener("pointermove", move);
+      bar.removeEventListener("pointerup", up);
+      // The timeline reads the height it was given, so it is redrawn once
+      // the drag ends rather than on every pointer move.
+      if (state.tree) drawTimeline();
+    };
+    bar.addEventListener("pointermove", move);
+    bar.addEventListener("pointerup", up);
+  });
+
+  // A splitter is a control, so it answers the arrow keys too.
+  bar.addEventListener("keydown", e => {
+    const step = e.shiftKey ? 48 : 12;
+    const grow = p.axis === "x" ? ["ArrowLeft"] : ["ArrowUp"];
+    const shrink = p.axis === "x" ? ["ArrowRight"] : ["ArrowDown"];
+    if (!grow.includes(e.key) && !shrink.includes(e.key) && e.key !== "Home") return;
+    e.preventDefault();
+    if (e.key === "Home") { setPanel(p, p.fallback || Math.round(innerHeight * 0.47)); }
+    else setPanel(p, currentPanel(p) + (grow.includes(e.key) ? step : -step));
+    if (state.tree) drawTimeline();
+  });
+});
+
+// A window that shrinks below a stored size must not leave a panel off screen.
+addEventListener("resize", () => PANELS.forEach(p => setPanel(p, currentPanel(p))));
+
+document.addEventListener("keydown", e => {
+  if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) return;
+  if (e.key === "Escape") { clearSelection(); return; }
+  if (e.key === "Enter" && state.folder) {
+    // A focused button or link owns Enter. Only the page-level selection
+    // uses it otherwise.
+    const el = document.activeElement;
+    if (el && el.closest("button, a, select, [tabindex]")) return;
+    e.preventDefault(); diveIn(); return;
+  }
+  const k = e.key.toLowerCase();
+  if (k !== "j" && k !== "k") return;
+  const ev = eventsFor(state.stream);
+  const i = ev.findIndex(x => x.id === state.sel);
+  if (i < 0) return;
+  select(ev[k === "j" ? Math.min(ev.length - 1, i + 1) : Math.max(0, i - 1)].id, true);
+});
+
+boot();
+</script>
+</body>
+</html>
