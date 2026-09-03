@@ -144,7 +144,11 @@ tbody tr:hover td { background: rgba(88,168,255,.05); }
 "use strict";
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
-const num = n => (n ?? 0).toLocaleString();
+// Dates and times render in English with a 24-hour clock for every reader.
+// Left to the browser, the month and day came out in the viewer's own
+// language, so two people looking at one conversation saw different text.
+const LOCALE = "en-US";
+const num = n => (n ?? 0).toLocaleString(LOCALE);
 function dur(ms) {
   if (!ms || ms < 0) return "—";
   if (ms < 60000) return `${Math.round(ms / 1000)} s`;
@@ -152,8 +156,8 @@ function dur(ms) {
   if (ms < 86400000) return `${(ms / 3600000).toFixed(1)} h`;
   return `${(ms / 86400000).toFixed(ms < 864000000 ? 1 : 0)} d`;
 }
-const when = ms => ms ? new Date(ms).toLocaleString(undefined,
-  { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+const when = ms => ms ? new Date(ms).toLocaleString(LOCALE,
+  { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : "—";
 
 const state = { rows: [], sort: "to", filter: "" };
 
@@ -173,8 +177,8 @@ function load() {
 // The server says when it last refreshed the zone and when it will next. The
 // list is fetched again only when that time moves, so a static server costs
 // one small poll a second and nothing else.
-const clock = ms => ms ? new Date(ms).toLocaleTimeString(undefined,
-  { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+const clock = ms => ms ? new Date(ms).toLocaleTimeString(LOCALE,
+  { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }) : "—";
 let seenRefresh = -1;
 function poll() {
   return fetch("/api/status").then(r => r.json()).then(s => {
