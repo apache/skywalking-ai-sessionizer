@@ -53,10 +53,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check license headers
-        uses: apache/skywalking-eyes/header@v0.9.0
-      - name: Check dependency licenses
-        uses: apache/skywalking-eyes/dependency@v0.9.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      # The skywalking-eyes actions bring their own Go, pinned below what
+      # go.mod requires, and the dependency check runs go with it. Both
+      # checks run through the Makefile instead, with the toolchain the
+      # module declares, which is what make check does locally.
+      - name: Check license headers and dependency licenses
+        run: make license-check dep-check
 
   build:
     name: Build and Test
