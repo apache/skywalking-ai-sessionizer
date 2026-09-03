@@ -1,0 +1,66 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Default configuration for asz.
+#
+# Every asz command reads this file when it is in the working directory and no
+# -config flag is given. Every value below is the built-in default, so deleting
+# the file changes nothing. It is here so the defaults can be read and edited
+# without reading Go.
+
+storage:
+  # Where collected data lands and where conversations are assembled.
+  # Relative paths are resolved from the working directory. The default,
+  # ./data, is ignored by git so a checkout never stages private transcripts.
+  root: ./data
+
+adapters:
+  - name: claude-code-local
+    enabled: true
+
+    # Where Claude Code keeps its files. Leave empty to resolve it the way
+    # Claude Code does: CLAUDE_CONFIG_DIR, then XDG_CONFIG_HOME, then
+    # ~/.claude. Set it only to collect from a copy or a mounted corpus.
+    source_root: ""
+
+    # Session filters. A session is judged by the working directory its main
+    # transcript was recorded under. An entry starting with / is a working
+    # directory, with ** for everything beneath it; anything else is a glob
+    # matched against the source directory name as Claude Code wrote it.
+    # An empty include list means every session is a candidate.
+    include: []
+    # Claude Code runs its own helper agents in scratch directories under
+    # /private/tmp. Those sessions are the tool's, not yours, so they are
+    # left out. A real session that merely used a scratch directory for a
+    # child agent is still collected, because the filter looks at the main
+    # transcript's directory only.
+    exclude:
+      - /private/tmp/**
+
+    collector:
+      # watch polls the source continuously. once makes a single pass and
+      # exits, which is the backfill path over history that already exists.
+      # asz view in watch mode also refreshes on this interval and shows the
+      # last and the next refresh on its list page.
+      mode: watch
+      interval: 5s
+
+      # The largest landed file written from one source in one pass. A large
+      # catch-up is split into several files rather than one enormous one.
+      max_delta_bytes: 8388608

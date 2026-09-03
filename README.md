@@ -70,7 +70,17 @@ adapter reports it as `unavailable` rather than approximating it.
 make build                 # builds ./bin/asz
 ./bin/asz sources          # list discovered sessions and their sources
 ./bin/asz collect -once    # land everything currently on disk
+./bin/asz view             # serve the conversations at http://127.0.0.1:8787
 ```
+
+Every command reads [`asz.yaml`](asz.yaml) from the working directory when no `-config` flag is
+given. The file at the repository root is the default configuration with every value written out,
+so it can be read and edited without reading Go.
+
+`asz view` serves what has been assembled. With the local Claude Code adapter it also runs the
+collector and the parser in the same process, once with `-once` or on the collector interval
+otherwise, and the list page shows when the data was last refreshed and when it will be next. On a
+storage root copied from another machine there is no local source, so it serves what is there.
 
 ## Documentation
 

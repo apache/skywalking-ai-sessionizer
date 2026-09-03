@@ -49,6 +49,7 @@ be.
 ## Structure
 
 ```
+asz.yaml                        default configuration, every value written out; read when no -config is given
 cmd/asz/                        CLI: sources · collect · index · show · parse · conversation · view · glossary · verify
 pkg/sessiondata/                Session Data: the landed record, `.sd` — public, adapters produce these
 pkg/model/                      the conversation vocabulary: node kinds, relations, qualification

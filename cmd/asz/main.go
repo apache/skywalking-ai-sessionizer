@@ -51,12 +51,15 @@ Usage:
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
 
 Flags:
-  -config FILE   configuration file (default: built-in defaults)
+  -config FILE   configuration file (default: ./asz.yaml when present, else built-in defaults)
   -once          single pass, then exit (overrides collector.mode)
   -terms MODE    name things as "unified" (default), "native", or "both"
 `
 
 // positional holds the command's non-flag arguments, filled once flags parse.
+// defaultConfig is read from the working directory when no -config is given.
+const defaultConfig = "asz.yaml"
+
 var positional []string
 
 // termMode selects whose words to print: the model's, the runtime's, or both.
@@ -87,6 +90,14 @@ func main() {
 	positional = fs.Args()
 	termMode = *terms
 
+	// A checkout carries asz.yaml with every default written out, so a
+	// command run from its root reads that file rather than a copy of the
+	// same values compiled in. An explicit -config always wins.
+	if *cfgPath == "" {
+		if _, err := os.Stat(defaultConfig); err == nil {
+			*cfgPath = defaultConfig
+		}
+	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		fatal(err)

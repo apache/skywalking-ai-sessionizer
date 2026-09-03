@@ -73,6 +73,10 @@ adapters:
 ./bin/asz collect -config collect.yaml
 ```
 
+Without `-config`, a command run from the repository root reads the `asz.yaml` there. Its
+values are the built-in defaults: storage root `./data`, watch mode, a 5 second interval. Pass a
+file like the one above when you want a single backfill pass into another directory.
+
 ## 5. Read the result line
 
 ```

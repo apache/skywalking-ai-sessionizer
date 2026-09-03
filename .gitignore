@@ -17,7 +17,7 @@ go.work.sum
 
 # Collected conversation data. /data is the DEFAULT storage root, so running
 # `asz collect` in a checkout would otherwise stage private transcripts.
-/data/
+/data
 /.sf/
 /.local/
 *.wal

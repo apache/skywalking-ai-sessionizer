@@ -57,6 +57,10 @@ header:
     - '**/claudecode-files/**'
     - 'dist/**'
     - 'bin/**'
+    # The default storage root. It holds collected data, never source, and a
+    # checkout that has collected would otherwise fail the check.
+    - 'data'
+    - 'data/**'
   comment: on-failure
 
 dependency:
