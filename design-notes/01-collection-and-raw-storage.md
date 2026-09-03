@@ -17,7 +17,9 @@ layout — `log-` and `trace-` are already reserved prefixes (§2.2). Raw provid
 (`OTEL_LOG_RAW_API_BODIES`) are a separate opt-in, orthogonal to both phases, and are the only route
 to a verified `input_manifest` (§1.8, §1.13).
 
-**Relationship to `AgentSessionizer_Design_v0.8`:** v0.8 is the direction, not a specification.
+**Relationship to the earlier design draft (v0.8):** that draft was written when the project was
+still called Agent Sessionizer, and it is not part of this repository. v0.8 is the direction, not a
+specification.
 Where this plan contradicts it, the observed evidence wins and the contradiction is deliberate.
 
 **Evidence basis:** a live corpus of ~2,920 JSONL files (~1.2 GB) across 38–43 project directories —
