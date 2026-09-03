@@ -145,9 +145,11 @@ func TestZoneLayout(t *testing.T) {
 		z.StreamDir("S", "a1"):   "/root/S/streams/a1",
 		z.RunDir("S", "wf1"):     "/root/S/runs/wf1",
 	}
+	// The zone builds real filesystem paths, so on Windows they carry
+	// backslashes. The expectation is written once and converted.
 	for got, want := range cases {
-		if got != want {
-			t.Errorf("got %q, want %q", got, want)
+		if got != filepath.FromSlash(want) {
+			t.Errorf("got %q, want %q", got, filepath.FromSlash(want))
 		}
 	}
 }
