@@ -38,7 +38,7 @@ The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon a
 x86-64 and ARM 64, and Windows on x86-64. Every one is cross-compiled from the release manager's
 machine, with the Go version the module declares.
 
-Pushing the tag builds the container image and publishes it under its `sha-` tag only, and builds
+Pushing the tag builds the container image and publishes it under its commit id only, and builds
 the same binary packages as a workflow artifact. The version tags and the release assets wait for
 the vote.
 

@@ -109,7 +109,7 @@ jobs:
           if [ "$EVENT" = "workflow_dispatch" ]; then ref="refs/tags/$INPUT_TAG"; fi
           case "$ref" in
             refs/tags/v*) v="${ref#refs/tags/v}" ;;
-            *) v="$(git rev-parse --short=8 HEAD)" ;;
+            *) v="$(git rev-parse HEAD)" ;;
           esac
           echo "version=$v" >> "$GITHUB_OUTPUT"
       # Every platform is cross-compiled from one runner: Go needs no
@@ -177,8 +177,9 @@ jobs:
           set -eu
           image=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
           sha=$(git rev-parse HEAD)
-          tags="$image:sha-${sha::8}"
-          version="sha-${sha::8}"
+          # Every build is tagged with its complete commit id, never moved.
+          tags="$image:$sha"
+          version="$sha"
           ref="$GITHUB_REF"
           if [ "$EVENT" = "workflow_dispatch" ]; then ref="refs/tags/$INPUT_TAG"; fi
           case "$EVENT:$ref" in
@@ -187,7 +188,7 @@ jobs:
               tags="$tags,$image:main" ;;
             push:refs/tags/v*)
               # A tag is a release candidate until the vote passes, so a tag
-              # push publishes the immutable sha tag and nothing else.
+              # push publishes the commit tag and nothing else.
               echo "::notice::${ref#refs/tags/} is a candidate; version tags are attached when its GitHub release is published" ;;
             release:refs/tags/v*|workflow_dispatch:refs/tags/v*)
               version="${ref#refs/tags/v}"

@@ -20,14 +20,15 @@ read the same way it is on a host.
 | `0.1` | the newest patch release of that line | on each patch |
 | `latest` | the newest release | on each release |
 | `main` | the development head | on each push to `main` |
-| `sha-<commit>` | one commit | never |
+| `<commit id>` | one commit, by its complete 40-character id | never |
 
 A `v*` tag is a release candidate until the Apache vote has passed. Pushing one publishes only its
-`sha-` tag. The version tags are attached when the GitHub release is published, which happens after
+commit tag. The version tags are attached when the GitHub release is published, which happens after
 the vote. A pre-release version such as `0.2.0-rc1` gets its own tag and moves nothing else.
 
 Every image carries `org.opencontainers.image.version` and `org.opencontainers.image.revision`
-labels, and `asz version` inside it prints the same version.
+labels, and `asz version` inside it prints the same version: the release version, or the complete
+commit id for a build that is not a release.
 
 ## Serve a storage root
 
