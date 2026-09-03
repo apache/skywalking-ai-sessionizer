@@ -42,8 +42,9 @@ never manufactured to make a tree look complete.
 
 ## Status
 
-Pre-alpha. The conversation model and the Claude Code data mapping are defined and evidence-backed;
-the collector, assembler, storage, export and preview are not yet implemented.
+Pre-alpha. The conversation model and the Claude Code data mapping are defined and evidence-backed.
+Collection, the derived index and assembly into a round chain are implemented. A local page that
+serves the assembled conversations is in progress. Static export and OTLP push are not started.
 
 ## Non-goals
 

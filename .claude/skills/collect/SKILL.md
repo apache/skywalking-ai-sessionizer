@@ -102,12 +102,16 @@ thousand sources, and landing is idempotent by design.
 
 ```
 <root>/<session-id>/
-    session.state                                 next_seq, liveness
-    streams/main/       cursor · transcript-<ts>-<seq>.jsonl
-    streams/<agent-id>/ cursor · transcript-… · meta-cursor · meta-…
-    journal/<wf-id>/    cursor · journal-<ts>-<seq>.jsonl
-    manifest/<run-id>/  cursor · manifest-<ts>-<seq>.jsonl
+    session.state                                   next_seq, liveness, last scan
+    streams/main/        transcript.cursor · transcript-<ts>-<seq>.sd
+    streams/<agent-id>/  transcript.cursor · transcript-… · meta.cursor · meta-…
+    runs/<run-id>/       journal.cursor · journal-… · manifest.cursor · manifest-… · script.cursor · script-…
+    index/               entries.bin · index.state
+<root>/_conversations/<id>/rounds/r000001-<digest>.sf   written by asz parse
 ```
+
+Landed files are Session Data (`.sd`), not copies of the source lines. See
+`docs/en/formats/storage-root.md`.
 
 Landed files are **write-once and read-only**. Each is a header line plus one
 line per source record, with the source bytes preserved verbatim in `payload`.

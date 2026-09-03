@@ -85,7 +85,9 @@ storage root copied from another machine there is no local source, so it serves 
 ## Documentation
 
 Official documentation lives in [`docs/`](docs/) and is indexed by
-[`docs/menu.yml`](docs/menu.yml).
+[`docs/menu.yml`](docs/menu.yml): concepts and designs, setup, the data formats, adapters, guides
+and changes. It is published at
+[skywalking.apache.org/docs/skywalking-ai-sessionizer](https://skywalking.apache.org/docs/skywalking-ai-sessionizer/next/readme/).
 
 [`design-notes/`](design-notes/) holds working engineering notes — measurements, corrections and open
 questions produced while designing against real runtime data. They are deliberately unpolished and
