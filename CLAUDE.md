@@ -73,8 +73,10 @@ while landing. No configuration of Claude Code required, and it works on history
 immutable rounds — see `design-notes/02` and the assembly doc.
 **Phase 3 (in progress):** read and export. `asz view` serves the conversations as a page: a list at
 `/`, and one conversation at `/c/{id}` with its transcript, its flow timeline and the evidence behind
-every step. It reads the folded chain on demand and writes nothing. A static export and OTLP push
-belong here too; both add measurement only, never structure.
+every step. It reads the folded chain on demand. With the local Claude Code adapter it also runs the
+collector and the parser in the same process, once or on the watch interval, and the list page shows
+the last and the next refresh. A static export and OTLP push belong here too; both add measurement
+only, never structure.
 
 ## Build
 

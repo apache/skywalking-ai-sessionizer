@@ -23,6 +23,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SkyWalking AI Sessionizer</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
@@ -60,9 +61,11 @@ code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospac
 
 /* ---------- header ---------- */
 .compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 50px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: #0b1727; }
-.compact-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
-.compact-brand { color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; text-decoration: none; }
-.compact-brand:hover { color: var(--text); }
+.compact-identity { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.compact-brand { display: inline-flex; align-items: center; color: inherit; text-decoration: none; white-space: nowrap; }
+.compact-logo { height: 16px; width: auto; display: block; }
+.compact-brand small { margin-left: 10px; padding-left: 10px; border-left: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 500; letter-spacing: .02em; }
+.compact-brand:hover small { color: var(--text); }
 .compact-title { min-width: 0; overflow: hidden; color: var(--text); font-size: 14px; font-weight: 650; white-space: nowrap; text-overflow: ellipsis; }
 .compact-divider { color: var(--line); }
 .compact-status { display: flex; align-items: center; justify-content: flex-end; gap: 9px; min-width: 0; color: var(--muted); font-size: 11px; white-space: nowrap; }
@@ -367,7 +370,7 @@ select.stream-button { border: 1px solid var(--line); background: var(--surface-
 <div class="app">
   <header class="compact-header">
     <div class="compact-identity">
-      <a class="compact-brand" href="/" title="All conversations">SkyWalking AI Sessionizer</a>
+      <a class="compact-brand" href="/" title="All conversations"><img class="compact-logo" src="/logo.svg" alt="SkyWalking"><small>AI Sessionizer</small></a>
       <span class="compact-divider">/</span>
       <span class="compact-title" id="convTitle">loading…</span>
     </div>

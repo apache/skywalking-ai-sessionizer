@@ -49,11 +49,15 @@ type Server struct {
 
 	mu     sync.Mutex
 	loaded map[string]*Conversation
+
+	statusMu sync.Mutex
+	status   Status
 }
 
-// New returns a server over a zone.
+// New returns a server over a zone. Nothing refreshes it until a caller says
+// so through SetStatus.
 func New(z *storage.Zone) *Server {
-	return &Server{zone: z, loaded: map[string]*Conversation{}}
+	return &Server{zone: z, loaded: map[string]*Conversation{}, status: Status{Mode: ModeStatic}}
 }
 
 // Conversation is one folded chain, with the times its rounds do not carry.

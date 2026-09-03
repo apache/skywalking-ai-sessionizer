@@ -30,10 +30,13 @@ import (
 
 // cmdView serves the conversations in the storage root.
 //
-// It reads and never writes: the chain, the landed records and the index are
-// all opened read-only, so a viewer can run beside a collector without taking
-// the lock that would block it.
-func cmdView(cfg *config.Config, _ config.Adapter, _ bool) error {
+// The page only reads: the chain, the landed records and the index are opened
+// read-only. When the adapter is the local Claude Code one and its source is
+// on this machine, the same process also runs the collector and the parser -
+// once, or on the configured interval in watch mode - so one command is a
+// complete local setup, and the list page can say when its data was last
+// refreshed and when it will be next.
+func cmdView(cfg *config.Config, ad config.Adapter, once bool) error {
 	zoneRoot, err := cfg.ResolvedRoot()
 	if err != nil {
 		return err
@@ -42,12 +45,24 @@ func cmdView(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if addr == "" {
 		addr = "127.0.0.1:8787"
 	}
-	srv := view.New(storage.NewZone(zoneRoot))
+	zone := storage.NewZone(zoneRoot)
+	srv := view.New(zone)
+
+	var ref *refresher
+	if ad.Name == config.AdapterClaudeCodeLocal {
+		if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
+			return err
+		}
+		if ref, err = newRefresher(srv, zone, ad, once); err != nil {
+			return err
+		}
+	}
+
 	ids, err := srv.List()
 	if err != nil {
 		return err
 	}
-	if len(ids) == 0 {
+	if len(ids) == 0 && ref == nil {
 		return fmt.Errorf("no conversations in %s; run asz parse first", zoneRoot)
 	}
 
@@ -56,8 +71,27 @@ func cmdView(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return err
 	}
 	fmt.Printf("reading  : %s\n", zoneRoot)
+	if ref != nil {
+		switch ref.base.Mode {
+		case config.ModeWatch:
+			fmt.Printf("source   : %s (refreshed every %s)\n", ref.base.Source, ref.interval)
+		default:
+			fmt.Printf("source   : %s (refreshed once)\n", ref.base.Source)
+		}
+	}
 	fmt.Printf("serving  : %d conversation(s)\n", len(ids))
 	fmt.Printf("\n   http://%s\n\n", ln.Addr())
 	fmt.Fprintln(os.Stderr, "ctrl-c to stop")
+
+	if ref != nil {
+		// The page is up before the first pass so a large backfill does not
+		// look like a hung command; the page shows the pass running.
+		go func() {
+			ref.pass()
+			if ref.base.Mode == config.ModeWatch {
+				ref.loop()
+			}
+		}()
+	}
 	return http.Serve(ln, srv.Handler())
 }

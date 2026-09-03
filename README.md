@@ -1,9 +1,14 @@
 # SkyWalking AI Sessionizer
 
+<img src="https://skywalking.apache.org/assets/logo.svg" alt="SkyWalking logo" height="90px" align="right"/>
+
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+
 **Conversation-level observability, measurement, and export for long-lived AI agents.**
 
 > **Status:** pre-alpha. The conversation model and the Claude Code data mapping are defined and
-> evidence-backed, and Phase 1 collection is implemented. The assembler, export and preview are not.
+> evidence-backed. Collection and assembly are implemented. The local page that serves the
+> assembled conversations is in progress; static export and OTLP push are not started.
 
 SkyWalking AI Sessionizer assembles fragmented agent telemetry into one durable conversation structure. It
 preserves sessions as source provenance, keeps parent and child-agent execution lineages separate,
@@ -85,6 +90,8 @@ cannot retain their source evidence and resolution state.
 ## License
 
 [Apache License 2.0](LICENSE).
+
+Apache SkyWalking, SkyWalking, and the Apache feather logo are trademarks of The Apache Software Foundation.
 
 ## Docker
 

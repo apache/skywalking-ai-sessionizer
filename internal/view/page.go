@@ -28,6 +28,12 @@ var pageHTML []byte
 //go:embed index.html
 var indexHTML []byte
 
+//go:embed favicon.svg
+var faviconSVG []byte
+
+//go:embed logo.svg
+var logoSVG []byte
+
 // index lists the conversations. It is the only page that knows there is more
 // than one of them.
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
@@ -46,4 +52,14 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(pageHTML)
+}
+
+// svg serves one embedded image. The tab icon and the header of every page
+// come from these same bytes, so the two cannot drift apart.
+func svg(b []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(b)
+	}
 }

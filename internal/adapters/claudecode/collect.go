@@ -82,6 +82,11 @@ type Stats struct {
 	// interrupted after landing but before the index was written.
 	Reindexed int
 	Errors    []error
+	// Changed lists the sessions whose landed data or index moved this pass.
+	// A caller that assembles structure afterwards needs only these; parsing
+	// every session again measured 3.3 s on a 43-session corpus with nothing
+	// new, which is most of a 5 s watch interval.
+	Changed []string
 }
 
 // Complete reports whether the pass collected everything available.
@@ -239,6 +244,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	// A recovered index must be persisted even when no source landed this pass;
 	// otherwise the rebuild is discarded and repeats on every round forever.
 	if changed || reindexed {
+		st.Changed = append(st.Changed, s.ID)
 		ixState.Schema = index.Schema
 		ixState.IndexedSeq = state.NextSeq - 1
 		ixState.Entries = len(ix.Entries)
