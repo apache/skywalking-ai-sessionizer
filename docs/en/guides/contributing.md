@@ -52,6 +52,13 @@ from evidence and never from position, absence means unchanged and never deleted
 write-once, the index is derived and disposable, and the model's vocabulary must stay free of any
 runtime's field names. Read them first.
 
+## Two sides
+
+The collector side, under `internal/adapters`, lands Session Data. The server side, `assemble`,
+`parse`, `view`, `verify` and `sessionflow`, assembles and serves it. They meet only at the
+storage root and never import each other; the test in `tests/boundary` fails when one does. Keep
+it that way. A later split into a collector binary and a server binary depends on it.
+
 ## Adding an adapter
 
 An adapter lives under `internal/adapters/<runtime>/` and produces

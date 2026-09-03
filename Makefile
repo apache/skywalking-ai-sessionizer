@@ -27,6 +27,12 @@ LDFLAGS     := -X main.version=$(VERSION)
 
 RELEASE_NAME := apache-skywalking-ai-sessionizer-$(VERSION)-src
 
+# The platforms a release ships binaries for. Every one is cross-compiled
+# from any host: the binary is pure Go and needs no C toolchain.
+PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
+DIST      := dist
+PKG_BASE  := apache-skywalking-ai-sessionizer-$(VERSION)-bin
+
 GOLANGCI_LINT_VERSION := v1.64.8
 LICENSE_EYE_VERSION   := v0.9.0
 
@@ -104,16 +110,41 @@ tidy:
 docker: ## Build the container image, as CI builds and publishes it
 	docker build --build-arg VERSION=$(VERSION) -t skywalking-ai-sessionizer:dev .
 
-## release: build the source release for a vote into dist/: tarball, sha512 and GPG signature. Needs VERSION=x.y.z and the tag vx.y.z
+## binaries: cross-compile every platform in PLATFORMS and package each with LICENSE and NOTICE into dist/
+.PHONY: binaries
+binaries:
+	@mkdir -p $(DIST)/build
+	@for t in $(PLATFORMS); do \
+	  os=$${t%/*}; arch=$${t#*/}; out=$(DIST)/build/$$os-$$arch; ext=""; \
+	  if [ "$$os" = windows ]; then ext=.exe; fi; \
+	  mkdir -p $$out && cp LICENSE NOTICE $$out/ && \
+	  echo "building $$os/$$arch" && \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
+	  if [ "$$os" = windows ]; then \
+	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && (cd $$out && zip -q ../../$(PKG_BASE)-$$os-$$arch.zip $(BINARY)$$ext LICENSE NOTICE); \
+	  else \
+	    tar -C $$out -czf $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz $(BINARY) LICENSE NOTICE; \
+	  fi; \
+	done
+	@ls -la $(DIST)/$(PKG_BASE)-*
+
+## checksums: write a sha512 file beside every package in dist/
+.PHONY: checksums
+checksums:
+	@cd $(DIST) && for f in *.tgz *.zip; do [ -f "$$f" ] && shasum -a 512 "$$f" > "$$f.sha512"; done; ls *.sha512
+
+## release: build everything a vote needs into dist/: the source package, every binary package, sha512 files and GPG signatures. Needs VERSION=x.y.z with the tag vx.y.z checked out
 .PHONY: release
 release:
 	@case "$(VERSION)" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "set the version, for example: make release VERSION=0.1.0"; exit 2 ;; esac
 	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "tag v$(VERSION) does not exist"; exit 2; }
-	@mkdir -p dist
-	git archive --format=tar --prefix=$(RELEASE_NAME)/ v$(VERSION) | gzip -n > dist/$(RELEASE_NAME).tgz
-	cd dist && shasum -a 512 $(RELEASE_NAME).tgz > $(RELEASE_NAME).tgz.sha512
-	cd dist && gpg --armor --detach-sign $(RELEASE_NAME).tgz
-	@ls -la dist/$(RELEASE_NAME).tgz*
+	@[ "$$(git rev-parse HEAD)" = "$$(git rev-parse 'v$(VERSION)^{commit}')" ] || { echo "check out v$(VERSION) first: the binaries are built from the working tree"; exit 2; }
+	@git diff --quiet HEAD || { echo "the working tree has changes; a release is built from the tag alone"; exit 2; }
+	@$(MAKE) binaries VERSION=$(VERSION)
+	git archive --format=tar --prefix=$(RELEASE_NAME)/ v$(VERSION) | gzip -n > $(DIST)/$(RELEASE_NAME).tgz
+	@$(MAKE) checksums VERSION=$(VERSION)
+	@cd $(DIST) && for f in *.tgz *.zip; do gpg --armor --detach-sign --yes "$$f"; done
+	@ls -la $(DIST)/*.tgz* $(DIST)/*.zip*
 
 check: vet lint license-check dep-check test
 

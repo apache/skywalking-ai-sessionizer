@@ -66,6 +66,9 @@ adapter reports it as `unavailable` rather than approximating it.
 
 ## Quick start
 
+Releases ship a binary package for macOS, Linux and Windows; see the
+[quick start](docs/en/setup/quick-start.md). Or build it:
+
 ```sh
 make build                 # builds ./bin/asz
 ./bin/asz sources          # list discovered sessions and their sources

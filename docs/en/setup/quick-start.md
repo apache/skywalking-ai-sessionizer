@@ -5,6 +5,28 @@ can read. Nothing in Claude Code changes: no plugin, no hook script, no environm
 collector reads files that are already on disk, so it also works on history written before it was
 installed.
 
+## Get the binary
+
+Each release ships one package per platform, with the binary, `LICENSE` and `NOTICE` inside:
+
+| Platform | Package |
+| --- | --- |
+| macOS, Apple silicon | `apache-skywalking-ai-sessionizer-<version>-bin-darwin-arm64.tgz` |
+| macOS, Intel | `apache-skywalking-ai-sessionizer-<version>-bin-darwin-amd64.tgz` |
+| Linux, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-amd64.tgz` |
+| Linux, ARM 64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-arm64.tgz` |
+| Windows, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-windows-amd64.zip` |
+
+They are on the [downloads page](https://skywalking.apache.org/downloads/) and attached to the
+[GitHub release](https://github.com/apache/skywalking-ai-sessionizer/releases). Unpack one, put
+`asz` on your path, and check it:
+
+```sh
+asz version
+```
+
+Or build it yourself.
+
 ## Build
 
 Go 1.25 or later. The module has one dependency, a YAML parser.

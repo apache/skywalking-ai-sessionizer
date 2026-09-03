@@ -24,20 +24,30 @@ git push origin "v$VERSION"
 make release VERSION=$VERSION
 ```
 
-`make release` writes three files into `dist/`: the source package
-`apache-skywalking-ai-sessionizer-$VERSION-src.tgz`, its `.sha512` checksum, and its `.asc`
-signature. The package is `git archive` of the tag, so it holds exactly what is committed and
-nothing else.
+`make release` refuses to run unless the tag is checked out and the tree is clean, because the
+binaries are built from the working tree. It writes into `dist/`:
 
-Pushing the tag builds the container image and publishes it under its `sha-` tag only. The
-version tags wait for the vote.
+- the source package, `apache-skywalking-ai-sessionizer-$VERSION-src.tgz`, which is `git archive`
+  of the tag and so holds exactly what is committed;
+- one binary package per platform, `apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>`,
+  as `.tgz` for macOS and Linux and `.zip` for Windows, each holding the binary, `LICENSE` and
+  `NOTICE`;
+- a `.sha512` checksum and an `.asc` signature beside every package.
+
+The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon and Intel, Linux on
+x86-64 and ARM 64, and Windows on x86-64. Every one is cross-compiled from the release manager's
+machine, with the Go version the module declares.
+
+Pushing the tag builds the container image and publishes it under its `sha-` tag only, and builds
+the same binary packages as a workflow artifact. The version tags and the release assets wait for
+the vote.
 
 ## Upload the candidate
 
 ```sh
 svn co https://dist.apache.org/repos/dist/dev/skywalking/ skywalking-dev
 mkdir -p skywalking-dev/ai-sessionizer/$VERSION
-cp dist/apache-skywalking-ai-sessionizer-$VERSION-src.tgz* skywalking-dev/ai-sessionizer/$VERSION/
+cp dist/apache-skywalking-ai-sessionizer-$VERSION-*.tgz* dist/apache-skywalking-ai-sessionizer-$VERSION-*.zip* skywalking-dev/ai-sessionizer/$VERSION/
 cd skywalking-dev/ai-sessionizer && svn add $VERSION && svn commit -m "Draft Apache SkyWalking AI Sessionizer release $VERSION"
 ```
 
@@ -58,6 +68,7 @@ Release Candidate:
  * https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer/$VERSION
  * sha512 checksums
    - <sha512> apache-skywalking-ai-sessionizer-$VERSION-src.tgz
+   - <sha512> apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>.tgz, one per platform
 
 Release Tag:
  * (Git Tag) v$VERSION
@@ -84,13 +95,14 @@ Thanks.
 
 Everyone voting should check these before a +1:
 
-1. The source package is in the candidate directory with its `.asc` and `.sha512`.
-2. `shasum -a 512 -c apache-skywalking-ai-sessionizer-$VERSION-src.tgz.sha512` passes.
-3. `gpg --verify apache-skywalking-ai-sessionizer-$VERSION-src.tgz.asc` passes against KEYS.
-4. `LICENSE` and `NOTICE` are in the package, and every source file carries the license header.
-5. The package builds and tests from source: unpack it, then `make build && make test`.
-6. The built binary works on real data: `./bin/asz sources`, `./bin/asz collect -once`,
-   `./bin/asz parse`, `./bin/asz verify`.
+1. The source package and every binary package are in the candidate directory, each with its
+   `.asc` and `.sha512`.
+2. `shasum -a 512 -c <package>.sha512` passes for each.
+3. `gpg --verify <package>.asc` passes for each, against KEYS.
+4. `LICENSE` and `NOTICE` are in every package, and every source file carries the license header.
+5. The source package builds and tests: unpack it, then `make build && make test`.
+6. A binary works on real data, whether built from source or unpacked from the package for your
+   platform: `asz version`, `asz sources`, `asz collect -once`, `asz parse`, `asz verify`.
 
 A PMC vote is binding. The vote passes after 72 hours with at least three binding +1 and more +1
 than -1. Send the result to the same list, listing the voters:
@@ -120,10 +132,11 @@ Thank you for voting, I will continue the release process.
    ```
 
 2. Publish the GitHub release for tag `v$VERSION`, with the changes page as its notes. Publishing
-   the release is what attaches the version tags to the container image: `$VERSION`, its
-   `major.minor` line, and `latest` when it is the newest release. A release that predates this
-   workflow, or a publish that failed, is promoted by running the CI workflow by hand with the tag
-   as its input.
+   the release is what attaches the version tags to the container image, `$VERSION`, its
+   `major.minor` line, and `latest` when it is the newest release, and what attaches the binary
+   packages and their checksums to the release as assets. A release that predates this workflow,
+   or a publish that failed, is promoted by running the CI workflow by hand with the tag as its
+   input.
 
 3. Update the [website](https://github.com/apache/skywalking-website): add the version and its
    commit to the project's entry in `data/docs.yml` so the documentation is published for it, and

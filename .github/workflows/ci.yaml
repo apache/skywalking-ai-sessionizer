@@ -63,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -75,17 +75,65 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
       - name: Vet
-        run: make vet
+        run: go vet ./...
       - name: Build
-        run: make build
-      # `make test` covers ./... including the end-to-end adapter suite under
-      # tests/. It is split out here so a failure names which layer broke.
+        run: go build -o bin/ ./cmd/asz
+      # The suite is split so a failure names which layer broke. The race
+      # detector needs a C toolchain, which the Windows runner does not put on
+      # its path, so Windows runs without it.
       - name: Unit tests
-        run: go test -race -count=1 ./pkg/... ./internal/...
+        run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./pkg/... ./internal/...
       - name: End-to-end adapter tests
-        run: go test -race -count=1 ./tests/...
-      - name: Full suite
-        run: make test
+        run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
+
+  binaries:
+    name: Binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: Version
+        id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          ref="$GITHUB_REF"
+          if [ "$EVENT" = "workflow_dispatch" ]; then ref="refs/tags/$INPUT_TAG"; fi
+          case "$ref" in
+            refs/tags/v*) v="${ref#refs/tags/v}" ;;
+            *) v="$(git rev-parse --short=8 HEAD)" ;;
+          esac
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      # Every platform is cross-compiled from one runner: Go needs no
+      # emulation and no C toolchain for this, so one job proves all five.
+      - name: Build every platform
+        run: make binaries checksums VERSION=${{ steps.v.outputs.version }}
+      - name: Smoke test
+        run: dist/build/linux-amd64/asz version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ steps.v.outputs.version }}
+          path: |
+            dist/*.tgz
+            dist/*.zip
+            dist/*.sha512
+          if-no-files-found: error
+      # Only a published release, which follows the vote, gets the packages
+      # attached. A tag push is a candidate and its packages stay artifacts.
+      - name: Attach to the GitHub release
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*.tgz dist/*.zip dist/*.sha512 --clobber
 
   lint:
     name: Lint
@@ -185,7 +233,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, lint, docker]
+    needs: [license, build, lint, docker, binaries]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

@@ -58,3 +58,9 @@ Claude Code files, the two public data formats, and a local page to read the res
   written out and held to the compiled defaults by a test.
 - A multi-platform container image on the GitHub container registry, tagged by version once a
   release is published.
+- Binary packages for macOS on Apple silicon and Intel, Linux on x86-64 and ARM 64, and Windows on
+  x86-64, each with `LICENSE` and `NOTICE`, built by `make release` and attached to the GitHub
+  release. On Windows the session lock is an exclusive open rather than a file lock, and a file's
+  identity is its volume serial and file index rather than an inode.
+- The collector side and the assembly and read side meet only at the storage root. A test fails
+  when either imports the other, so a later split into two binaries is packaging, not a refactor.
