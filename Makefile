@@ -139,7 +139,7 @@ checksums:
 .PHONY: release-notes
 release-notes:
 	@f=docs/en/changes/changes-$(VERSION).md; [ -f "$$f" ] || f=docs/en/changes/changes.md; \
-	tail -n +2 "$$f" | sed '/^> In development/,/^$$/d'; \
+	tail -n +2 "$$f" | sed '/^> In development/,/^$$/d' | sed '1{/^$$/d;}'; \
 	printf '%s\n' '' '#### Downloads and documentation' \
 	  '- Downloads, with a checksum and a signature beside each package: https://skywalking.apache.org/downloads/' \
 	  '- Documentation: https://skywalking.apache.org/docs/skywalking-ai-sessionizer/v$(VERSION)/readme/' \

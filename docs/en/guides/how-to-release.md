@@ -16,10 +16,21 @@ shows.
 ## Prerequisites
 
 1. Close every issue in the milestone, or move what is unfinished to the next one.
-2. Turn the changelog's current-version page into the version's page: rename
-   `docs/en/changes/changes.md` to `changes-$VERSION.md`, remove its "in development" note, list
-   it under Changelog in `docs/menu.yml`, and start a new `changes.md` for the next version.
-3. Run `make check`. It includes the dependency license check.
+2. Make sure the changelog is complete. The version being released has its own page,
+   `docs/en/changes/changes-$VERSION.md`, from the start of its development; the next version
+   collects on `docs/en/changes/changes.md`.
+3. Run the preparation script:
+
+   ```sh
+   tools/release.sh $VERSION $NEXT_VERSION
+   ```
+
+   It refuses a dirty tree and an existing tag, checks the license headers, runs `make check`,
+   removes the in-development note from the version's changelog page, starts the rolling page
+   for the next version if it is not started, lists the version under Changelog in
+   `docs/menu.yml` and in `CHANGES.md`, and commits all of that as one commit. `--dry-run` shows
+   the plan without writing; `--skip-check` leaves out `make check`. It does not tag, build or
+   push.
 4. Have a GPG key. Upload its public key to a key server, add its fingerprint at
    [id.apache.org](https://id.apache.org/), and add it to the
    [SkyWalking KEYS file](https://dist.apache.org/repos/dist/release/skywalking/KEYS). Only a PMC
@@ -30,6 +41,7 @@ shows.
 ```sh
 export VERSION=0.1.0
 git clone git@github.com:apache/skywalking-ai-sessionizer.git && cd skywalking-ai-sessionizer
+git push origin main                    # the preparation commit
 git tag -a "v$VERSION" -m "Release Apache SkyWalking AI Sessionizer v$VERSION"
 git push origin "v$VERSION"
 make release VERSION=$VERSION
