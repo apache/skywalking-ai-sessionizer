@@ -149,9 +149,21 @@ Thank you for voting, I will continue the release process.
 
 2. Create the GitHub release for tag `v$VERSION`, named `$VERSION`, with the output of
    `make release-notes VERSION=$VERSION` as its text, and release it: not a draft, not a
-   prerelease. The text is the version's changelog page followed by the download, documentation
-   and image links, so the page never carries a second copy of the changes. Releasing it is what publishes the container image under
-   `$VERSION`, its `major.minor` line, and `latest` when it is the newest release. The release
+   prerelease. From the terminal:
+
+   ```sh
+   make release-notes VERSION=$VERSION > /tmp/release-notes-$VERSION.md
+   gh release create "v$VERSION" --verify-tag --title "$VERSION" \
+     --notes-file /tmp/release-notes-$VERSION.md
+   gh run list --event release --limit 1        # the run that publishes the image
+   ```
+
+   The text is the version's changelog page followed by the download, documentation and image
+   links, so the page never carries a second copy of the changes. `--verify-tag` refuses to
+   create the release unless the tag is already on GitHub. Releasing it is what publishes the
+   container image under `$VERSION`, its `major.minor` line, and `latest` when it is the newest
+   release; once the run is green, check with
+   `docker manifest inspect ghcr.io/apache/skywalking-ai-sessionizer:$VERSION`. The release
    carries no binary assets; the packages are distributed through dist.apache.org and the
    downloads page, like every SkyWalking project. A release that predates this workflow, or a
    publish that failed, is published by running the CI workflow by hand with the tag as its
