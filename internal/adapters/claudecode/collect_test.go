@@ -185,3 +185,66 @@ func TestSourceGoneIsNotAnError(t *testing.T) {
 		t.Error("landed data must outlive its pruned source")
 	}
 }
+
+// TestSourceUnderNewInodeResumes guards the path a storage root takes when its
+// source is reached through another filesystem: a bind mount into a container,
+// a restored backup, a copied tree. The bytes are the same, so collection must
+// continue, and the cursor must record the new identity even though nothing
+// landed, or every later pass re-verifies the tail of every unchanged source.
+func TestSourceUnderNewInodeResumes(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj", tSess+".jsonl")
+	mk(t, main, "{\"uuid\":\"a\",\"type\":\"user\"}\n{\"uuid\":\"b\",\"type\":\"assistant\"}\n")
+
+	col := claudecode.New(src, storage.NewZone(zone), 0)
+	if st, err := col.CollectAll(nil); err != nil || st.SourcesLanded != 1 {
+		t.Fatalf("first pass: landed=%d err=%v", st.SourcesLanded, err)
+	}
+	cursorPath := filepath.Join(zone, tSess, "streams", "main", "transcript.cursor")
+	before, err := storage.LoadCursor(cursorPath, storage.CursorAppend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Ino == 0 {
+		t.Skip("no inode on this platform")
+	}
+
+	// The same bytes under a new inode.
+	body, err := os.ReadFile(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk(t, main+".new", string(body))
+	if err := os.Rename(main+".new", main); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Conflicts != 0 || st.SourcesLanded != 0 {
+		t.Fatalf("second pass: conflicts=%d landed=%d, want 0 and 0", st.Conflicts, st.SourcesLanded)
+	}
+	after, err := storage.LoadCursor(cursorPath, storage.CursorAppend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != storage.CursorActive || after.Ino == before.Ino {
+		t.Fatalf("cursor must stay active and record the new inode: state=%s ino %d -> %d",
+			after.State, before.Ino, after.Ino)
+	}
+
+	// New data after the move lands as usual.
+	f, err := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("{\"uuid\":\"c\",\"type\":\"user\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	if st, err := col.CollectAll(nil); err != nil || st.SourcesLanded != 1 || st.Records != 1 {
+		t.Fatalf("third pass: landed=%d records=%d err=%v", st.SourcesLanded, st.Records, err)
+	}
+}

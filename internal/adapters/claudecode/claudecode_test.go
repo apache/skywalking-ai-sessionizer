@@ -287,3 +287,98 @@ func applyChunk(t *testing.T, cur *storage.Cursor, path string, ch *claudecode.C
 	cur.Size, cur.MTime = fi.Size(), fi.ModTime().Unix()
 	_ = time.Now
 }
+
+// replaceFile writes body to a new file and renames it over path, so the path
+// keeps its name and gets a new inode. This is what a bind mount, a restored
+// backup or a copied source tree look like to the cursor.
+func replaceFile(t *testing.T, path, body string) {
+	t.Helper()
+	tmp := path + ".new"
+	writeFile(t, tmp, body)
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// tailThenRemember tails a fresh source and records everything the collector
+// would, including the identity, which applyChunk alone does not.
+func tailThenRemember(t *testing.T, p string) *storage.Cursor {
+	t.Helper()
+	cur := storage.NewCursor(storage.CursorAppend, filepath.Base(p))
+	ch, err := claudecode.TailAppend(p, cur, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyChunk(t, cur, p, ch)
+	cur.Dev, cur.Ino = ch.Dev, ch.Ino
+	if cur.Ino == 0 {
+		t.Skip("no inode on this platform")
+	}
+	return cur
+}
+
+func TestTailAcceptsSameBytesUnderNewInode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	writeFile(t, p, "{\"a\":1}\n{\"a\":2}\n")
+	cur := tailThenRemember(t, p)
+
+	// The same bytes, then more, under a new inode.
+	replaceFile(t, p, "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n")
+	ch, err := claudecode.TailAppend(p, cur, 1<<20)
+	if err != nil {
+		t.Fatalf("same bytes under a new inode must not conflict: %v", err)
+	}
+	if len(ch.Lines) != 1 || ch.Lines[0].Ord != 3 {
+		t.Fatalf("got %d lines, want only the new third line", len(ch.Lines))
+	}
+	if !ch.Moved || ch.Ino == cur.Ino {
+		t.Fatalf("chunk must report the new identity: moved=%v ino=%d old=%d", ch.Moved, ch.Ino, cur.Ino)
+	}
+}
+
+func TestTailReportsNewInodeWhenNothingIsNew(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	writeFile(t, p, "{\"a\":1}\n{\"a\":2}\n")
+	cur := tailThenRemember(t, p)
+
+	replaceFile(t, p, "{\"a\":1}\n{\"a\":2}\n")
+	ch, err := claudecode.TailAppend(p, cur, 1<<20)
+	if err != nil {
+		t.Fatalf("an identical copy must not conflict: %v", err)
+	}
+	if len(ch.Lines) != 0 || !ch.Moved || ch.Ino == cur.Ino {
+		t.Fatalf("want no lines and the new identity, got lines=%d moved=%v", len(ch.Lines), ch.Moved)
+	}
+}
+
+func TestTailRejectsDifferentBytesUnderNewInode(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	writeFile(t, p, "{\"a\":1}\n{\"a\":2}\n")
+	cur := tailThenRemember(t, p)
+
+	// Same length behind the cursor, different bytes: a real replacement.
+	replaceFile(t, p, "{\"a\":9}\n{\"a\":8}\n{\"a\":3}\n")
+	_, err := claudecode.TailAppend(p, cur, 1<<20)
+	var ce *claudecode.ConflictError
+	if !asConflict(err, &ce) {
+		t.Fatalf("expected ConflictError, got %T: %v", err, err)
+	}
+}
+
+func TestTailConflictsOnNewInodeWithoutTailDigest(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "s.jsonl")
+	writeFile(t, p, "{\"a\":1}\n{\"a\":2}\n")
+	cur := tailThenRemember(t, p)
+	cur.TailSHA256 = "" // an old cursor that never recorded one
+
+	replaceFile(t, p, "{\"a\":1}\n{\"a\":2}\n{\"a\":3}\n")
+	_, err := claudecode.TailAppend(p, cur, 1<<20)
+	var ce *claudecode.ConflictError
+	if !asConflict(err, &ce) {
+		t.Fatalf("without a digest the bytes cannot be checked, so this must conflict; got %T: %v", err, err)
+	}
+}

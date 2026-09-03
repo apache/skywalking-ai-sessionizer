@@ -336,6 +336,14 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		return false, false, err
 	}
 	if len(chunk.Lines) == 0 {
+		if chunk.Moved {
+			// The same bytes under a new identity. Record it now, or the next
+			// pass re-reads the tail window of this source to verify it again,
+			// which across thousands of unchanged sources is most of a pass.
+			cur.Dev, cur.Ino = chunk.Dev, chunk.Ino
+			cur.Size, cur.MTime = chunk.Size, chunk.MTime
+			return false, false, cur.Save(cursorPath, now)
+		}
 		return false, false, nil
 	}
 

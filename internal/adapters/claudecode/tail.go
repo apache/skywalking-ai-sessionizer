@@ -70,6 +70,12 @@ type Chunk struct {
 	Dev, Ino uint64
 	Size     int64
 	MTime    int64
+
+	// Moved reports that the file's identity changed but the bytes before the
+	// cursor were verified intact. The caller must record the new identity
+	// even when nothing landed, or every later pass re-reads the tail window
+	// to verify it again.
+	Moved bool
 }
 
 // statInfo carries the identity and size checks a cursor is validated against.
@@ -109,14 +115,23 @@ func TailAppend(path string, cur *storage.Cursor, maxBytes int64) (*Chunk, error
 	}
 
 	fresh := cur.Ino == 0 && cur.Offset == 0
+	moved := false
 	if !fresh {
-		// A different inode under the same path means the file was replaced,
-		// not appended to.
-		if cur.Ino != 0 && info.ino != 0 && cur.Ino != info.ino {
-			return nil, &ConflictError{Path: path, Reason: "inode changed (file rotated or replaced)"}
-		}
 		if info.size < int64(cur.Offset) {
 			return nil, &ConflictError{Path: path, Reason: fmt.Sprintf("truncated: size %d < offset %d", info.size, cur.Offset)}
+		}
+		// A different inode under the same path usually means the file was
+		// replaced. It also happens when the same file is reached through
+		// another filesystem: a bind mount into a container, a restored backup,
+		// a copied source tree. Measured: every source collected on a host
+		// conflicted inside a container when the inode alone decided. So the
+		// bytes decide. The window before the cursor is verified below, and
+		// only a mismatch is a conflict.
+		if cur.Ino != 0 && info.ino != 0 && cur.Ino != info.ino {
+			if cur.TailSHA256 == "" {
+				return nil, &ConflictError{Path: path, Reason: "inode changed and the cursor has no tail digest to verify the bytes with"}
+			}
+			moved = true
 		}
 	}
 
@@ -133,7 +148,7 @@ func TailAppend(path string, cur *storage.Cursor, maxBytes int64) (*Chunk, error
 	// pass would re-read a 1 MiB window for every one of several thousand
 	// unchanged sources. A rewrite is only actionable when we are about to read
 	// past it, so the check belongs on the path that actually reads.
-	if info.size == int64(cur.Offset) {
+	if info.size == int64(cur.Offset) && !moved {
 		return &Chunk{NewOffset: cur.Offset, NewOrd: cur.Ord, LastUUID: cur.LastUUID,
 			Dev: info.dev, Ino: info.ino, Size: info.size, MTime: info.mtime}, nil
 	}
@@ -146,6 +161,11 @@ func TailAppend(path string, cur *storage.Cursor, maxBytes int64) (*Chunk, error
 		if sum != cur.TailSHA256 {
 			return nil, &ConflictError{Path: path, Reason: "tail digest mismatch (source rewritten behind cursor)"}
 		}
+	}
+	if info.size == int64(cur.Offset) {
+		// Nothing new, but the identity changed and the bytes checked out.
+		return &Chunk{NewOffset: cur.Offset, NewOrd: cur.Ord, LastUUID: cur.LastUUID,
+			Dev: info.dev, Ino: info.ino, Size: info.size, MTime: info.mtime, Moved: true}, nil
 	}
 
 	buf, err := readWindow(f, int64(cur.Offset), info.size, maxBytes)
@@ -170,12 +190,12 @@ func TailAppend(path string, cur *storage.Cursor, maxBytes int64) (*Chunk, error
 	if end < 0 {
 		// Still no complete line: an in-flight write. Nothing safe to land yet.
 		return &Chunk{NewOffset: cur.Offset, NewOrd: cur.Ord, LastUUID: cur.LastUUID,
-			Dev: info.dev, Ino: info.ino, Size: info.size, MTime: info.mtime}, nil
+			Dev: info.dev, Ino: info.ino, Size: info.size, MTime: info.mtime, Moved: moved}, nil
 	}
 	consumed := buf[:end+1]
 
 	ch := &Chunk{NewOrd: cur.Ord, LastUUID: cur.LastUUID,
-		Dev: info.dev, Ino: info.ino, Size: info.size, MTime: info.mtime}
+		Dev: info.dev, Ino: info.ino, Size: info.size, MTime: info.mtime, Moved: moved}
 	off := cur.Offset
 	ord := cur.Ord
 	for _, raw := range bytes.SplitAfter(consumed, []byte("\n")) {
