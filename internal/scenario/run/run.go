@@ -205,7 +205,7 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 	}
 	if f == scenario.FormatClaudeCode {
 		if err := props("recollect_idempotent", ex.Properties.RecollectIdempotent, func() ([]string, error) {
-			st, err := claudecode.New(filepath.Join(out, "source"), storage.NewZone(out), 0).CollectAll(nil)
+			st, err := claudecode.New(filepath.Join(out, "_source"), storage.NewZone(out), 0).CollectAll(nil)
 			if err != nil {
 				return nil, err
 			}
@@ -261,7 +261,7 @@ func collect(f scenario.Format, out string) error {
 	if f != scenario.FormatClaudeCode {
 		return nil
 	}
-	st, err := claudecode.New(filepath.Join(out, "source"), storage.NewZone(out), 0).CollectAll(nil)
+	st, err := claudecode.New(filepath.Join(out, "_source"), storage.NewZone(out), 0).CollectAll(nil)
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func copyLanded(from, to string) error {
 			return err
 		}
 		if d.IsDir() {
-			if rel == "_conversations" || rel == "source" || filepath.Base(rel) == "index" {
+			if rel == "_conversations" || rel == "_source" || filepath.Base(rel) == "index" {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(to, rel), 0o755)

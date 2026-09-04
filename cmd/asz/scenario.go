@@ -32,7 +32,7 @@ const scenarioUsage = `asz scenario build FILE --format {claude-code|sd} --out D
 asz scenario check FILE [--format {claude-code|sd|all}] [--out DIR] [--at TIME] [--scale FACTOR]
 
 build writes a scenario's input into DIR and stops: for claude-code, the runtime's own files under
-DIR/source for asz collect to land; for sd, Session Data landed into DIR as a storage root. It also
+DIR/_source for asz collect to land; for sd, Session Data landed into DIR as a storage root. It also
 writes DIR/asz.yaml, so the ordinary commands finish the job:
 
   asz collect -once -config DIR/asz.yaml

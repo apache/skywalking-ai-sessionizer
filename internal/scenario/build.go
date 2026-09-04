@@ -51,8 +51,10 @@ type Built struct {
 
 // Build plans a scenario and writes it into out with the named writer, then
 // writes out/asz.yaml so the ordinary commands finish the job: for a runtime
-// format, asz collect reads out/source and lands into out; asz parse then
-// writes the rounds. The build itself never collects or parses.
+// format, asz collect reads out/_source and lands into out; asz parse then
+// writes the rounds. The build itself never collects or parses. The source
+// directory starts with an underscore so the storage root's session listing
+// passes over it, as it passes over _conversations.
 func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error) {
 	p, err := sc.Plan(opts)
 	if err != nil {
@@ -62,7 +64,7 @@ func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error
 	if err != nil {
 		return nil, err
 	}
-	source := filepath.Join(out, "source")
+	source := filepath.Join(out, "_source")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		return nil, err
 	}

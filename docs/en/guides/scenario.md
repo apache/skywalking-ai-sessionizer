@@ -13,7 +13,7 @@ must fold to the same conversation.
 ## Build
 
 ```sh
-asz scenario build FILE --format claude-code --out DIR      # the runtime's files, under DIR/source
+asz scenario build FILE --format claude-code --out DIR      # the runtime's files, under DIR/_source
 asz scenario build FILE --format sd --out DIR               # Session Data landed into DIR, dialect mock/1
 asz collect -once -config DIR/asz.yaml                      # for a runtime format: the real adapter lands it
 asz parse -config DIR/asz.yaml                              # the real parser writes the rounds
@@ -21,7 +21,7 @@ asz view -config DIR/asz.yaml                               # or verify, or push
 ```
 
 `build` writes the input and `DIR/asz.yaml`, whose storage root is `DIR` and whose adapter source
-is `DIR/source`, then stops. It refuses to change a `DIR/asz.yaml` that says something else.
+is `DIR/_source`, then stops. It refuses to change a `DIR/asz.yaml` that says something else.
 
 | Flag | Meaning |
 | --- | --- |

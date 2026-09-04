@@ -106,7 +106,7 @@ func (s *stage) through(checkpoint string) *claudecode.Stats {
 }
 
 func (s *stage) collector() *claudecode.Collector {
-	return claudecode.New(filepath.Join(s.out, "source"), s.zone, 0)
+	return claudecode.New(filepath.Join(s.out, "_source"), s.zone, 0)
 }
 
 func (s *stage) parse() *parse.Round {
