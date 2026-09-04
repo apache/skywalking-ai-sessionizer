@@ -10,18 +10,39 @@ rounds. That is what makes a scenario both a fixture generator and a conformance
 the runtime's own files and collected through its adapter, or landed directly as Session Data, it
 must fold to the same conversation.
 
-## Build
+## Generate, then load, parse and export
+
+`build` only generates. It writes the input and `DIR/asz.yaml`, whose storage root is `DIR` and
+whose adapter source is `DIR/_source`, then stops; the ordinary commands do the rest, each one
+inspectable on disk before the next.
 
 ```sh
-asz scenario build FILE --format claude-code --out DIR      # the runtime's files, under DIR/_source
-asz scenario build FILE --format sd --out DIR               # Session Data landed into DIR, dialect mock/1
-asz collect -once -config DIR/asz.yaml                      # for a runtime format: the real adapter lands it
-asz parse -config DIR/asz.yaml                              # the real parser writes the rounds
-asz view -config DIR/asz.yaml                               # or verify, or push
+asz scenario build FILE --format claude-code --out DIR      # generate the runtime's files, under DIR/_source
+asz collect -once -config DIR/asz.yaml                      # load: the real adapter lands them as .sd
+asz parse -config DIR/asz.yaml                              # parse: the real parser writes the .sf rounds
+asz verify -config DIR/asz.yaml                             # every digest and every chain
+asz view -config DIR/asz.yaml                               # the page, on 127.0.0.1:8787
+asz push -once -config DIR/asz.yaml                         # export: every file to an OTLP receiver
 ```
 
-`build` writes the input and `DIR/asz.yaml`, whose storage root is `DIR` and whose adapter source
-is `DIR/_source`, then stops. It refuses to change a `DIR/asz.yaml` that says something else.
+With `--format sd` the Session Data is landed by the build itself, so the collect step is skipped
+and the rest is the same. To push, name the receiver in `DIR/asz.yaml`; `build` leaves the block
+there, commented:
+
+```yaml
+export:
+  otlp:
+    endpoint: http://127.0.0.1:12800
+```
+
+The pushed records say where they came from. A `claude-code` build is landed by the Claude Code
+adapter and is attributed to `Claude Code`; an `sd` build carries the `mock/1` dialect and is
+attributed to `Mock Agent`, so a receiver never lists an invented conversation as a real one.
+
+A demo corpus is one scenario repeated: `--repeat 20` builds twenty sessions end to end on the
+clock, each with its own id, and `--at 2026-06-01T09:00:00Z --scale 60` puts them on a day rather
+than in a burst. `build` refuses to change a `DIR/asz.yaml` that says something else, so a
+directory holds one configuration.
 
 | Flag | Meaning |
 | --- | --- |

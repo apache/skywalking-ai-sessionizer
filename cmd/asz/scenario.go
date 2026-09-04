@@ -21,7 +21,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
@@ -164,18 +165,28 @@ func cmdScenario(args []string) int {
 	}
 }
 
-// repeatedSession names the k-th session of a repeated build. A named
-// session gets a suffix; an unnamed one stays in the UUID shape discovery
-// requires, varied in its last group.
+// repeatedSession names the k-th session of a repeated build. A session id
+// in the UUID shape discovery requires stays in that shape, its last group
+// counted up by k; any other name gets a suffix; an unnamed session takes
+// the derived id and varies the same way.
 func repeatedSession(sc *scenario.Scenario, k int) string {
-	if sc.Session != "" {
-		return fmt.Sprintf("%s-%d", sc.Session, k)
+	id := sc.Session
+	if id == "" {
+		p, err := sc.Plan(scenario.Options{At: time.Unix(0, 0)})
+		if err != nil {
+			return fmt.Sprintf("scenario-%d", k)
+		}
+		id = p.Session
 	}
-	p, err := sc.Plan(scenario.Options{At: time.Unix(0, 0)})
+	if !uuidShape.MatchString(id) {
+		return fmt.Sprintf("%s-%d", id, k)
+	}
+	tail := id[len(id)-12:]
+	n, err := strconv.ParseUint(tail, 16, 64)
 	if err != nil {
-		return fmt.Sprintf("scenario-%d", k)
+		return fmt.Sprintf("%s-%d", id, k)
 	}
-	id := p.Session
-	tail := fmt.Sprintf("%012x", k)
-	return id[:len(id)-12] + strings.ToLower(tail[len(tail)-12:])
+	return id[:len(id)-12] + fmt.Sprintf("%012x", (n+uint64(k))&0xffffffffffff)
 }
+
+var uuidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)

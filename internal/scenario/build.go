@@ -90,7 +90,8 @@ func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error
 
 // writeConfig writes the configuration the ordinary commands read: the
 // storage root is the output directory, and the adapter's source is the
-// source directory beside it, which an sd build leaves empty.
+// source directory beside it, which an sd build leaves empty. The export
+// block is left commented, with the one key a push needs.
 func writeConfig(out, source string) (string, error) {
 	path := filepath.Join(out, "asz.yaml")
 	text := fmt.Sprintf(`# Written by asz scenario build. The storage root is this directory; the
@@ -104,6 +105,10 @@ adapters:
     source_root: %s
     collector:
       mode: once
+# To export the session with asz push, name the receiver:
+# export:
+#   otlp:
+#     endpoint: http://127.0.0.1:12800
 `, out, source)
 	if old, err := os.ReadFile(path); err == nil && string(old) == text {
 		return path, nil
