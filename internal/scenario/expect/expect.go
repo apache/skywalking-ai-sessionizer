@@ -48,6 +48,14 @@ type File struct {
 	Checkpoints map[string]*Checkpoint `yaml:"checkpoints"`
 	Properties  Properties             `yaml:"properties"`
 	Parse       ParseOptions           `yaml:"parse"`
+	// Push is what the OTLP push of the finished session must carry.
+	Push *Push `yaml:"push"`
+}
+
+// Push is what a scenario's push must carry beyond what every push must:
+// the file kinds that must appear on the wire.
+type Push struct {
+	Kinds []string `yaml:"kinds"`
 }
 
 // ParseOptions are parse settings a scenario runs under.
@@ -70,6 +78,7 @@ type Properties struct {
 	EveryLineARecord      *bool `yaml:"every_line_a_record"`
 	DiscoveryIgnoresNoise *bool `yaml:"discovery_ignores_noise"`
 	RepackKeepsStructure  *bool `yaml:"repack_keeps_structure"`
+	PushFollowsTheWire    *bool `yaml:"push_follows_the_wire"`
 }
 
 // On reports whether a property is enabled.

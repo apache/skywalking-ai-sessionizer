@@ -103,6 +103,24 @@ jobs:
             ./bin/asz${{ runner.os == 'Windows' && '.exe' || '' }} scenario check "$f" || exit 1
           done
 
+  # A real OpenTelemetry Collector, not the in-process receiver the scenario
+  # checks use: the protobuf the sender writes must be accepted by an OTLP
+  # receiver that is not ours, and what its file exporter writes must rebuild
+  # into a root that verifies. Ubuntu only, because it needs docker.
+  collector:
+    name: Collector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      - name: Build
+        run: make build
+      - name: Push into a Collector and verify its output
+        run: tools/e2e-collector.sh
+
   # Builds every platform on every run so a broken cross-compile is caught
   # at once, and keeps the packages as an artifact. When a release is
   # released on GitHub, after the vote where there is one, the packages and
@@ -250,7 +268,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, lint, docker, binaries]
+    needs: [license, build, lint, docker, binaries, collector]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

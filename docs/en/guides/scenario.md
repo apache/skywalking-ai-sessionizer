@@ -146,8 +146,11 @@ properties:                               # all on unless set false
   discovery_ignores_noise: true           # runtime formats only
   cross_format: true
   records_match: true
+  push_follows_the_wire: true
 parse:
   max_round_bytes: 0                      # a parse setting, when the scenario needs one
+push:
+  kinds: [transcript, agent_meta, journal, workflow_manifest, workflow_script, round]   # kinds the push must carry
 ```
 
 Only what is written is checked. The properties are: two parses of the same landed files write
@@ -160,6 +163,16 @@ nothing, every source line becomes one landed record, and discovery passes over 
 writer plants beside the session. Across formats, the folds must agree, and so must the landed
 records themselves, field by field: the runtime's adapter and the sd writer must land the same
 evidence from the same scenario, which is what makes a scenario a conformance test for an adapter.
+
+The push is checked too. Every scenario, in both formats, is pushed to a receiver in the test,
+one file per request, and every request is compared with the tables of
+[Export over OpenTelemetry](../setup/export-otlp.md): the resource and the scope, one record per
+file with the file's bytes and digest, the attributes a landed file carries and the ones only a
+round carries, the record time range and the list attributes, and the stamp a receiver bounds a
+read on. A refused request must leave every file for the next pass, a second pass must send
+nothing, and writing every body back to its path must give a root that verifies and folds the
+same. `push.kinds` names the file kinds a scenario's push must carry; `all-kinds.yaml` names all
+six.
 
 The project's own tests are scenarios under `tests/scenarios/`, one property of assembly each,
 run in both formats by `go test ./tests/`.

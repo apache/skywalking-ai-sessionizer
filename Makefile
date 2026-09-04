@@ -66,6 +66,12 @@ scenarios: build
 		echo "== $$f"; $(BIN_DIR)/asz scenario check $$f || exit 1; \
 	done
 
+## e2e-collector: push a generated session into a real OpenTelemetry Collector and verify what it wrote (needs docker)
+.PHONY: e2e-collector
+e2e-collector: build
+	tools/e2e-collector.sh
+
+## coverage: run tests with a coverage profile
 .PHONY: coverage
 coverage:
 	$(GO) test -race -count=1 -coverprofile=coverage.txt -covermode=atomic ./...

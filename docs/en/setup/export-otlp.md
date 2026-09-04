@@ -73,6 +73,10 @@ inside the session's range and cannot go stale. A round is stamped with the sess
 activity as of that round, so a receiver's newest row per conversation is the head. Every record
 also carries the time it was observed.
 
+Every scenario in the test suite is pushed to a receiver and checked against the two tables
+above, in both formats, so a change to the wire that this page does not describe fails the build.
+See [Scenarios](../guides/scenario.md).
+
 ## Checking what a receiver gets
 
 An OpenTelemetry Collector with a file exporter writes back what it decoded, which is the easiest
@@ -97,7 +101,9 @@ service:
 
 Point `export.otlp.endpoint` at `http://127.0.0.1:4318`, run `asz push -once`, and read
 `logs.json`: one JSON line per request, with the resource, the scope and the records as the
-Collector understood them. Writing each record's body to `asz.file` under a new root gives a
+Collector understood them. `make e2e-collector` does exactly this with a generated session and a
+Collector container, then checks every record against the root and rebuilds the root from what
+the Collector wrote; CI runs it on every change. Writing each record's body to `asz.file` under a new root gives a
 root that `asz verify` and `asz view` read like the original.
 
 ## Size

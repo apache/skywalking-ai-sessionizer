@@ -55,7 +55,9 @@
   test against an expectation file, in both formats and at every checkpoint, and checks the
   properties every chain must have. The rounds are never mocked; the ordinary parser writes them.
   The project's own assembly tests are now scenarios under `tests/scenarios/`, and the Go
-  transcript builder they used became the `claude-code` writer.
+  transcript builder they used became the `claude-code` writer. Every scenario is also pushed to
+  an OTLP receiver in the test and checked against the export page, one file per request, both
+  formats and all six file kinds, then rebuilt from the wire and verified.
 
 ## Read
 
