@@ -86,6 +86,20 @@ func (w *Writer) Write(r *Record) error {
 	return nil
 }
 
+// WriteRaw appends one record that is already encoded, as the bytes of its
+// line without the newline. It is the counterpart of Reader.NextRaw: the
+// bytes go into the file and the digest exactly as given.
+func (w *Writer) WriteRaw(line []byte) error {
+	if _, err := w.bw.Write(line); err != nil {
+		return err
+	}
+	if err := w.bw.WriteByte('\n'); err != nil {
+		return err
+	}
+	w.n++
+	return nil
+}
+
 // Count reports how many records have been written.
 func (w *Writer) Count() int { return w.n }
 

@@ -19,6 +19,7 @@ package sessiondata
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"time"
 )
 
 // Reader reads a .sd file back.
@@ -106,8 +108,81 @@ func (r *Reader) Next() (*Record, error) {
 	return &rec, nil
 }
 
+// NextRaw returns the next record as the bytes of its line, without decoding
+// it, or io.EOF once the closing line is reached. The closing line is
+// verified the same way Next verifies it.
+//
+// It exists for the paths that must carry a record unchanged: repacking a
+// zone under another file budget, and sending records over a wire where the
+// receiver lands them byte for byte so the file digests still match. A record
+// re-encoded from its decoded form could differ in bytes and break both.
+func (r *Reader) NextRaw() ([]byte, error) {
+	if r.done {
+		return nil, io.EOF
+	}
+	line, err := readLine(r.br)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("sessiondata: %s has no closing line; it is incomplete", r.hdr.Src)
+		}
+		return nil, err
+	}
+	if isEnd(line) {
+		var e End
+		if err := json.Unmarshal(line, &e); err != nil {
+			return nil, fmt.Errorf("sessiondata: decode closing line: %w", err)
+		}
+		r.end, r.done = &e, true
+		if got := hex.EncodeToString(r.h.Sum(nil)); got != e.Digest {
+			return nil, fmt.Errorf("sessiondata: %s: digest mismatch, computed %s and the file claims %s",
+				r.hdr.Src, got[:12], firstN(e.Digest, 12))
+		}
+		if r.n != e.Records {
+			return nil, fmt.Errorf("sessiondata: %s holds %d records, the file claims %d",
+				r.hdr.Src, r.n, e.Records)
+		}
+		return nil, io.EOF
+	}
+	r.h.Write(line)
+	r.h.Write([]byte{'\n'})
+	r.n++
+	out := make([]byte, len(line))
+	copy(out, line)
+	return out, nil
+}
+
 // End returns the closing line, once the file has been read to its end.
 func (r *Reader) End() *End { return r.end }
+
+// LineTime returns a record's time from the bytes of its line, as unix
+// nanoseconds, without decoding the record. It reports false when the record
+// carries no time.
+//
+// A page turning thousands of node references into moments must not pay for
+// a full decode of every record, most of which is content it will never
+// show. The record's own fields are encoded before its parts, so the first
+// time field that appears before the parts is the record's own and never one
+// nested inside a part.
+func LineTime(line []byte) (int64, bool) {
+	limit := bytes.Index(line, []byte(`"parts":`))
+	if limit < 0 {
+		limit = len(line)
+	}
+	i := bytes.Index(line[:limit], []byte(`"time":"`))
+	if i < 0 {
+		return 0, false
+	}
+	start := i + len(`"time":"`)
+	end := bytes.IndexByte(line[start:], '"')
+	if end < 0 {
+		return 0, false
+	}
+	t, err := time.Parse(time.RFC3339Nano, string(line[start:start+end]))
+	if err != nil {
+		return 0, false
+	}
+	return t.UnixNano(), true
+}
 
 // isEnd reports whether a line is the closing one, without a full decode.
 func isEnd(line []byte) bool {
