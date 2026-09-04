@@ -19,7 +19,7 @@ adapters:
     collector:
       mode: watch
       interval: 5s
-      max_delta_bytes: 8388608
+      max_delta_bytes: 4194304
 ```
 
 ## storage
@@ -66,7 +66,7 @@ are the tool's, not yours, which is why they are excluded by default.
 | --- | --- | --- |
 | `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass and exits, which is the backfill path over history that already exists. `-once` on the command line overrides the file. |
 | `interval` | `5s` | How long the collector sleeps between passes in watch mode. `asz view` refreshes on the same interval. |
-| `max_delta_bytes` | `8388608` | The largest landed file written from one source in one pass, 8 MiB. A large catch-up is split into several files rather than one enormous one. |
+| `max_delta_bytes` | `4194304` | The largest `.sd` file the collector writes, 4 MiB. A large catch-up is split into several files, and a single record larger than this is landed whole. It is also the largest unit a receiver has to accept in one message when landed files travel, which is why the default fits the 4 MiB limit an OpenTelemetry Collector applies out of the box. A change applies to new files only; `asz repack` brings an existing root under a new budget. |
 
 ## Precedence
 

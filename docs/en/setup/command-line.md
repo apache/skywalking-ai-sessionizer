@@ -11,6 +11,7 @@ asz collect [-config FILE] [-once]   land new source data into the storage root
 asz index [-config FILE] [SESSION]   report what the derived index holds
 asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
 asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
+asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
 asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
 asz view [-config FILE] [ADDR]       serve the conversations as a page
 asz glossary                         what the runtime calls the things the model names
@@ -83,6 +84,23 @@ SESSION                               ROUND  SEQ   NODES  RELS  UNRES  TALKS  RU
 conversation now covers. `UNRES` counts references that could not be resolved. `TOOLS` and
 `CHILDREN` are joined out of total. The command exits non-zero when any session failed to parse,
 so a loop or a CI step can read the status instead of the log.
+
+## repack
+
+Re-cuts every landed file of the storage root, or of one session, into `DEST` so that no file
+exceeds the configured `max_delta_bytes`, then assembles `DEST`'s chains. Every record keeps its
+bytes and its order; the cursors come along so collection can continue into `DEST`; the index and
+the chains are rebuilt there, because a round addresses records by file and line and the old
+references name positions that no longer exist. `DEST` must be a different directory: a landed file
+is never rewritten in place. One row per session:
+
+```text
+SESSION                               FILES IN  FILES OUT  RECORDS  BYTES
+0438c73b-2367-4ed5-9de3-13ef9a17ed01  305       312        21119    42.1MB
+```
+
+This is how an existing root is brought under a new budget after `max_delta_bytes` changes, and
+it needs no source files.
 
 ## conversation
 

@@ -54,11 +54,19 @@ so a crash between writing a file and saving state cannot reissue a number.
 A file lands before its cursor is committed. A crash between the two lands the same records twice
 in the next pass, and assembly removes the duplicate. The reverse order would lose data.
 
+A file is cut once. The collector cuts at `max_delta_bytes`, 4 MiB by default, and a round then
+addresses every record by file and line and binds itself to the file digests, so re-cutting a file
+that a round references would break every reference. A change of budget applies to new files
+only. To bring an existing root under a new budget, `asz repack DEST` re-cuts every file into a
+new root, keeping each record's bytes and order, carries the cursors over, and builds the chains
+again on the new files, which describe the same conversation at new positions.
+
 ## The index
 
 `index/` holds identifiers and roles, never text: which record is in which stream, which call a
 fragment belongs to, which tool use a result answers, which child a launch started. Assembly reads
-this and never the payloads. It is derived and disposable. Delete it and the next collect or parse
+this and never the payloads; the page does not read it at all, and takes every time from the
+record itself. It is derived and disposable. Delete it and the next collect or parse
 rebuilds it from the landed files; a schema change discards it rather than migrating it.
 
 ## The chain

@@ -73,7 +73,10 @@ type Collector struct {
 	Interval time.Duration `yaml:"interval"`
 
 	// MaxDeltaBytes caps how much of a source is landed in a single file, so a
-	// large catch-up is split rather than producing one enormous delta.
+	// large catch-up is split rather than producing one enormous delta. It is
+	// also the largest unit a receiver has to accept in one message when
+	// landed files travel, which is why the default fits the 4 MiB limit an
+	// OpenTelemetry Collector applies out of the box.
 	MaxDeltaBytes int64 `yaml:"max_delta_bytes"`
 }
 
@@ -96,7 +99,7 @@ func Default() *Config {
 			Collector: Collector{
 				Mode:          ModeWatch,
 				Interval:      5 * time.Second,
-				MaxDeltaBytes: 8 << 20,
+				MaxDeltaBytes: 4 << 20,
 			},
 		}},
 	}
@@ -139,7 +142,7 @@ func (c *Collector) applyDefaults() {
 		c.Interval = 5 * time.Second
 	}
 	if c.MaxDeltaBytes <= 0 {
-		c.MaxDeltaBytes = 8 << 20
+		c.MaxDeltaBytes = 4 << 20
 	}
 }
 

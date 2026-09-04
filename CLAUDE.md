@@ -127,6 +127,9 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 ## Invariants worth knowing before changing collector code
 
 - **Landed files are write-once.** temp → fsync → rename → `chmod 0444`. Never appended.
+- **A landed file is cut once.** A round addresses records by `{seq, row}` and binds to file
+  digests, so a referenced file is never re-cut. A new budget applies to new files; an existing
+  root is brought under it with `asz repack` into a new root, where the chains are built again.
 - **Platform-specific calls live in one file per platform.** The session lock is `flock` on Unix
   and an exclusive open on Windows; a file's identity is an inode on Unix and a volume serial plus
   file index on Windows. Relative source paths are written with forward slashes everywhere.

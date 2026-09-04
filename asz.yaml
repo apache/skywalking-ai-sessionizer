@@ -61,6 +61,11 @@ adapters:
       mode: watch
       interval: 5s
 
-      # The largest landed file written from one source in one pass. A large
-      # catch-up is split into several files rather than one enormous one.
-      max_delta_bytes: 8388608
+      # The largest landed file the collector writes, in bytes. A large
+      # catch-up is split into several files rather than one enormous one,
+      # and a single record larger than this is landed whole. It is also the
+      # largest unit a receiver must accept in one message when landed files
+      # travel, so 4 MiB keeps under the default limit of an OpenTelemetry
+      # Collector. A change applies to new files only: asz repack re-cuts an
+      # existing root into a new one.
+      max_delta_bytes: 4194304

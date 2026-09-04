@@ -44,8 +44,12 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
+	return parseZone(zoneRoot, arg(0))
+}
+
+// parseZone assembles every session under zoneRoot, or the one named by want.
+func parseZone(zoneRoot, want string) error {
 	z := storage.NewZone(zoneRoot)
-	want := arg(0)
 
 	sessions, err := sessionDirs(zoneRoot)
 	if err != nil {
