@@ -87,8 +87,8 @@ export:
     endpoint: ""
     service_name: ""
     instance_id: ""
-    layer: AI-AGENT
-    batch_bytes: 20971520
+    layer: AI_AGENT
+    batch_bytes: 8388608
     interval: 5s
 ```
 
@@ -97,9 +97,9 @@ export:
 | `endpoint` | empty | The OpenTelemetry logs receiver's base URL; `/v1/logs` is appended. The SkyWalking OAP listens on its REST port, `http://127.0.0.1:12800` by default. Empty means `asz push` refuses to run. |
 | `service_name` | empty | The service every record is attributed to. Empty means the runtime the adapter reads, `Claude Code` for `claude-code-local`: one service per kind of agent. |
 | `instance_id` | empty | Sent as `service.instance.id`, the identity of this sender. Empty means a new UUID each time `asz push` starts. |
-| `layer` | `AI-AGENT` | Sent as `service.layer`, the layer the receiver places the service in. |
+| `layer` | `AI_AGENT` | Sent as `service.layer`, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores. |
 | `headers` | none | Headers added to every request, for example `Authorization`. |
-| `batch_bytes` | `20971520` | How many file bytes one request carries at most, 20 MiB. A file larger than this is sent alone, in a request of its own. |
+| `batch_bytes` | `8388608` | How many file bytes one request carries at most, 8 MiB, which keeps a request under the 10 MiB the OAP's HTTP server accepts. A file larger than this is sent alone, in a request of its own. |
 | `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |
 
 See [Export over OpenTelemetry](export-otlp.md) for what is sent.

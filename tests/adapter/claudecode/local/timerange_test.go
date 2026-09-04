@@ -114,4 +114,26 @@ func TestRoundsCarryTheRecordTimeRange(t *testing.T) {
 	if v2.SessionFromTime != from || v2.SessionThroughTime != through {
 		t.Fatalf("round 2 header session range %q..%q, node %q..%q", v2.SessionFromTime, v2.SessionThroughTime, from, through)
 	}
+
+	// The head round's header carries what a list shows, and it must be
+	// what the fold holds, so a reader of the header alone lists the
+	// conversation as the fold would.
+	chain := sessionflow.OpenChain(z.Root(), growSession)
+	files, err := chain.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := chain.Open(files[len(files)-1].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := head.Header
+	if h.Talks != len(v2.NodesByKind("talk")) || h.Streams != len(v2.NodesByKind("stream")) || h.Segments != len(v2.NodesByKind("segment")) ||
+		h.Unresolved != len(v2.OpenUnresolved()) || h.Talks == 0 {
+		t.Fatalf("head header counts talks=%d streams=%d segments=%d unresolved=%d; fold has %d talks, %d streams, %d segments, %d open",
+			h.Talks, h.Streams, h.Segments, h.Unresolved, len(v2.NodesByKind("talk")), len(v2.NodesByKind("stream")), len(v2.NodesByKind("segment")), len(v2.OpenUnresolved()))
+	}
+	if h.Steps == 0 {
+		t.Fatalf("head header steps = 0")
+	}
 }

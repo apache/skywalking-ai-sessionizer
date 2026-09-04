@@ -90,7 +90,7 @@ func (p *Pusher) Prepare() error {
 		return errors.New("otlp: no service name")
 	}
 	if p.BatchBytes <= 0 {
-		p.BatchBytes = 20 << 20
+		p.BatchBytes = 8 << 20
 	}
 	if p.Now == nil {
 		p.Now = time.Now
@@ -133,7 +133,7 @@ func (p *Pusher) Pass() (*Stats, error) {
 			if state.pushed(rel) {
 				continue
 			}
-			if err := b.addLanded(rel, lf, session); err != nil {
+			if err := b.addLanded(rel, lf, session, files); err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 			}
 		}
@@ -179,6 +179,10 @@ type batch struct {
 	byKey   map[string]int
 	bytes   int64
 	pending []pendingFile
+
+	// latest is the latest record time of each session, read once per pass
+	// when a file without timed records needs a timestamp.
+	latest map[string]uint64
 }
 
 type pendingFile struct{ rel, digest string }
@@ -248,7 +252,7 @@ func (b *batch) resource() []Attr {
 }
 
 // addLanded sends one landed file as one record.
-func (b *batch) addLanded(rel string, lf storage.LandedFile, session string) error {
+func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, files []storage.LandedFile) error {
 	data, err := os.ReadFile(lf.Path)
 	if err != nil {
 		return err
@@ -282,11 +286,23 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string) err
 	// The record time range of the file lets a receiver place it in time
 	// without decoding the body. A file whose records carry no time, such
 	// as a child's meta file, carries neither attribute.
-	if from, through, ok := timeRange(data); ok {
+	//
+	// The record's own time becomes the row's timestamp in a receiver, and
+	// a receiver reads a session's files by a time range it takes from the
+	// head round, so the stamp must fall inside the session's range: the
+	// file's own last record time, or, for a file without one, the latest
+	// record time of the session as known now. That point is always inside
+	// the range and, unlike a range, cannot go stale as the session grows.
+	stamp := b.sessionLatest(session, files)
+	if from, through, hi, ok := timeRange(data); ok {
 		attrs = append(attrs, Attr{Key: "asz.from_time", Str: from}, Attr{Key: "asz.through_time", Str: through})
+		stamp = uint64(hi)
+	}
+	if stamp == 0 {
+		stamp = parseTime(hdr.At)
 	}
 	now := uint64(b.p.Now().UnixNano())
-	rec := Record{TimeNano: parseTime(hdr.At), ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
+	rec := Record{TimeNano: stamp, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
 	return b.add(b.resource(), rec, rel, digest)
 }
 
@@ -307,6 +323,12 @@ func (b *batch) addRound(rel, path, conv string) error {
 		ThroughTime  string `json:"through_time"`
 		SessionFrom  string `json:"session_from_time"`
 		SessionThru  string `json:"session_through_time"`
+		Title        string `json:"title"`
+		Talks        *int64 `json:"talks"`
+		Steps        *int64 `json:"steps"`
+		Streams      *int64 `json:"streams"`
+		Segments     *int64 `json:"segments"`
+		Unresolved   *int64 `json:"unresolved"`
 	}
 	if err := json.Unmarshal(headerLine, &hdr); err != nil {
 		return fmt.Errorf("decode round header: %w", err)
@@ -339,14 +361,58 @@ func (b *batch) addRound(rel, path, conv string) error {
 	if hdr.SessionFrom != "" && hdr.SessionThru != "" {
 		attrs = append(attrs, Attr{Key: "asz.session.from_time", Str: hdr.SessionFrom}, Attr{Key: "asz.session.through_time", Str: hdr.SessionThru})
 	}
+	// What a list of conversations shows, as of this round, copied off the
+	// header so a receiver lists conversations without decoding a body.
+	if hdr.Talks != nil {
+		if hdr.Title != "" {
+			attrs = append(attrs, Attr{Key: "asz.conversation.title", Str: hdr.Title})
+		}
+		attrs = append(attrs,
+			Attr{Key: "asz.conversation.talks", Int: *hdr.Talks, IsInt: true},
+			Attr{Key: "asz.conversation.steps", Int: *hdr.Steps, IsInt: true},
+			Attr{Key: "asz.conversation.streams", Int: *hdr.Streams, IsInt: true},
+			Attr{Key: "asz.conversation.segments", Int: *hdr.Segments, IsInt: true},
+			Attr{Key: "asz.conversation.unresolved", Int: *hdr.Unresolved, IsInt: true})
+	}
+	// A round is stamped with the session's last activity as of the round,
+	// which only widens, so a receiver's newest row per conversation is the
+	// head. A round from before that field existed is stamped with now.
 	now := uint64(b.p.Now().UnixNano())
-	rec := Record{TimeNano: now, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
+	stamp := parseTime(hdr.SessionThru)
+	if stamp == 0 {
+		stamp = now
+	}
+	rec := Record{TimeNano: stamp, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
 	return b.add(b.resource(), rec, rel, digest)
 }
 
+// sessionLatest is the latest record time among a session's landed files,
+// read once per pass and only when a file without timed records needs a
+// timestamp.
+func (b *batch) sessionLatest(session string, files []storage.LandedFile) uint64 {
+	if b.latest == nil {
+		b.latest = map[string]uint64{}
+	}
+	if v, ok := b.latest[session]; ok {
+		return v
+	}
+	var hi int64
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			continue
+		}
+		if _, _, h, ok := timeRange(data); ok && h > hi {
+			hi = h
+		}
+	}
+	b.latest[session] = uint64(hi)
+	return uint64(hi)
+}
+
 // timeRange is the earliest and the latest record time in a landed file,
-// written the way a round header writes them.
-func timeRange(data []byte) (from, through string, ok bool) {
+// written the way a round header writes them, and the latest as nanoseconds.
+func timeRange(data []byte) (from, through string, hiNS int64, ok bool) {
 	var lo, hi int64
 	for len(data) > 0 {
 		line := data
@@ -368,9 +434,9 @@ func timeRange(data []byte) (from, through string, ok bool) {
 		ok = true
 	}
 	if !ok {
-		return "", "", false
+		return "", "", 0, false
 	}
-	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi), true
+	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi), hi, true
 }
 
 // digestOf is the file digest a receiver checks: SHA-256 over the bytes as

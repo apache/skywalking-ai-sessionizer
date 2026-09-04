@@ -244,7 +244,8 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 	round := filepath.Join(z.Root(), "_conversations", "sess1", "rounds", "r000001-abcdefabcdef.sf")
 	roundText := "{\"t\":\"header\",\"schema\":\"sf/1\",\"conversation\":\"sess1\",\"session\":\"sess1\",\"round\":1," +
 		"\"from_time\":\"2026-09-04T01:00:00Z\",\"through_time\":\"2026-09-04T01:00:00Z\"," +
-		"\"session_from_time\":\"2026-09-03T23:00:00Z\",\"session_through_time\":\"2026-09-04T01:00:00Z\"}\n" +
+		"\"session_from_time\":\"2026-09-03T23:00:00Z\",\"session_through_time\":\"2026-09-04T01:00:00Z\"," +
+		"\"title\":\"hello\",\"talks\":1,\"steps\":2,\"streams\":1,\"segments\":1,\"unresolved\":0}\n" +
 		"{\"t\":\"node\",\"id\":\"n1\",\"kind\":\"talk\"}\n" +
 		"{\"t\":\"commit\",\"digest\":\"abcdefabcdef\",\"counts\":{\"nodes\":1}}\n"
 	if err := os.MkdirAll(filepath.Dir(round), 0o755); err != nil {
@@ -262,7 +263,7 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code", Layer: "AI-AGENT", InstanceID: "sender-1"}
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code", Layer: "AI_AGENT", InstanceID: "sender-1"}
 
 	st, err := p.Pass()
 	if err != nil {
@@ -302,7 +303,7 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 		t.Fatalf("want one resource for one request, got %d: %v", len(resources), resources)
 	}
 	res := resources[0]
-	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "Claude Code" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI-AGENT" {
+	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "Claude Code" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI_AGENT" {
 		t.Fatalf("resource attributes: %v", res)
 	}
 	// A landed file says what it is, and where a round's {seq, row} lands:
@@ -334,12 +335,27 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 	if h["asz.session.from_time"] != "" || all[1].attrs["asz.session.through_time"] != "" {
 		t.Fatalf("a landed file must not carry the session range: %v", h)
 	}
+	// What a list shows rides on the round, copied off its header.
+	if r := all[2].attrs; r["asz.conversation.title"] != "hello" || r["asz.conversation.talks"] != "int:1" || r["asz.conversation.steps"] != "int:2" ||
+		r["asz.conversation.streams"] != "int:1" || r["asz.conversation.segments"] != "int:1" || r["asz.conversation.unresolved"] != "int:0" {
+		t.Fatalf("round list attributes: %v", r)
+	}
+	if h["asz.conversation.talks"] != "" {
+		t.Fatalf("a landed file must not carry list attributes: %v", h)
+	}
 	if _, ok := h["asz.line"]; ok {
 		t.Fatalf("a whole file carries no line address: %v", h)
 	}
-	// A landed file is stamped with the time it was written.
-	if all[0].time != uint64(time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC).UnixNano()) {
-		t.Fatalf("landed file time = %d", all[0].time)
+	// A landed file is stamped with its last record time, and a file without
+	// timed records with the session's latest record time, so a receiver
+	// that bounds a read by the session's range finds both.
+	at := uint64(time.Date(2026, 9, 4, 1, 0, 0, 0, time.UTC).UnixNano())
+	if all[0].time != at || all[1].time != at {
+		t.Fatalf("landed file times = %d, %d, want %d for both", all[0].time, all[1].time, at)
+	}
+	// A round is stamped with the session's last activity as of the round.
+	if all[2].time != at {
+		t.Fatalf("round time = %d, want %d", all[2].time, at)
 	}
 	r := all[2].attrs
 	if r["asz.format"] != "sf" || r["asz.format.version"] != "sf/1" || r["asz.file.kind"] != "round" || r["asz.round"] != "int:1" || r["asz.conversation"] != "sess1" || r["asz.session"] != "sess1" || r["asz.seq"] != "" {

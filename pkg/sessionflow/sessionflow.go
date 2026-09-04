@@ -108,6 +108,18 @@ type Header struct {
 	// learns them without folding the round.
 	SessionFromTime    string `json:"session_from_time,omitempty"`
 	SessionThroughTime string `json:"session_through_time,omitempty"`
+
+	// Title and the counts are what a list of conversations shows, as of
+	// this round: the session's title and the fold's talks, steps, streams,
+	// segments and open unresolved references. A receiver that lists
+	// conversations reads them off the header, or off the attributes a
+	// sender copies from it, and never folds.
+	Title      string `json:"title,omitempty"`
+	Talks      int    `json:"talks"`
+	Steps      int    `json:"steps"`
+	Streams    int    `json:"streams"`
+	Segments   int    `json:"segments"`
+	Unresolved int    `json:"unresolved"`
 }
 
 // Ref points at one landed record, and optionally one content block within it.

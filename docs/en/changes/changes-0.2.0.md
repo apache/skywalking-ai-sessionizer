@@ -19,9 +19,13 @@
   file as landed and checks its digest at once. Records name the sender with `telemetry.sdk.name`,
   the format and its version, the file, its kind, its digest and its line count, and the session
   and sequence a round's reference resolves against. Each file is sent once; `push.state` records
-  which. A request carries up to `batch_bytes`, 20 MiB by default, and a larger file goes alone.
+  which. A request carries up to `batch_bytes`, 8 MiB by default, under the 10 MiB the OAP accepts
+  over HTTP, and a larger file goes alone.
   The service is `export.otlp.service_name`, or the runtime the adapter reads, `Claude Code`, so a
-  receiver lists conversations by the agent that produced them.
+  receiver lists conversations by the agent that produced them; the layer is `AI_AGENT`, spelled
+  as the OAP spells a layer. A round's record also carries `asz.conversation.title` and the
+  fold's counts, and every record is stamped with a time inside the session's range, so a receiver
+  lists conversations and bounds its reads without decoding a body.
   The protobuf encoding is written in the project, so the module still has one dependency. Each
   record also carries `asz.from_time` and `asz.through_time`, the record time range of the file,
   so a receiver can place a file in time without decoding it, and a round's record carries
@@ -39,16 +43,19 @@
   among the landed files it consumed, and the `session` node carries the same pair for the whole
   conversation so far, which makes its `from_time` when the session began. The header repeats the
   session's pair as `session_from_time` and `session_through_time`, so a reader of the header alone
-  has it. All are record times the runtime wrote, so they reproduce with the round and sit inside
-  its digest.
+  has it, and its `title` and the fold's counts of talks, steps, streams, segments and open
+  unresolved references, so a list of conversations needs no fold. All are evidence, so they
+  reproduce with the round and sit inside its digest.
 
 ## Read
 
-- The Conversation View, `cv/1`, is one conversation rebuilt from its rounds and its landed files as
-  one document: every talk as a tree with the text its records carry, the streams, the segments,
-  the relations, the rounds and the files. Package `pkg/sessionview` defines and owns the shape and
-  `asz view` serves it at `/api/c/{id}/view`. It is never a file. A server holding the same files,
-  such as the SkyWalking OAP, builds the same document. See the format page.
+- `asz.view`, version 1.0, is one conversation rebuilt from its rounds and its landed files as one
+  document: every talk as a tree with the text, usage and flags its records carry, the streams, the
+  segments, the relations, and the rounds and files it was built from, each verified, with a gap or
+  a failed digest written into the document rather than returned as an error. Package
+  `pkg/sessionview` defines and owns the shape and `asz view` serves it at `/api/c/{id}/view`. It is
+  never a file. A server holding the same files, such as the SkyWalking OAP, builds the same
+  document. See the format page.
 
 - The page reads Session Data and Session Flow and nothing else. It took every record's time from
   the index; it now takes it from the record, so a root that arrives with only its landed files

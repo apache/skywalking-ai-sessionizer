@@ -15,128 +15,151 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package sessionview defines the Conversation View: one conversation,
-// rebuilt from its Session Flow and its Session Data, as one document.
+// Package sessionview defines the asz.view document: one conversation,
+// rebuilt from its Session Flow and its Session Data, as one document that
+// holds everything a viewer renders and nothing a viewer must compute.
 //
 // It is never a file. asz view builds it in memory and serves it as one
 // response, and a server that holds the same landed files and rounds, such
 // as the SkyWalking OAP, builds the same document and answers a conversation
-// query with it. This package defines and owns the shape; every reader
-// shares it, and a change to it is a change to the schema below.
+// query with it. This package defines and owns the shape. A 1.x version adds
+// keys and never removes or renames one; a 2.0 may do either.
 //
-// Times in a view are unix milliseconds, because a view is read and never
-// digested. Session Data and Session Flow carry RFC 3339 strings, because
-// their bytes are.
+// The document is JSON. Keys are snake_case, as in the two source formats,
+// and are written in the order the types below list them. Times are unix
+// milliseconds, read from the .sd record a node references; a view is read
+// and never digested, so it carries no RFC 3339 strings.
 package sessionview
 
 import (
 	"encoding/json"
 
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
-// Schema is the version of the document shape.
-const Schema = "cv/1"
+// Format and Version are the first two keys of every document. A reader
+// that does not know the version stops there.
+const (
+	Format  = "asz.view"
+	Version = "1.0"
+)
 
-// Conversation is the whole view.
+// Conversation is the whole document.
 type Conversation struct {
-	Schema  string `json:"schema"`
-	ID      string `json:"conversation"`
-	Session string `json:"session"`
-	// Title is the last name the runtime gave the session, or empty.
-	Title string `json:"title,omitempty"`
+	Format  string `json:"format"`
+	Version string `json:"version"`
+
+	// Conversation is the id, and Sessions the sessions that contributed
+	// to it: one, equal to the id, for the Claude Code adapter.
+	Conversation string   `json:"conversation"`
+	Sessions     []string `json:"sessions"`
+
+	// Head is the newest round the document was folded to.
+	Head   Head   `json:"head"`
+	Parser string `json:"parser"`
+	Policy string `json:"policy"`
+
+	Summary Summary `json:"summary"`
+
+	Rounds     []Round      `json:"rounds"`
+	Files      []File       `json:"files"`
+	Streams    []Stream     `json:"streams"`
+	Segments   []Segment    `json:"segments"`
+	Talks      []Node       `json:"talks"`
+	Relations  []Relation   `json:"relations"`
+	Unresolved []Unresolved `json:"unresolved"`
+}
+
+// Head identifies the fold the document was built from.
+type Head struct {
+	Round  uint64 `json:"round"`
+	Digest string `json:"digest"`
+}
+
+// Summary is what a list or a header shows without opening the rest.
+// Verification is content, not an error: State is "verified", "incomplete"
+// when a round or a file is missing, or "mismatch" when a digest failed,
+// and Problems says which, one line each. The rest of the document holds
+// whatever could still be folded.
+type Summary struct {
+	Title    string   `json:"title"`
+	State    string   `json:"state"`
+	Problems []string `json:"problems"`
+
+	Talks      int `json:"talks"`
+	Steps      int `json:"steps"`
+	Streams    int `json:"streams"`
+	Segments   int `json:"segments"`
+	Rounds     int `json:"rounds"`
+	Unresolved int `json:"unresolved"`
+
 	// From and To are when the session began and its last activity, from
 	// the session node.
 	From int64 `json:"from"`
 	To   int64 `json:"to"`
 
-	Head   Head    `json:"head"`
-	Rounds []Round `json:"rounds"`
-	Files  []File  `json:"files"`
-
-	Counts        Counts         `json:"counts"`
+	// Kinds, RelationTypes and Quality size the fold by node kind, by
+	// relation type, and by how well each relation is known.
 	Kinds         map[string]int `json:"kinds"`
 	RelationTypes map[string]int `json:"relation_types"`
 	Quality       map[string]int `json:"quality"`
-
-	Streams    []Stream     `json:"streams"`
-	Segments   []Segment    `json:"segments"`
-	Talks      []Talk       `json:"talks"`
-	Relations  []Relation   `json:"relations"`
-	Unresolved []Unresolved `json:"unresolved"`
 }
 
-// Head identifies the fold the view was built from.
-type Head struct {
-	Round       uint64 `json:"round"`
-	Digest      string `json:"digest"`
-	ThroughSeq  uint64 `json:"through_seq"`
-	InputDigest string `json:"input_digest"`
-	Parser      string `json:"parser"`
-	Policy      string `json:"policy"`
-}
+// The three verification states.
+const (
+	StateVerified   = "verified"
+	StateIncomplete = "incomplete"
+	StateMismatch   = "mismatch"
+)
 
-// Round is one round of the chain, from its header and its file.
+// Round is one round of the chain, from its header. Its file is listed
+// under Files like every other file.
 type Round struct {
-	Round       uint64 `json:"round"`
-	Digest      string `json:"digest"`
-	Previous    string `json:"previous,omitempty"`
-	FromSeq     uint64 `json:"from_seq"`
-	ThroughSeq  uint64 `json:"through_seq"`
-	InputDigest string `json:"input_digest"`
-	// From and To are the record time range of the files the round
-	// consumed; SessionFrom and SessionTo the session's range as of the
-	// round. Zero when the header carries none.
-	From        int64  `json:"from,omitempty"`
-	To          int64  `json:"to,omitempty"`
-	SessionFrom int64  `json:"session_from,omitempty"`
-	SessionTo   int64  `json:"session_to,omitempty"`
-	Lines       int    `json:"lines"`
-	Bytes       int64  `json:"bytes"`
-	FileDigest  string `json:"file_digest"`
-	File        string `json:"file"`
+	Round       uint64  `json:"round"`
+	Digest      string  `json:"digest"`
+	Previous    *string `json:"previous"`
+	FromSeq     uint64  `json:"from_seq"`
+	ThroughSeq  uint64  `json:"through_seq"`
+	InputDigest string  `json:"input_digest"`
+	// FromTime and ThroughTime are the record time range of the files the
+	// round consumed; null when none carries a time.
+	FromTime    *int64 `json:"from_time"`
+	ThroughTime *int64 `json:"through_time"`
+	// Verified says the round's digest, its link to the round before and
+	// its input digest over the landed files all held.
+	Verified bool `json:"verified"`
 }
 
-// File is one landed file of the session.
+// File is one landed file or one round file, as it was on the wire.
 type File struct {
-	File    string `json:"file"`
-	Format  string `json:"format"`
-	Version string `json:"version"`
-	Kind    string `json:"kind"`
-	Seq     uint64 `json:"seq"`
-	Stream  string `json:"stream,omitempty"`
-	Run     string `json:"run,omitempty"`
-	Lines   int    `json:"lines"`
-	Bytes   int64  `json:"bytes"`
-	Digest  string `json:"digest"`
-	// From and To are the record time range of the file. Zero when no
-	// record carries a time.
-	From int64 `json:"from,omitempty"`
-	To   int64 `json:"to,omitempty"`
-}
-
-// Counts sizes the fold.
-type Counts struct {
-	Nodes      int `json:"nodes"`
-	Relations  int `json:"relations"`
-	Unresolved int `json:"unresolved"`
-	Talks      int `json:"talks"`
-	Steps      int `json:"steps"`
-	Streams    int `json:"streams"`
-	Segments   int `json:"segments"`
+	File   string  `json:"file"`
+	Format string  `json:"format"` // "sd" or "sf"
+	Kind   string  `json:"kind"`
+	Seq    *uint64 `json:"seq"`
+	Round  *uint64 `json:"round"`
+	Stream *string `json:"stream"`
+	Run    *string `json:"run"`
+	Lines  int     `json:"lines"`
+	Bytes  int64   `json:"bytes"`
+	Digest string  `json:"digest"`
+	// FromTime and ThroughTime are the record time range of the file; null
+	// when no record carries a time.
+	FromTime    *int64 `json:"from_time"`
+	ThroughTime *int64 `json:"through_time"`
 }
 
 // Stream is one execution stream, with the step that started it.
 type Stream struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
-	Role    string `json:"role"`
+	Role    string `json:"role"` // "main" or "child"
 	Label   string `json:"label"`
-	NamedBy string `json:"named_by"`
-	Records int    `json:"records"`
 	Parent  string `json:"parent"`
-	Talk    string `json:"talk"`
+	Records int    `json:"records"`
 	Steps   int    `json:"steps"`
+	Talk    string `json:"talk"`
+	NamedBy string `json:"named_by"`
 	// OpenedBy lists every step the assembler could tie to the start of
 	// this stream, with the quality of each. Several means it did not
 	// choose, and neither does a view.
@@ -147,41 +170,27 @@ type Stream struct {
 type Origin struct {
 	Step    string `json:"step"`
 	Stream  string `json:"stream"`
-	Quality string `json:"quality"`
 	Talk    string `json:"talk"`
+	Quality string `json:"quality"`
 }
 
 // Segment is one activity window, with the span of the talks placed in it.
 type Segment struct {
 	ID          string `json:"id"`
 	State       string `json:"state"`
+	Committable bool   `json:"committable"`
 	Talks       int    `json:"talks"`
 	From        int64  `json:"from"`
 	To          int64  `json:"to"`
-	Committable bool   `json:"committable"`
 }
 
-// Talk is one readable interaction: its summary, and its tree of runs and
-// steps when the view carries trees.
-type Talk struct {
-	ID      string `json:"id"`
-	Stream  string `json:"stream"`
-	Label   string `json:"label"`
-	Runs    int    `json:"runs"`
-	Steps   int    `json:"steps"`
-	Tools   int    `json:"tools"`
-	From    int64  `json:"from"`
-	To      int64  `json:"to"`
-	Child   bool   `json:"child"`
-	Segment string `json:"segment,omitempty"`
-	// Reply is the first 2,000 bytes of the talk's last assistant message.
-	Reply string `json:"reply,omitempty"`
-	Tree  *Node  `json:"tree,omitempty"`
-}
-
-// Node is one entity of the fold with what its record says: the readable
-// text of the part it stands on, clipped to 2,000 bytes, with the full size
-// in Bytes. The whole record is read by address, {seq, row}, from the file.
+// Node is one entity of the fold with what its record says, and its
+// children: a talk holds runs, a run holds steps, a call holds what it
+// produced. Text is the readable text of the part the node stands on,
+// clipped to 2,000 bytes, with the full size in Bytes; a viewer wanting the
+// whole record reads it by address. A talk adds its summary: Label, Reply,
+// Runs, Steps, Tools, From, To, Child and Segment. A tool or agent call adds
+// Name and what came back.
 type Node struct {
 	ID     string            `json:"id"`
 	Kind   string            `json:"kind"`
@@ -191,21 +200,41 @@ type Node struct {
 	Ref    *sessionflow.Ref  `json:"ref,omitempty"`
 	Refs   []sessionflow.Ref `json:"refs,omitempty"`
 	Attrs  json.RawMessage   `json:"attrs,omitempty"`
-	Text   string            `json:"text,omitempty"`
-	Name   string            `json:"name,omitempty"`
-	Failed *bool             `json:"failed,omitempty"`
-	State  string            `json:"state,omitempty"`
-	Bytes  int               `json:"bytes,omitempty"`
 
-	Result      string `json:"result,omitempty"`
-	ResultState string `json:"result_state,omitempty"`
-	ResultBytes int    `json:"result_bytes,omitempty"`
+	Text  string `json:"text,omitempty"`
+	State string `json:"state,omitempty"`
+	Bytes int    `json:"bytes,omitempty"`
 
-	DurationMS  int64  `json:"duration_ms,omitempty"`
-	DurationHow string `json:"duration_measured_by,omitempty"`
+	// Usage, Flags and Dropped are what else the referenced record says,
+	// copied once: on an llm.call the token counts from the one record its
+	// usage_at names; the record's flags; and what the conversion left out.
+	Usage   *sessiondata.Usage `json:"usage,omitempty"`
+	Flags   []string           `json:"flags,omitempty"`
+	Dropped []sessiondata.Drop `json:"dropped,omitempty"`
 
+	// A talk adds these.
+	Label   string `json:"label,omitempty"`
+	Reply   string `json:"reply,omitempty"`
+	Runs    int    `json:"runs,omitempty"`
+	Steps   int    `json:"steps,omitempty"`
+	Tools   int    `json:"tools,omitempty"`
+	From    int64  `json:"from,omitempty"`
+	To      int64  `json:"to,omitempty"`
+	Child   bool   `json:"child,omitempty"`
+	Segment string `json:"segment,omitempty"`
+
+	// A tool or agent call adds these.
+	Name              string `json:"name,omitempty"`
+	Failed            *bool  `json:"failed,omitempty"`
+	Result            string `json:"result,omitempty"`
+	ResultState       string `json:"result_state,omitempty"`
+	ResultBytes       int    `json:"result_bytes,omitempty"`
 	RequestToResultMS int64  `json:"request_to_result_ms,omitempty"`
 	RequestToResultBy string `json:"request_to_result_join,omitempty"`
+
+	// A turn.duration step adds these.
+	DurationMS  int64  `json:"duration_ms,omitempty"`
+	DurationHow string `json:"duration_measured_by,omitempty"`
 
 	Children []Node `json:"children,omitempty"`
 	Edges    []Edge `json:"edges,omitempty"`

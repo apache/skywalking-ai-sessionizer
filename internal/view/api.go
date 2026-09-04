@@ -335,12 +335,6 @@ func (c *Conversation) overview() *overview {
 	}
 }
 
-// view converts a talk row to the view's talk, without its tree.
-func (t talkRow) view() sessionview.Talk {
-	return sessionview.Talk{ID: t.ID, Stream: t.Stream, Label: t.Label, Runs: t.Runs, Steps: t.Steps, Tools: t.Tools,
-		From: t.From, To: t.To, Child: t.Child, Segment: t.Segment, Reply: t.Reply}
-}
-
 // segmentRows lists the conversation's segments, each with the span of the
 // talks the assembler placed in it.
 //

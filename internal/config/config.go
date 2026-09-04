@@ -68,7 +68,8 @@ type OTLP struct {
 	// Headers are added to every request, for example an authorization token.
 	Headers map[string]string `yaml:"headers"`
 	// BatchBytes is how many file bytes one request carries at most. A file
-	// larger than this is sent alone.
+	// larger than this is sent alone. The default, 8 MiB, keeps a request
+	// under the 10 MiB the OAP's HTTP server accepts.
 	BatchBytes int64 `yaml:"batch_bytes"`
 	// Interval is how long asz push sleeps between passes in watch mode.
 	Interval time.Duration `yaml:"interval"`
@@ -145,8 +146,8 @@ func Default() *Config {
 		}},
 		Parse: Parse{MaxRoundBytes: 2 << 20},
 		Export: Export{OTLP: OTLP{
-			Layer:      "AI-AGENT",
-			BatchBytes: 20 << 20,
+			Layer:      "AI_AGENT",
+			BatchBytes: 8 << 20,
 			Interval:   5 * time.Second,
 		}},
 	}

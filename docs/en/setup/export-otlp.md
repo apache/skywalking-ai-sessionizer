@@ -41,7 +41,7 @@ The resource, which names the service a record belongs to:
 | --- | --- |
 | `service.name` | `export.otlp.service_name`, or when empty the runtime the adapter reads, `Claude Code` for `claude-code-local`: one service per kind of agent |
 | `service.instance.id` | `export.otlp.instance_id`, the identity of this sender, or when empty a new UUID each time `asz push` starts; the session a record belongs to is on the record as `asz.session` |
-| `service.layer` | `export.otlp.layer`, `AI-AGENT` by default, the layer the receiver places the service in |
+| `service.layer` | `export.otlp.layer`, `AI_AGENT` by default, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores |
 | `telemetry.sdk.name` | `asz`, so a receiver can tell these records apart from any other source |
 | `telemetry.sdk.version` | the version of `asz` that sent them |
 | `telemetry.sdk.language` | `go` |
@@ -61,13 +61,17 @@ body:
 | `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |
 | `asz.from_time`, `asz.through_time` | the earliest and the latest record time in the file, as the runtime wrote them, in UTC; for `sf`, the round header's own pair, the range of the files that round consumed. Absent when no record carries a time, as in a child's meta file |
 | `asz.session.from_time`, `asz.session.through_time` | for `sf` only: the session's own range as of that round, when it began and its last activity so far. A landed file never carries it: it can travel before any round exists, and the last activity keeps moving, so the value there would be missing or stale |
+| `asz.conversation.title`, `asz.conversation.talks`, `asz.conversation.steps`, `asz.conversation.streams`, `asz.conversation.segments`, `asz.conversation.unresolved` | for `sf` only: what a list of conversations shows, as of that round, copied off the round's header. A receiver lists conversations off its newest round per conversation and never folds |
 | `asz.seq` | for `sd`: the landed sequence. With the session it names the file a round's `{seq, row}` reference points at, and the row is a line of the body |
 | `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
 | `asz.conversation`, `asz.round` | for `sf`: the conversation and the round number |
 
-A landed file is stamped with the time it was written, the header's `at`. A round carries no
-time of its own, by design, so it is stamped with the time it was sent. Every record also carries
-the time it was observed.
+The record's time is chosen so a receiver can bound a read by a range it already holds. A landed
+file is stamped with its last record time, and a file whose records carry no time, such as a
+child's meta file, with the latest record time of the session as known at push, which is always
+inside the session's range and cannot go stale. A round is stamped with the session's last
+activity as of that round, so a receiver's newest row per conversation is the head. Every record
+also carries the time it was observed.
 
 ## Checking what a receiver gets
 
@@ -80,7 +84,7 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
-        max_request_body_size: 33554432   # the default is 20 MiB; see Size
+        max_request_body_size: 33554432   # the default is 20 MiB, enough for the 8 MiB batches; see Size
 exporters:
   file:
     path: /out/logs.json
@@ -98,14 +102,14 @@ root that `asz verify` and `asz view` read like the original.
 
 ## Size
 
-A request carries at most `export.otlp.batch_bytes` of file bytes, 20 MiB by default. A file
-larger than that is sent alone, in a request of its own. A landed file is cut at
+A request carries at most `export.otlp.batch_bytes` of file bytes, 8 MiB by default, which keeps a
+request under the 10 MiB the OAP's HTTP server accepts. A file larger than that is sent alone, in
+a request of its own. A landed file is cut at
 `max_delta_bytes`, 2 MiB by default, and a round is cut at `parse.max_round_bytes`, also
-2 MiB, so a request normally carries ten or more files. The exception on both sides is a single
+2 MiB, so a request normally carries several files. The exception on both sides is a single
 unit larger than the budget: a source record is landed whole, and a round covering one landed
 file is published whole. The largest source record in the measured corpus is 4.5 MB.
 
-The receiver's limit must cover the largest single request. The OAP accepts 50 MB by default. An
-OpenTelemetry Collector accepts 20 MiB over HTTP and 4 MiB over gRPC unless its receiver is
-configured otherwise, so raise its HTTP limit above the batch budget with some room for the
-attributes.
+The receiver's limit must cover the largest single request. The OAP accepts 10 MiB over HTTP and
+50 MB over gRPC by default. An OpenTelemetry Collector accepts 20 MiB over HTTP and 4 MiB over
+gRPC unless its receiver is configured otherwise.

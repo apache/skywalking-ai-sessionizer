@@ -100,11 +100,14 @@ export:
     # is on the record itself, as asz.session.
     instance_id: ""
     # Sent as service.layer, the layer the receiver places the service in.
-    layer: AI-AGENT
+    # The OAP selects its rules by layer, and a layer name is upper case
+    # with underscores.
+    layer: AI_AGENT
     # Headers added to every request, for example
     #   headers: { Authorization: "Bearer ..." }
     # How many file bytes one request carries at most; a file larger than
-    # this is sent alone. And how long push sleeps between passes in watch
-    # mode.
-    batch_bytes: 20971520
+    # this is sent alone. 8 MiB keeps a request under the 10 MiB the OAP's
+    # HTTP server accepts. And how long push sleeps between passes in
+    # watch mode.
+    batch_bytes: 8388608
     interval: 5s

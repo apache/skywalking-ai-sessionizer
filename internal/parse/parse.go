@@ -33,6 +33,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/assemble"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
@@ -267,7 +268,7 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			return nil, err
 		}
 		fromTime, throughTime := windowTimes(ix, view.ThroughSeq, through)
-		sessionFrom, sessionThrough := sessionRange(res, opt.Session)
+		sessionFrom, sessionThrough, title := sessionRange(res, opt.Session)
 		w, err := sessionflow.NewWriter(sessionflow.Header{
 			Conversation: opt.Conversation, Session: opt.Session,
 			Round: round, Previous: view.Digest,
@@ -275,6 +276,8 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			InputDigest: inputDigest, Parser: Parser, Policy: policy,
 			FromTime: fromTime, ThroughTime: throughTime,
 			SessionFromTime: sessionFrom, SessionThroughTime: sessionThrough,
+			Title: title, Talks: countKind(res, model.KindTalk), Steps: countSteps(res), Streams: countKind(res, model.KindStream),
+			Segments: countKind(res, model.KindSegment), Unresolved: countOpen(res),
 		})
 		if err != nil {
 			return nil, err
@@ -414,9 +417,10 @@ func windowTimes(ix *index.Index, after, through uint64) (from, throughTime stri
 	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi)
 }
 
-// sessionRange reads the session's own time range off the session node the
-// assembler built, so the header repeats exactly what the node carries.
-func sessionRange(res *assemble.Result, session string) (from, through string) {
+// sessionRange reads the session's own time range and title off the
+// session node the assembler built, so the header repeats exactly what the
+// node carries.
+func sessionRange(res *assemble.Result, session string) (from, through, title string) {
 	id := sessionflow.NodeID("session", session)
 	for i := range res.Nodes {
 		if res.Nodes[i].ID != id || len(res.Nodes[i].Attrs) == 0 {
@@ -425,11 +429,48 @@ func sessionRange(res *assemble.Result, session string) (from, through string) {
 		var a struct {
 			From    string `json:"from_time"`
 			Through string `json:"through_time"`
+			Title   string `json:"title"`
 		}
 		_ = json.Unmarshal(res.Nodes[i].Attrs, &a)
-		return a.From, a.Through
+		return a.From, a.Through, a.Title
 	}
-	return "", ""
+	return "", "", ""
+}
+
+func countKind(res *assemble.Result, kind string) int {
+	n := 0
+	for i := range res.Nodes {
+		if res.Nodes[i].Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// countSteps counts the leaves of the tree, every node that is not
+// structure, which is what a list of conversations shows as steps and what
+// the asz.view document counts. The assembler's own Stats.Steps counts
+// differently and is not what a reader compares against.
+func countSteps(res *assemble.Result) int {
+	n := 0
+	for i := range res.Nodes {
+		switch res.Nodes[i].Kind {
+		case model.KindConversation, model.KindSegment, model.KindSession, model.KindStream, model.KindEpoch, model.KindTalk, model.KindRun:
+		default:
+			n++
+		}
+	}
+	return n
+}
+
+func countOpen(res *assemble.Result) int {
+	n := 0
+	for i := range res.Unresolved {
+		if res.Unresolved[i].State == "open" {
+			n++
+		}
+	}
+	return n
 }
 
 // delta is what one round must write.

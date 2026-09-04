@@ -77,6 +77,9 @@ func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
 				out = append(out, &x.Refs[i])
 			}
 		}
+		if r := usageAt(x); r != nil {
+			out = append(out, r)
+		}
 		for _, k := range c.View.Children(x.ID) {
 			walk(k)
 		}
@@ -149,6 +152,9 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 		if rec := recs[[2]uint64{n.Ref.Seq, n.Ref.Row}]; rec != nil {
 			fill(&out, rec, n.Ref.Block)
 			fillDuration(&out, n, rec)
+			// What else the record says, copied once so a viewer never
+			// opens a landed file: its flags and what the conversion left out.
+			out.Flags, out.Dropped = rec.Flags, rec.Dropped
 		}
 		// A tool use is one step carrying request and result. The request is
 		// refs[0]; anything after it is what came back.
@@ -160,12 +166,34 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 		}
 		c.fillRequestToResult(&out, n)
 	}
+	// A call's token counts come from the one record usage_at names. Never
+	// from summing fragments: a main transcript stamps usage on every one.
+	if r := usageAt(n); r != nil {
+		if rec := recs[[2]uint64{r.Seq, r.Row}]; rec != nil && rec.Usage != nil {
+			out.Usage = rec.Usage
+		}
+	}
 	if depth < 12 {
 		for _, k := range c.View.Children(n.ID) {
 			out.Children = append(out.Children, c.step(k, depth+1, recs))
 		}
 	}
 	return out
+}
+
+// usageAt is the record an llm.call's usage is read from, named by the
+// assembler in the node's attrs, or nil for any other node.
+func usageAt(n *sessionflow.Node) *sessionflow.Ref {
+	if n.Kind != model.KindLLMCall || len(n.Attrs) == 0 {
+		return nil
+	}
+	var a struct {
+		UsageAt *sessionflow.Ref `json:"usage_at"`
+	}
+	if json.Unmarshal(n.Attrs, &a) != nil || a.UsageAt == nil {
+		return nil
+	}
+	return a.UsageAt
 }
 
 // fill takes a step's readable content from the record it points at.
