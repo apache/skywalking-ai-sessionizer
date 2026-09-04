@@ -37,9 +37,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
@@ -113,15 +113,12 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		from: map[string][]*sessionflow.Relation{},
 		to:   map[string][]*sessionflow.Relation{},
 	}
-	// The time of every landed position, from the index. A node carries
-	// {seq, row}; this is what turns that into a moment.
-	if ix, ok, ierr := index.Load(s.zone.IndexDir(v.Session), v.Session); ierr == nil && ok {
-		for i := range ix.Entries {
-			e := &ix.Entries[i]
-			if e.TS != 0 {
-				c.at[[2]uint64{uint64(e.Seq), uint64(e.Row)}] = e.TS
-			}
-		}
+	// The time of every landed position, from the records themselves. A node
+	// carries {seq, row}; this is what turns that into a moment. The page reads
+	// Session Data and Session Flow and nothing else: the index is assembly's
+	// accelerator, and a root that arrives without one still shows its times.
+	if err := timesOf(s.zone, v.Session, c.at); err != nil {
+		return nil, err
 	}
 	for _, r := range v.Relations {
 		c.from[r.From] = append(c.from[r.From], r)
@@ -240,4 +237,40 @@ func Millis(ns int64) int64 {
 		return 0
 	}
 	return ns / int64(time.Millisecond)
+}
+
+// timesOf fills at with the time of every record in the session's landed
+// files, keyed by landed position.
+//
+// Only the time is taken from each line, without decoding the record: a
+// conversation has tens of thousands of records and the page needs one field
+// of each. A file that fails to read contributes no times rather than failing
+// the page; its records still render, without a moment.
+func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64) error {
+	files, err := storage.LandedFiles(z, session)
+	if err != nil {
+		return err
+	}
+	for _, lf := range files {
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			continue
+		}
+		r, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			continue
+		}
+		for row := uint64(1); ; row++ {
+			line, err := r.NextRaw()
+			if err != nil {
+				break
+			}
+			if ns, ok := sessiondata.LineTime(line); ok {
+				at[[2]uint64{lf.Seq, row}] = ns
+			}
+		}
+		f.Close()
+	}
+	return nil
 }

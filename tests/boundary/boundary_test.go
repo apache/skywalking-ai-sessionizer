@@ -60,6 +60,20 @@ func TestSidesMeetOnlyAtTheStorageRoot(t *testing.T) {
 	check(serverSide, collectorSide)
 }
 
+// The page reads Session Data and Session Flow and nothing else. The index is
+// assembly's accelerator, derived and disposable; a root that arrives with
+// only its landed files and its rounds must render in full.
+func TestThePageReadsOnlyTheTwoFormats(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for pkg, imports := range importsUnder(t, filepath.Join(root, "internal/view/")) {
+		for _, imp := range imports {
+			if strings.HasPrefix(imp, module+"internal/index") {
+				t.Errorf("%s imports %s; the page must read .sd and .sf only", pkg, imp)
+			}
+		}
+	}
+}
+
 // importsUnder lists the imports of every non-test package under dir, keyed
 // by package directory. Test files are left out: a test may drive both sides.
 func importsUnder(t *testing.T, dir string) map[string][]string {
