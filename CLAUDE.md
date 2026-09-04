@@ -60,6 +60,8 @@ internal/parse/                 one round: assemble, compare against the chain, 
 internal/storage/               landing zone, atomic writes, cursors, session/index state, locks
 internal/verify/                contiguity and digest checks over landed data
 internal/view/                  reads a conversation and serves it as a page
+internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per line
+internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/config/                YAML configuration
 tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus

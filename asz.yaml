@@ -69,3 +69,28 @@ adapters:
       # Collector. A change applies to new files only: asz repack re-cuts an
       # existing root into a new one.
       max_delta_bytes: 4194304
+
+export:
+  # asz push sends every landed file and every round to an OpenTelemetry logs
+  # receiver over OTLP/HTTP, one log record per file line, so the receiver can
+  # write the files back byte for byte. Records carry service.name,
+  # service.instance.id (the session), service.layer, telemetry.sdk.name
+  # "asz", and asz.* attributes naming the format, its version, the file, the
+  # line and its kind. Landed files and rounds are write-once, so each is
+  # sent once; push.state in the storage root records which were.
+  otlp:
+    # The receiver's base URL; /v1/logs is appended. The SkyWalking OAP
+    # listens on its REST port, http://127.0.0.1:12800 by default. Empty
+    # means asz push refuses to run.
+    endpoint: ""
+    # The service every record is attributed to. Empty means the project
+    # directory each session was recorded under, one service per project.
+    service_name: ""
+    # Sent as service.layer. GENAI is the OAP's layer for generative AI.
+    layer: GENAI
+    # Headers added to every request, for example
+    #   headers: { Authorization: "Bearer ..." }
+    # How much body text one request carries at most, and how long push
+    # sleeps between passes in watch mode.
+    batch_bytes: 1048576
+    interval: 5s

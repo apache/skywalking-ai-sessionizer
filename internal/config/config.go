@@ -31,6 +31,32 @@ import (
 type Config struct {
 	Storage  Storage   `yaml:"storage"`
 	Adapters []Adapter `yaml:"adapters"`
+	Export   Export    `yaml:"export"`
+}
+
+// Export configures where collected data is sent.
+type Export struct {
+	OTLP OTLP `yaml:"otlp"`
+}
+
+// OTLP configures the OpenTelemetry logs push: every landed file and every
+// round, one log record per line, over OTLP/HTTP.
+type OTLP struct {
+	// Endpoint is the receiver's base URL; the logs path is appended. Empty
+	// means asz push has nowhere to send and refuses to run.
+	Endpoint string `yaml:"endpoint"`
+	// ServiceName is the service every record is attributed to. Empty means
+	// the project directory each session was recorded under.
+	ServiceName string `yaml:"service_name"`
+	// Layer is sent as service.layer, which the SkyWalking OAP uses to place
+	// the service.
+	Layer string `yaml:"layer"`
+	// Headers are added to every request, for example an authorization token.
+	Headers map[string]string `yaml:"headers"`
+	// BatchBytes is how much body text one request carries at most.
+	BatchBytes int64 `yaml:"batch_bytes"`
+	// Interval is how long asz push sleeps between passes in watch mode.
+	Interval time.Duration `yaml:"interval"`
 }
 
 // Storage locates the landing zone.
@@ -102,6 +128,11 @@ func Default() *Config {
 				MaxDeltaBytes: 4 << 20,
 			},
 		}},
+		Export: Export{OTLP: OTLP{
+			Layer:      "GENAI",
+			BatchBytes: 1 << 20,
+			Interval:   5 * time.Second,
+		}},
 	}
 }
 
@@ -130,6 +161,25 @@ func Load(path string) (*Config, error) {
 		for i := range cfg.Adapters {
 			cfg.Adapters[i].Collector.applyDefaults()
 		}
+	}
+	o := &loaded.Export.OTLP
+	if o.Endpoint != "" {
+		cfg.Export.OTLP.Endpoint = o.Endpoint
+	}
+	if o.ServiceName != "" {
+		cfg.Export.OTLP.ServiceName = o.ServiceName
+	}
+	if o.Layer != "" {
+		cfg.Export.OTLP.Layer = o.Layer
+	}
+	if len(o.Headers) > 0 {
+		cfg.Export.OTLP.Headers = o.Headers
+	}
+	if o.BatchBytes > 0 {
+		cfg.Export.OTLP.BatchBytes = o.BatchBytes
+	}
+	if o.Interval > 0 {
+		cfg.Export.OTLP.Interval = o.Interval
 	}
 	return cfg, cfg.Validate()
 }

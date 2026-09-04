@@ -14,6 +14,7 @@ asz parse [-config FILE] [SESSION]   assemble conversation structure into a roun
 asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
 asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
 asz view [-config FILE] [ADDR]       serve the conversations as a page
+asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
 asz glossary                         what the runtime calls the things the model names
 asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
 asz version                          print the version
@@ -125,6 +126,19 @@ process also runs the collector and the parser: once with `-once`, or on the col
 otherwise. `/api/status` reports the mode, the source, the last and the next refresh and the counts
 of the last pass, and the list page shows the same. On a storage root copied from another machine
 there is no source, so the page serves what is there and shows no refresh.
+
+## push
+
+Sends every landed file and every round not yet sent to the OpenTelemetry logs receiver at
+`export.otlp.endpoint`, one log record per line, then exits with `-once` or repeats every
+`export.otlp.interval`. One line per pass:
+
+```text
+[10:12:03] files=306 records=21424 bytes=42.8MB requests=44 errors=0 (6.2s)
+```
+
+A pass with errors exits non-zero with `-once`; the files whose requests failed are not recorded
+as sent and go again on the next pass. See [Export over OpenTelemetry](export-otlp.md).
 
 ## glossary
 

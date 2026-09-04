@@ -49,6 +49,7 @@ Usage:
   asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
   asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
   asz view [-config FILE] [ADDR]       serve the conversations as a page (default 127.0.0.1:8787)
+  asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
   asz version                          print the version
@@ -134,6 +135,8 @@ func main() {
 		run = cmdGlossary
 	case "view":
 		run = cmdView
+	case "push":
+		run = cmdPush
 	case "verify":
 		run = cmdVerify
 	default:

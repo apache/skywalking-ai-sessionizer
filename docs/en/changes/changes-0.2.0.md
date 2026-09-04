@@ -11,6 +11,14 @@
   budget, keeping every record's bytes and order, carrying the cursors over, and building the
   chains again on the new files. A landed file is never rewritten in place.
 
+## Export
+
+- `asz push` sends every landed file and every round to an OpenTelemetry logs receiver over
+  OTLP/HTTP, one log record per line with the line's bytes unchanged, so a receiver can write the
+  files back byte for byte. Records name the sender with `telemetry.sdk.name`, the format and its
+  version, the file, the line and its kind. Each file is sent once; `push.state` records which. The
+  protobuf encoding is written in the project, so the module still has one dependency.
+
 ## Read
 
 - The page reads Session Data and Session Flow and nothing else. It took every record's time from
