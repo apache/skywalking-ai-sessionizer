@@ -86,8 +86,12 @@ export:
     # The service every record is attributed to. Empty means the project
     # directory each session was recorded under, one service per project.
     service_name: ""
-    # Sent as service.layer. GENAI is the OAP's layer for generative AI.
-    layer: GENAI
+    # Sent as service.instance.id, the identity of this sender. Empty means
+    # a new UUID each time asz push starts. The session a record belongs to
+    # is on the record itself, as asz.session.
+    instance_id: ""
+    # Sent as service.layer, the layer the receiver places the service in.
+    layer: AI-AGENT
     # Headers added to every request, for example
     #   headers: { Authorization: "Bearer ..." }
     # How much body text one request carries at most, and how long push

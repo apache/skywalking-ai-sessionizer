@@ -43,10 +43,19 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		Client:      &otlp.Client{Endpoint: o.Endpoint, Headers: o.Headers},
 		Version:     version,
 		ServiceName: o.ServiceName,
+		InstanceID:  o.InstanceID,
 		Layer:       o.Layer,
 		BatchBytes:  o.BatchBytes,
 	}
-	fmt.Printf("storage root: %s\nendpoint    : %s/v1/logs\n", zoneRoot, o.Endpoint)
+	if err := p.Prepare(); err != nil {
+		return err
+	}
+	service := o.ServiceName
+	if service == "" {
+		service = "the project directory of each session"
+	}
+	fmt.Printf("storage root: %s\nendpoint    : %s/v1/logs\nservice     : %s\ninstance    : %s\nlayer       : %s\n",
+		zoneRoot, o.Endpoint, service, p.InstanceID, o.Layer)
 	pass := func() error {
 		start := time.Now()
 		st, err := p.Pass()

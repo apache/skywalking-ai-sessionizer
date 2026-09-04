@@ -75,7 +75,8 @@ export:
   otlp:
     endpoint: ""
     service_name: ""
-    layer: GENAI
+    instance_id: ""
+    layer: AI-AGENT
     batch_bytes: 1048576
     interval: 5s
 ```
@@ -84,7 +85,8 @@ export:
 | --- | --- | --- |
 | `endpoint` | empty | The OpenTelemetry logs receiver's base URL; `/v1/logs` is appended. The SkyWalking OAP listens on its REST port, `http://127.0.0.1:12800` by default. Empty means `asz push` refuses to run. |
 | `service_name` | empty | The service every record is attributed to. Empty means the project directory each session was recorded under, one service per project. |
-| `layer` | `GENAI` | Sent as `service.layer`, which the OAP uses to place the service. |
+| `instance_id` | empty | Sent as `service.instance.id`, the identity of this sender. Empty means a new UUID each time `asz push` starts. |
+| `layer` | `AI-AGENT` | Sent as `service.layer`, the layer the receiver places the service in. |
 | `headers` | none | Headers added to every request, for example `Authorization`. |
 | `batch_bytes` | `1048576` | How much body text one request carries at most, 1 MiB. |
 | `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |

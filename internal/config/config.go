@@ -48,6 +48,9 @@ type OTLP struct {
 	// ServiceName is the service every record is attributed to. Empty means
 	// the project directory each session was recorded under.
 	ServiceName string `yaml:"service_name"`
+	// InstanceID is sent as service.instance.id and identifies this sender.
+	// Empty means a new UUID each time asz push starts.
+	InstanceID string `yaml:"instance_id"`
 	// Layer is sent as service.layer, which the SkyWalking OAP uses to place
 	// the service.
 	Layer string `yaml:"layer"`
@@ -129,7 +132,7 @@ func Default() *Config {
 			},
 		}},
 		Export: Export{OTLP: OTLP{
-			Layer:      "GENAI",
+			Layer:      "AI-AGENT",
 			BatchBytes: 1 << 20,
 			Interval:   5 * time.Second,
 		}},
@@ -168,6 +171,9 @@ func Load(path string) (*Config, error) {
 	}
 	if o.ServiceName != "" {
 		cfg.Export.OTLP.ServiceName = o.ServiceName
+	}
+	if o.InstanceID != "" {
+		cfg.Export.OTLP.InstanceID = o.InstanceID
 	}
 	if o.Layer != "" {
 		cfg.Export.OTLP.Layer = o.Layer

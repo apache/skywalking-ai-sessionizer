@@ -34,8 +34,8 @@ The resource, which names the service a record belongs to:
 | Attribute | Value |
 | --- | --- |
 | `service.name` | `export.otlp.service_name`, or when empty the project directory the session was recorded under, one service per project |
-| `service.instance.id` | the session id |
-| `service.layer` | `export.otlp.layer`, `GENAI` by default, the OAP's layer for generative AI |
+| `service.instance.id` | `export.otlp.instance_id`, the identity of this sender, or when empty a new UUID each time `asz push` starts; the session a record belongs to is on the record as `asz.session` |
+| `service.layer` | `export.otlp.layer`, `AI-AGENT` by default, the layer the receiver places the service in |
 | `telemetry.sdk.name` | `asz`, so a receiver can tell these records apart from any other source |
 | `telemetry.sdk.version` | the version of `asz` that sent them |
 | `telemetry.sdk.language` | `go` |

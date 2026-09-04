@@ -19,6 +19,7 @@ package otlp
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,6 +49,9 @@ type Pusher struct {
 	// the project directory the session was recorded under, one service per
 	// project.
 	ServiceName string
+	// InstanceID identifies this sender as service.instance.id. Empty means a
+	// new UUID, made once per Pusher.
+	InstanceID string
 	// Layer is the receiver's layer for the service, sent as service.layer.
 	Layer string
 	// BatchBytes is how much body text one request carries at most.
@@ -67,17 +71,34 @@ type Stats struct {
 // ScopeName identifies the sender in every request.
 const ScopeName = "github.com/apache/skywalking-ai-sessionizer"
 
-// Pass sends what is not yet sent, in landed order: each session's landed
-// files by sequence, then each conversation's rounds by number.
-func (p *Pusher) Pass() (*Stats, error) {
+// Prepare settles the defaults: the batch budget, the clock, and the
+// instance id, which is a new UUID when none was configured. Pass calls it,
+// and a caller may call it first to learn the instance id.
+func (p *Pusher) Prepare() error {
 	if p.Client == nil || p.Client.Endpoint == "" {
-		return nil, errors.New("otlp: no endpoint")
+		return errors.New("otlp: no endpoint")
 	}
 	if p.BatchBytes <= 0 {
 		p.BatchBytes = 1 << 20
 	}
 	if p.Now == nil {
 		p.Now = time.Now
+	}
+	if p.InstanceID == "" {
+		id, err := newUUID()
+		if err != nil {
+			return err
+		}
+		p.InstanceID = id
+	}
+	return nil
+}
+
+// Pass sends what is not yet sent, in landed order: each session's landed
+// files by sequence, then each conversation's rounds by number.
+func (p *Pusher) Pass() (*Stats, error) {
+	if err := p.Prepare(); err != nil {
+		return nil, err
 	}
 	st := &Stats{}
 	state, err := loadState(p.statePath())
@@ -203,14 +224,14 @@ func (b *batch) flush() error {
 }
 
 // resource names the service a file's records belong to.
-func (b *batch) resource(project, session string) []Attr {
+func (b *batch) resource(project string) []Attr {
 	service := b.p.ServiceName
 	if service == "" {
 		service = project
 	}
 	attrs := []Attr{
 		{Key: "service.name", Str: service},
-		{Key: "service.instance.id", Str: session},
+		{Key: "service.instance.id", Str: b.p.InstanceID},
 		{Key: "telemetry.sdk.name", Str: "asz"},
 		{Key: "telemetry.sdk.version", Str: b.p.Version},
 		{Key: "telemetry.sdk.language", Str: "go"},
@@ -244,7 +265,7 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, pro
 	if projects[session] == "" {
 		projects[session] = projectOf(hdr.Src)
 	}
-	res := b.resource(projects[session], session)
+	res := b.resource(projects[session])
 	fileAt := parseTime(hdr.At)
 	now := uint64(b.p.Now().UnixNano())
 	common := []Attr{
@@ -325,7 +346,7 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 	if session == "" {
 		session = conv
 	}
-	res := b.resource(projects[session], session)
+	res := b.resource(projects[session])
 	now := uint64(b.p.Now().UnixNano())
 	common := []Attr{
 		{Key: "asz.format", Str: "sf"},
@@ -397,6 +418,17 @@ func sessionProject(files []storage.LandedFile) string {
 		return p
 	}
 	return pick("")
+}
+
+// newUUID returns a random version 4 UUID.
+func newUUID() (string, error) {
+	var u [16]byte
+	if _, err := rand.Read(u[:]); err != nil {
+		return "", err
+	}
+	u[6] = (u[6] & 0x0f) | 0x40
+	u[8] = (u[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16]), nil
 }
 
 // projectOf takes the project directory from a landed header's source path,

@@ -256,7 +256,7 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", Layer: "GENAI"}
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", Layer: "AI-AGENT", InstanceID: "sender-1"}
 
 	st, err := p.Pass()
 	if err != nil {
@@ -289,8 +289,11 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 		t.Fatalf("want one resource for one session, got %d: %v", len(resources), resources)
 	}
 	res := resources[0]
-	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "-Users-me-proj" || res["service.instance.id"] != "sess1" || res["service.layer"] != "GENAI" {
+	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "-Users-me-proj" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI-AGENT" {
 		t.Fatalf("resource attributes: %v", res)
+	}
+	if all[1].attrs["asz.session"] != "sess1" {
+		t.Fatalf("the session rides on the record: %v", all[1].attrs)
 	}
 	// Format, version, file kind and line kinds ride on each record.
 	h := all[0].attrs
@@ -370,5 +373,32 @@ func TestPushSplitsLargeBatches(t *testing.T) {
 	}
 	if st.Files != 3 {
 		t.Fatalf("files marked pushed = %d, want 3", st.Files)
+	}
+}
+
+// Without a configured instance id the sender makes one UUID and keeps it
+// for every pass; a configured one is sent as given.
+func TestInstanceIDIsAUUIDUnlessConfigured(t *testing.T) {
+	z, _ := zoneWithOneSession(t)
+	rcv := &receiver{}
+	srv := httptest.NewServer(rcv.handler())
+	defer srv.Close()
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test"}
+	if err := p.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	id := p.InstanceID
+	if len(id) != 36 || id[14] != '4' || strings.Count(id, "-") != 4 {
+		t.Fatalf("instance id %q is not a version 4 UUID", id)
+	}
+	if _, err := p.Pass(); err != nil {
+		t.Fatal(err)
+	}
+	if p.InstanceID != id {
+		t.Fatalf("instance id changed between Prepare and Pass: %s -> %s", id, p.InstanceID)
+	}
+	res, _ := parseRequest(t, rcv.reqs[0])
+	if res[0]["service.instance.id"] != id {
+		t.Fatalf("resource carries %q, want %q", res[0]["service.instance.id"], id)
 	}
 }
