@@ -53,10 +53,14 @@ type Pusher struct {
 	Client *Client
 	// Version is what the sender reports about itself.
 	Version string
-	// ServiceName is the service every record is attributed to. The command
-	// supplies the runtime's name, such as Claude Code, when none is
-	// configured; the pusher itself refuses to run without one.
+	// ServiceName is the service every record is attributed to, when one is
+	// configured. Empty means the runtime that produced each session, read
+	// off its landed header's adapter and named through Runtimes.
 	ServiceName string
+	// Runtimes names the runtime behind each adapter: claude-code-local is
+	// Claude Code, mock is Mock Agent. An adapter with no entry is named by
+	// its own name.
+	Runtimes map[string]string
 	// InstanceID identifies this sender as service.instance.id. Empty means a
 	// new UUID, made once per Pusher.
 	InstanceID string
@@ -86,8 +90,8 @@ func (p *Pusher) Prepare() error {
 	if p.Client == nil || p.Client.Endpoint == "" {
 		return errors.New("otlp: no endpoint")
 	}
-	if p.ServiceName == "" {
-		return errors.New("otlp: no service name")
+	if p.ServiceName == "" && len(p.Runtimes) == 0 {
+		return errors.New("otlp: no service name and no runtime names")
 	}
 	if p.BatchBytes <= 0 {
 		p.BatchBytes = 8 << 20
@@ -120,13 +124,17 @@ func (p *Pusher) Pass() (*Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := &batch{p: p, st: st, state: state}
+	b := &batch{p: p, st: st, state: state, services: map[string]string{}}
 	for _, session := range sessions {
 		files, err := storage.LandedFiles(p.Zone, session)
 		if err != nil {
 			st.Errors = append(st.Errors, err)
 			continue
 		}
+		// A session's records are attributed to the runtime that produced
+		// them, which its landed headers name. The rounds of its
+		// conversation follow the session.
+		b.services[session] = p.serviceOf(files)
 		for _, lf := range files {
 			rel, _ := filepath.Rel(p.Zone.Root(), lf.Path)
 			rel = filepath.ToSlash(rel)
@@ -179,6 +187,9 @@ type batch struct {
 	byKey   map[string]int
 	bytes   int64
 	pending []pendingFile
+
+	// services is the service each session's records are attributed to.
+	services map[string]string
 
 	// latest is the latest record time of each session, read once per pass
 	// when a file without timed records needs a timestamp.
@@ -236,10 +247,46 @@ func (b *batch) flush() error {
 	return b.state.save(b.p.statePath(), b.p.Now())
 }
 
-// resource names the sender and the service its records belong to.
-func (b *batch) resource() []Attr {
+// serviceOf is the service a session's records are attributed to: the
+// configured name, or the runtime named by the adapter on the session's
+// first landed header.
+func (p *Pusher) serviceOf(files []storage.LandedFile) string {
+	if p.ServiceName != "" {
+		return p.ServiceName
+	}
+	for _, lf := range files {
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			continue
+		}
+		line, err := readLine(bufio.NewReaderSize(f, 1<<20))
+		f.Close()
+		if err != nil {
+			continue
+		}
+		var hdr struct {
+			Adapter string `json:"adapter"`
+		}
+		if json.Unmarshal(line, &hdr) != nil || hdr.Adapter == "" {
+			continue
+		}
+		name, _, _ := strings.Cut(hdr.Adapter, "/")
+		if runtime, ok := p.Runtimes[name]; ok {
+			return runtime
+		}
+		return name
+	}
+	return "unknown"
+}
+
+// resource names the sender and the service a session's records belong to.
+func (b *batch) resource(session string) []Attr {
+	service := b.services[session]
+	if service == "" {
+		service = b.p.ServiceName
+	}
 	attrs := []Attr{
-		{Key: "service.name", Str: b.p.ServiceName},
+		{Key: "service.name", Str: service},
 		{Key: "service.instance.id", Str: b.p.InstanceID},
 		{Key: "telemetry.sdk.name", Str: "asz"},
 		{Key: "telemetry.sdk.version", Str: b.p.Version},
@@ -303,7 +350,7 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, fil
 	}
 	now := uint64(b.p.Now().UnixNano())
 	rec := Record{TimeNano: stamp, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
-	return b.add(b.resource(), rec, rel, digest)
+	return b.add(b.resource(session), rec, rel, digest)
 }
 
 // addRound sends one round file as one record. A round carries no time of
@@ -383,7 +430,13 @@ func (b *batch) addRound(rel, path, conv string) error {
 		stamp = now
 	}
 	rec := Record{TimeNano: stamp, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
-	return b.add(b.resource(), rec, rel, digest)
+	if _, known := b.services[session]; !known {
+		files, err := storage.LandedFiles(b.p.Zone, session)
+		if err == nil {
+			b.services[session] = b.p.serviceOf(files)
+		}
+	}
+	return b.add(b.resource(session), rec, rel, digest)
 }
 
 // sessionLatest is the latest record time among a session's landed files,

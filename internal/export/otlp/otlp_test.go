@@ -426,13 +426,26 @@ func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
 	}
 }
 
-// A pusher without a service name refuses to run: the command supplies the
-// runtime's name when nothing is configured, so an empty one is a wiring bug.
-func TestPushRefusesToRunWithoutAServiceName(t *testing.T) {
+// A pusher with neither a service name nor runtime names refuses to run;
+// with runtime names, a session is attributed to the runtime its landed
+// header names.
+func TestServiceIsTheRuntimeThatProducedTheSession(t *testing.T) {
 	z, _ := zoneWithOneSession(t)
 	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: "http://127.0.0.1:1"}, Version: "test"}
 	if err := p.Prepare(); err == nil {
-		t.Fatal("Prepare accepted an empty service name")
+		t.Fatal("Prepare accepted a pusher with no service name and no runtime names")
+	}
+	rcv := &receiver{}
+	srv := httptest.NewServer(rcv.handler())
+	defer srv.Close()
+	p = &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test",
+		Runtimes: map[string]string{"test": "Test Runtime"}}
+	if _, err := p.Pass(); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := parseRequest(t, rcv.reqs[0])
+	if res[0]["service.name"] != "Test Runtime" {
+		t.Fatalf("service.name is %q; the header's adapter test/0 names the runtime Test Runtime", res[0]["service.name"])
 	}
 }
 

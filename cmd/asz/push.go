@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
@@ -30,7 +31,7 @@ import (
 
 // cmdPush sends the storage root's landed files and rounds to an
 // OpenTelemetry logs receiver, once or on the export interval.
-func cmdPush(cfg *config.Config, ad config.Adapter, once bool) error {
+func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 	o := cfg.Export.OTLP
 	if o.Endpoint == "" {
 		return fmt.Errorf("push: set export.otlp.endpoint, the receiver's base URL, for example http://127.0.0.1:12800")
@@ -39,24 +40,25 @@ func cmdPush(cfg *config.Config, ad config.Adapter, once bool) error {
 	if err != nil {
 		return err
 	}
-	// The service is the configured name, or else the runtime the adapter
-	// reads: one service per kind of agent, which is how a receiver lists
-	// them.
-	service := o.ServiceName
-	if service == "" && ad.Name == config.AdapterClaudeCodeLocal {
-		service = claudecode.RuntimeName
-	}
+	// The service is the configured name, or else the runtime that produced
+	// each session, read off its landed headers: one service per kind of
+	// agent, which is how a receiver lists them.
 	p := &otlp.Pusher{
 		Zone:        storage.NewZone(zoneRoot),
 		Client:      &otlp.Client{Endpoint: o.Endpoint, Headers: o.Headers},
 		Version:     version,
-		ServiceName: service,
+		ServiceName: o.ServiceName,
+		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, mock.Name: mock.RuntimeName},
 		InstanceID:  o.InstanceID,
 		Layer:       o.Layer,
 		BatchBytes:  o.BatchBytes,
 	}
 	if err := p.Prepare(); err != nil {
 		return err
+	}
+	service := o.ServiceName
+	if service == "" {
+		service = "the runtime of each session (Claude Code, Mock Agent)"
 	}
 	fmt.Printf("storage root: %s\nendpoint    : %s/v1/logs\nservice     : %s\ninstance    : %s\nlayer       : %s\n",
 		zoneRoot, o.Endpoint, service, p.InstanceID, o.Layer)

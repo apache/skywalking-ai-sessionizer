@@ -32,7 +32,7 @@ checkpoints:
     rounds: 3
     written: true
     delta: true
-    kinds: {talk: 6, stream: 2, epoch: 3, epoch.boundary: 1, tool: 2}   # the reset's summary opens a talk of its own
-    talks_on: {main: 5, checker: 1}
-    relations: {starts: 1, reports: 1, ends_with: 1, follows: 1, summarizes: 1}
-    view: {state: verified, rounds: 3, talks: 6}
+    kinds: {talk: 7, stream: 3, epoch: 4, epoch.boundary: 1, tool: 2}   # the reset's summary opens a talk of its own
+    talks_on: {main: 5, checker: 1, reviewer: 1}
+    relations: {starts: 2, reports: 2, ends_with: 2, follows: 1, summarizes: 1}
+    view: {state: verified, rounds: 3, talks: 7}

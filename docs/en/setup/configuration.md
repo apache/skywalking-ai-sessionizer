@@ -95,7 +95,7 @@ export:
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `endpoint` | empty | The OpenTelemetry logs receiver's base URL; `/v1/logs` is appended. The SkyWalking OAP listens on its REST port, `http://127.0.0.1:12800` by default. Empty means `asz push` refuses to run. |
-| `service_name` | empty | The service every record is attributed to. Empty means the runtime the adapter reads, `Claude Code` for `claude-code-local`: one service per kind of agent. |
+| `service_name` | empty | The service every record is attributed to. Empty means the runtime that produced each session, read off its landed header: `Claude Code` for `claude-code-local`, `Mock Agent` for `mock`. One service per kind of agent. |
 | `instance_id` | empty | Sent as `service.instance.id`, the identity of this sender. Empty means a new UUID each time `asz push` starts. |
 | `layer` | `AI_AGENT` | Sent as `service.layer`, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores. |
 | `headers` | none | Headers added to every request, for example `Authorization`. |

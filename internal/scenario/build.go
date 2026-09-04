@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -110,10 +111,12 @@ adapters:
 #   otlp:
 #     endpoint: http://127.0.0.1:12800
 `, out, source)
-	if old, err := os.ReadFile(path); err == nil && string(old) == text {
+	// A file that starts with what the build writes is the build's, with
+	// whatever a person appended, such as the export block for a push.
+	if old, err := os.ReadFile(path); err == nil && strings.HasPrefix(string(old), text) {
 		return path, nil
 	} else if err == nil {
-		return "", errors.New("scenario: " + path + " exists and differs; use another --out")
+		return "", errors.New("scenario: " + path + " exists and is not this build's; use another --out")
 	}
 	return path, os.WriteFile(path, []byte(text), 0o644)
 }

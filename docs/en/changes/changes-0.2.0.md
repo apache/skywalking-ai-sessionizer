@@ -21,9 +21,9 @@
   and sequence a round's reference resolves against. Each file is sent once; `push.state` records
   which. A request carries up to `batch_bytes`, 8 MiB by default, under the 10 MiB the OAP accepts
   over HTTP, and a larger file goes alone.
-  The service is `export.otlp.service_name`, or the runtime the adapter reads, `Claude Code`, so a
-  receiver lists conversations by the agent that produced them; the layer is `AI_AGENT`, spelled
-  as the OAP spells a layer. A round's record also carries `asz.conversation.title` and the
+  The service is `export.otlp.service_name`, or the runtime that produced each session, read off
+  its landed header, `Claude Code` or `Mock Agent`, so a receiver lists conversations by the agent
+  that produced them; the layer is `AI_AGENT`, spelled as the OAP spells a layer. A round's record also carries `asz.conversation.title` and the
   fold's counts, and every record is stamped with a time inside the session's range, so a receiver
   lists conversations and bounds its reads without decoding a body.
   The protobuf encoding is written in the project, so the module still has one dependency. Each
@@ -74,6 +74,9 @@
   the session was parsed in. A server holding the same files, such as the SkyWalking OAP, builds the same
   document. See the format page.
 
+- The conversation list's time span is the session node's, when it began and its last activity,
+  the same pair the document and the wire carry; it was the span of the talks, which ended before
+  a reset's boundary.
 - The page reads Session Data and Session Flow and nothing else. It took every record's time from
   the index; it now takes it from the record, so a root that arrives with only its landed files
   and its rounds renders in full, and the index is assembly's alone.

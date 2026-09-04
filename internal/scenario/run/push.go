@@ -32,7 +32,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
@@ -78,7 +81,7 @@ var wireKinds = map[string]bool{
 // the ones it must not, the stamp a receiver bounds a read on, delivery
 // once and at least once, and the export path: writing every body back
 // gives a root that verifies and folds the same.
-func pushFollowsTheWire(out, session string, want *expect.Push) ([]string, error) {
+func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Push) ([]string, error) {
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
@@ -97,6 +100,35 @@ func pushFollowsTheWire(out, session string, want *expect.Push) ([]string, error
 	bad := func(format string, a ...any) {
 		out2 = append(out2, "push_follows_the_wire: "+fmt.Sprintf(format, a...))
 	}
+
+	// With no service configured, a session is attributed to the runtime
+	// that produced it, read off its landed header: the adapter's runtime
+	// for a runtime format, the mock's for sd.
+	named := newPusher()
+	named.ServiceName = ""
+	named.Runtimes = map[string]string{claudecode.Name: claudecode.RuntimeName, mock.Name: mock.RuntimeName}
+	if _, err := named.Pass(); err != nil {
+		return nil, err
+	}
+	wantService := mock.RuntimeName
+	if f == scenario.FormatClaudeCode {
+		wantService = claudecode.RuntimeName
+	}
+	for i, req := range rcv.reqs {
+		groups, err := otlp.Decode(req)
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range groups {
+			if got := attrMap(g.Resource)["service.name"]; got != wantService {
+				bad("request %d without a configured service names %q, want the runtime %q", i, got, wantService)
+			}
+		}
+	}
+	rcv.mu.Lock()
+	rcv.reqs = nil
+	rcv.mu.Unlock()
+	_ = os.Remove(filepath.Join(out, "push.state"))
 
 	// A refused pass leaves everything for the next one.
 	rcv.fail = true

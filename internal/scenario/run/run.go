@@ -226,7 +226,7 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		{"immutable_rounds", ex.Properties.ImmutableRounds, func() ([]string, error) { return expect.ImmutableRounds(out, session) }},
 		{"records_well_formed", ex.Properties.RecordsWellFormed, func() ([]string, error) { return expect.RecordsWellFormed(out, session) }},
 		{"repack_keeps_structure", ex.Properties.RepackKeepsStructure, func() ([]string, error) { return repackKeepsStructure(out, session, ex.Parse.MaxRoundBytes) }},
-		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) { return pushFollowsTheWire(out, session, ex.Push) }},
+		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) { return pushFollowsTheWire(out, session, f, ex.Push) }},
 		{"view_covers_the_session", ex.Properties.ViewCoversTheSession, func() ([]string, error) { return expect.ViewCoversTheSession(out, session) }},
 		{"reproducible", ex.Properties.Reproducible, func() ([]string, error) {
 			// Two parses of identical landed evidence must produce identical

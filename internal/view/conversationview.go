@@ -255,7 +255,7 @@ func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.R
 		round := h.Round
 		files = append(files, sessionview.File{
 			File: c.relPath(rf.Path), Format: "sf", Kind: "round", Round: &round,
-			Lines: 2 + len(r.Nodes) + len(r.Relations) + len(r.Unresolved), Bytes: int64(len(data)),
+			Lines: countByte(data, '\n'), Bytes: int64(len(data)),
 			Digest: digestOf(data), FromTime: millisPtr(h.FromTime), ThroughTime: millisPtr(h.ThroughTime),
 		})
 		prevDigest, prevInput, prevThrough = r.Commit.Digest, h.InputDigest, h.ThroughSeq

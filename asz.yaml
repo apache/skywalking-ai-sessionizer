@@ -91,9 +91,10 @@ export:
     # listens on its REST port, http://127.0.0.1:12800 by default. Empty
     # means asz push refuses to run.
     endpoint: ""
-    # The service every record is attributed to. Empty means the runtime the
-    # adapter reads, "Claude Code" for claude-code-local: one service per
-    # kind of agent.
+    # The service every record is attributed to. Empty means the runtime
+    # that produced each session, read off its landed header: "Claude Code"
+    # for claude-code-local, "Mock Agent" for mock. One service per kind of
+    # agent.
     service_name: ""
     # Sent as service.instance.id, the identity of this sender. Empty means
     # a new UUID each time asz push starts. The session a record belongs to

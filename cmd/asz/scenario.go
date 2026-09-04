@@ -165,10 +165,10 @@ func cmdScenario(args []string) int {
 	}
 }
 
-// repeatedSession names the k-th session of a repeated build. A session id
-// in the UUID shape discovery requires stays in that shape, its last group
-// counted up by k; any other name gets a suffix; an unnamed session takes
-// the derived id and varies the same way.
+// repeatedSession names the k-th session of a repeated build. The first is
+// the scenario's own. A session id in the UUID shape discovery requires
+// stays in that shape, its last group counted up; any other name gets a
+// suffix; an unnamed session takes the derived id and varies the same way.
 func repeatedSession(sc *scenario.Scenario, k int) string {
 	id := sc.Session
 	if id == "" {
@@ -178,6 +178,9 @@ func repeatedSession(sc *scenario.Scenario, k int) string {
 		}
 		id = p.Session
 	}
+	if k == 1 {
+		return id
+	}
 	if !uuidShape.MatchString(id) {
 		return fmt.Sprintf("%s-%d", id, k)
 	}
@@ -186,7 +189,7 @@ func repeatedSession(sc *scenario.Scenario, k int) string {
 	if err != nil {
 		return fmt.Sprintf("%s-%d", id, k)
 	}
-	return id[:len(id)-12] + fmt.Sprintf("%012x", (n+uint64(k))&0xffffffffffff)
+	return id[:len(id)-12] + fmt.Sprintf("%012x", (n+uint64(k-1))&0xffffffffffff)
 }
 
 var uuidShape = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)

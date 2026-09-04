@@ -40,9 +40,10 @@ adapter and is attributed to `Claude Code`; an `sd` build carries the `mock/1` d
 attributed to `Mock Agent`, so a receiver never lists an invented conversation as a real one.
 
 A demo corpus is one scenario repeated: `--repeat 20` builds twenty sessions end to end on the
-clock, each with its own id, and `--at 2026-06-01T09:00:00Z --scale 60` puts them on a day rather
-than in a burst. `build` refuses to change a `DIR/asz.yaml` that says something else, so a
-directory holds one configuration.
+clock, the first with the scenario's own id and the rest counted up from it, and `--at
+2026-06-01T09:00:00Z --scale 60` puts them on a day rather than in a burst. `build` refuses a
+`DIR/asz.yaml` it did not write, so a directory holds one configuration; what a person appends to
+it, such as the export block, is kept across builds.
 
 | Flag | Meaning |
 | --- | --- |

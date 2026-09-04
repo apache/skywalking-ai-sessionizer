@@ -32,6 +32,8 @@ steps:
     checkpoint: second
   - input: wrap up
   - call: {text: Wrapping up, tool: {name: Bash, input: {command: git status}, result: clean}}
-  - reset: {summary: "Summary: built, checked, wrapped up."}
+  - call:
+      agent: {name: reviewer, prompt: review the change, steps: [{call: {text: looks good}}], notify: true}
+  - reset: {summary: "Summary: built, checked, reviewed, wrapped up."}
   - input: one more thing
   - call: {text: All done.}

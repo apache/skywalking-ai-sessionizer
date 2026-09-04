@@ -121,6 +121,14 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 		row.From, row.To = Millis(row.From), Millis(row.To)
+		// The session node carries when the session began and its last
+		// activity, the same pair the document and the wire carry; the
+		// talks' span is the fallback for a chain from before that field.
+		if sn := c.View.Nodes[sessionflow.NodeID("session", c.Session)]; sn != nil {
+			if from, to := millisOf(attrString(sn, "from_time")), millisOf(attrString(sn, "through_time")); from != 0 && to != 0 {
+				row.From, row.To = from, to
+			}
+		}
 		if row.Title == "" {
 			row.Title = "(untitled)"
 		}
