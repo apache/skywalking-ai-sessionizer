@@ -40,7 +40,7 @@ The resource, which names the service a record belongs to:
 | Attribute | Value |
 | --- | --- |
 | `service.name` | `export.otlp.service_name`, or when empty the runtime that produced each session, read off its landed header's adapter: `Claude Code` for `claude-code-local`, `Mock Agent` for `mock`. One service per kind of agent, and a root that holds both is pushed as both |
-| `service.instance.id` | `export.otlp.instance_id`, the identity of this sender, or when empty a new UUID each time `asz push` starts; the session a record belongs to is on the record as `asz.session` |
+| `service.instance.id` | `export.otlp.instance_id`: who is pushing, in words the people reading the receiver recognise. A receiver lists it under the service as the instance, so put your mailbox, your name, or the machine there. Empty means `user@host` of the machine running `asz push`, which is stable across restarts. The session a record belongs to is on the record as `asz.session` |
 | `service.layer` | `export.otlp.layer`, `AI_AGENT` by default, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores |
 | `telemetry.sdk.name` | `asz`, so a receiver can tell these records apart from any other source |
 | `telemetry.sdk.version` | the version of `asz` that sent them |

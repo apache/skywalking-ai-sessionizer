@@ -449,9 +449,10 @@ func TestServiceIsTheRuntimeThatProducedTheSession(t *testing.T) {
 	}
 }
 
-// Without a configured instance id the sender makes one UUID and keeps it
-// for every pass; a configured one is sent as given.
-func TestInstanceIDIsAUUIDUnlessConfigured(t *testing.T) {
+// Without a configured instance id the sender names itself by the person
+// and the machine, user@host, and keeps that for every pass; a configured
+// one is sent as given.
+func TestInstanceIsUserAtHostUnlessConfigured(t *testing.T) {
 	z, _ := zoneWithOneSession(t)
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
@@ -461,8 +462,9 @@ func TestInstanceIDIsAUUIDUnlessConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := p.InstanceID
-	if len(id) != 36 || id[14] != '4' || strings.Count(id, "-") != 4 {
-		t.Fatalf("instance id %q is not a version 4 UUID", id)
+	host, _ := os.Hostname()
+	if !strings.HasSuffix(id, "@"+host) || strings.HasPrefix(id, "@") {
+		t.Fatalf("instance id %q is not user@%s", id, host)
 	}
 	if _, err := p.Pass(); err != nil {
 		t.Fatal(err)

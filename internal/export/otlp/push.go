@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -61,8 +62,11 @@ type Pusher struct {
 	// Claude Code, mock is Mock Agent. An adapter with no entry is named by
 	// its own name.
 	Runtimes map[string]string
-	// InstanceID identifies this sender as service.instance.id. Empty means a
-	// new UUID, made once per Pusher.
+	// InstanceID identifies this sender as service.instance.id: who is
+	// pushing, in words the people reading the receiver recognise, such as
+	// a mailbox, a name or a machine. Empty means user@host of the machine
+	// running the push, which is stable across restarts and already says
+	// where the records come from.
 	InstanceID string
 	// Layer is the receiver's layer for the service, sent as service.layer.
 	Layer string
@@ -100,7 +104,7 @@ func (p *Pusher) Prepare() error {
 		p.Now = time.Now
 	}
 	if p.InstanceID == "" {
-		id, err := newUUID()
+		id, err := defaultInstance()
 		if err != nil {
 			return err
 		}
@@ -497,6 +501,22 @@ func timeRange(data []byte) (from, through string, hiNS int64, ok bool) {
 func digestOf(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// defaultInstance names the sender by the person and the machine, user@host,
+// so the same machine is the same instance on every push. A machine that
+// can name neither gets a random UUID, which at least stays unique.
+func defaultInstance() (string, error) {
+	host, herr := os.Hostname()
+	u, uerr := user.Current()
+	if herr != nil || uerr != nil || host == "" || u.Username == "" {
+		return newUUID()
+	}
+	name := u.Username
+	if i := strings.LastIndexAny(name, `\/`); i >= 0 {
+		name = name[i+1:] // a Windows account carries its domain in front
+	}
+	return name + "@" + host, nil
 }
 
 // newUUID returns a random version 4 UUID.

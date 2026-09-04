@@ -59,8 +59,9 @@ type OTLP struct {
 	// ServiceName is the service every record is attributed to. Empty means
 	// the runtime the adapter reads, Claude Code for claude-code-local.
 	ServiceName string `yaml:"service_name"`
-	// InstanceID is sent as service.instance.id and identifies this sender.
-	// Empty means a new UUID each time asz push starts.
+	// InstanceID is sent as service.instance.id and says who is pushing, in
+	// words the people reading the receiver recognise: a mailbox, a name, a
+	// machine. Empty means user@host of the machine running asz push.
 	InstanceID string `yaml:"instance_id"`
 	// Layer is sent as service.layer, which the SkyWalking OAP uses to place
 	// the service.

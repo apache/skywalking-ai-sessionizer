@@ -23,7 +23,10 @@
   over HTTP, and a larger file goes alone.
   The service is `export.otlp.service_name`, or the runtime that produced each session, read off
   its landed header, `Claude Code` or `Mock Agent`, so a receiver lists conversations by the agent
-  that produced them; the layer is `AI_AGENT`, spelled as the OAP spells a layer. A round's record also carries `asz.conversation.title` and the
+  that produced them; the layer is `AI_AGENT`, spelled as the OAP spells a layer. The instance is
+  who is pushing, `export.otlp.instance_id`, meant to be a mailbox, a name or a machine; empty means
+  `user@host` of the machine running the push, stable across restarts, where it was a new UUID
+  each start. A round's record also carries `asz.conversation.title` and the
   fold's counts, and every record is stamped with a time inside the session's range, so a receiver
   lists conversations and bounds its reads without decoding a body.
   The protobuf encoding is written in the project, so the module still has one dependency. Each
