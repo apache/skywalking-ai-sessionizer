@@ -1,22 +1,37 @@
 # asz.view
 
 `asz.view` is one conversation, rebuilt from its Session Flow and its Session Data, as one document:
-everything a viewer renders, and nothing a viewer must compute. Every talk is a tree of runs and
+everything a viewer renders, and nothing a viewer must compute. It is the final form of a
+conversation, the one a page draws and the one a person reads. Every talk is a tree of runs and
 steps with the text the referenced records carry, and the streams, the segments, the relations,
 the rounds and the files sit beside them, each verified. The evidence is inside it once, so a
 viewer never opens a `.sd` file; the `ref` on a node is a citation, not a pointer to fetch.
 
-It is never a file. `asz view` builds it in memory from the `.sf` rounds and the `.sd` files, once
-per fold, and serves it as one response at `/api/c/{id}/view`. A server that holds the same files,
-such as the SkyWalking OAP, builds the same document and answers a conversation query with it.
-Package `pkg/sessionview` defines and owns the shape. Every reader shares it, and a change to it is
-a change to the version: a 1.x adds keys and never removes or renames one; a 2.0 may do either.
+It is never a file that the project writes. Package `pkg/sessionview` defines and owns the shape,
+and three things produce it from the same code:
+
+| How | What you get |
+| --- | --- |
+| `asz conversation -json ID` | the document on standard output, indented |
+| `asz conversation -yaml ID` | the same document rendered as YAML, with the same keys in the same order |
+| `asz view`, at `/api/c/{id}/view` | the document as the page's own response, built once per fold |
+
+A server that holds the same `.sd` and `.sf` files, such as the SkyWalking OAP, builds the same
+document and answers a conversation query with it. Every reader shares the shape, and a change to
+it is a change to the version: a 1.x adds keys and never removes or renames one; a 2.0 may do
+either.
 
 The document is JSON. Keys are `snake_case`, as in the two source formats, and are written in the
 order this page lists them. Times are unix milliseconds, read from the `.sd` record a node
 references; a view is read and never digested, so it carries no RFC 3339 strings. The same head
 round over the same files gives the same document, so one built by `asz view` and one built by
 another server compare equal as documents.
+
+**A complete example.** [asz-view-example.yaml](asz-view-example.yaml) is the whole document for
+the fixture session of the format pages, three talks across a main stream and a child agent, a
+tool, a synthetic error and a context reset, exactly as `asz conversation -yaml` prints it. It is
+generated from the scenario `tests/scenarios/fixture.yaml` by `make asz-view-example`, and a test
+fails when the committed file no longer matches what the code produces.
 
 ## Top level
 
@@ -98,10 +113,36 @@ instead of a document.
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
 the fold and the records say. Where the fold says `unavailable`, the document says it too.
 
+## Rendering the whole conversation
+
+The document is complete: a viewer draws every view of a conversation from it and fetches
+nothing else. This is how each view reads it.
+
+| View | Read |
+| --- | --- |
+| **Transcript** | `talks`, in order. Each talk's `label` is the person's input and its `reply` the last assistant message; its `children` are the runs, a run's children the steps, and a call's children what it produced: thinking, messages, tools. `text` is what to show for a step, `name` and `result` for a tool, `usage` on a call. |
+| **Flow timeline** | every node of every tree by `at`, with `kind` and `stream`; a node with `at` of `0` was never observed at a time and is placed by its position. |
+| **Cross-stream flow** | `edges` on a node, and `relations` as the whole list: `starts` from an agent call to the child's `stream`, `reports` from the notification that resumed the parent, `ends_with` from a stream to the child's output, `follows` between epochs across a reset, `summarizes` from a summary to its boundary, `in_segment` from a talk to its window. Containment never crosses a stream; a child's work is under the child. |
+| **Streams and segments** | `streams` with `role`, `label`, `parent` and `opened_by`, the step that started each; `segments` with the span of the talks placed in them. |
+| **Evidence** | a node's `ref` and `refs`, `{seq, row, block}`, name the record and the part it stands on. The text is already on the node, clipped to 2,000 bytes with the full size in `bytes`; only a reader that wants the whole of a longer part goes to the record, by that address, in `files`. |
+| **Verification** | `summary.state` and `summary.problems`, every round's `verified`, and every file's `digest`, `lines` and `bytes`. A gap or a failed digest is content here, never an error in place of the document. |
+| **Counts and time** | `summary`: the counts a list shows, the session's `from` and `to`, and the fold sized by `kinds`, `relation_types` and `quality`. |
+
+Nothing in a document is inferred beyond what the fold and the records say. Where the fold says
+`unavailable`, the document says it too, and a viewer shows that word rather than a guess.
+
+## The YAML rendering
+
+`-yaml` is a rendering of the JSON, not a second format. It is produced from the JSON, so the keys
+are the same and in the same order; mappings are blocks; scalars are plain, and quoted only where
+YAML would otherwise misread them, so `version` is `"1.0"` and a title with a colon is quoted; an
+empty map is `{}`; a text with line breaks is a block scalar. Reading the YAML back gives the same
+values as the JSON.
+
 ## Reading it
 
 `asz view` serves the document at `/api/c/{id}/view` and builds it once per fold, so a second reader
 pays nothing until a new round arrives. `asz conversation -json ID` prints the same document to
-standard output, and `-yaml` prints it as YAML with the same keys in the same order, for a
-terminal or a diff; the page stays the page. The largest conversation measured, 357 talks and 16,121
-steps, is 19 MB as one document and was built in 0.7 s.
+standard output, and `-yaml` prints it as YAML, for a terminal or a diff; the page stays the page.
+The largest conversation measured, 357 talks and 16,121 steps, is 19 MB as one document and was
+built in 0.7 s.

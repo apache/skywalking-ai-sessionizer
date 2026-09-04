@@ -66,7 +66,9 @@
   segments, the relations, and the rounds and files it was built from, each verified, with a gap or
   a failed digest written into the document rather than returned as an error. Package
   `pkg/sessionview` defines and owns the shape and `asz view` serves it at `/api/c/{id}/view`;
-  `asz conversation -json` or `-yaml` prints it. It is never a file. A server holding the same files, such as the SkyWalking OAP, builds the same
+  `asz conversation -json` or `-yaml` prints it. It is never a file. The format page says how each
+  view of a conversation is drawn from the document, and carries a complete example generated from
+  the fixture scenario, which a test keeps current. A server holding the same files, such as the SkyWalking OAP, builds the same
   document. See the format page.
 
 - The page reads Session Data and Session Flow and nothing else. It took every record's time from

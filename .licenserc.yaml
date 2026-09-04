@@ -53,9 +53,9 @@ header:
     - 'go.sum'
     - '**/*.md'
     - '**/testdata/**'
-    # Fixture corpora are captured data, not source. They reproduce another
-    # program's file format byte for byte, so a header would corrupt them.
-    - '**/claudecode-files/**'
+    # The complete example document on the asz.view format page is what
+    # the command prints, byte for byte, and a test holds it to that.
+    - 'docs/en/formats/asz-view-example.yaml'
     - 'dist/**'
     - 'bin/**'
     # The default storage root. It holds collected data, never source, and a

@@ -71,6 +71,15 @@ scenarios: build
 e2e-collector: build
 	tools/e2e-collector.sh
 
+## asz-view-example: regenerate the complete example document on the asz.view format page from the fixture scenario
+.PHONY: asz-view-example
+asz-view-example: build
+	@dir=$$(mktemp -d); \
+	$(BIN_DIR)/asz scenario build tests/scenarios/fixture.yaml --format sd --out $$dir --at 2026-01-01T00:00:00Z >/dev/null && \
+	$(BIN_DIR)/asz parse -config $$dir/asz.yaml >/dev/null && \
+	$(BIN_DIR)/asz conversation -config $$dir/asz.yaml -yaml 00000001-0000-4000-8000-000000000001 > docs/en/formats/asz-view-example.yaml && \
+	rm -rf $$dir && echo "docs/en/formats/asz-view-example.yaml"
+
 ## coverage: run tests with a coverage profile
 .PHONY: coverage
 coverage:
