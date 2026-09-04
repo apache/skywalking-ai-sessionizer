@@ -42,8 +42,8 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 		}
 	}
 	var written []string
-	put := func(rel string, lines []string) error {
-		path := filepath.Join(proj, filepath.FromSlash(rel))
+	putUnder := func(dir, rel string, lines []string) error {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
@@ -58,7 +58,17 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 		written = append(written, path)
 		return nil
 	}
+	put := func(rel string, lines []string) error { return putUnder(proj, rel, lines) }
 	if err := put(p.Session+".jsonl", w.files["main"]); err != nil {
+		return nil, err
+	}
+	// Noise a real project directory holds: a file whose name is not a
+	// session id, and a directory that is not a session. Discovery must pass
+	// over both, and every scenario checks that it does.
+	if err := put("not-a-uuid.jsonl", []string{`{"type":"summary","summary":"not a session"}`}); err != nil {
+		return nil, err
+	}
+	if err := put("memory/notes.md", []string{"# notes", "", "not a session either"}); err != nil {
 		return nil, err
 	}
 	for _, s := range p.Streams {
@@ -97,7 +107,11 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 		if err := put(fmt.Sprintf("%s/workflows/%s.json", p.Session, r.ID), []string{string(manifest)}); err != nil {
 			return nil, err
 		}
-		if err := put(fmt.Sprintf("%s/workflows/scripts/%s-%s.js", p.Session, strings.ReplaceAll(r.Name, " ", "-"), r.ID), strings.Split(r.Script, "\n")); err != nil {
+		scriptDir := proj
+		if r.ScriptProject != "" {
+			scriptDir = filepath.Join(root, r.ScriptProject)
+		}
+		if err := putUnder(scriptDir, fmt.Sprintf("%s/workflows/scripts/%s-%s.js", p.Session, strings.ReplaceAll(r.Name, " ", "-"), r.ID), strings.Split(r.Script, "\n")); err != nil {
 			return nil, err
 		}
 	}

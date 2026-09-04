@@ -117,18 +117,28 @@ properties:                               # all on unless set false
   fold_equals_parse: true
   immutable_rounds: true
   bundle: true
-  recollect_idempotent: true
   header_matches_fold: true
+  records_well_formed: true
+  repack_keeps_structure: true
+  recollect_idempotent: true              # runtime formats only
+  every_line_a_record: true               # runtime formats only
+  discovery_ignores_noise: true           # runtime formats only
   cross_format: true
+  records_match: true
 parse:
   max_round_bytes: 0                      # a parse setting, when the scenario needs one
 ```
 
 Only what is written is checked. The properties are: two parses of the same landed files write
 the same rounds; folding every round equals one full parse; rounds verify, link and are not
-writable; the landed files and rounds are self-sufficient without index and state; a second
-collect of a runtime format lands nothing; the head round's header says what the fold holds; and
-a parse with no new evidence writes nothing.
+writable; the landed files and rounds are self-sufficient without index and state; the head
+round's header says what the fold holds; a parse with no new evidence writes nothing; every landed
+record carries only the fields the format states a purpose for; a repack under the smallest budget
+keeps every record and the whole structure; and, for a runtime format, a second collect lands
+nothing, every source line becomes one landed record, and discovery passes over the noise the
+writer plants beside the session. Across formats, the folds must agree, and so must the landed
+records themselves, field by field: the runtime's adapter and the sd writer must land the same
+evidence from the same scenario, which is what makes a scenario a conformance test for an adapter.
 
 The project's own tests are scenarios under `tests/scenarios/`, one property of assembly each,
 run in both formats by `go test ./tests/`.

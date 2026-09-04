@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package local_test
+package chain_test
 
 import (
 	"io/fs"
@@ -29,16 +29,19 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
+	"github.com/apache/skywalking-ai-sessionizer/internal/repack"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
-// The tests here simulate what a scenario cannot express: a crash between
-// landing and committing a cursor, a lost or stale state file, and several
-// collectors or parsers running at once. Every property of assembly itself
-// is a scenario under tests/scenarios.
+// Package chain_test holds what a scenario cannot express: a crash between
+// landing and committing a cursor, a lost or stale state file, several
+// collectors or parsers running at once, the round budget, and a repack
+// refused. Each drives the real adapter and the real parser from a
+// scenario. Every property of assembly itself is a scenario under
+// tests/scenarios.
 
 // growing is a scenario with three checkpoints, so a test can land evidence
 // in stages.
@@ -312,5 +315,14 @@ func TestRoundBudgetCutsTheChainByWindow(t *testing.T) {
 		if m == nil || m.Kind != n.Kind || m.Parent != n.Parent {
 			t.Fatalf("node %s differs between the folds: whole=%v cut=%v", id, n, m)
 		}
+	}
+}
+
+// A repack into the root it reads from is refused.
+func TestRepackRefusesTheSameRoot(t *testing.T) {
+	s := newStage(t, growing)
+	s.through("one")
+	if _, err := repack.Session(s.zone, s.zone, s.session, 4<<20, time.Now()); err == nil {
+		t.Fatal("repack into the same root must be refused")
 	}
 }

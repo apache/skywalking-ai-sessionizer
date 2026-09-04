@@ -71,7 +71,8 @@ internal/scenario/expect/       expectation files evaluated over a root (server 
 internal/scenario/run/          the runner that wires build, collect, parse and check; command and tests only
 tests/scenarios/                the assembly tests, one scenario and one expectation file each
 internal/config/                YAML configuration
-tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
+tests/chain/                    what a scenario cannot express: crashes, lost state, races, the round budget
+tests/boundary/                 the import rules between the two sides
 ```
 
 `pkg/` is public because third-party adapters and consumers need it. Built-in adapters stay in
@@ -107,7 +108,8 @@ only, never structure.
 ```sh
 make build          # -> ./bin/asz
 make test           # whole suite, -race
-make test-e2e       # only the end-to-end adapter tests, verbose
+make test-e2e       # the scenarios, the chain tests and the boundary rules, verbose
+make scenarios      # every scenario through the built command, as CI runs them
 make check          # vet, lint, license headers, dependency licenses, tests — what CI runs
 make docker         # the container image, as CI builds and publishes it
 make help           # all targets

@@ -184,10 +184,13 @@ type Skill struct {
 	Steps []Step `yaml:"steps"`
 }
 
-// Workflow starts several children as one batch.
+// Workflow starts several children as one batch. ScriptProject files the
+// script under another project directory, as a real corpus does, so
+// discovery must group by session across directories.
 type Workflow struct {
-	Name     string  `yaml:"name"`
-	Children []Child `yaml:"children"`
+	Name          string  `yaml:"name"`
+	Children      []Child `yaml:"children"`
+	ScriptProject string  `yaml:"script_project"`
 }
 
 // Child is one workflow child.

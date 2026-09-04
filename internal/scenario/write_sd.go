@@ -269,16 +269,18 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 		}
 		r.Parts = []sessiondata.Part{textPart(e.Text)}
 	case EvQueued:
+		// An attachment is the runtime's record whatever it carries; a queued
+		// prompt is a person's input by its flag, not by its producer.
+		r.From = sessiondata.FromRuntime
 		if e.Mode == "prompt" {
-			r.From, r.Flags = sessiondata.FromExternal, []string{"external_input"}
-			r.Parts = []sessiondata.Part{textPart(e.Text)}
+			r.Flags = []string{"external_input"}
 		} else {
-			r.From, r.Flags = sessiondata.FromRuntime, []string{"injected"}
-			r.Parts = []sessiondata.Part{dataPart(map[string]any{"type": "queued_command", "commandMode": e.Mode, "content": e.Text})}
+			r.Flags = []string{"injected"}
 		}
+		r.Parts = []sessiondata.Part{textPart(e.Text)}
 	case EvInject:
 		r.From, r.Flags = sessiondata.FromRuntime, []string{"injected"}
-		r.Parts = []sessiondata.Part{dataPart(map[string]any{"type": e.Type, "content": e.Text})}
+		r.Parts = []sessiondata.Part{textPart(e.Text)}
 	case EvFragment:
 		r.From, r.Call = sessiondata.FromAgent, e.Call
 		u := e.Usage
@@ -317,7 +319,8 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 			data = map[string]any{"agentId": e.Fork.Child, "status": "forked"}
 		case e.Launch != nil:
 			// A workflow launch is acknowledged the way an agent launch is.
-			r.Batch, r.Label, r.Flags = e.Launch.Run, e.Launch.Name, []string{"launch_ack"}
+			// The run's name is on the manifest, not on the launch.
+			r.Batch, r.Flags = e.Launch.Run, []string{"launch_ack"}
 			data = map[string]any{"runId": e.Launch.Run, "status": "async_launched", "transcriptDir": "subagents/workflows/" + e.Launch.Run, "workflowName": e.Launch.Name}
 		case e.StringEnrichment:
 			data = "a bare string, not an object"

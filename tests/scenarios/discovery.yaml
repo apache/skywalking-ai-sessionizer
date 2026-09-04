@@ -15,16 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# A workflow's children are resolved through their batch: the launch result
-# names the run, the run's journal names each child, and every child gets a
-# parent.
+# A session id is not reliably lower case in a real corpus, and joins are
+# byte-exact, never case-folded. Discovery must find this session as it is,
+# and pass over the noise every project directory holds.
+session: 00000002-0000-4000-8000-00000000000A
+project: -Users-dev-02-uppercase-session-id
 steps:
-  - input: run the workflow
-  - call:
-      workflow:
-        name: check
-        script_project: -Users-dev-script-filed-elsewhere   # discovery groups by session across directories
-        children:
-          - {name: part-0, prompt: do part 0, steps: [{call: {text: part 0 done}}]}
-          - {name: part-1, prompt: do part 1, steps: [{call: {text: part 1 done}}]}
-          - {name: part-2, prompt: do part 2, steps: [{call: {text: part 2 done}}]}
+  - input: hello from an uppercase session

@@ -38,6 +38,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
@@ -57,13 +58,18 @@ type ParseOptions struct {
 // Properties are the checks every scenario gets unless it opts out. A nil
 // value means on.
 type Properties struct {
-	Reproducible        *bool `yaml:"reproducible"`
-	FoldEqualsParse     *bool `yaml:"fold_equals_parse"`
-	ImmutableRounds     *bool `yaml:"immutable_rounds"`
-	Bundle              *bool `yaml:"bundle"`
-	RecollectIdempotent *bool `yaml:"recollect_idempotent"`
-	CrossFormat         *bool `yaml:"cross_format"`
-	HeaderMatchesFold   *bool `yaml:"header_matches_fold"`
+	Reproducible          *bool `yaml:"reproducible"`
+	FoldEqualsParse       *bool `yaml:"fold_equals_parse"`
+	ImmutableRounds       *bool `yaml:"immutable_rounds"`
+	Bundle                *bool `yaml:"bundle"`
+	RecollectIdempotent   *bool `yaml:"recollect_idempotent"`
+	CrossFormat           *bool `yaml:"cross_format"`
+	HeaderMatchesFold     *bool `yaml:"header_matches_fold"`
+	RecordsMatch          *bool `yaml:"records_match"`
+	RecordsWellFormed     *bool `yaml:"records_well_formed"`
+	EveryLineARecord      *bool `yaml:"every_line_a_record"`
+	DiscoveryIgnoresNoise *bool `yaml:"discovery_ignores_noise"`
+	RepackKeepsStructure  *bool `yaml:"repack_keeps_structure"`
 }
 
 // On reports whether a property is enabled.
@@ -405,12 +411,16 @@ func checkView(root, session string, want *View) ([]string, error) {
 	return out, nil
 }
 
-// Summary is what one format's fold looks like, for comparing formats.
+// Summary is what one format's fold looks like, for comparing folds of the
+// same evidence. Unresolved counts only the open references: a reference
+// that was open in one round and resolved in a later one stays in the fold
+// as resolved, while a parse that saw the evidence at once never had it, and
+// both are the same conversation.
 type Summary struct {
 	Kinds      map[string]int
 	Relations  map[string]int
 	TalksOn    map[string]int
-	Unresolved map[string]int // kind:state -> count
+	Unresolved map[string]int // kind -> open references
 	Streams    []string
 }
 
@@ -433,8 +443,8 @@ func Summarize(root, session string) (*Summary, error) {
 	for _, r := range v.Relations {
 		s.Relations[r.Type]++
 	}
-	for _, u := range v.Unresolved {
-		s.Unresolved[u.Kind+":"+u.State]++
+	for _, u := range v.OpenUnresolved() {
+		s.Unresolved[u.Kind]++
 	}
 	sort.Strings(s.Streams)
 	return s, nil
@@ -632,3 +642,178 @@ func stamp(s string) time.Time {
 func sorted(m map[string]int) map[string]int        { return m }
 func sortedS(m map[string]string) map[string]string { return m }
 func sortedN(m map[string]*Node) map[string]*Node   { return m }
+
+// Properties over the landed records themselves.
+
+// recordView is the part of a landed record two formats must agree on: the
+// role-named identifiers, who produced it, when, what started it, its flags,
+// its usage, and the shape of its parts. Provenance differs by construction,
+// and a data part's bytes are the runtime's own, so neither is compared.
+type recordView struct {
+	Kind, Stream, Batch                                                       string
+	ID, Parent, Call, Run, Continues, Tool, Child, RecBatch, Label, StartedBy string
+	From, Time, Trigger                                                       string
+	Flags                                                                     string
+	Usage                                                                     string
+	Parts                                                                     string
+	Dropped                                                                   int
+}
+
+func viewOf(hdr *sessiondata.Header, r *sessiondata.Record) recordView {
+	flags := append([]string(nil), r.Flags...)
+	sort.Strings(flags)
+	usage := ""
+	if r.Usage != nil {
+		usage = fmt.Sprintf("%d/%d/%d/%d", r.Usage.Input, r.Usage.Output, r.Usage.CacheRead, r.Usage.CacheWrite)
+	}
+	var parts []string
+	for _, p := range r.Parts {
+		text := p.Text
+		if p.Kind == sessiondata.PartData || p.Kind == sessiondata.PartUnknown {
+			text = ""
+		}
+		failed := ""
+		if p.Failed != nil {
+			failed = fmt.Sprint(*p.Failed)
+		}
+		parts = append(parts, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s", p.Kind, p.ID, p.Of, p.Name, p.State, failed, text))
+	}
+	return recordView{
+		Kind: string(hdr.Kind), Stream: hdr.Stream, Batch: hdr.Batch,
+		ID: r.ID, Parent: r.Parent, Call: r.Call, Run: r.Run, Continues: r.Continues, Tool: r.Tool, Child: r.Child,
+		RecBatch: r.Batch, Label: r.Label, StartedBy: r.StartedBy,
+		From: string(r.From), Time: r.Time, Trigger: r.Trigger,
+		Flags: strings.Join(flags, ","), Usage: usage, Parts: strings.Join(parts, ";"), Dropped: len(r.Dropped),
+	}
+}
+
+// landedRecords reads every record of a session, grouped by the file it
+// came from, in landed order.
+func landedRecords(root, session string) (map[string][]recordView, error) {
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]recordView{}
+	for _, lf := range files {
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			return nil, err
+		}
+		r, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		hdr := r.Header()
+		key := string(hdr.Kind) + ":" + hdr.Stream + ":" + hdr.Batch
+		for {
+			rec, err := r.Next()
+			if err != nil {
+				break
+			}
+			out[key] = append(out[key], viewOf(&hdr, rec))
+		}
+		f.Close()
+	}
+	return out, nil
+}
+
+// RecordsAgree compares the landed records of two roots: every file kind
+// and stream holds the same records, with the same identifiers, producer,
+// time, flags, usage and parts, in the same order. A runtime's adapter and
+// the sd writer must land the same evidence from the same scenario; where
+// they do not, one of them reads the model differently.
+func RecordsAgree(rootA, rootB, session string) ([]string, error) {
+	a, err := landedRecords(rootA, session)
+	if err != nil {
+		return nil, err
+	}
+	b, err := landedRecords(rootB, session)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	keys := map[string]bool{}
+	for k := range a {
+		keys[k] = true
+	}
+	for k := range b {
+		keys[k] = true
+	}
+	var names []string
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		ra, rb := a[k], b[k]
+		if len(ra) != len(rb) {
+			out = append(out, fmt.Sprintf("records_match: %s holds %d records against %d", k, len(ra), len(rb)))
+			continue
+		}
+		for i := range ra {
+			if ra[i] != rb[i] {
+				out = append(out, fmt.Sprintf("records_match: %s record %d (%s) differs:\n    %+v\n    %+v", k, i+1, ra[i].ID, ra[i], rb[i]))
+				if len(out) > 8 {
+					return out, nil
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// RecordsWellFormed checks every landed file's header names what it is and
+// every record carries only the fields the format states a purpose for, and
+// the ones provenance requires.
+func RecordsWellFormed(root, session string) ([]string, error) {
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{
+		"ord": true, "off": true, "sha": true, "bytes": true,
+		"from": true, "time": true, "trigger": true, "flags": true,
+		"id": true, "parent": true, "call": true, "run": true, "continues": true, "tool": true, "child": true,
+		"batch": true, "label": true, "started_by": true,
+		"parts": true, "usage": true, "dropped": true,
+	}
+	var out []string
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			return nil, err
+		}
+		lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+		var hdr sessiondata.Header
+		if err := json.Unmarshal([]byte(lines[0]), &hdr); err != nil {
+			return nil, err
+		}
+		for name, got := range map[string]string{"kind": string(hdr.Kind), "session": hdr.Session, "src": hdr.Src, "adapter": hdr.Adapter, "dialect": hdr.Dialect, "at": hdr.At} {
+			if got == "" {
+				out = append(out, fmt.Sprintf("records_well_formed: %s: header field %q is empty", filepath.Base(lf.Path), name))
+			}
+		}
+		if hdr.Session != session || (hdr.Stream == "" && hdr.Batch == "") {
+			out = append(out, fmt.Sprintf("records_well_formed: %s: header identity %s stream=%q batch=%q", filepath.Base(lf.Path), hdr.Session, hdr.Stream, hdr.Batch))
+		}
+		for i, line := range lines[1 : len(lines)-1] {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(line), &fields); err != nil {
+				return nil, err
+			}
+			for k := range fields {
+				if !allowed[k] {
+					out = append(out, fmt.Sprintf("records_well_formed: %s record %d carries field %q with no stated purpose", filepath.Base(lf.Path), i+1, k))
+				}
+			}
+			for _, must := range []string{"ord", "off", "sha", "bytes", "parts"} {
+				if _, ok := fields[must]; !ok {
+					out = append(out, fmt.Sprintf("records_well_formed: %s record %d lacks %q", filepath.Base(lf.Path), i+1, must))
+				}
+			}
+		}
+	}
+	return out, nil
+}

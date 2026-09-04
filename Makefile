@@ -53,12 +53,19 @@ build: $(BIN_DIR)
 test:
 	$(GO) test -race -count=1 ./...
 
-## test-e2e: run only the end-to-end adapter tests against the fixture corpus
+## test-e2e: the scenarios, the chain tests and the boundary rules, verbose
 .PHONY: test-e2e
 test-e2e:
-	$(GO) test -race -count=1 -v ./tests/...
+	go test -race -count=1 -v ./tests/...
 
-## coverage: run tests with a coverage profile
+## scenarios: run every scenario through the built command, as CI does
+.PHONY: scenarios
+scenarios: build
+	@for f in tests/scenarios/*.yaml; do \
+		case $$f in *.expect.yaml) continue;; esac; \
+		echo "== $$f"; $(BIN_DIR)/asz scenario check $$f || exit 1; \
+	done
+
 .PHONY: coverage
 coverage:
 	$(GO) test -race -count=1 -coverprofile=coverage.txt -covermode=atomic ./...

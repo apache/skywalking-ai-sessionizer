@@ -157,6 +157,9 @@ type Run struct {
 	ID       string
 	Name     string
 	Children []string
+	// ScriptProject is the project directory the script is filed under,
+	// when not the session's own.
+	ScriptProject string
 	// Journal is the run's journal, in order: a started line per child, and
 	// a result line when a child finished.
 	Journal []JournalLine
@@ -474,7 +477,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 			Of: tool.ID, Text: "workflow launched", Launch: &Launch{Run: runID, Name: w.Name}}
 		b.emit(res)
 		l.last = res.ID
-		r := Run{ID: runID, Name: w.Name, Script: "export const meta = {\n  name: '" + w.Name + "',\n}"}
+		r := Run{ID: runID, Name: w.Name, Script: "export const meta = {\n  name: '" + w.Name + "',\n}", ScriptProject: w.ScriptProject}
 		t := res.At
 		for _, ch := range w.Children {
 			child := agentID(w.Name + "/" + ch.Name)

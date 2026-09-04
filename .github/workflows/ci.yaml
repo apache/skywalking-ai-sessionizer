@@ -90,8 +90,18 @@ jobs:
       # its path, so Windows runs without it.
       - name: Unit tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./pkg/... ./internal/...
-      - name: End-to-end adapter tests
+      - name: Scenarios, chain and boundary tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
+      # The same scenarios once more, through the command a person runs, so
+      # the command is exercised and a failure prints as a person sees it.
+      - name: Scenarios through the command
+        shell: bash
+        run: |
+          for f in tests/scenarios/*.yaml; do
+            case "$f" in *.expect.yaml) continue;; esac
+            echo "== $f"
+            ./bin/asz${{ runner.os == 'Windows' && '.exe' || '' }} scenario check "$f" || exit 1
+          done
 
   # Builds every platform on every run so a broken cross-compile is caught
   # at once, and keeps the packages as an artifact. When a release is

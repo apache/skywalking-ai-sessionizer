@@ -12,14 +12,17 @@ Go 1.27 or later. The module has one dependency, a YAML parser, and adding anoth
 ```sh
 make build          # -> ./bin/asz
 make test           # the whole suite, with the race detector
-make test-e2e       # only the end-to-end adapter tests, verbose
+make test-e2e       # the scenarios, the chain tests and the boundary rules, verbose
+make scenarios      # every scenario through the built command, as CI runs them
 make check          # vet, lint, license headers, dependency licenses, tests: what CI runs
 make help           # every target
 ```
 
-The end-to-end suite in `tests/adapter/claudecode/local/` runs the whole pipeline over a synthetic
-fixture corpus that reproduces Claude Code's file layout byte for byte. A change to collection,
-indexing or assembly should come with a fixture that shows it.
+The end-to-end tests are scenarios under `tests/scenarios/`: a YAML description of a conversation
+and an expectation file beside it, run in both formats by `go test ./tests/` and, through the
+command, by `make scenarios`. See [Scenarios](scenario.md). `tests/chain/` holds what a scenario
+cannot express, and `tests/boundary/` the import rules between the collector side and the server
+side.
 
 ## Before opening a pull request
 
