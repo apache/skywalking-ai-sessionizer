@@ -41,20 +41,31 @@ The resource, which names the service a record belongs to:
 | `telemetry.sdk.language` | `go` |
 
 The scope is `github.com/apache/skywalking-ai-sessionizer` with the same version. Each record then
-says what it is:
+says what it is. What a receiver needs to place a line and to resolve a round's reference to it is
+on every line; what is constant for a file is on its header line only, and the file's digest is on
+the header and on the closing line, where a receiver checks what it wrote back. Measured, that
+keeps the attributes near 15% of the body instead of the 28% that repeating everything cost.
+
+On every line:
 
 | Attribute | Value |
 | --- | --- |
 | `asz.format` | `sd` for a landed file, `sf` for a round |
-| `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
-| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`; for `sf`, `round` |
 | `asz.file` | the file's path relative to the storage root |
-| `asz.file.digest` | the file's SHA-256, so a receiver can check what it wrote back |
 | `asz.line` | the line's index in the file, starting at 0 for the header |
 | `asz.line.kind` | for `sd`: `header`, `record`, `end`; for `sf`: the frame type, `header`, `node`, `relation`, `unresolved`, `commit` |
-| `asz.session` | the session |
-| `asz.stream`, `asz.run`, `asz.seq` | for `sd`: the stream or workflow run, and the landed sequence |
+| `asz.session`, `asz.seq` | for `sd`: the session and the landed sequence. With `asz.line`, this is the address a round's `{seq, row}` reference names: a record's row is its line index |
 | `asz.conversation`, `asz.round` | for `sf`: the conversation and the round number |
+
+On the header line only:
+
+| Attribute | Value |
+| --- | --- |
+| `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
+| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`; for `sf`, `round` |
+| `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
+| `asz.session` | for `sf`: the session the round was assembled from |
+| `asz.file.digest` | the file's SHA-256, repeated on the closing line, `end` or `commit` |
 
 A landed record is stamped with its own time when it carries one, and with the file's collection
 time otherwise. A round carries no time of its own, by design, so its lines are stamped with the

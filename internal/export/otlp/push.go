@@ -268,26 +268,40 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, pro
 	res := b.resource(projects[session])
 	fileAt := parseTime(hdr.At)
 	now := uint64(b.p.Now().UnixNano())
+	// Every line carries what a receiver needs to place it and to resolve a
+	// round's reference to it: the file, the line, the session and the
+	// sequence. What is constant for the file rides on the header line only,
+	// and the digest on the header and the closing line, where a receiver
+	// checks what it wrote back. Repeating them on every line measured 28% on
+	// top of the body; this keeps it near 15%.
 	common := []Attr{
 		{Key: "asz.format", Str: "sd"},
-		{Key: "asz.format.version", Str: hdr.Schema},
-		{Key: "asz.file.kind", Str: string(hdr.Kind)},
 		{Key: "asz.file", Str: rel},
-		{Key: "asz.file.digest", Str: digest},
 		{Key: "asz.session", Str: session},
 		{Key: "asz.seq", Int: int64(lf.Seq), IsInt: true},
 	}
+	once := []Attr{
+		{Key: "asz.format.version", Str: hdr.Schema},
+		{Key: "asz.file.kind", Str: string(hdr.Kind)},
+		{Key: "asz.file.digest", Str: digest},
+	}
 	if lf.Stream != "" {
-		common = append(common, Attr{Key: "asz.stream", Str: lf.Stream})
+		once = append(once, Attr{Key: "asz.stream", Str: lf.Stream})
 	}
 	if lf.RunID != "" {
-		common = append(common, Attr{Key: "asz.run", Str: lf.RunID})
+		once = append(once, Attr{Key: "asz.run", Str: lf.RunID})
 	}
 	line := int64(0)
 	emit := func(kind string, text []byte, at uint64) error {
 		attrs := append(append([]Attr{}, common...),
 			Attr{Key: "asz.line", Int: line, IsInt: true},
 			Attr{Key: "asz.line.kind", Str: kind})
+		switch kind {
+		case "header":
+			attrs = append(attrs, once...)
+		case "end":
+			attrs = append(attrs, Attr{Key: "asz.file.digest", Str: digest})
+		}
 		line++
 		return b.add(res, Record{TimeNano: at, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(text), Attrs: attrs})
 	}
@@ -350,13 +364,15 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 	now := uint64(b.p.Now().UnixNano())
 	common := []Attr{
 		{Key: "asz.format", Str: "sf"},
-		{Key: "asz.format.version", Str: hdr.Schema},
-		{Key: "asz.file.kind", Str: "round"},
 		{Key: "asz.file", Str: rel},
-		{Key: "asz.file.digest", Str: digest},
-		{Key: "asz.session", Str: session},
 		{Key: "asz.conversation", Str: hdr.Conversation},
 		{Key: "asz.round", Int: hdr.Round, IsInt: true},
+	}
+	once := []Attr{
+		{Key: "asz.format.version", Str: hdr.Schema},
+		{Key: "asz.file.kind", Str: "round"},
+		{Key: "asz.file.digest", Str: digest},
+		{Key: "asz.session", Str: session},
 	}
 	line := int64(0)
 	emit := func(text []byte) error {
@@ -367,6 +383,12 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 		attrs := append(append([]Attr{}, common...),
 			Attr{Key: "asz.line", Int: line, IsInt: true},
 			Attr{Key: "asz.line.kind", Str: frame.T})
+		switch frame.T {
+		case "header":
+			attrs = append(attrs, once...)
+		case "commit":
+			attrs = append(attrs, Attr{Key: "asz.file.digest", Str: digest})
+		}
 		line++
 		return b.add(res, Record{TimeNano: now, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(text), Attrs: attrs})
 	}

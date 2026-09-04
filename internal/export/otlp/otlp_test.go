@@ -292,9 +292,6 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "-Users-me-proj" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI-AGENT" {
 		t.Fatalf("resource attributes: %v", res)
 	}
-	if all[1].attrs["asz.session"] != "sess1" {
-		t.Fatalf("the session rides on the record: %v", all[1].attrs)
-	}
 	// Format, version, file kind and line kinds ride on each record.
 	h := all[0].attrs
 	if h["asz.format"] != "sd" || h["asz.format.version"] != "sd/1" || h["asz.file.kind"] != "transcript" || h["asz.line.kind"] != "header" || h["asz.line"] != "int:0" {
@@ -302,6 +299,18 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 	}
 	if all[1].attrs["asz.line.kind"] != "record" || all[3].attrs["asz.line.kind"] != "end" {
 		t.Fatalf("landed line kinds: %v / %v", all[1].attrs, all[3].attrs)
+	}
+	// What resolves a round's reference rides on every record line: the
+	// session, the sequence, the line. What is constant for the file is on
+	// the header line only, and the digest is on the header and the closing line.
+	if r := all[1].attrs; r["asz.session"] != "sess1" || r["asz.seq"] != "int:1" || r["asz.line"] != "int:1" || r["asz.file"] == "" {
+		t.Fatalf("record line lacks its address: %v", r)
+	}
+	if r := all[1].attrs; r["asz.file.digest"] != "" || r["asz.format.version"] != "" || r["asz.file.kind"] != "" || r["asz.stream"] != "" {
+		t.Fatalf("record line repeats per-file attributes: %v", r)
+	}
+	if h["asz.file.digest"] == "" || h["asz.stream"] != "main" || all[3].attrs["asz.file.digest"] != h["asz.file.digest"] {
+		t.Fatalf("digest and stream must be on the header and the digest on the closing line: %v / %v", h, all[3].attrs)
 	}
 	// A record with a time is stamped with it; one without gets the file's time.
 	if all[1].time != uint64(time.Date(2026, 9, 4, 1, 0, 0, 0, time.UTC).UnixNano()) {
@@ -311,11 +320,14 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 		t.Fatalf("record without a time must carry the file's time, got %d", all[2].time)
 	}
 	r := all[7].attrs
-	if r["asz.format"] != "sf" || r["asz.format.version"] != "sf/1" || r["asz.file.kind"] != "round" || r["asz.line.kind"] != "header" || r["asz.round"] != "int:1" || r["asz.conversation"] != "sess1" {
+	if r["asz.format"] != "sf" || r["asz.format.version"] != "sf/1" || r["asz.file.kind"] != "round" || r["asz.line.kind"] != "header" || r["asz.round"] != "int:1" || r["asz.conversation"] != "sess1" || r["asz.session"] != "sess1" {
 		t.Fatalf("round header attributes: %v", r)
 	}
-	if all[8].attrs["asz.line.kind"] != "node" || all[9].attrs["asz.line.kind"] != "commit" {
-		t.Fatalf("round line kinds: %v / %v", all[8].attrs, all[9].attrs)
+	if n := all[8].attrs; n["asz.line.kind"] != "node" || n["asz.conversation"] != "sess1" || n["asz.round"] != "int:1" || n["asz.format.version"] != "" {
+		t.Fatalf("round node line: %v", n)
+	}
+	if c := all[9].attrs; c["asz.line.kind"] != "commit" || c["asz.file.digest"] != r["asz.file.digest"] {
+		t.Fatalf("round commit line must carry the digest: %v", c)
 	}
 
 	// A second pass sends nothing: both files are write-once and recorded.
