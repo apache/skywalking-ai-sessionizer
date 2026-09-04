@@ -50,6 +50,11 @@ type View struct {
 	Parser      string
 	Policy      string
 
+	// FromTime and ThroughTime are the head round's own window, from its
+	// header. The conversation's range is on the session node.
+	FromTime    string
+	ThroughTime string
+
 	Nodes      map[string]*Node
 	Relations  map[string]*Relation
 	Unresolved map[string]*Unresolved
@@ -176,6 +181,7 @@ func (v *View) Apply(r *Round) error {
 	v.Digest = r.Commit.Digest
 	v.ThroughSeq = r.Header.ThroughSeq
 	v.InputDigest = r.Header.InputDigest
+	v.FromTime, v.ThroughTime = r.Header.FromTime, r.Header.ThroughTime
 	return nil
 }
 

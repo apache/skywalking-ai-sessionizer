@@ -33,6 +33,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/assemble"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
@@ -265,11 +266,13 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		if err != nil {
 			return nil, err
 		}
+		fromTime, throughTime := windowTimes(ix, view.ThroughSeq, through)
 		w, err := sessionflow.NewWriter(sessionflow.Header{
 			Conversation: opt.Conversation, Session: opt.Session,
 			Round: round, Previous: view.Digest,
 			FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
 			InputDigest: inputDigest, Parser: Parser, Policy: policy,
+			FromTime: fromTime, ThroughTime: throughTime,
 		})
 		if err != nil {
 			return nil, err
@@ -381,6 +384,32 @@ func inputDigestFor(z *storage.Zone, session, previous string, after, through ui
 		added = append(added, d)
 	}
 	return sessionflow.ChainInputDigest(previous, added), nil
+}
+
+// windowTimes is the earliest and the latest record time among the landed
+// files a round consumes, from the index. They are what the runtime wrote,
+// so they are evidence and reproduce with the round. Both are empty when no
+// record in the window carries a time.
+func windowTimes(ix *index.Index, after, through uint64) (from, throughTime string) {
+	var lo, hi int64
+	ok := false
+	for i := range ix.Entries {
+		e := &ix.Entries[i]
+		if uint64(e.Seq) <= after || uint64(e.Seq) > through || e.TS == 0 {
+			continue
+		}
+		if !ok || e.TS < lo {
+			lo = e.TS
+		}
+		if !ok || e.TS > hi {
+			hi = e.TS
+		}
+		ok = true
+	}
+	if !ok {
+		return "", ""
+	}
+	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi)
 }
 
 // delta is what one round must write.

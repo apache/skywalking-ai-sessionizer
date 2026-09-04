@@ -242,7 +242,8 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 	files = append(files, string(data))
 
 	round := filepath.Join(z.Root(), "_conversations", "sess1", "rounds", "r000001-abcdefabcdef.sf")
-	roundText := "{\"t\":\"header\",\"schema\":\"sf/1\",\"conversation\":\"sess1\",\"session\":\"sess1\",\"round\":1}\n" +
+	roundText := "{\"t\":\"header\",\"schema\":\"sf/1\",\"conversation\":\"sess1\",\"session\":\"sess1\",\"round\":1," +
+		"\"from_time\":\"2026-09-04T01:00:00Z\",\"through_time\":\"2026-09-04T01:00:00Z\"}\n" +
 		"{\"t\":\"node\",\"id\":\"n1\",\"kind\":\"talk\"}\n" +
 		"{\"t\":\"commit\",\"digest\":\"abcdefabcdef\",\"counts\":{\"nodes\":1}}\n"
 	if err := os.MkdirAll(filepath.Dir(round), 0o755); err != nil {
@@ -313,6 +314,18 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 	}
 	if c := all[1].attrs; c["asz.seq"] != "int:2" || c["asz.stream"] != "a1" || c["asz.session"] != "sess1" {
 		t.Fatalf("child file attributes: %v", c)
+	}
+	// The record time range of a file rides on its record: the main file has
+	// one timed record, the child's has none, and the round carries its
+	// header's pair.
+	if h["asz.from_time"] != "2026-09-04T01:00:00Z" || h["asz.through_time"] != "2026-09-04T01:00:00Z" {
+		t.Fatalf("landed file time range: %v", h)
+	}
+	if c := all[1].attrs; c["asz.from_time"] != "" || c["asz.through_time"] != "" {
+		t.Fatalf("a file without timed records must carry no range: %v", c)
+	}
+	if r := all[2].attrs; r["asz.from_time"] != "2026-09-04T01:00:00Z" || r["asz.through_time"] != "2026-09-04T01:00:00Z" {
+		t.Fatalf("round time range: %v", r)
 	}
 	if _, ok := h["asz.line"]; ok {
 		t.Fatalf("a whole file carries no line address: %v", h)

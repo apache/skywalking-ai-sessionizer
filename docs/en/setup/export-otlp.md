@@ -59,6 +59,7 @@ body:
 | `asz.file.digest` | the file's SHA-256, the digest of the body as received |
 | `asz.lines` | how many lines the body has, the header and the closing line included |
 | `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |
+| `asz.from_time`, `asz.through_time` | the earliest and the latest record time in the file, as the runtime wrote them, in UTC; for `sf`, the round header's own pair, the range of the files that round consumed. Absent when no record carries a time, as in a child's meta file |
 | `asz.seq` | for `sd`: the landed sequence. With the session it names the file a round's `{seq, row}` reference points at, and the row is a line of the body |
 | `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
 | `asz.conversation`, `asz.round` | for `sf`: the conversation and the round number |

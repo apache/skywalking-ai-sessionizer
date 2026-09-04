@@ -91,6 +91,15 @@ type Header struct {
 	// alters meaning starts a new chain generation.
 	Parser string `json:"parser"`
 	Policy string `json:"policy"`
+
+	// FromTime and ThroughTime are the earliest and the latest record time
+	// among the landed files this round consumed, as the runtime wrote them,
+	// in UTC. They are evidence, not the parser's clock, so the same input
+	// reproduces them and they sit inside the digest. Absent when no record
+	// in the window carries a time. The session node carries the same pair
+	// for the whole conversation so far.
+	FromTime    string `json:"from_time,omitempty"`
+	ThroughTime string `json:"through_time,omitempty"`
 }
 
 // Ref points at one landed record, and optionally one content block within it.

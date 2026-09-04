@@ -288,6 +288,12 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, pro
 	if lf.RunID != "" {
 		attrs = append(attrs, Attr{Key: "asz.run", Str: lf.RunID})
 	}
+	// The record time range of the file lets a receiver place it in time
+	// without decoding the body. A file whose records carry no time, such
+	// as a child's meta file, carries neither attribute.
+	if from, through, ok := timeRange(data); ok {
+		attrs = append(attrs, Attr{Key: "asz.from_time", Str: from}, Attr{Key: "asz.through_time", Str: through})
+	}
 	now := uint64(b.p.Now().UnixNano())
 	rec := Record{TimeNano: parseTime(hdr.At), ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
 	return b.add(b.resource(projects[session]), rec, rel, digest)
@@ -306,6 +312,8 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 		Conversation string `json:"conversation"`
 		Session      string `json:"session"`
 		Round        int64  `json:"round"`
+		FromTime     string `json:"from_time"`
+		ThroughTime  string `json:"through_time"`
 	}
 	if err := json.Unmarshal(headerLine, &hdr); err != nil {
 		return fmt.Errorf("decode round header: %w", err)
@@ -326,9 +334,43 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 		{Key: "asz.conversation", Str: hdr.Conversation},
 		{Key: "asz.round", Int: hdr.Round, IsInt: true},
 	}
+	// A round's header carries the record time range of the files it
+	// consumed; it travels as the same pair.
+	if hdr.FromTime != "" && hdr.ThroughTime != "" {
+		attrs = append(attrs, Attr{Key: "asz.from_time", Str: hdr.FromTime}, Attr{Key: "asz.through_time", Str: hdr.ThroughTime})
+	}
 	now := uint64(b.p.Now().UnixNano())
 	rec := Record{TimeNano: now, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
 	return b.add(b.resource(projects[session]), rec, rel, digest)
+}
+
+// timeRange is the earliest and the latest record time in a landed file,
+// written the way a round header writes them.
+func timeRange(data []byte) (from, through string, ok bool) {
+	var lo, hi int64
+	for len(data) > 0 {
+		line := data
+		if k := bytes.IndexByte(data, '\n'); k >= 0 {
+			line, data = data[:k], data[k+1:]
+		} else {
+			data = nil
+		}
+		ns, has := sessiondata.LineTime(line)
+		if !has {
+			continue
+		}
+		if !ok || ns < lo {
+			lo = ns
+		}
+		if !ok || ns > hi {
+			hi = ns
+		}
+		ok = true
+	}
+	if !ok {
+		return "", "", false
+	}
+	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi), true
 }
 
 // digestOf is the file digest a receiver checks: SHA-256 over the bytes as

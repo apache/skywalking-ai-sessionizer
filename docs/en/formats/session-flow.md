@@ -16,7 +16,8 @@ one `commit`.
 
 ```json
 {"t":"header","schema":"sf/1","conversation":"1213…","session":"1213…","round":1,
- "from_seq":1,"through_seq":118,"input_digest":"48d8…","parser":"v1","policy":"v1+idle=10m0s"}
+ "from_seq":1,"through_seq":118,"input_digest":"48d8…","parser":"v1","policy":"v1+idle=10m0s",
+ "from_time":"2026-08-06T16:21:30.556Z","through_time":"2026-08-07T02:14:51.749Z"}
 {"t":"node","id":"ack/1/1338","revision":1,"kind":"agent.launch_ack","parent":"run/…","ref":{…}}
 {"t":"relation","id":"…","revision":1,"type":"starts","from":"…","to":"…","quality":"exact","evidence":[…]}
 {"t":"unresolved","id":"…","revision":1,"kind":"tool","ref":"toolu_…","reason":"…","state":"open"}
@@ -33,10 +34,13 @@ one `commit`.
 | `from_seq`, `through_seq` | the landed sequence range this round consumed |
 | `input_digest` | binds the round to the landed evidence it read. It is chained rather than recomputed, the previous input digest hashed with the digests of the newly landed files, so producing it stays proportional to new data. |
 | `parser`, `policy` | the interpretation versions. A change to either that alters meaning starts a new chain. |
+| `from_time`, `through_time` | the earliest and the latest record time among the landed files this round consumed, as the runtime wrote them, in UTC. Absent when no record in the window carries a time. The `session` node carries the same pair as `from_time` and `through_time` in its attributes for the whole conversation so far, so its `from_time` is when the session began and its `through_time` is its last activity. |
 
 A header carries no wall-clock time. A round's bytes must be reproducible from its inputs, so the
 same landed range, the same previous digest and the same parser version yield the same digest.
-When a round was produced lives outside every digest, in `conversation.state`.
+When a round was produced lives outside every digest, in `conversation.state`. Record times are
+different: the runtime wrote them into the landed files, so they are evidence, and the two time
+fields above reproduce with the round.
 
 ### Entities
 

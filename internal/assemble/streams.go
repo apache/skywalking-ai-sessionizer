@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
@@ -89,6 +90,12 @@ func (b *builder) stage2Streams() {
 	if t := b.latestTitle(); t != "" {
 		a["title"] = t
 		a["title_from"] = model.ObservedReplayable
+	}
+	// When the session began and when it was last active, from the record
+	// times the runtime wrote. A reader learns both without opening a landed
+	// file, and because they are evidence they reproduce with the round.
+	if from, through, ok := b.timeRange(); ok {
+		a["from_time"], a["through_time"] = from, through
 	}
 	b.node(sessionflow.Node{
 		Entity: sessionflow.Entity{ID: sessionNode}, Kind: model.KindSession,
@@ -198,4 +205,27 @@ func (b *builder) mainStream() *streamInfo {
 		}
 	}
 	return nil
+}
+
+// timeRange is the earliest and the latest record time among the records
+// the assembly covers. Zero means the record carried no time and is skipped.
+func (b *builder) timeRange() (from, through string, ok bool) {
+	var lo, hi int64
+	for _, i := range b.canonical {
+		ts := b.ix.Entries[i].TS
+		if ts == 0 {
+			continue
+		}
+		if !ok || ts < lo {
+			lo = ts
+		}
+		if !ok || ts > hi {
+			hi = ts
+		}
+		ok = true
+	}
+	if !ok {
+		return "", "", false
+	}
+	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi), true
 }

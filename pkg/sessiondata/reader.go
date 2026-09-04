@@ -163,6 +163,12 @@ func (r *Reader) End() *End { return r.end }
 // show. The record's own fields are encoded before its parts, so the first
 // time field that appears before the parts is the record's own and never one
 // nested inside a part.
+// FormatTime writes a record time the one way a round or a wire attribute
+// writes it: UTC, RFC 3339, nanoseconds with trailing zeros dropped. The
+// same evidence then gives the same bytes whatever precision the runtime
+// used.
+func FormatTime(ns int64) string { return time.Unix(0, ns).UTC().Format(time.RFC3339Nano) }
+
 func LineTime(line []byte) (int64, bool) {
 	limit := bytes.Index(line, []byte(`"parts":`))
 	if limit < 0 {

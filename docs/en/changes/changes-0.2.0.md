@@ -20,7 +20,9 @@
   the format and its version, the file, its kind, its digest and its line count, and the session
   and sequence a round's reference resolves against. Each file is sent once; `push.state` records
   which. A request carries up to `batch_bytes`, 20 MiB by default, and a larger file goes alone.
-  The protobuf encoding is written in the project, so the module still has one dependency.
+  The protobuf encoding is written in the project, so the module still has one dependency. Each
+  record also carries `asz.from_time` and `asz.through_time`, the record time range of the file,
+  so a receiver can place a file in time without decoding it.
 
 ## Assembly
 
@@ -29,6 +31,11 @@
   until the round fits and leaves the rest of the evidence to the next round; `asz parse` and the
   refresh loop keep going until the chain reaches the index. Measured on the real corpus, the
   largest round was 17 MB and 8 of 589 were over 4 MiB before the budget.
+
+- A round's header carries `from_time` and `through_time`, the earliest and the latest record time
+  among the landed files it consumed, and the `session` node carries the same pair for the whole
+  conversation so far, which makes its `from_time` when the session began. Both are record times
+  the runtime wrote, so they reproduce with the round and sit inside its digest.
 
 ## Read
 

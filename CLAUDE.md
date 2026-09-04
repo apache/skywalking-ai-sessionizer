@@ -115,7 +115,9 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   A round covering one landed file may exceed the budget, as a landed file holding one oversize
   record may. `Round.More` says the chain has not reached the index yet.
 - **A round carries no wall-clock time**, so the same evidence reproduces the same bytes and digest.
-  Anything mutable or temporal lives in `conversation.state`, outside every digest.
+  Anything mutable or temporal lives in `conversation.state`, outside every digest. Record times
+  are evidence, not the clock: the header carries the window's first and last record time, and the
+  session node the conversation's, both inside the digest.
 - **Absence in a round means unchanged, never deleted.** Removal is an explicit tombstone, and a
   resolved reference is superseded with that state rather than dropped.
 - **Landed files plus the round chain are the whole conversation.** Nothing else has to travel with
