@@ -62,11 +62,17 @@ type Conversation struct {
 
 	Summary Summary `json:"summary"`
 
-	Rounds     []Round      `json:"rounds"`
-	Files      []File       `json:"files"`
-	Streams    []Stream     `json:"streams"`
-	Segments   []Segment    `json:"segments"`
-	Talks      []Node       `json:"talks"`
+	Rounds   []Round   `json:"rounds"`
+	Files    []File    `json:"files"`
+	Streams  []Stream  `json:"streams"`
+	Segments []Segment `json:"segments"`
+	Talks    []Node    `json:"talks"`
+	// Loose holds the runs and steps no talk contains, as trees from their
+	// highest such ancestor: a child's output the fold parented to the
+	// session because the child's stream opened no talk, for instance. It
+	// is empty for most conversations, and it exists so the document holds
+	// every step the fold holds.
+	Loose      []Node       `json:"loose"`
 	Relations  []Relation   `json:"relations"`
 	Unresolved []Unresolved `json:"unresolved"`
 }

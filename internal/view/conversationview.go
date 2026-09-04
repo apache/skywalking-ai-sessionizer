@@ -72,7 +72,7 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 			Kinds: o.kinds, RelationTypes: o.rels, Quality: o.quality,
 		},
 		Streams: o.streams, Segments: o.segments,
-		Rounds: []sessionview.Round{}, Files: []sessionview.File{}, Talks: []sessionview.Node{},
+		Rounds: []sessionview.Round{}, Files: []sessionview.File{}, Talks: []sessionview.Node{}, Loose: []sessionview.Node{},
 		Relations: []sessionview.Relation{}, Unresolved: []sessionview.Unresolved{},
 	}
 	if sn := c.View.Nodes[sessionflow.NodeID("session", c.Session)]; sn != nil {
@@ -93,9 +93,13 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	v.Summary.State, v.Summary.Problems = state, problems
 
 	talks := c.Talks()
+	loose := c.looseRoots()
 	var refs []*sessionflow.Ref
 	for _, t := range talks {
 		refs = append(refs, c.refsUnder(t)...)
+	}
+	for _, n := range loose {
+		refs = append(refs, c.refsUnder(n)...)
 	}
 	recs := c.records(refs)
 	rows := map[string]talkRow{}
@@ -120,6 +124,9 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 		}
 	}
 
+	for _, n := range loose {
+		v.Loose = append(v.Loose, c.step(n, 0, recs))
+	}
 	for _, r := range c.View.Relations {
 		v.Relations = append(v.Relations, sessionview.Relation{
 			ID: r.ID, Type: r.Type, From: r.From, To: r.To, Quality: r.Quality, Via: r.Via, Evidence: r.Evidence,
@@ -135,6 +142,39 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	v.Summary.Rounds, v.Summary.Unresolved = len(v.Rounds), len(o.open)
 	c.built = v
 	return v, nil
+}
+
+// looseRoots finds the runs and steps no talk contains, and returns the
+// highest such ancestor of each, in order, so the document can hold them
+// as trees. A step is contained by a talk when a talk is above it; one
+// whose ancestors are only structure, the session, a stream, an epoch or a
+// segment, is loose.
+func (c *Conversation) looseRoots() []*sessionflow.Node {
+	roots := map[string]*sessionflow.Node{}
+	for _, n := range c.View.Nodes {
+		if n.Kind != model.KindRun && !isStep(n.Kind) {
+			continue
+		}
+		top := n
+		covered := false
+		for cur := n; cur != nil; cur = c.View.Nodes[cur.Parent] {
+			if cur.Kind == model.KindTalk {
+				covered = true
+				break
+			}
+			if cur.Kind == model.KindRun || isStep(cur.Kind) {
+				top = cur
+			}
+		}
+		if !covered {
+			roots[top.ID] = top
+		}
+	}
+	var out []*sessionflow.Node
+	for _, n := range roots {
+		out = append(out, n)
+	}
+	return sessionflow.InOrder(out)
 }
 
 // sessions lists the sessions the fold holds, the conversation's own first.

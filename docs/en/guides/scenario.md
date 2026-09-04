@@ -147,6 +147,7 @@ properties:                               # all on unless set false
   cross_format: true
   records_match: true
   push_follows_the_wire: true
+  view_covers_the_session: true
 parse:
   max_round_bytes: 0                      # a parse setting, when the scenario needs one
 push:
@@ -163,6 +164,14 @@ nothing, every source line becomes one landed record, and discovery passes over 
 writer plants beside the session. Across formats, the folds must agree, and so must the landed
 records themselves, field by field: the runtime's adapter and the sd writer must land the same
 evidence from the same scenario, which is what makes a scenario a conformance test for an adapter.
+
+The document is checked too: at the end of every scenario, `view_covers_the_session` holds the
+`asz.view` document to the whole session: every round, verified; every landed file with its digest
+as on disk; every talk, run and step of the fold in a tree; the session's own range; and a verified
+state. A scenario with checkpoints is the multi-round case: `three-rounds` lands and parses in
+three stages, from the start to the first checkpoint, from there to the second, and from there to
+the end, so three rounds sit over landed files cut at each stage, and the final document must
+cover the session as one parse would.
 
 The push is checked too. Every scenario, in both formats, is pushed to a receiver in the test,
 one file per request, and every request is compared with the tables of

@@ -657,6 +657,45 @@ talks:
           dir: out
           quality: strong_inference
           via: inside the window of the talk that delegated it
+loose:
+    - id: boundary/1/15
+      kind: epoch.boundary
+      parent: epoch/main/s8-boundary
+      stream: main
+      at: 1767225611100
+      ref:
+        seq: 1
+        row: 15
+      text: '{"compactMetadata":{"preservedMessages":{"allUuids":["s7-synthetic"]},"trigger":"auto"},"logicalParentUuid":"s7-synthetic","subtype":"compact_boundary","type":"system"}'
+      state: available
+      bytes: 168
+      flags:
+        - context_reset
+      edges:
+        - type: summarizes
+          other: summary/1/16
+          dir: in
+          quality: exact_unique
+          via: containment parent
+    - id: summary/1/16
+      kind: epoch.summary
+      parent: epoch/main/s8-boundary
+      stream: main
+      at: 1767225610700
+      ref:
+        seq: 1
+        row: 16
+      text: 'Summary: the build was run and checked.'
+      state: available
+      bytes: 39
+      flags:
+        - reset_summary
+      edges:
+        - type: summarizes
+          other: boundary/1/15
+          dir: out
+          quality: exact_unique
+          via: containment parent
 relations:
     - id: rel/ends_with/stream_a0a10ef0666c4dc7e/output_a0a10ef0666c4dc7e
       type: ends_with

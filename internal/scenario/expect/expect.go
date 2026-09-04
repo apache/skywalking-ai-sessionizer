@@ -40,6 +40,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // File is an expectation file: one block per checkpoint, "final" for the
@@ -79,6 +80,7 @@ type Properties struct {
 	DiscoveryIgnoresNoise *bool `yaml:"discovery_ignores_noise"`
 	RepackKeepsStructure  *bool `yaml:"repack_keeps_structure"`
 	PushFollowsTheWire    *bool `yaml:"push_follows_the_wire"`
+	ViewCoversTheSession  *bool `yaml:"view_covers_the_session"`
 }
 
 // On reports whether a property is enabled.
@@ -825,4 +827,116 @@ func RecordsWellFormed(root, session string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// ViewCoversTheSession checks the asz.view document holds the whole
+// session: every round of the chain, verified; every landed file, with its
+// digest as on disk; every talk, run and step of the fold in a tree, under
+// a talk or under loose; the session's own range; and a verified state.
+func ViewCoversTheSession(root, session string) ([]string, error) {
+	srv := view.New(storage.NewZone(root), nil)
+	c, err := srv.Load(session)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := c.Build()
+	if err != nil {
+		return nil, err
+	}
+	v := c.View
+	var out []string
+	bad := func(format string, a ...any) {
+		out = append(out, "view_covers_the_session: "+fmt.Sprintf(format, a...))
+	}
+	if doc.Summary.State != sessionview.StateVerified {
+		bad("state is %s: %v", doc.Summary.State, doc.Summary.Problems)
+	}
+	// Every round, verified, and the head.
+	chain := sessionflow.OpenChain(root, session)
+	files, err := chain.List()
+	if err != nil {
+		return nil, err
+	}
+	if len(doc.Rounds) != len(files) || doc.Head.Round != v.Round || doc.Head.Digest != v.Digest {
+		bad("%d rounds in the document, %d on disk; head %d/%s against %d/%s", len(doc.Rounds), len(files), doc.Head.Round, firstN(doc.Head.Digest, 12), v.Round, firstN(v.Digest, 12))
+	}
+	for _, r := range doc.Rounds {
+		if !r.Verified {
+			bad("round %d is not verified", r.Round)
+		}
+	}
+	// Every landed file, as on disk.
+	landed, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return nil, err
+	}
+	byFile := map[string]sessionview.File{}
+	for _, f := range doc.Files {
+		byFile[f.File] = f
+	}
+	for _, lf := range landed {
+		rel, _ := filepath.Rel(root, lf.Path)
+		rel = filepath.ToSlash(rel)
+		f, ok := byFile[rel]
+		if !ok {
+			bad("landed file %s is not in the document", rel)
+			continue
+		}
+		d, err := storage.FileDigest(lf.Path)
+		if err != nil {
+			return nil, err
+		}
+		if f.Digest != d || f.Seq == nil || *f.Seq != lf.Seq {
+			bad("landed file %s: digest or sequence differ from disk", rel)
+		}
+	}
+	if len(doc.Files) != len(landed)+len(files) {
+		bad("%d files in the document, %d landed and %d rounds on disk", len(doc.Files), len(landed), len(files))
+	}
+	// Every talk, run and step, in a tree.
+	inTrees := map[string]bool{}
+	var walk func(n *sessionview.Node)
+	walk = func(n *sessionview.Node) {
+		inTrees[n.ID] = true
+		for i := range n.Children {
+			walk(&n.Children[i])
+		}
+	}
+	for i := range doc.Talks {
+		walk(&doc.Talks[i])
+	}
+	for i := range doc.Loose {
+		walk(&doc.Loose[i])
+	}
+	for id, n := range v.Nodes {
+		switch n.Kind {
+		case model.KindConversation, model.KindSession, model.KindStream, model.KindEpoch, model.KindSegment:
+			continue
+		}
+		if !inTrees[id] {
+			bad("%s (%s) is in the fold but in no tree of the document", id, n.Kind)
+		}
+	}
+	if len(doc.Talks) != len(v.NodesByKind(model.KindTalk)) || doc.Summary.Talks != len(doc.Talks) {
+		bad("%d talks in the document, %d in the fold, summary says %d", len(doc.Talks), len(v.NodesByKind(model.KindTalk)), doc.Summary.Talks)
+	}
+	// The session's own range.
+	if sn := v.Nodes[sessionflow.NodeID("session", session)]; sn != nil {
+		var attrs struct {
+			From    string `json:"from_time"`
+			Through string `json:"through_time"`
+		}
+		_ = json.Unmarshal(sn.Attrs, &attrs)
+		if doc.Summary.From != stamp(attrs.From).UnixMilli() || doc.Summary.To != stamp(attrs.Through).UnixMilli() {
+			bad("summary range %d..%d, the session node says %s..%s", doc.Summary.From, doc.Summary.To, attrs.From, attrs.Through)
+		}
+	}
+	return out, nil
+}
+
+func firstN(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }

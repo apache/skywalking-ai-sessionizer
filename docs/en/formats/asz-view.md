@@ -76,6 +76,7 @@ fails when the committed file no longer matches what the code produces.
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`; several means it did not choose, and neither does a view |
 | `segments` | one per activity window: `id`, `state`, `committable`, `talks`, `from`, `to` |
 | `talks` | one tree per talk, in time order. See the node below |
+| `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold, so the document covers the whole session |
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence` |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
 
@@ -116,11 +117,15 @@ the fold and the records say. Where the fold says `unavailable`, the document sa
 ## Rendering the whole conversation
 
 The document is complete: a viewer draws every view of a conversation from it and fetches
-nothing else. This is how each view reads it.
+nothing else, however many rounds the session was parsed in. A session landed and parsed in three
+stages has three rounds and its landed files cut at each stage, and the document built from the
+head holds every round, every file, and every talk, run and step, exactly as one built from a
+single parse would; the scenario `three-rounds` checks that at each stage, and every scenario
+checks the property `view_covers_the_session` at its end. This is how each view reads it.
 
 | View | Read |
 | --- | --- |
-| **Transcript** | `talks`, in order. Each talk's `label` is the person's input and its `reply` the last assistant message; its `children` are the runs, a run's children the steps, and a call's children what it produced: thinking, messages, tools. `text` is what to show for a step, `name` and `result` for a tool, `usage` on a call. |
+| **Transcript** | `talks`, in order. Each talk's `label` is the person's input and its `reply` the last assistant message; its `children` are the runs, a run's children the steps, and a call's children what it produced: thinking, messages, tools. `text` is what to show for a step, `name` and `result` for a tool, `usage` on a call. `loose` holds whatever no talk contains, and is usually empty. |
 | **Flow timeline** | every node of every tree by `at`, with `kind` and `stream`; a node with `at` of `0` was never observed at a time and is placed by its position. |
 | **Cross-stream flow** | `edges` on a node, and `relations` as the whole list: `starts` from an agent call to the child's `stream`, `reports` from the notification that resumed the parent, `ends_with` from a stream to the child's output, `follows` between epochs across a reset, `summarizes` from a summary to its boundary, `in_segment` from a talk to its window. Containment never crosses a stream; a child's work is under the child. |
 | **Streams and segments** | `streams` with `role`, `label`, `parent` and `opened_by`, the step that started each; `segments` with the span of the talks placed in them. |
