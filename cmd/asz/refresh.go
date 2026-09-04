@@ -25,7 +25,6 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
-	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 )
@@ -42,6 +41,7 @@ type refresher struct {
 	col      *claudecode.Collector
 	match    func(claudecode.Session) bool
 	interval time.Duration
+	maxRound int64
 
 	// base carries the status fields that do not change between passes.
 	base view.Status
@@ -54,7 +54,7 @@ type refresher struct {
 
 // newRefresher wires the local adapter to a server, or returns nil when the
 // adapter's source is not on this machine.
-func newRefresher(srv *view.Server, zone *storage.Zone, ad config.Adapter, once bool) (*refresher, error) {
+func newRefresher(srv *view.Server, zone *storage.Zone, ad config.Adapter, maxRound int64, once bool) (*refresher, error) {
 	src, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return nil, err
@@ -76,6 +76,7 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ad config.Adapter, once 
 		col:      claudecode.New(src, zone, ad.Collector.MaxDeltaBytes),
 		match:    claudecode.NewMatcher(ad.Include, ad.Exclude).Match,
 		interval: ad.Collector.Interval,
+		maxRound: maxRound,
 		base:     view.Status{Mode: mode, Adapter: ad.Name, Source: src},
 		full:     true,
 	}
@@ -114,13 +115,14 @@ func (r *refresher) pass() {
 	}
 	rounds := 0
 	for _, id := range sessions {
-		res, perr := parse.Session(r.zone, parse.Options{Conversation: id, Session: id})
+		written := 0
+		res, perr := parseToIndex(r.zone, id, r.maxRound, &written)
 		if perr != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", id, perr))
 			continue
 		}
-		if res.Changed() {
-			rounds++
+		if res.Changed() || written > 0 {
+			rounds += written
 			// The server caches a folded conversation. A new round has to
 			// reach the next reader.
 			r.srv.Forget(id)

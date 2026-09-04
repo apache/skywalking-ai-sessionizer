@@ -18,7 +18,10 @@
 package otlp_test
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -187,14 +190,15 @@ func (r *receiver) handler() http.Handler {
 	})
 }
 
-// zoneWithOneSession builds a root with one landed file of two records and
-// one round of three frames, the smallest shape that exercises both formats.
+// zoneWithOneSession builds a root with one landed file of two records, a
+// child's landed file and one round of three frames, the smallest shape that
+// exercises both formats. It returns the three files' bytes, in push order.
 func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 	t.Helper()
 	z := storage.NewZone(t.TempDir())
 	dir := z.StreamDir("sess1", "main")
 	path := filepath.Join(dir, storage.LandedName("transcript", storage.Stamp(time.Unix(0, 0)), 1))
-	var lines []string
+	var files []string
 	err := storage.WriteAtomic(path, storage.PermLanded, func(w io.Writer) error {
 		hdr := &sessiondata.Header{Seq: 1, At: "2026-09-04T00:00:00Z", Kind: sessiondata.KindTranscript,
 			Adapter: "test/0", Dialect: "test/1", Src: "-Users-me-proj/sess1.jsonl", Session: "sess1", Stream: "main"}
@@ -214,7 +218,7 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	lines = append(lines, strings.Split(strings.TrimRight(string(data), "\n"), "\n")...)
+	files = append(files, string(data))
 
 	// A child agent that ran in another directory: its file names that
 	// directory, but it belongs to the session's project all the same.
@@ -235,7 +239,7 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(child)
-	lines = append(lines, strings.Split(strings.TrimRight(string(data), "\n"), "\n")...)
+	files = append(files, string(data))
 
 	round := filepath.Join(z.Root(), "_conversations", "sess1", "rounds", "r000001-abcdefabcdef.sf")
 	roundText := "{\"t\":\"header\",\"schema\":\"sf/1\",\"conversation\":\"sess1\",\"session\":\"sess1\",\"round\":1}\n" +
@@ -247,12 +251,12 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 	if err := os.WriteFile(round, []byte(roundText), 0o444); err != nil {
 		t.Fatal(err)
 	}
-	lines = append(lines, strings.Split(strings.TrimRight(roundText, "\n"), "\n")...)
-	return z, lines
+	files = append(files, roundText)
+	return z, files
 }
 
-func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
-	z, lines := zoneWithOneSession(t)
+func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
+	z, files := zoneWithOneSession(t)
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
@@ -262,8 +266,8 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.Errors) != 0 || st.Files != 3 || st.Records != len(lines) {
-		t.Fatalf("first pass: files=%d records=%d errors=%v, want 3 files and %d records", st.Files, st.Records, st.Errors, len(lines))
+	if len(st.Errors) != 0 || st.Files != len(files) || st.Requests != 1 {
+		t.Fatalf("first pass: files=%d requests=%d errors=%v, want %d files in one request", st.Files, st.Requests, st.Errors, len(files))
 	}
 
 	var all []decodedLog
@@ -273,13 +277,21 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 		resources = append(resources, res...)
 		all = append(all, logs...)
 	}
-	if len(all) != len(lines) {
-		t.Fatalf("receiver decoded %d records, want %d", len(all), len(lines))
+	if len(all) != len(files) {
+		t.Fatalf("receiver decoded %d records, want one per file, %d", len(all), len(files))
 	}
-	// Every line arrives as a body, in order, unchanged.
-	for i, l := range lines {
-		if all[i].body != l {
-			t.Fatalf("record %d body differs:\n got %s\nwant %s", i, all[i].body, l)
+	// Every file arrives whole as one body, in order, byte for byte, and the
+	// digest on the record is the digest of that body.
+	for i, f := range files {
+		if all[i].body != f {
+			t.Fatalf("record %d body differs:\n got %s\nwant %s", i, all[i].body, f)
+		}
+		sum := sha256.Sum256([]byte(f))
+		if all[i].attrs["asz.file.digest"] != hex.EncodeToString(sum[:]) {
+			t.Fatalf("record %d digest %q is not the digest of its body", i, all[i].attrs["asz.file.digest"])
+		}
+		if all[i].attrs["asz.lines"] != fmt.Sprintf("int:%d", strings.Count(f, "\n")) {
+			t.Fatalf("record %d lines = %q, want the line count of the body", i, all[i].attrs["asz.lines"])
 		}
 	}
 	// The sender is named on the resource, the service comes from the project
@@ -292,52 +304,36 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "-Users-me-proj" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI-AGENT" {
 		t.Fatalf("resource attributes: %v", res)
 	}
-	// Format, version, file kind and line kinds ride on each record.
+	// A landed file says what it is, and where a round's {seq, row} lands:
+	// the session and the sequence name the file, and a row is a line of it.
 	h := all[0].attrs
-	if h["asz.format"] != "sd" || h["asz.format.version"] != "sd/1" || h["asz.file.kind"] != "transcript" || h["asz.line.kind"] != "header" || h["asz.line"] != "int:0" {
-		t.Fatalf("landed header attributes: %v", h)
+	if h["asz.format"] != "sd" || h["asz.format.version"] != "sd/1" || h["asz.file.kind"] != "transcript" || h["asz.file"] == "" ||
+		h["asz.session"] != "sess1" || h["asz.seq"] != "int:1" || h["asz.stream"] != "main" || h["asz.run"] != "" {
+		t.Fatalf("landed file attributes: %v", h)
 	}
-	if all[1].attrs["asz.line.kind"] != "record" || all[3].attrs["asz.line.kind"] != "end" {
-		t.Fatalf("landed line kinds: %v / %v", all[1].attrs, all[3].attrs)
+	if c := all[1].attrs; c["asz.seq"] != "int:2" || c["asz.stream"] != "a1" || c["asz.session"] != "sess1" {
+		t.Fatalf("child file attributes: %v", c)
 	}
-	// What resolves a round's reference rides on every record line: the
-	// session, the sequence, the line. What is constant for the file is on
-	// the header line only, and the digest is on the header and the closing line.
-	if r := all[1].attrs; r["asz.session"] != "sess1" || r["asz.seq"] != "int:1" || r["asz.line"] != "int:1" || r["asz.file"] == "" {
-		t.Fatalf("record line lacks its address: %v", r)
+	if _, ok := h["asz.line"]; ok {
+		t.Fatalf("a whole file carries no line address: %v", h)
 	}
-	if r := all[1].attrs; r["asz.file.digest"] != "" || r["asz.format.version"] != "" || r["asz.file.kind"] != "" || r["asz.stream"] != "" {
-		t.Fatalf("record line repeats per-file attributes: %v", r)
+	// A landed file is stamped with the time it was written.
+	if all[0].time != uint64(time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC).UnixNano()) {
+		t.Fatalf("landed file time = %d", all[0].time)
 	}
-	if h["asz.file.digest"] == "" || h["asz.stream"] != "main" || all[3].attrs["asz.file.digest"] != h["asz.file.digest"] {
-		t.Fatalf("digest and stream must be on the header and the digest on the closing line: %v / %v", h, all[3].attrs)
-	}
-	// A record with a time is stamped with it; one without gets the file's time.
-	if all[1].time != uint64(time.Date(2026, 9, 4, 1, 0, 0, 0, time.UTC).UnixNano()) {
-		t.Fatalf("record time = %d", all[1].time)
-	}
-	if all[2].time != uint64(time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC).UnixNano()) {
-		t.Fatalf("record without a time must carry the file's time, got %d", all[2].time)
-	}
-	r := all[7].attrs
-	if r["asz.format"] != "sf" || r["asz.format.version"] != "sf/1" || r["asz.file.kind"] != "round" || r["asz.line.kind"] != "header" || r["asz.round"] != "int:1" || r["asz.conversation"] != "sess1" || r["asz.session"] != "sess1" {
-		t.Fatalf("round header attributes: %v", r)
-	}
-	if n := all[8].attrs; n["asz.line.kind"] != "node" || n["asz.conversation"] != "sess1" || n["asz.round"] != "int:1" || n["asz.format.version"] != "" {
-		t.Fatalf("round node line: %v", n)
-	}
-	if c := all[9].attrs; c["asz.line.kind"] != "commit" || c["asz.file.digest"] != r["asz.file.digest"] {
-		t.Fatalf("round commit line must carry the digest: %v", c)
+	r := all[2].attrs
+	if r["asz.format"] != "sf" || r["asz.format.version"] != "sf/1" || r["asz.file.kind"] != "round" || r["asz.round"] != "int:1" || r["asz.conversation"] != "sess1" || r["asz.session"] != "sess1" || r["asz.seq"] != "" {
+		t.Fatalf("round attributes: %v", r)
 	}
 
-	// A second pass sends nothing: both files are write-once and recorded.
+	// A second pass sends nothing: every file is write-once and recorded.
 	before := len(rcv.reqs)
 	st, err = p.Pass()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Records != 0 || len(rcv.reqs) != before {
-		t.Fatalf("second pass re-sent %d records", st.Records)
+	if st.Files != 0 || len(rcv.reqs) != before {
+		t.Fatalf("second pass re-sent %d files", st.Files)
 	}
 	if _, err := os.Stat(filepath.Join(z.Root(), "push.state")); err != nil {
 		t.Fatal("push.state was not written")
@@ -345,7 +341,7 @@ func TestPushSendsEveryLineOnceWithItsAttributes(t *testing.T) {
 }
 
 func TestPushLeavesFilesForTheNextPassWhenTheReceiverFails(t *testing.T) {
-	z, lines := zoneWithOneSession(t)
+	z, files := zoneWithOneSession(t)
 	rcv := &receiver{fail: true}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
@@ -365,13 +361,16 @@ func TestPushLeavesFilesForTheNextPassWhenTheReceiverFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.Errors) != 0 || st.Records != len(lines) {
-		t.Fatalf("the next pass must send everything: records=%d errors=%v", st.Records, st.Errors)
+	if len(st.Errors) != 0 || st.Files != len(files) {
+		t.Fatalf("the next pass must send everything: files=%d errors=%v", st.Files, st.Errors)
 	}
 }
 
-func TestPushSplitsLargeBatches(t *testing.T) {
-	z, lines := zoneWithOneSession(t)
+// A file larger than the budget travels alone, and the files around it are
+// batched as before: with a budget smaller than any file, every file is its
+// own request.
+func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
+	z, files := zoneWithOneSession(t)
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
@@ -380,11 +379,14 @@ func TestPushSplitsLargeBatches(t *testing.T) {
 	if err != nil || len(st.Errors) != 0 {
 		t.Fatal(err, st.Errors)
 	}
-	if st.Requests < len(lines) {
-		t.Fatalf("a one-byte budget must send a request per line: %d requests for %d lines", st.Requests, len(lines))
+	if st.Requests != len(files) || st.Files != len(files) {
+		t.Fatalf("a one-byte budget must send a request per file: %d requests for %d files, %d marked", st.Requests, len(files), st.Files)
 	}
-	if st.Files != 3 {
-		t.Fatalf("files marked pushed = %d, want 3", st.Files)
+	for i, req := range rcv.reqs {
+		_, logs := parseRequest(t, req)
+		if len(logs) != 1 || logs[0].body != files[i] {
+			t.Fatalf("request %d must carry file %d alone and whole", i, i)
+		}
 	}
 }
 

@@ -19,7 +19,7 @@ adapters:
     collector:
       mode: watch
       interval: 5s
-      max_delta_bytes: 4194304
+      max_delta_bytes: 2097152
 ```
 
 ## storage
@@ -66,7 +66,18 @@ are the tool's, not yours, which is why they are excluded by default.
 | --- | --- | --- |
 | `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass and exits, which is the backfill path over history that already exists. `-once` on the command line overrides the file. |
 | `interval` | `5s` | How long the collector sleeps between passes in watch mode. `asz view` refreshes on the same interval. |
-| `max_delta_bytes` | `4194304` | The largest `.sd` file the collector writes, 4 MiB. A large catch-up is split into several files, and a single record larger than this is landed whole. It is also the largest unit a receiver has to accept in one message when landed files travel, which is why the default fits the 4 MiB limit an OpenTelemetry Collector applies out of the box. A change applies to new files only; `asz repack` brings an existing root under a new budget. |
+| `max_delta_bytes` | `2097152` | The largest `.sd` file the collector writes, 2 MiB. A large catch-up is split into several files, and a single record larger than this is landed whole. A file travels whole as one log record, so this is also the largest record a receiver has to accept. A change applies to new files only; `asz repack` brings an existing root under a new budget. |
+
+## parse
+
+```yaml
+parse:
+  max_round_bytes: 2097152
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_round_bytes` | `2097152` | The largest `.sf` round file the parser writes, 2 MiB, the same budget as a landed file. A round travels whole as one log record. The parser narrows a round's input window until the round fits and leaves the rest of the evidence to the next round, so one parse pass may write several rounds. A round covering a single landed file is published whole even when larger. |
 
 ## export
 
@@ -77,7 +88,7 @@ export:
     service_name: ""
     instance_id: ""
     layer: AI-AGENT
-    batch_bytes: 1048576
+    batch_bytes: 20971520
     interval: 5s
 ```
 
@@ -88,7 +99,7 @@ export:
 | `instance_id` | empty | Sent as `service.instance.id`, the identity of this sender. Empty means a new UUID each time `asz push` starts. |
 | `layer` | `AI-AGENT` | Sent as `service.layer`, the layer the receiver places the service in. |
 | `headers` | none | Headers added to every request, for example `Authorization`. |
-| `batch_bytes` | `1048576` | How much body text one request carries at most, 1 MiB. |
+| `batch_bytes` | `20971520` | How many file bytes one request carries at most, 20 MiB. A file larger than this is sent alone, in a request of its own. |
 | `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |
 
 See [Export over OpenTelemetry](export-otlp.md) for what is sent.

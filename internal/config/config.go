@@ -31,7 +31,18 @@ import (
 type Config struct {
 	Storage  Storage   `yaml:"storage"`
 	Adapters []Adapter `yaml:"adapters"`
+	Parse    Parse     `yaml:"parse"`
 	Export   Export    `yaml:"export"`
+}
+
+// Parse configures assembly into rounds.
+type Parse struct {
+	// MaxRoundBytes caps a round file. A round travels whole as one log
+	// record, so it is cut at the same budget as a landed file: the parser
+	// narrows a round's input window until the round fits, and the rest of
+	// the evidence goes to the next round. A round covering a single landed
+	// file is published whole even when larger. The default is 2 MiB.
+	MaxRoundBytes int64 `yaml:"max_round_bytes"`
 }
 
 // Export configures where collected data is sent.
@@ -40,7 +51,7 @@ type Export struct {
 }
 
 // OTLP configures the OpenTelemetry logs push: every landed file and every
-// round, one log record per line, over OTLP/HTTP.
+// round, one log record per file, over OTLP/HTTP.
 type OTLP struct {
 	// Endpoint is the receiver's base URL; the logs path is appended. Empty
 	// means asz push has nowhere to send and refuses to run.
@@ -56,7 +67,8 @@ type OTLP struct {
 	Layer string `yaml:"layer"`
 	// Headers are added to every request, for example an authorization token.
 	Headers map[string]string `yaml:"headers"`
-	// BatchBytes is how much body text one request carries at most.
+	// BatchBytes is how many file bytes one request carries at most. A file
+	// larger than this is sent alone.
 	BatchBytes int64 `yaml:"batch_bytes"`
 	// Interval is how long asz push sleeps between passes in watch mode.
 	Interval time.Duration `yaml:"interval"`
@@ -102,10 +114,10 @@ type Collector struct {
 	Interval time.Duration `yaml:"interval"`
 
 	// MaxDeltaBytes caps how much of a source is landed in a single file, so a
-	// large catch-up is split rather than producing one enormous delta. It is
-	// also the largest unit a receiver has to accept in one message when
-	// landed files travel, which is why the default fits the 4 MiB limit an
-	// OpenTelemetry Collector applies out of the box.
+	// large catch-up is split rather than producing one enormous delta. A
+	// file travels whole as one log record, so this is also the largest
+	// record a receiver has to accept, apart from a single source record
+	// larger than the budget, which is landed whole. The default is 2 MiB.
 	MaxDeltaBytes int64 `yaml:"max_delta_bytes"`
 }
 
@@ -128,12 +140,13 @@ func Default() *Config {
 			Collector: Collector{
 				Mode:          ModeWatch,
 				Interval:      5 * time.Second,
-				MaxDeltaBytes: 4 << 20,
+				MaxDeltaBytes: 2 << 20,
 			},
 		}},
+		Parse: Parse{MaxRoundBytes: 2 << 20},
 		Export: Export{OTLP: OTLP{
 			Layer:      "AI-AGENT",
-			BatchBytes: 1 << 20,
+			BatchBytes: 20 << 20,
 			Interval:   5 * time.Second,
 		}},
 	}
@@ -164,6 +177,9 @@ func Load(path string) (*Config, error) {
 		for i := range cfg.Adapters {
 			cfg.Adapters[i].Collector.applyDefaults()
 		}
+	}
+	if loaded.Parse.MaxRoundBytes > 0 {
+		cfg.Parse.MaxRoundBytes = loaded.Parse.MaxRoundBytes
 	}
 	o := &loaded.Export.OTLP
 	if o.Endpoint != "" {
@@ -198,7 +214,7 @@ func (c *Collector) applyDefaults() {
 		c.Interval = 5 * time.Second
 	}
 	if c.MaxDeltaBytes <= 0 {
-		c.MaxDeltaBytes = 4 << 20
+		c.MaxDeltaBytes = 2 << 20
 	}
 }
 

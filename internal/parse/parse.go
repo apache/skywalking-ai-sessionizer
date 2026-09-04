@@ -67,11 +67,24 @@ func policyFor(idle time.Duration) string {
 	return fmt.Sprintf("%s+idle=%s", policyBase, idle)
 }
 
+// DefaultMaxRoundBytes bounds a round file. A round travels whole as one log
+// record when a root is exported, so it is cut at the same budget as a landed
+// file. A round's size follows its input window, so the parser narrows the
+// window until the round fits and leaves the rest of the evidence to the next
+// round.
+const DefaultMaxRoundBytes = 2 << 20
+
 // Options configures one parse round.
 type Options struct {
 	Conversation string
 	Session      string
 	IdleGap      time.Duration
+
+	// MaxRoundBytes is the largest round file to publish. Zero means
+	// DefaultMaxRoundBytes. A round covering a single landed file is
+	// published whole even when it is larger, as a single source record
+	// larger than the landing budget is landed whole.
+	MaxRoundBytes int64
 
 	// Now supplies the clock for chain state. Rounds themselves carry no time,
 	// so this never reaches a digest.
@@ -102,6 +115,11 @@ type Round struct {
 
 	FromSeq    uint64
 	ThroughSeq uint64
+
+	// More reports that the round was cut at the byte budget and evidence
+	// past ThroughSeq is indexed already. A caller that wants the chain to
+	// reach the index calls Session again until More is false.
+	More bool
 
 	Nodes      int
 	Relations  int
@@ -203,67 +221,89 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			view.ThroughSeq, through)
 	}
 
-	res, err := assemble.Session(ix, assemble.Options{
-		Conversation: opt.Conversation,
-		Session:      opt.Session,
-		IdleGap:      opt.IdleGap,
-		ThroughSeq:   through,
-	})
-	if err != nil {
-		return nil, err
+	budget := opt.MaxRoundBytes
+	if budget <= 0 {
+		budget = DefaultMaxRoundBytes
 	}
-	out.Stats = res.Stats
-
-	d := diff(view, res)
-
-	// A round is written when EVIDENCE advanced, not only when the structure
-	// changed. Evidence that produced no new entity - a replayed block, a record
-	// type nothing reads - still has to move the chain's watermark, or the next
-	// round re-reads it forever and "no round" comes to mean two different
-	// things: nothing new arrived, and nothing new mattered.
-	if d.empty() && through <= view.ThroughSeq {
-		out.ThroughSeq = view.ThroughSeq
-		return out, nil
-	}
-
+	indexed := through
 	round := view.Round + 1
-	// The input digest chains from the LAST ROUND's own header, not from the
-	// state file. State is a cache and may be stale or absent after a crash;
-	// chaining from it would break the link binding each round to the evidence
-	// before it.
-	inputDigest, err := inputDigestFor(z, opt.Session, view.InputDigest, view.ThroughSeq, through)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		d           *delta
+		data        []byte
+		digest      string
+		inputDigest string
+	)
+	for {
+		res, err := assemble.Session(ix, assemble.Options{
+			Conversation: opt.Conversation,
+			Session:      opt.Session,
+			IdleGap:      opt.IdleGap,
+			ThroughSeq:   through,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out.Stats = res.Stats
+		d = diff(view, res)
 
-	w, err := sessionflow.NewWriter(sessionflow.Header{
-		Conversation: opt.Conversation, Session: opt.Session,
-		Round: round, Previous: view.Digest,
-		FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
-		InputDigest: inputDigest, Parser: Parser, Policy: policy,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, n := range d.nodes {
-		if err := w.Node(n); err != nil {
+		// A round is written when EVIDENCE advanced, not only when the
+		// structure changed. Evidence that produced no new entity - a replayed
+		// block, a record type nothing reads - still has to move the chain's
+		// watermark, or the next round re-reads it forever and "no round" comes
+		// to mean two different things: nothing new arrived, and nothing new
+		// mattered.
+		if d.empty() && through <= view.ThroughSeq {
+			out.ThroughSeq = view.ThroughSeq
+			return out, nil
+		}
+
+		// The input digest chains from the LAST ROUND's own header, not from
+		// the state file. State is a cache and may be stale or absent after a
+		// crash; chaining from it would break the link binding each round to
+		// the evidence before it.
+		inputDigest, err = inputDigestFor(z, opt.Session, view.InputDigest, view.ThroughSeq, through)
+		if err != nil {
 			return nil, err
 		}
-	}
-	for _, r := range d.relations {
-		if err := w.Relation(r); err != nil {
+		w, err := sessionflow.NewWriter(sessionflow.Header{
+			Conversation: opt.Conversation, Session: opt.Session,
+			Round: round, Previous: view.Digest,
+			FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
+			InputDigest: inputDigest, Parser: Parser, Policy: policy,
+		})
+		if err != nil {
 			return nil, err
 		}
-	}
-	for _, u := range d.unresolved {
-		if err := w.Unresolved(u); err != nil {
+		for _, n := range d.nodes {
+			if err := w.Node(n); err != nil {
+				return nil, err
+			}
+		}
+		for _, r := range d.relations {
+			if err := w.Relation(r); err != nil {
+				return nil, err
+			}
+		}
+		for _, u := range d.unresolved {
+			if err := w.Unresolved(u); err != nil {
+				return nil, err
+			}
+		}
+		data, digest, err = w.Close()
+		if err != nil {
 			return nil, err
 		}
+		// A round over the budget is built again over a narrower window,
+		// halved each time, until it fits or covers a single landed file.
+		// Nothing is lost: the evidence past the window is still indexed and
+		// the next round starts where this one stops.
+		if int64(len(data)) <= budget || through <= out.FromSeq {
+			break
+		}
+		through = out.FromSeq + (through-out.FromSeq)/2
 	}
-	data, digest, err := w.Close()
-	if err != nil {
-		return nil, err
-	}
+	out.ThroughSeq = through
+	out.More = through < indexed
 	path, err := chain.Publish(round, digest, data)
 	if err != nil {
 		return nil, err

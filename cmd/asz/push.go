@@ -62,8 +62,8 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("[%s] files=%d records=%d bytes=%s requests=%d errors=%d (%s)\n",
-			time.Now().Format("15:04:05"), st.Files, st.Records, humanBytes(st.Bytes), st.Requests,
+		fmt.Printf("[%s] files=%d bytes=%s requests=%d errors=%d (%s)\n",
+			time.Now().Format("15:04:05"), st.Files, humanBytes(st.Bytes), st.Requests,
 			len(st.Errors), time.Since(start).Round(time.Millisecond))
 		for _, e := range st.Errors {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", e)

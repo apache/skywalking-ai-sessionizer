@@ -54,7 +54,7 @@ so a crash between writing a file and saving state cannot reissue a number.
 A file lands before its cursor is committed. A crash between the two lands the same records twice
 in the next pass, and assembly removes the duplicate. The reverse order would lose data.
 
-A file is cut once. The collector cuts at `max_delta_bytes`, 4 MiB by default, and a round then
+A file is cut once. The collector cuts at `max_delta_bytes`, 2 MiB by default, and a round then
 addresses every record by file and line and binds itself to the file digests, so re-cutting a file
 that a round references would break every reference. A change of budget applies to new files
 only. To bring an existing root under a new budget, `asz repack DEST` re-cuts every file into a

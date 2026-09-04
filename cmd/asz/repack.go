@@ -87,5 +87,5 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 	}
 	// The chains are built on the new files: their old references named
 	// positions that no longer exist.
-	return parseZone(dstRoot, want)
+	return parseZone(dstRoot, want, cfg.Parse.MaxRoundBytes)
 }

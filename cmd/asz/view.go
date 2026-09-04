@@ -54,7 +54,7 @@ func cmdView(cfg *config.Config, ad config.Adapter, once bool) error {
 		if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
 			return err
 		}
-		if ref, err = newRefresher(srv, zone, ad, once); err != nil {
+		if ref, err = newRefresher(srv, zone, ad, cfg.Parse.MaxRoundBytes, once); err != nil {
 			return err
 		}
 	}

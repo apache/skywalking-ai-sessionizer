@@ -19,7 +19,10 @@ package otlp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,10 +39,15 @@ import (
 
 // Pusher sends every file in a storage root that has not been sent yet.
 //
-// A file is sent as one log record per line, header and closing line
-// included, so a receiver can write the file back byte for byte and every
-// digest still holds. Landed files and rounds are both write-once, so a file
-// is sent once; push.state in the root records which ones were.
+// A file is sent whole, as one log record whose body is the file's bytes.
+// A receiver stores it as it was landed and checks the digest at once, and
+// nothing has to be put back together. Sending a record per line was
+// measured first: 39,683 records for one conversation of 306 files, with the
+// attributes 16% on top of the body, and a receiver that had to track which
+// lines had arrived. Landed files are cut at a budget and a round is small
+// next to the files it reads, so a whole file is a reasonable record.
+// Landed files and rounds are both write-once, so a file is sent once;
+// push.state in the root records which ones were.
 type Pusher struct {
 	Zone   *storage.Zone
 	Client *Client
@@ -54,7 +62,8 @@ type Pusher struct {
 	InstanceID string
 	// Layer is the receiver's layer for the service, sent as service.layer.
 	Layer string
-	// BatchBytes is how much body text one request carries at most.
+	// BatchBytes is how many file bytes one request carries at most. A file
+	// larger than the budget is sent alone, in a request of its own.
 	BatchBytes int64
 	Now        func() time.Time
 }
@@ -62,7 +71,6 @@ type Pusher struct {
 // Stats reports what one pass did.
 type Stats struct {
 	Files    int
-	Records  int
 	Bytes    int64
 	Requests int
 	Errors   []error
@@ -79,7 +87,7 @@ func (p *Pusher) Prepare() error {
 		return errors.New("otlp: no endpoint")
 	}
 	if p.BatchBytes <= 0 {
-		p.BatchBytes = 1 << 20
+		p.BatchBytes = 20 << 20
 	}
 	if p.Now == nil {
 		p.Now = time.Now
@@ -161,9 +169,9 @@ func (p *Pusher) Pass() (*Stats, error) {
 
 func (p *Pusher) statePath() string { return filepath.Join(p.Zone.Root(), "push.state") }
 
-// batch accumulates records across files and sends them when the body budget
-// is reached. A file is recorded as pushed only after the request carrying
-// its last line succeeded, so a failed request leaves it to the next pass.
+// batch accumulates files and sends them when the budget is reached. A file
+// is recorded as pushed only after the request carrying it succeeded, so a
+// failed request leaves it to the next pass.
 type batch struct {
 	p     *Pusher
 	st    *Stats
@@ -190,7 +198,10 @@ func (b *batch) group(resource []Attr) *ResourceLogs {
 	return &b.groups[len(b.groups)-1]
 }
 
-func (b *batch) add(resource []Attr, r Record) error {
+func (b *batch) add(resource []Attr, r Record, rel, digest string) error {
+	// A file that does not fit next to what is already batched goes after
+	// it. A file larger than the whole budget therefore travels alone: the
+	// batch before it is sent first, and the file after it starts a new one.
 	if b.bytes > 0 && b.bytes+int64(len(r.Body)) > b.p.BatchBytes {
 		if err := b.flush(); err != nil {
 			return err
@@ -199,8 +210,8 @@ func (b *batch) add(resource []Attr, r Record) error {
 	g := b.group(resource)
 	g.Records = append(g.Records, r)
 	b.bytes += int64(len(r.Body))
-	b.st.Records++
 	b.st.Bytes += int64(len(r.Body))
+	b.pending = append(b.pending, pendingFile{rel, digest})
 	return nil
 }
 
@@ -242,22 +253,13 @@ func (b *batch) resource(project string) []Attr {
 	return attrs
 }
 
-// addLanded sends one landed file, line by line.
+// addLanded sends one landed file as one record.
 func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, projects map[string]string) error {
-	f, err := os.Open(lf.Path)
+	data, err := os.ReadFile(lf.Path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	digest, err := storage.FileDigest(lf.Path)
-	if err != nil {
-		return err
-	}
-	br := bufio.NewReaderSize(f, 1<<20)
-	headerLine, err := readLine(br)
-	if err != nil {
-		return err
-	}
+	headerLine, _, _ := bytes.Cut(data, []byte("\n"))
 	var hdr sessiondata.Header
 	if err := json.Unmarshal(headerLine, &hdr); err != nil {
 		return fmt.Errorf("decode header: %w", err)
@@ -265,88 +267,40 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, pro
 	if projects[session] == "" {
 		projects[session] = projectOf(hdr.Src)
 	}
-	res := b.resource(projects[session])
-	fileAt := parseTime(hdr.At)
-	now := uint64(b.p.Now().UnixNano())
-	// Every line carries what a receiver needs to place it and to resolve a
-	// round's reference to it: the file, the line, the session and the
-	// sequence. What is constant for the file rides on the header line only,
-	// and the digest on the header and the closing line, where a receiver
-	// checks what it wrote back. Repeating them on every line measured 28% on
-	// top of the body; this keeps it near 15%.
-	common := []Attr{
+	digest := digestOf(data)
+	// The attributes say what the file is without decoding it: a receiver
+	// routes, indexes and verifies on them, and reads the body only to serve
+	// it. Session and sequence are what a round's {seq, row} reference names,
+	// and a row is a line of this body.
+	attrs := []Attr{
 		{Key: "asz.format", Str: "sd"},
+		{Key: "asz.format.version", Str: hdr.Schema},
 		{Key: "asz.file", Str: rel},
+		{Key: "asz.file.kind", Str: string(hdr.Kind)},
+		{Key: "asz.file.digest", Str: digest},
+		{Key: "asz.lines", Int: int64(bytes.Count(data, []byte("\n"))), IsInt: true},
 		{Key: "asz.session", Str: session},
 		{Key: "asz.seq", Int: int64(lf.Seq), IsInt: true},
 	}
-	once := []Attr{
-		{Key: "asz.format.version", Str: hdr.Schema},
-		{Key: "asz.file.kind", Str: string(hdr.Kind)},
-		{Key: "asz.file.digest", Str: digest},
-	}
 	if lf.Stream != "" {
-		once = append(once, Attr{Key: "asz.stream", Str: lf.Stream})
+		attrs = append(attrs, Attr{Key: "asz.stream", Str: lf.Stream})
 	}
 	if lf.RunID != "" {
-		once = append(once, Attr{Key: "asz.run", Str: lf.RunID})
+		attrs = append(attrs, Attr{Key: "asz.run", Str: lf.RunID})
 	}
-	line := int64(0)
-	emit := func(kind string, text []byte, at uint64) error {
-		attrs := append(append([]Attr{}, common...),
-			Attr{Key: "asz.line", Int: line, IsInt: true},
-			Attr{Key: "asz.line.kind", Str: kind})
-		switch kind {
-		case "header":
-			attrs = append(attrs, once...)
-		case "end":
-			attrs = append(attrs, Attr{Key: "asz.file.digest", Str: digest})
-		}
-		line++
-		return b.add(res, Record{TimeNano: at, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(text), Attrs: attrs})
-	}
-	if err := emit("header", headerLine, fileAt); err != nil {
-		return err
-	}
-	for {
-		l, err := readLine(br)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		kind, at := "record", fileAt
-		if len(l) > 8 && string(l[:9]) == `{"t":"end` {
-			kind = "end"
-		} else if ns, ok := sessiondata.LineTime(l); ok {
-			at = uint64(ns)
-		}
-		if err := emit(kind, l, at); err != nil {
-			return err
-		}
-	}
-	b.pending = append(b.pending, pendingFile{rel, digest})
-	return nil
+	now := uint64(b.p.Now().UnixNano())
+	rec := Record{TimeNano: parseTime(hdr.At), ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
+	return b.add(b.resource(projects[session]), rec, rel, digest)
 }
 
-// addRound sends one round file, line by line. Rounds carry no time of their
-// own, so every line is stamped with the time it was observed.
+// addRound sends one round file as one record. A round carries no time of
+// its own, so the record is stamped with the time it was sent.
 func (b *batch) addRound(rel, path, conv string, projects map[string]string) error {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	digest, err := storage.FileDigest(path)
-	if err != nil {
-		return err
-	}
-	br := bufio.NewReaderSize(f, 1<<20)
-	headerLine, err := readLine(br)
-	if err != nil {
-		return err
-	}
+	headerLine, _, _ := bytes.Cut(data, []byte("\n"))
 	var hdr struct {
 		Schema       string `json:"schema"`
 		Conversation string `json:"conversation"`
@@ -360,55 +314,28 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 	if session == "" {
 		session = conv
 	}
-	res := b.resource(projects[session])
-	now := uint64(b.p.Now().UnixNano())
-	common := []Attr{
+	digest := digestOf(data)
+	attrs := []Attr{
 		{Key: "asz.format", Str: "sf"},
+		{Key: "asz.format.version", Str: hdr.Schema},
 		{Key: "asz.file", Str: rel},
+		{Key: "asz.file.kind", Str: "round"},
+		{Key: "asz.file.digest", Str: digest},
+		{Key: "asz.lines", Int: int64(bytes.Count(data, []byte("\n"))), IsInt: true},
+		{Key: "asz.session", Str: session},
 		{Key: "asz.conversation", Str: hdr.Conversation},
 		{Key: "asz.round", Int: hdr.Round, IsInt: true},
 	}
-	once := []Attr{
-		{Key: "asz.format.version", Str: hdr.Schema},
-		{Key: "asz.file.kind", Str: "round"},
-		{Key: "asz.file.digest", Str: digest},
-		{Key: "asz.session", Str: session},
-	}
-	line := int64(0)
-	emit := func(text []byte) error {
-		var frame struct {
-			T string `json:"t"`
-		}
-		_ = json.Unmarshal(text, &frame)
-		attrs := append(append([]Attr{}, common...),
-			Attr{Key: "asz.line", Int: line, IsInt: true},
-			Attr{Key: "asz.line.kind", Str: frame.T})
-		switch frame.T {
-		case "header":
-			attrs = append(attrs, once...)
-		case "commit":
-			attrs = append(attrs, Attr{Key: "asz.file.digest", Str: digest})
-		}
-		line++
-		return b.add(res, Record{TimeNano: now, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(text), Attrs: attrs})
-	}
-	if err := emit(headerLine); err != nil {
-		return err
-	}
-	for {
-		l, err := readLine(br)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if err := emit(l); err != nil {
-			return err
-		}
-	}
-	b.pending = append(b.pending, pendingFile{rel, digest})
-	return nil
+	now := uint64(b.p.Now().UnixNano())
+	rec := Record{TimeNano: now, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
+	return b.add(b.resource(projects[session]), rec, rel, digest)
+}
+
+// digestOf is the file digest a receiver checks: SHA-256 over the bytes as
+// landed, the same value storage.FileDigest reads from disk.
+func digestOf(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // sessionProject reads the project directory from the header of the session's

@@ -44,11 +44,12 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
-	return parseZone(zoneRoot, arg(0))
+	return parseZone(zoneRoot, arg(0), cfg.Parse.MaxRoundBytes)
 }
 
-// parseZone assembles every session under zoneRoot, or the one named by want.
-func parseZone(zoneRoot, want string) error {
+// parseZone assembles every session under zoneRoot, or the one named by want,
+// writing rounds of at most maxRound bytes until each chain reaches its index.
+func parseZone(zoneRoot, want string, maxRound int64) error {
 	z := storage.NewZone(zoneRoot)
 
 	sessions, err := sessionDirs(zoneRoot)
@@ -63,7 +64,7 @@ func parseZone(zoneRoot, want string) error {
 		if want != "" && id != want {
 			continue
 		}
-		r, err := parse.Session(z, parse.Options{Conversation: id, Session: id})
+		r, err := parseToIndex(z, id, maxRound, &rounds)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  %s: %v\n", id, err)
 			failed++
@@ -73,7 +74,6 @@ func parseZone(zoneRoot, want string) error {
 		round := "-"
 		if r.Changed() {
 			round = fmt.Sprintf("%d", r.Number)
-			rounds++
 		}
 		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d/%d\t%d/%d\n",
 			id, round, r.ThroughSeq, r.Nodes, r.Relations, r.Unresolved,
@@ -90,6 +90,24 @@ func parseZone(zoneRoot, want string) error {
 		return fmt.Errorf("%d session(s) failed to parse", failed)
 	}
 	return nil
+}
+
+// parseToIndex writes rounds for one session until the chain reaches the
+// index. A round is cut at the byte budget, so one pass may take several.
+// It returns the last round and adds to rounds the number written.
+func parseToIndex(z *storage.Zone, id string, maxRound int64, rounds *int) (*parse.Round, error) {
+	for {
+		r, err := parse.Session(z, parse.Options{Conversation: id, Session: id, MaxRoundBytes: maxRound})
+		if err != nil {
+			return nil, err
+		}
+		if r.Changed() {
+			*rounds++
+		}
+		if !r.Changed() || !r.More {
+			return r, nil
+		}
+	}
 }
 
 // termsFor returns how to render a name, from the -terms flag.

@@ -60,7 +60,7 @@ internal/parse/                 one round: assemble, compare against the chain, 
 internal/storage/               landing zone, atomic writes, cursors, session/index state, locks
 internal/verify/                contiguity and digest checks over landed data
 internal/view/                  reads a conversation and serves it as a page
-internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per line
+internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/config/                YAML configuration
@@ -111,6 +111,9 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   is never rewritten; later evidence produces a new revision in a later round.
 - **Entity ids come from stable evidence, never from position.** An id that shifts when an earlier
   source is backfilled cannot supersede its own earlier revision.
+- **A round is cut at a byte budget** by narrowing its input window, never by splitting its frames.
+  A round covering one landed file may exceed the budget, as a landed file holding one oversize
+  record may. `Round.More` says the chain has not reached the index yet.
 - **A round carries no wall-clock time**, so the same evidence reproduces the same bytes and digest.
   Anything mutable or temporal lives in `conversation.state`, outside every digest.
 - **Absence in a round means unchanged, never deleted.** Removal is an explicit tombstone, and a

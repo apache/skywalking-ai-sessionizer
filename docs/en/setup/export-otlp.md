@@ -16,16 +16,22 @@ export:
 ./bin/asz push            # keep sending new files every export.otlp.interval
 ```
 
-## One log record per line
+## One log record per file
 
-A file is sent as one log record per line, the header and the closing line included, and each
-record's body is the line's bytes unchanged. That is what lets a receiver write the file back
-byte for byte: the file's digest still matches, an uploaded round still verifies against the
-landed files it names, and every `{seq, row, block}` reference still means what it meant.
+A file is sent whole: one log record whose body is the file's bytes, unchanged. A receiver
+stores it as it was landed, checks its digest at once, and has nothing to put back together.
+Every `{seq, row, block}` reference in a round still means what it meant, because a row is a
+line of the body it names.
+
+This is the second design. The first sent one record per line, and it was measured on one
+conversation of 306 files: 39,683 records, attributes 16% on top of the body even after
+trimming, and a receiver that had to track which lines had arrived before it could verify
+anything. A landed file is cut at a budget and a round is cut at the same budget, so a whole file
+is a small record, and the same conversation is 306 records.
 
 Landed files and rounds are both write-once, so each is sent once. `push.state` in the storage
 root lists what was sent, with the digest each file had; a file is recorded only after the request
-carrying its last line succeeded, so a failed request leaves it for the next pass.
+carrying it succeeded, so a failed request leaves it for the next pass.
 
 ## What every record carries
 
@@ -41,35 +47,25 @@ The resource, which names the service a record belongs to:
 | `telemetry.sdk.language` | `go` |
 
 The scope is `github.com/apache/skywalking-ai-sessionizer` with the same version. Each record then
-says what it is. What a receiver needs to place a line and to resolve a round's reference to it is
-on every line; what is constant for a file is on its header line only, and the file's digest is on
-the header and on the closing line, where a receiver checks what it wrote back. Measured, that
-keeps the attributes near 15% of the body instead of the 28% that repeating everything cost.
-
-On every line:
+says what its file is, so a receiver can route it, index it and verify it without decoding the
+body:
 
 | Attribute | Value |
 | --- | --- |
 | `asz.format` | `sd` for a landed file, `sf` for a round |
+| `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
 | `asz.file` | the file's path relative to the storage root |
-| `asz.line` | the line's index in the file, starting at 0 for the header |
-| `asz.line.kind` | for `sd`: `header`, `record`, `end`; for `sf`: the frame type, `header`, `node`, `relation`, `unresolved`, `commit` |
-| `asz.session`, `asz.seq` | for `sd`: the session and the landed sequence. With `asz.line`, this is the address a round's `{seq, row}` reference names: a record's row is its line index |
+| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`; for `sf`, `round` |
+| `asz.file.digest` | the file's SHA-256, the digest of the body as received |
+| `asz.lines` | how many lines the body has, the header and the closing line included |
+| `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |
+| `asz.seq` | for `sd`: the landed sequence. With the session it names the file a round's `{seq, row}` reference points at, and the row is a line of the body |
+| `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
 | `asz.conversation`, `asz.round` | for `sf`: the conversation and the round number |
 
-On the header line only:
-
-| Attribute | Value |
-| --- | --- |
-| `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
-| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`; for `sf`, `round` |
-| `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
-| `asz.session` | for `sf`: the session the round was assembled from |
-| `asz.file.digest` | the file's SHA-256, repeated on the closing line, `end` or `commit` |
-
-A landed record is stamped with its own time when it carries one, and with the file's collection
-time otherwise. A round carries no time of its own, by design, so its lines are stamped with the
-time they were sent. Every record also carries the time it was observed.
+A landed file is stamped with the time it was written, the header's `at`. A round carries no
+time of its own, by design, so it is stamped with the time it was sent. Every record also carries
+the time it was observed.
 
 ## Checking what a receiver gets
 
@@ -82,6 +78,7 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
+        max_request_body_size: 33554432   # the default is 20 MiB; see Size
 exporters:
   file:
     path: /out/logs.json
@@ -94,11 +91,19 @@ service:
 
 Point `export.otlp.endpoint` at `http://127.0.0.1:4318`, run `asz push -once`, and read
 `logs.json`: one JSON line per request, with the resource, the scope and the records as the
-Collector understood them.
+Collector understood them. Writing each record's body to `asz.file` under a new root gives a
+root that `asz verify` and `asz view` read like the original.
 
 ## Size
 
-A request carries at most `export.otlp.batch_bytes` of body text, 1 MiB by default, and a file
-larger than that is sent across several requests in order. The largest single record in the
-measured corpus is 4.5 MB and is sent alone. The OAP accepts requests up to 50 MB by default; an
-OpenTelemetry Collector accepts 4 MiB, which is why the landing budget defaults to 4 MiB as well.
+A request carries at most `export.otlp.batch_bytes` of file bytes, 20 MiB by default. A file
+larger than that is sent alone, in a request of its own. A landed file is cut at
+`max_delta_bytes`, 2 MiB by default, and a round is cut at `parse.max_round_bytes`, also
+2 MiB, so a request normally carries ten or more files. The exception on both sides is a single
+unit larger than the budget: a source record is landed whole, and a round covering one landed
+file is published whole. The largest source record in the measured corpus is 4.5 MB.
+
+The receiver's limit must cover the largest single request. The OAP accepts 50 MB by default. An
+OpenTelemetry Collector accepts 20 MiB over HTTP and 4 MiB over gRPC unless its receiver is
+configured otherwise, so raise its HTTP limit above the batch budget with some room for the
+attributes.

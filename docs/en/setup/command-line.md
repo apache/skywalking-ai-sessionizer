@@ -130,11 +130,11 @@ there is no source, so the page serves what is there and shows no refresh.
 ## push
 
 Sends every landed file and every round not yet sent to the OpenTelemetry logs receiver at
-`export.otlp.endpoint`, one log record per line, then exits with `-once` or repeats every
+`export.otlp.endpoint`, one log record per file, then exits with `-once` or repeats every
 `export.otlp.interval`. One line per pass:
 
 ```text
-[10:12:03] files=306 records=21424 bytes=42.8MB requests=44 errors=0 (6.2s)
+[10:12:03] files=306 bytes=47.9MB requests=5 errors=0 (1.1s)
 ```
 
 A pass with errors exits non-zero with `-once`; the files whose requests failed are not recorded

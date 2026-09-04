@@ -97,7 +97,7 @@ func (s *Stats) Complete() bool {
 // New returns a Collector with sensible defaults.
 func New(sourceRoot string, zone *storage.Zone, maxDelta int64) *Collector {
 	if maxDelta <= 0 {
-		maxDelta = 4 << 20
+		maxDelta = 2 << 20
 	}
 	return &Collector{SourceRoot: sourceRoot, Zone: zone, MaxDelta: maxDelta, Now: time.Now}
 }
