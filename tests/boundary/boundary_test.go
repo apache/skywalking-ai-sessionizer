@@ -40,7 +40,7 @@ var (
 	// The exporter is the collector side's way out: it reads the storage root
 	// and sends, and must not know how anything is assembled or shown.
 	collectorSide = []string{"internal/adapters/", "internal/export/"}
-	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/"}
+	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/"}
 )
 
 func TestSidesMeetOnlyAtTheStorageRoot(t *testing.T) {

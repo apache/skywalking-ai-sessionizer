@@ -33,64 +33,17 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // step is one node as a reader meets it.
-type step struct {
-	ID     string            `json:"id"`
-	Kind   string            `json:"kind"`
-	Parent string            `json:"parent,omitempty"`
-	Stream string            `json:"stream,omitempty"`
-	At     int64             `json:"at"`
-	Ref    *sessionflow.Ref  `json:"ref,omitempty"`
-	Refs   []sessionflow.Ref `json:"refs,omitempty"`
-	Attrs  json.RawMessage   `json:"attrs,omitempty"`
-	Text   string            `json:"text,omitempty"`
-	Name   string            `json:"name,omitempty"`
-	Failed *bool             `json:"failed,omitempty"`
-	State  string            `json:"state,omitempty"`
-	Bytes  int               `json:"bytes,omitempty"`
+// step and edge are the Conversation View's node and edge: the page serves
+// the same shape the view is made of, so there is one definition.
+type (
+	step = sessionview.Node
+	edge = sessionview.Edge
+)
 
-	// Result is what a tool sent back. A tool use is one step carrying both
-	// halves, so the card that shows the command shows the output too.
-	Result      string `json:"result,omitempty"`
-	ResultState string `json:"result_state,omitempty"`
-	ResultBytes int    `json:"result_bytes,omitempty"`
-
-	// DurationMS is a duration the runtime measured, not one inferred from
-	// the gap between records. Only a step whose source reports one has it.
-	DurationMS  int64  `json:"duration_ms,omitempty"`
-	DurationHow string `json:"duration_measured_by,omitempty"`
-
-	// RequestToResultMS is how long lay between the record carrying the
-	// request and the record carrying the result.
-	//
-	// This is NOT the duration the tool ran, and it is not what "timing"
-	// means. It is an interval between two landed records. It is reported
-	// only where an exact identifier ties those two records to each other,
-	// so the interval belongs to this call and not to whatever happened to
-	// be written next.
-	RequestToResultMS int64  `json:"request_to_result_ms,omitempty"`
-	RequestToResultBy string `json:"request_to_result_join,omitempty"`
-	Children          []step `json:"children,omitempty"`
-	Edges             []edge `json:"edges,omitempty"`
-}
-
-// edge is one typed relation, as it reads from this node's side.
-type edge struct {
-	Type    string `json:"type"`
-	Other   string `json:"other"`
-	Dir     string `json:"dir"` // "out" or "in"
-	Quality string `json:"quality"`
-	Via     string `json:"via,omitempty"`
-}
-
-// preview is how much of a step's text is sent with the tree.
-//
-// A tool result reaches a megabyte and a session's results can be four fifths
-// of its bytes, so the tree carries an opening and the reader asks for the rest
-// when it wants it. The state and the true size travel with it, so nothing is
-// shown as complete when it is not.
 const preview = 2000
 
 func (s *Server) apiTalk(w http.ResponseWriter, id, talk string) {
@@ -182,10 +135,10 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: n.Attrs,
 	}
 	for _, r := range c.from[n.ID] {
-		out.Edges = append(out.Edges, edge{r.Type, r.To, "out", r.Quality, r.Via})
+		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.To, Dir: "out", Quality: r.Quality, Via: r.Via})
 	}
 	for _, r := range c.to[n.ID] {
-		out.Edges = append(out.Edges, edge{r.Type, r.From, "in", r.Quality, r.Via})
+		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.From, Dir: "in", Quality: r.Quality, Via: r.Via})
 	}
 	// The content a reader sees, taken from the part this node points at.
 	//
@@ -194,15 +147,15 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 	// record it starts at would show a tool's command as the call's own words.
 	if n.Ref != nil && carriesContent(n.Kind) {
 		if rec := recs[[2]uint64{n.Ref.Seq, n.Ref.Row}]; rec != nil {
-			out.fill(rec, n.Ref.Block)
-			out.fillDuration(n, rec)
+			fill(&out, rec, n.Ref.Block)
+			fillDuration(&out, n, rec)
 		}
 		// A tool use is one step carrying request and result. The request is
 		// refs[0]; anything after it is what came back.
 		for i := 1; i < len(n.Refs); i++ {
 			r := n.Refs[i]
 			if rec := recs[[2]uint64{r.Seq, r.Row}]; rec != nil && out.Result == "" {
-				out.fillResult(rec, r.Block)
+				fillResult(&out, rec, r.Block)
 			}
 		}
 		c.fillRequestToResult(&out, n)
@@ -216,7 +169,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 }
 
 // fill takes a step's readable content from the record it points at.
-func (s *step) fill(rec *sessiondata.Record, block *int) {
+func fill(s *step, rec *sessiondata.Record, block *int) {
 	var p *sessiondata.Part
 	if block != nil && *block < len(rec.Parts) {
 		p = &rec.Parts[*block]
@@ -273,7 +226,7 @@ func (c *Conversation) fillRequestToResult(out *step, n *sessionflow.Node) {
 }
 
 // fillResult takes what a tool sent back from the record it points at.
-func (s *step) fillResult(rec *sessiondata.Record, block *int) {
+func fillResult(s *step, rec *sessiondata.Record, block *int) {
 	var p *sessiondata.Part
 	if block != nil && *block < len(rec.Parts) {
 		p = &rec.Parts[*block]
@@ -306,7 +259,7 @@ func (s *step) fillResult(rec *sessiondata.Record, block *int) {
 // Nothing here is inferred from the gap between two records. A step whose
 // source does not report a duration keeps none, and the reader is told so
 // rather than shown a number that was calculated.
-func (s *step) fillDuration(n *sessionflow.Node, rec *sessiondata.Record) {
+func fillDuration(s *step, n *sessionflow.Node, rec *sessiondata.Record) {
 	if n.Kind != model.KindTurnDuration {
 		return
 	}

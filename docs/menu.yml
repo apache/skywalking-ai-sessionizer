@@ -48,6 +48,8 @@ catalog:
           path: /en/formats/session-data
         - name: Session Flow
           path: /en/formats/session-flow
+        - name: Conversation View
+          path: /en/formats/conversation-view
     - name: Adapters
       catalog:
         - name: Claude Code

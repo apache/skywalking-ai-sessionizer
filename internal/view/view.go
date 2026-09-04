@@ -41,6 +41,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // Server reads conversations out of a storage zone.
@@ -91,6 +92,11 @@ type Conversation struct {
 	pathsMu   sync.Mutex
 	paths     map[uint64]string
 	pathsScan time.Time
+
+	// built is the Conversation View, made once per fold. Forget drops the
+	// whole Conversation, and the view with it, when a round arrives.
+	builtMu sync.Mutex
+	built   *sessionview.Conversation
 }
 
 // Load folds a conversation and builds its lookups, once.

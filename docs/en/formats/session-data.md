@@ -33,6 +33,23 @@ The schema is `sd/1`.
 | `src` | the source, relative to the adapter's root |
 | `session`, `stream`, `batch` | the session, the execution stream (`main` or an agent id), and the group of children a workflow run started |
 
+## File kinds
+
+One `.sd` file holds one cut of one source. The header's `kind` says which, and the records of
+each kind carry a characteristic set of fields.
+
+| `kind` | Collected from | Its records | What refers to it |
+| --- | --- | --- | --- |
+| `transcript` | one execution stream: the main stream or a child agent's own | the conversation itself: inputs, calls in fragments, results, injections, resets. `stream` on the header is `main` or the agent id. | almost every node of a round |
+| `agent_meta` | what the runtime recorded about a child agent when it started it | one record, `from: runtime`, with `child` and `label`, and a `data` part | the child's `stream` node, for its label |
+| `journal` | a workflow run's journal | one record per event, `from: runtime`, with `child` and `batch`; a `child_result` flag on the record that returns a child's value | `agent.output` nodes and `ends_with` relations |
+| `workflow_manifest` | a workflow run's manifest | one record with `batch` and `label`, and a `data` part | the run's name |
+| `workflow_script` | the program a workflow ran | one record whose part is `unknown`: the source is a program, not data | nothing; kept because it is part of the session |
+
+Files of every kind are bound by the rounds' `input_digest`, so a session travels or archives as
+all of them. A session's `agent_meta`, `workflow_manifest` and `workflow_script` records carry
+no time, so those files have no record time range.
+
 ## Record
 
 ```json

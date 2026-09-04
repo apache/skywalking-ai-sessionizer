@@ -44,6 +44,12 @@
 
 ## Read
 
+- The Conversation View, `cv/1`, is one conversation rebuilt from its rounds and its landed files as
+  one document: every talk as a tree with the text its records carry, the streams, the segments,
+  the relations, the rounds and the files. Package `pkg/sessionview` defines and owns the shape and
+  `asz view` serves it at `/api/c/{id}/view`. It is never a file. A server holding the same files,
+  such as the SkyWalking OAP, builds the same document. See the format page.
+
 - The page reads Session Data and Session Flow and nothing else. It took every record's time from
   the index; it now takes it from the record, so a root that arrives with only its landed files
   and its rounds renders in full, and the index is assembly's alone.

@@ -31,6 +31,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // Handler serves the page and the four questions a reader asks: which
@@ -154,6 +155,7 @@ func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
 }
 
 var flowPath = regexp.MustCompile(`^/api/c/([^/]+)/flow$`)
+var viewPath = regexp.MustCompile(`^/api/c/([^/]+)/view$`)
 var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)
 var talkPath = regexp.MustCompile(`^/api/c/([^/]+)/talk/(.+)$`)
 
@@ -166,6 +168,10 @@ func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := flowPath.FindStringSubmatch(r.URL.Path); m != nil {
 		s.apiFlow(w, m[1])
+		return
+	}
+	if m := viewPath.FindStringSubmatch(r.URL.Path); m != nil {
+		s.apiView(w, m[1])
 		return
 	}
 	if m := talkPath.FindStringSubmatch(r.URL.Path); m != nil {
@@ -202,12 +208,39 @@ type talkRow struct {
 	replyAt *sessionflow.Ref
 }
 
+// overview is what the page's conversation summary and the Conversation
+// View share: computed once per fold, from the fold alone plus the text of
+// the records that name and answer each talk.
+type overview struct {
+	title                string
+	kinds, rels, quality map[string]int
+	talks                []talkRow
+	streams              []sessionview.Stream
+	segments             []sessionview.Segment
+	open                 []map[string]string
+}
+
 func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 	c, err := s.Load(id)
 	if err != nil {
 		fail(w, err, http.StatusNotFound)
 		return
 	}
+	o := c.overview()
+	writeJSON(w, map[string]any{
+		"id": id, "title": o.title, "session": c.Session,
+		"rounds": c.View.Round, "digest": c.View.Digest,
+		"parser": c.View.Parser, "policy": c.View.Policy,
+		"through_seq": c.View.ThroughSeq,
+		"nodes":       len(c.View.Nodes), "relations": len(c.View.Relations),
+		"kinds": o.kinds, "relation_types": o.rels, "quality": o.quality,
+		"talks": o.talks, "unresolved": o.open,
+		"streams":  o.streams,
+		"segments": o.segments,
+	})
+}
+
+func (c *Conversation) overview() *overview {
 	var title string
 	kinds := map[string]int{}
 	for _, n := range c.View.Nodes {
@@ -296,17 +329,16 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 		open = append(open, map[string]string{"kind": u.Kind, "ref": u.RefID, "reason": u.Reason})
 	}
 
-	writeJSON(w, map[string]any{
-		"id": id, "title": title, "session": c.Session,
-		"rounds": c.View.Round, "digest": c.View.Digest,
-		"parser": c.View.Parser, "policy": c.View.Policy,
-		"through_seq": c.View.ThroughSeq,
-		"nodes":       len(c.View.Nodes), "relations": len(c.View.Relations),
-		"kinds": kinds, "relation_types": rels, "quality": quality,
-		"talks": talks, "unresolved": open,
-		"streams":  streamRows(c, talks),
-		"segments": segmentRows(c, talks),
-	})
+	return &overview{
+		title: title, kinds: kinds, rels: rels, quality: quality,
+		talks: talks, streams: streamRows(c, talks), segments: segmentRows(c, talks), open: open,
+	}
+}
+
+// view converts a talk row to the view's talk, without its tree.
+func (t talkRow) view() sessionview.Talk {
+	return sessionview.Talk{ID: t.ID, Stream: t.Stream, Label: t.Label, Runs: t.Runs, Steps: t.Steps, Tools: t.Tools,
+		From: t.From, To: t.To, Child: t.Child, Segment: t.Segment, Reply: t.Reply}
 }
 
 // segmentRows lists the conversation's segments, each with the span of the
@@ -314,7 +346,7 @@ func (s *Server) apiOverview(w http.ResponseWriter, id string) {
 //
 // A segment's own time is not recomputed here. Its bounds are the bounds of its
 // talks, which is what "in_segment" already decided.
-func segmentRows(c *Conversation, talks []talkRow) []map[string]any {
+func segmentRows(c *Conversation, talks []talkRow) []sessionview.Segment {
 	span := map[string][2]int64{}
 	count := map[string]int{}
 	for _, t := range talks {
@@ -337,13 +369,13 @@ func segmentRows(c *Conversation, talks []talkRow) []map[string]any {
 			segs = append(segs, n)
 		}
 	}
-	out := []map[string]any{}
+	out := []sessionview.Segment{}
 	for _, n := range sessionflow.InOrder(segs) {
 		s := span[n.ID]
-		out = append(out, map[string]any{
-			"id": n.ID, "state": attrString(n, "state"),
-			"talks": count[n.ID], "from": s[0], "to": s[1],
-			"committable": attrBool(n, "committable"),
+		out = append(out, sessionview.Segment{
+			ID: n.ID, State: attrString(n, "state"),
+			Talks: count[n.ID], From: s[0], To: s[1],
+			Committable: attrBool(n, "committable"),
 		})
 	}
 	return out
@@ -355,7 +387,7 @@ func segmentRows(c *Conversation, talks []talkRow) []map[string]any {
 // The parent is read from the "starts" relation, never from the stream name. A
 // call that could have started several streams reports each of them, because
 // the assembler does not choose one and neither may this.
-func streamRows(c *Conversation, talks []talkRow) []map[string]any {
+func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
 	firstTalk := map[string]string{}
 	steps := map[string]int{}
 	for i := range talks {
@@ -382,7 +414,7 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 		}
 	}
 	names := c.journalNames()
-	out := []map[string]any{}
+	out := []sessionview.Stream{}
 	for _, st := range c.Streams() {
 		label, namedBy := attrString(st, "label"), ""
 		if label == "" {
@@ -390,25 +422,20 @@ func streamRows(c *Conversation, talks []talkRow) []map[string]any {
 				label, namedBy = n, "journal"
 			}
 		}
-		out = append(out, map[string]any{
-			"id": st.ID, "name": st.Stream,
-			"role":     attrString(st, "role"),
-			"label":    label,
-			"named_by": namedBy,
-			"records":  attrNumber(st, "records"),
-			"parent":   parent[st.ID],
-			"talk":     firstTalk[st.Stream],
-			"steps":    steps[st.Stream],
-			"opened_by": func() []map[string]string {
-				out := []map[string]string{}
-				for _, o := range from[st.ID] {
-					out = append(out, map[string]string{
-						"step": o.Step, "stream": o.Stream,
-						"quality": o.Quality, "talk": o.Talk,
-					})
-				}
-				return out
-			}(),
+		opened := []sessionview.Origin{}
+		for _, o := range from[st.ID] {
+			opened = append(opened, sessionview.Origin{Step: o.Step, Stream: o.Stream, Quality: o.Quality, Talk: o.Talk})
+		}
+		out = append(out, sessionview.Stream{
+			ID: st.ID, Name: st.Stream,
+			Role:     attrString(st, "role"),
+			Label:    label,
+			NamedBy:  namedBy,
+			Records:  int(attrNumber(st, "records")),
+			Parent:   parent[st.ID],
+			Talk:     firstTalk[st.Stream],
+			Steps:    steps[st.Stream],
+			OpenedBy: opened,
 		})
 	}
 	return out

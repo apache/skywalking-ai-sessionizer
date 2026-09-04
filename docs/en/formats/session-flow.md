@@ -8,6 +8,8 @@ the conversation is the fold of every round. There is no other state.
 The format is public. Package `pkg/sessionflow` defines it, and a consumer reads it. The schema is
 `sf/1`.
 
+There is one kind of `.sf` file, a round; on the wire and in a receiver it is `round`.
+
 ## A round
 
 One round is one file of JSON lines. Every line carries `t`, its frame type, and the frames come in
