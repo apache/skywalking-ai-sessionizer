@@ -131,3 +131,8 @@ var glossary = model.NewGlossary(Dialect,
 
 // Glossary returns what Claude Code calls the things the model names.
 func Glossary() *model.Glossary { return glossary }
+
+// RuntimeName is what the runtime this adapter reads is called. It is the
+// service every record is attributed to when no service name is configured,
+// so a receiver lists conversations by the agent that produced them.
+const RuntimeName = "Claude Code"

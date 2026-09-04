@@ -53,9 +53,9 @@ type Pusher struct {
 	Client *Client
 	// Version is what the sender reports about itself.
 	Version string
-	// ServiceName is the service every record is attributed to. Empty means
-	// the project directory the session was recorded under, one service per
-	// project.
+	// ServiceName is the service every record is attributed to. The command
+	// supplies the runtime's name, such as Claude Code, when none is
+	// configured; the pusher itself refuses to run without one.
 	ServiceName string
 	// InstanceID identifies this sender as service.instance.id. Empty means a
 	// new UUID, made once per Pusher.
@@ -85,6 +85,9 @@ const ScopeName = "github.com/apache/skywalking-ai-sessionizer"
 func (p *Pusher) Prepare() error {
 	if p.Client == nil || p.Client.Endpoint == "" {
 		return errors.New("otlp: no endpoint")
+	}
+	if p.ServiceName == "" {
+		return errors.New("otlp: no service name")
 	}
 	if p.BatchBytes <= 0 {
 		p.BatchBytes = 20 << 20
@@ -118,24 +121,19 @@ func (p *Pusher) Pass() (*Stats, error) {
 		return nil, err
 	}
 	b := &batch{p: p, st: st, state: state}
-	projects := map[string]string{}
 	for _, session := range sessions {
 		files, err := storage.LandedFiles(p.Zone, session)
 		if err != nil {
 			st.Errors = append(st.Errors, err)
 			continue
 		}
-		// A session belongs to the project its main transcript was recorded
-		// under. A child agent can run in another directory, and its files
-		// must still be attributed to the session's project, not their own.
-		projects[session] = sessionProject(files)
 		for _, lf := range files {
 			rel, _ := filepath.Rel(p.Zone.Root(), lf.Path)
 			rel = filepath.ToSlash(rel)
 			if state.pushed(rel) {
 				continue
 			}
-			if err := b.addLanded(rel, lf, session, projects); err != nil {
+			if err := b.addLanded(rel, lf, session); err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 			}
 		}
@@ -156,7 +154,7 @@ func (p *Pusher) Pass() (*Stats, error) {
 			if state.pushed(rel) {
 				continue
 			}
-			if err := b.addRound(rel, path, conv, projects); err != nil {
+			if err := b.addRound(rel, path, conv); err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 			}
 		}
@@ -234,14 +232,10 @@ func (b *batch) flush() error {
 	return b.state.save(b.p.statePath(), b.p.Now())
 }
 
-// resource names the service a file's records belong to.
-func (b *batch) resource(project string) []Attr {
-	service := b.p.ServiceName
-	if service == "" {
-		service = project
-	}
+// resource names the sender and the service its records belong to.
+func (b *batch) resource() []Attr {
 	attrs := []Attr{
-		{Key: "service.name", Str: service},
+		{Key: "service.name", Str: b.p.ServiceName},
 		{Key: "service.instance.id", Str: b.p.InstanceID},
 		{Key: "telemetry.sdk.name", Str: "asz"},
 		{Key: "telemetry.sdk.version", Str: b.p.Version},
@@ -254,7 +248,7 @@ func (b *batch) resource(project string) []Attr {
 }
 
 // addLanded sends one landed file as one record.
-func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, projects map[string]string) error {
+func (b *batch) addLanded(rel string, lf storage.LandedFile, session string) error {
 	data, err := os.ReadFile(lf.Path)
 	if err != nil {
 		return err
@@ -263,9 +257,6 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, pro
 	var hdr sessiondata.Header
 	if err := json.Unmarshal(headerLine, &hdr); err != nil {
 		return fmt.Errorf("decode header: %w", err)
-	}
-	if projects[session] == "" {
-		projects[session] = projectOf(hdr.Src)
 	}
 	digest := digestOf(data)
 	// The attributes say what the file is without decoding it: a receiver
@@ -296,12 +287,12 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, pro
 	}
 	now := uint64(b.p.Now().UnixNano())
 	rec := Record{TimeNano: parseTime(hdr.At), ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
-	return b.add(b.resource(projects[session]), rec, rel, digest)
+	return b.add(b.resource(), rec, rel, digest)
 }
 
 // addRound sends one round file as one record. A round carries no time of
 // its own, so the record is stamped with the time it was sent.
-func (b *batch) addRound(rel, path, conv string, projects map[string]string) error {
+func (b *batch) addRound(rel, path, conv string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -314,6 +305,8 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 		Round        int64  `json:"round"`
 		FromTime     string `json:"from_time"`
 		ThroughTime  string `json:"through_time"`
+		SessionFrom  string `json:"session_from_time"`
+		SessionThru  string `json:"session_through_time"`
 	}
 	if err := json.Unmarshal(headerLine, &hdr); err != nil {
 		return fmt.Errorf("decode round header: %w", err)
@@ -339,9 +332,16 @@ func (b *batch) addRound(rel, path, conv string, projects map[string]string) err
 	if hdr.FromTime != "" && hdr.ThroughTime != "" {
 		attrs = append(attrs, Attr{Key: "asz.from_time", Str: hdr.FromTime}, Attr{Key: "asz.through_time", Str: hdr.ThroughTime})
 	}
+	// The session's own range as of this round: when it began, and its last
+	// activity so far. Only a round carries it. A landed file can travel
+	// before any round exists and the last activity keeps moving, so on a
+	// landed file the value would be missing or stale.
+	if hdr.SessionFrom != "" && hdr.SessionThru != "" {
+		attrs = append(attrs, Attr{Key: "asz.session.from_time", Str: hdr.SessionFrom}, Attr{Key: "asz.session.through_time", Str: hdr.SessionThru})
+	}
 	now := uint64(b.p.Now().UnixNano())
 	rec := Record{TimeNano: now, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
-	return b.add(b.resource(projects[session]), rec, rel, digest)
+	return b.add(b.resource(), rec, rel, digest)
 }
 
 // timeRange is the earliest and the latest record time in a landed file,
@@ -380,37 +380,6 @@ func digestOf(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// sessionProject reads the project directory from the header of the session's
-// first main-stream file, or of its first file when the main transcript is
-// gone, which happens when the runtime has pruned it.
-func sessionProject(files []storage.LandedFile) string {
-	pick := func(want string) string {
-		for _, lf := range files {
-			if want != "" && lf.Stream != want {
-				continue
-			}
-			f, err := os.Open(lf.Path)
-			if err != nil {
-				continue
-			}
-			line, err := readLine(bufio.NewReaderSize(f, 1<<20))
-			f.Close()
-			if err != nil {
-				continue
-			}
-			var hdr sessiondata.Header
-			if json.Unmarshal(line, &hdr) == nil && hdr.Src != "" {
-				return projectOf(hdr.Src)
-			}
-		}
-		return ""
-	}
-	if p := pick(storage.StreamMain); p != "" {
-		return p
-	}
-	return pick("")
-}
-
 // newUUID returns a random version 4 UUID.
 func newUUID() (string, error) {
 	var u [16]byte
@@ -420,16 +389,6 @@ func newUUID() (string, error) {
 	u[6] = (u[6] & 0x0f) | 0x40
 	u[8] = (u[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16]), nil
-}
-
-// projectOf takes the project directory from a landed header's source path,
-// which is relative to the adapter's root and starts with that directory.
-func projectOf(src string) string {
-	src = strings.TrimLeft(src, "/")
-	if i := strings.IndexByte(src, '/'); i > 0 {
-		return src[:i]
-	}
-	return src
 }
 
 func parseTime(s string) uint64 {

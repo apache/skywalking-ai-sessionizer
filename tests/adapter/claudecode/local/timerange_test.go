@@ -84,6 +84,9 @@ func TestRoundsCarryTheRecordTimeRange(t *testing.T) {
 	if from, through := sessionRange(v1); from != v1.FromTime || through != v1.ThroughTime {
 		t.Fatalf("after one round the session range must be the window: session %q..%q, window %q..%q", from, through, v1.FromTime, v1.ThroughTime)
 	}
+	if from, through := sessionRange(v1); v1.SessionFromTime != from || v1.SessionThroughTime != through {
+		t.Fatalf("the header must repeat the session node's range: header %q..%q, node %q..%q", v1.SessionFromTime, v1.SessionThroughTime, from, through)
+	}
 
 	x.AddTurn("second", false)
 	x.Flush()
@@ -107,5 +110,8 @@ func TestRoundsCarryTheRecordTimeRange(t *testing.T) {
 	}
 	if from != v1.FromTime {
 		t.Fatalf("the session began at %q in round 1 and reads %q after round 2", v1.FromTime, from)
+	}
+	if v2.SessionFromTime != from || v2.SessionThroughTime != through {
+		t.Fatalf("round 2 header session range %q..%q, node %q..%q", v2.SessionFromTime, v2.SessionThroughTime, from, through)
 	}
 }

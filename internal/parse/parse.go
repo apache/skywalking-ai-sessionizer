@@ -267,12 +267,14 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			return nil, err
 		}
 		fromTime, throughTime := windowTimes(ix, view.ThroughSeq, through)
+		sessionFrom, sessionThrough := sessionRange(res, opt.Session)
 		w, err := sessionflow.NewWriter(sessionflow.Header{
 			Conversation: opt.Conversation, Session: opt.Session,
 			Round: round, Previous: view.Digest,
 			FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
 			InputDigest: inputDigest, Parser: Parser, Policy: policy,
 			FromTime: fromTime, ThroughTime: throughTime,
+			SessionFromTime: sessionFrom, SessionThroughTime: sessionThrough,
 		})
 		if err != nil {
 			return nil, err
@@ -410,6 +412,24 @@ func windowTimes(ix *index.Index, after, through uint64) (from, throughTime stri
 		return "", ""
 	}
 	return sessiondata.FormatTime(lo), sessiondata.FormatTime(hi)
+}
+
+// sessionRange reads the session's own time range off the session node the
+// assembler built, so the header repeats exactly what the node carries.
+func sessionRange(res *assemble.Result, session string) (from, through string) {
+	id := sessionflow.NodeID("session", session)
+	for i := range res.Nodes {
+		if res.Nodes[i].ID != id || len(res.Nodes[i].Attrs) == 0 {
+			continue
+		}
+		var a struct {
+			From    string `json:"from_time"`
+			Through string `json:"through_time"`
+		}
+		_ = json.Unmarshal(res.Nodes[i].Attrs, &a)
+		return a.From, a.Through
+	}
+	return "", ""
 }
 
 // delta is what one round must write.

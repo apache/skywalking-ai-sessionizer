@@ -100,6 +100,14 @@ type Header struct {
 	// for the whole conversation so far.
 	FromTime    string `json:"from_time,omitempty"`
 	ThroughTime string `json:"through_time,omitempty"`
+
+	// SessionFromTime and SessionThroughTime are the session node's own
+	// pair as of this round: when the session began, and its last activity
+	// so far. They repeat what the session node carries so that a reader of
+	// the header alone, such as a receiver looking at a record's attributes,
+	// learns them without folding the round.
+	SessionFromTime    string `json:"session_from_time,omitempty"`
+	SessionThroughTime string `json:"session_through_time,omitempty"`
 }
 
 // Ref points at one landed record, and optionally one content block within it.

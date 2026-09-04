@@ -243,7 +243,8 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 
 	round := filepath.Join(z.Root(), "_conversations", "sess1", "rounds", "r000001-abcdefabcdef.sf")
 	roundText := "{\"t\":\"header\",\"schema\":\"sf/1\",\"conversation\":\"sess1\",\"session\":\"sess1\",\"round\":1," +
-		"\"from_time\":\"2026-09-04T01:00:00Z\",\"through_time\":\"2026-09-04T01:00:00Z\"}\n" +
+		"\"from_time\":\"2026-09-04T01:00:00Z\",\"through_time\":\"2026-09-04T01:00:00Z\"," +
+		"\"session_from_time\":\"2026-09-03T23:00:00Z\",\"session_through_time\":\"2026-09-04T01:00:00Z\"}\n" +
 		"{\"t\":\"node\",\"id\":\"n1\",\"kind\":\"talk\"}\n" +
 		"{\"t\":\"commit\",\"digest\":\"abcdefabcdef\",\"counts\":{\"nodes\":1}}\n"
 	if err := os.MkdirAll(filepath.Dir(round), 0o755); err != nil {
@@ -261,7 +262,7 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", Layer: "AI-AGENT", InstanceID: "sender-1"}
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code", Layer: "AI-AGENT", InstanceID: "sender-1"}
 
 	st, err := p.Pass()
 	if err != nil {
@@ -295,14 +296,13 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 			t.Fatalf("record %d lines = %q, want the line count of the body", i, all[i].attrs["asz.lines"])
 		}
 	}
-	// The sender is named on the resource, the service comes from the project
-	// directory of the main transcript, and the child's file in another
-	// directory lands under the same service: one resource for the session.
+	// The sender is named on the resource, and every file of every session
+	// lands under the one configured service: one resource per request.
 	if len(resources) != 1 {
-		t.Fatalf("want one resource for one session, got %d: %v", len(resources), resources)
+		t.Fatalf("want one resource for one request, got %d: %v", len(resources), resources)
 	}
 	res := resources[0]
-	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "-Users-me-proj" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI-AGENT" {
+	if res["telemetry.sdk.name"] != "asz" || res["service.name"] != "Claude Code" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI-AGENT" {
 		t.Fatalf("resource attributes: %v", res)
 	}
 	// A landed file says what it is, and where a round's {seq, row} lands:
@@ -326,6 +326,13 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 	}
 	if r := all[2].attrs; r["asz.from_time"] != "2026-09-04T01:00:00Z" || r["asz.through_time"] != "2026-09-04T01:00:00Z" {
 		t.Fatalf("round time range: %v", r)
+	}
+	// The session's own range rides on the round only.
+	if r := all[2].attrs; r["asz.session.from_time"] != "2026-09-03T23:00:00Z" || r["asz.session.through_time"] != "2026-09-04T01:00:00Z" {
+		t.Fatalf("round session range: %v", r)
+	}
+	if h["asz.session.from_time"] != "" || all[1].attrs["asz.session.through_time"] != "" {
+		t.Fatalf("a landed file must not carry the session range: %v", h)
 	}
 	if _, ok := h["asz.line"]; ok {
 		t.Fatalf("a whole file carries no line address: %v", h)
@@ -358,7 +365,7 @@ func TestPushLeavesFilesForTheNextPassWhenTheReceiverFails(t *testing.T) {
 	rcv := &receiver{fail: true}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test"}
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code"}
 
 	st, err := p.Pass()
 	if err != nil {
@@ -387,7 +394,7 @@ func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", BatchBytes: 1}
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code", BatchBytes: 1}
 	st, err := p.Pass()
 	if err != nil || len(st.Errors) != 0 {
 		t.Fatal(err, st.Errors)
@@ -403,6 +410,16 @@ func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
 	}
 }
 
+// A pusher without a service name refuses to run: the command supplies the
+// runtime's name when nothing is configured, so an empty one is a wiring bug.
+func TestPushRefusesToRunWithoutAServiceName(t *testing.T) {
+	z, _ := zoneWithOneSession(t)
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: "http://127.0.0.1:1"}, Version: "test"}
+	if err := p.Prepare(); err == nil {
+		t.Fatal("Prepare accepted an empty service name")
+	}
+}
+
 // Without a configured instance id the sender makes one UUID and keeps it
 // for every pass; a configured one is sent as given.
 func TestInstanceIDIsAUUIDUnlessConfigured(t *testing.T) {
@@ -410,7 +427,7 @@ func TestInstanceIDIsAUUIDUnlessConfigured(t *testing.T) {
 	rcv := &receiver{}
 	srv := httptest.NewServer(rcv.handler())
 	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test"}
+	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code"}
 	if err := p.Prepare(); err != nil {
 		t.Fatal(err)
 	}

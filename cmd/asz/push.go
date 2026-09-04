@@ -22,6 +22,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
@@ -29,7 +30,7 @@ import (
 
 // cmdPush sends the storage root's landed files and rounds to an
 // OpenTelemetry logs receiver, once or on the export interval.
-func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
+func cmdPush(cfg *config.Config, ad config.Adapter, once bool) error {
 	o := cfg.Export.OTLP
 	if o.Endpoint == "" {
 		return fmt.Errorf("push: set export.otlp.endpoint, the receiver's base URL, for example http://127.0.0.1:12800")
@@ -38,21 +39,24 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 	if err != nil {
 		return err
 	}
+	// The service is the configured name, or else the runtime the adapter
+	// reads: one service per kind of agent, which is how a receiver lists
+	// them.
+	service := o.ServiceName
+	if service == "" && ad.Name == config.AdapterClaudeCodeLocal {
+		service = claudecode.RuntimeName
+	}
 	p := &otlp.Pusher{
 		Zone:        storage.NewZone(zoneRoot),
 		Client:      &otlp.Client{Endpoint: o.Endpoint, Headers: o.Headers},
 		Version:     version,
-		ServiceName: o.ServiceName,
+		ServiceName: service,
 		InstanceID:  o.InstanceID,
 		Layer:       o.Layer,
 		BatchBytes:  o.BatchBytes,
 	}
 	if err := p.Prepare(); err != nil {
 		return err
-	}
-	service := o.ServiceName
-	if service == "" {
-		service = "the project directory of each session"
 	}
 	fmt.Printf("storage root: %s\nendpoint    : %s/v1/logs\nservice     : %s\ninstance    : %s\nlayer       : %s\n",
 		zoneRoot, o.Endpoint, service, p.InstanceID, o.Layer)

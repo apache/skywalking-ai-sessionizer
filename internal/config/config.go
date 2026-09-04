@@ -57,7 +57,7 @@ type OTLP struct {
 	// means asz push has nowhere to send and refuses to run.
 	Endpoint string `yaml:"endpoint"`
 	// ServiceName is the service every record is attributed to. Empty means
-	// the project directory each session was recorded under.
+	// the runtime the adapter reads, Claude Code for claude-code-local.
 	ServiceName string `yaml:"service_name"`
 	// InstanceID is sent as service.instance.id and identifies this sender.
 	// Empty means a new UUID each time asz push starts.

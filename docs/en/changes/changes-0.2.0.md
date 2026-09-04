@@ -20,9 +20,12 @@
   the format and its version, the file, its kind, its digest and its line count, and the session
   and sequence a round's reference resolves against. Each file is sent once; `push.state` records
   which. A request carries up to `batch_bytes`, 20 MiB by default, and a larger file goes alone.
+  The service is `export.otlp.service_name`, or the runtime the adapter reads, `Claude Code`, so a
+  receiver lists conversations by the agent that produced them.
   The protobuf encoding is written in the project, so the module still has one dependency. Each
   record also carries `asz.from_time` and `asz.through_time`, the record time range of the file,
-  so a receiver can place a file in time without decoding it.
+  so a receiver can place a file in time without decoding it, and a round's record carries
+  `asz.session.from_time` and `asz.session.through_time`, the session's range as of that round.
 
 ## Assembly
 
@@ -34,8 +37,10 @@
 
 - A round's header carries `from_time` and `through_time`, the earliest and the latest record time
   among the landed files it consumed, and the `session` node carries the same pair for the whole
-  conversation so far, which makes its `from_time` when the session began. Both are record times
-  the runtime wrote, so they reproduce with the round and sit inside its digest.
+  conversation so far, which makes its `from_time` when the session began. The header repeats the
+  session's pair as `session_from_time` and `session_through_time`, so a reader of the header alone
+  has it. All are record times the runtime wrote, so they reproduce with the round and sit inside
+  its digest.
 
 ## Read
 

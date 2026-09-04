@@ -39,7 +39,7 @@ The resource, which names the service a record belongs to:
 
 | Attribute | Value |
 | --- | --- |
-| `service.name` | `export.otlp.service_name`, or when empty the project directory the session was recorded under, one service per project |
+| `service.name` | `export.otlp.service_name`, or when empty the runtime the adapter reads, `Claude Code` for `claude-code-local`: one service per kind of agent |
 | `service.instance.id` | `export.otlp.instance_id`, the identity of this sender, or when empty a new UUID each time `asz push` starts; the session a record belongs to is on the record as `asz.session` |
 | `service.layer` | `export.otlp.layer`, `AI-AGENT` by default, the layer the receiver places the service in |
 | `telemetry.sdk.name` | `asz`, so a receiver can tell these records apart from any other source |
@@ -60,6 +60,7 @@ body:
 | `asz.lines` | how many lines the body has, the header and the closing line included |
 | `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |
 | `asz.from_time`, `asz.through_time` | the earliest and the latest record time in the file, as the runtime wrote them, in UTC; for `sf`, the round header's own pair, the range of the files that round consumed. Absent when no record carries a time, as in a child's meta file |
+| `asz.session.from_time`, `asz.session.through_time` | for `sf` only: the session's own range as of that round, when it began and its last activity so far. A landed file never carries it: it can travel before any round exists, and the last activity keeps moving, so the value there would be missing or stale |
 | `asz.seq` | for `sd`: the landed sequence. With the session it names the file a round's `{seq, row}` reference points at, and the row is a line of the body |
 | `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
 | `asz.conversation`, `asz.round` | for `sf`: the conversation and the round number |

@@ -51,9 +51,13 @@ type View struct {
 	Policy      string
 
 	// FromTime and ThroughTime are the head round's own window, from its
-	// header. The conversation's range is on the session node.
-	FromTime    string
-	ThroughTime string
+	// header. SessionFromTime and SessionThroughTime are the session's range
+	// as the head round's header states it, which is what the session node
+	// carries.
+	FromTime           string
+	ThroughTime        string
+	SessionFromTime    string
+	SessionThroughTime string
 
 	Nodes      map[string]*Node
 	Relations  map[string]*Relation
@@ -182,6 +186,7 @@ func (v *View) Apply(r *Round) error {
 	v.ThroughSeq = r.Header.ThroughSeq
 	v.InputDigest = r.Header.InputDigest
 	v.FromTime, v.ThroughTime = r.Header.FromTime, r.Header.ThroughTime
+	v.SessionFromTime, v.SessionThroughTime = r.Header.SessionFromTime, r.Header.SessionThroughTime
 	return nil
 }
 
