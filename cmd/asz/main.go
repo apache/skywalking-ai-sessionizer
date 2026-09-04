@@ -47,7 +47,7 @@ Usage:
   asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
   asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
   asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
-  asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
+  asz conversation [-config FILE] [-json|-yaml] ID   fold a conversation's rounds and show the structure, or print the asz.view document
   asz view [-config FILE] [ADDR]       serve the conversations as a page (default 127.0.0.1:8787)
   asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
   asz glossary                         what the runtime calls the things the model names
@@ -59,6 +59,7 @@ Flags:
   -config FILE   configuration file (default: ./asz.yaml when present, else built-in defaults)
   -once          single pass, then exit (overrides collector.mode)
   -terms MODE    name things as "unified" (default), "native", or "both"
+  -json, -yaml   conversation: print the asz.view document instead of the summary
 `
 
 // positional holds the command's non-flag arguments, filled once flags parse.
@@ -73,6 +74,10 @@ var positional []string
 
 // termMode selects whose words to print: the model's, the runtime's, or both.
 var termMode string
+
+// docFormat is what asz conversation prints: "" for the summary, "json" or
+// "yaml" for the asz.view document.
+var docFormat string
 
 // arg returns the nth positional argument, or "" when there is none.
 func arg(n int) string {
@@ -99,7 +104,17 @@ func main() {
 	cfgPath := fs.String("config", "", "configuration file")
 	once := fs.Bool("once", false, "single pass, then exit")
 	terms := fs.String("terms", "unified", "name things in the `mode`: unified, native, or both")
+	asJSON := fs.Bool("json", false, "conversation: print the asz.view document as JSON")
+	asYAML := fs.Bool("yaml", false, "conversation: print the asz.view document as YAML")
 	_ = fs.Parse(os.Args[2:])
+	switch {
+	case *asJSON && *asYAML:
+		fatal(fmt.Errorf("-json and -yaml are one or the other"))
+	case *asJSON:
+		docFormat = "json"
+	case *asYAML:
+		docFormat = "yaml"
+	}
 	// Take the positional arguments from the flag set, not by scanning argv for
 	// anything without a leading dash. A flag's VALUE has no leading dash either,
 	// so scanning reads "-config asz.yaml" as the positional "asz.yaml".

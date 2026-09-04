@@ -65,8 +65,8 @@
   document: every talk as a tree with the text, usage and flags its records carry, the streams, the
   segments, the relations, and the rounds and files it was built from, each verified, with a gap or
   a failed digest written into the document rather than returned as an error. Package
-  `pkg/sessionview` defines and owns the shape and `asz view` serves it at `/api/c/{id}/view`. It is
-  never a file. A server holding the same files, such as the SkyWalking OAP, builds the same
+  `pkg/sessionview` defines and owns the shape and `asz view` serves it at `/api/c/{id}/view`;
+  `asz conversation -json` or `-yaml` prints it. It is never a file. A server holding the same files, such as the SkyWalking OAP, builds the same
   document. See the format page.
 
 - The page reads Session Data and Session Flow and nothing else. It took every record's time from

@@ -101,5 +101,7 @@ the fold and the records say. Where the fold says `unavailable`, the document sa
 ## Reading it
 
 `asz view` serves the document at `/api/c/{id}/view` and builds it once per fold, so a second reader
-pays nothing until a new round arrives. The largest conversation measured, 357 talks and 16,121
+pays nothing until a new round arrives. `asz conversation -json ID` prints the same document to
+standard output, and `-yaml` prints it as YAML with the same keys in the same order, for a
+terminal or a diff; the page stays the page. The largest conversation measured, 357 talks and 16,121
 steps, is 19 MB as one document and was built in 0.7 s.

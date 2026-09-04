@@ -18,6 +18,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -28,8 +29,10 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // cmdParse turns landed records into conversation structure and appends one
@@ -110,6 +113,33 @@ func parseToIndex(z *storage.Zone, id string, maxRound int64, rounds *int) (*par
 	}
 }
 
+// printDocument writes the conversation's asz.view document to standard
+// output, the same document asz view serves at /api/c/{id}/view, as JSON
+// or as YAML. The page stays the page; this is the document for a pipeline
+// or a diff.
+func printDocument(zoneRoot, id, format string) error {
+	c, err := view.New(storage.NewZone(zoneRoot), nil).Load(id)
+	if err != nil {
+		return err
+	}
+	doc, err := c.Build()
+	if err != nil {
+		return err
+	}
+	var out []byte
+	switch format {
+	case "json":
+		out, err = json.MarshalIndent(doc, "", "  ")
+	case "yaml":
+		out, err = sessionview.MarshalYAML(doc)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(append(out, '\n'))
+	return err
+}
+
 // termsFor returns how to render a name, from the -terms flag.
 //
 // A reader who knows their own agent product recognises its words; a reader
@@ -167,7 +197,10 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 	id := arg(0)
 	if id == "" {
-		return fmt.Errorf("usage: asz conversation CONVERSATION")
+		return fmt.Errorf("usage: asz conversation [-json|-yaml] CONVERSATION")
+	}
+	if docFormat != "" {
+		return printDocument(zoneRoot, id, docFormat)
 	}
 
 	chain := sessionflow.OpenChain(zoneRoot, id)

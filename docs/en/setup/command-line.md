@@ -12,7 +12,7 @@ asz index [-config FILE] [SESSION]   report what the derived index holds
 asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
 asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
 asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
-asz conversation [-config FILE] ID   fold a conversation's rounds and show the structure
+asz conversation [-config FILE] [-json|-yaml] ID   fold a conversation's rounds and show the structure, or print the asz.view document
 asz view [-config FILE] [ADDR]       serve the conversations as a page
 asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
 asz glossary                         what the runtime calls the things the model names
@@ -113,6 +113,15 @@ conversation 0438c73b-2367-4ed5-9de3-13ef9a17ed01
   rounds     1, head 9a29d5acdd73…
   landed     through seq 305
   entities   17249 nodes, 703 relations, 0 unresolved (0 still open)
+```
+
+With `-json` or `-yaml` it prints the conversation's [asz.view](../formats/asz-view.md) document
+instead, the same document `asz view` serves at `/api/c/{id}/view`, for a pipeline or a diff. The
+YAML is a rendering of the JSON with the same keys in the same order, not a second format.
+
+```sh
+asz conversation -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01 > conversation.json
+asz conversation -yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01 | head
 ```
 
 ## view
