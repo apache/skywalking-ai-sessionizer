@@ -1,5 +1,3 @@
-# Changes in 0.1.0
-
 The first release. It establishes the conversation model, one adapter that fills it from local
 Claude Code files, the two public data formats, and a local page to read the result.
 
@@ -64,3 +62,10 @@ Claude Code files, the two public data formats, and a local page to read the res
   and a file's identity is its volume serial and file index rather than an inode.
 - The collector side and the assembly and read side meet only at the storage root. A test fails
   when either imports the other, so a later split into two binaries is packaging, not a refactor.
+
+#### Where to get it
+- Binary packages for macOS, Linux and Windows, with a sha512 beside each: attached to this release
+- Container image: `ghcr.io/apache/skywalking-ai-sessionizer:0.1.0`
+- From source: `git checkout v0.1.0 && make build`, or `make binaries` for every platform
+- Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v0.1.0/docs/README.md
+- Full changelog: https://github.com/apache/skywalking-ai-sessionizer/blob/v0.1.0/docs/en/changes/changes-0.1.0.md

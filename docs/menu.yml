@@ -62,3 +62,5 @@ catalog:
       catalog:
         - name: Current Version
           path: /en/changes/changes-0.1.0
+        - name: 0.1.0
+          path: /en/changes/changes-0.1.0
