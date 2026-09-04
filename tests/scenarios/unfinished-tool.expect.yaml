@@ -1,0 +1,17 @@
+checkpoints:
+  open:
+    rounds: 1
+    kinds: {tool: 1}
+    nodes:
+      tool/s2-tool: {refs: 1, revision: 1, attrs: {result: unavailable}}
+    unresolved: {open: 1, resolved: 0}
+    unresolved_kinds: {tool_result: open}
+  final:
+    rounds: 2
+    written: true
+    delta: true
+    kinds: {tool: 1}
+    nodes:
+      tool/s2-tool: {refs: 2, revision: 2, attrs: {result: available}}
+    unresolved: {open: 0, resolved: 1}       # resolved, never dropped
+    unresolved_kinds: {tool_result: resolved}

@@ -38,28 +38,45 @@ const module = "github.com/apache/skywalking-ai-sessionizer/"
 
 var (
 	// The exporter is the collector side's way out: it reads the storage root
-	// and sends, and must not know how anything is assembled or shown.
-	collectorSide = []string{"internal/adapters/", "internal/export/"}
-	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/"}
+	// and sends, and must not know how anything is assembled or shown. A
+	// scenario's writers land input, so they are collector side too.
+	collectorSide = []string{"internal/adapters/", "internal/export/", "internal/scenario/"}
+	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/", "internal/scenario/expect/"}
+	// The scenario runner wires both sides, as the command does. Only the
+	// command and the tests may import it.
+	wiring = []string{"internal/scenario/run/"}
 )
 
-func TestSidesMeetOnlyAtTheStorageRoot(t *testing.T) {
-	root := filepath.Join("..", "..")
-	check := func(from, to []string) {
-		for _, dir := range from {
-			for pkg, imports := range importsUnder(t, filepath.Join(root, dir)) {
-				for _, imp := range imports {
-					for _, forbidden := range to {
-						if strings.HasPrefix(imp, module+forbidden) {
-							t.Errorf("%s imports %s; the two sides may meet only at the storage root", pkg, imp)
-						}
-					}
-				}
+// sideOf classifies a package directory by its longest matching prefix.
+func sideOf(pkg string) string {
+	best, side := 0, ""
+	for name, list := range map[string][]string{"collector": collectorSide, "server": serverSide, "wiring": wiring} {
+		for _, prefix := range list {
+			if strings.HasPrefix(pkg, prefix) && len(prefix) > best {
+				best, side = len(prefix), name
 			}
 		}
 	}
-	check(collectorSide, serverSide)
-	check(serverSide, collectorSide)
+	return side
+}
+
+func TestSidesMeetOnlyAtTheStorageRoot(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for pkg, imports := range importsUnder(t, root) {
+		from := sideOf(pkg)
+		for _, imp := range imports {
+			if !strings.HasPrefix(imp, module) {
+				continue
+			}
+			to := sideOf(strings.TrimPrefix(imp, module) + "/")
+			switch {
+			case from == "collector" && to == "server", from == "server" && to == "collector":
+				t.Errorf("%s imports %s; the two sides may meet only at the storage root", pkg, imp)
+			case to == "wiring" && from != "wiring" && !strings.HasPrefix(pkg, "cmd/") && !strings.HasPrefix(pkg, "tests/"):
+				t.Errorf("%s imports %s; the scenario runner is wiring, for the command and the tests only", pkg, imp)
+			}
+		}
+	}
 }
 
 // The page reads Session Data and Session Flow and nothing else. The index is
@@ -80,6 +97,7 @@ func TestThePageReadsOnlyTheTwoFormats(t *testing.T) {
 // by package directory. Test files are left out: a test may drive both sides.
 func importsUnder(t *testing.T, dir string) map[string][]string {
 	t.Helper()
+	root := filepath.Join("..", "..")
 	out := map[string][]string{}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -93,7 +111,8 @@ func importsUnder(t *testing.T, dir string) map[string][]string {
 		if err != nil {
 			return err
 		}
-		key := filepath.ToSlash(filepath.Dir(p))
+		key, _ := filepath.Rel(root, filepath.Dir(p))
+		key = filepath.ToSlash(key) + "/"
 		for _, imp := range f.Imports {
 			out[key] = append(out[key], strings.Trim(imp.Path.Value, `"`))
 		}

@@ -1,0 +1,8 @@
+# Every system record becomes a step: a turn duration, a local command, and a
+# subtype from the future.
+steps:
+  - input: do the thing
+  - call: {text: Done.}
+  - system: {subtype: turn_duration, fields: {durationMs: 12345, messageCount: 9}}
+  - system: {subtype: local_command, fields: {content: "<local-command-stdout></local-command-stdout>"}}
+  - system: {subtype: a_subtype_from_the_future, fields: {content: something new}}

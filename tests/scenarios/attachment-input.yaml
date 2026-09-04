@@ -1,0 +1,10 @@
+# Input that exists only as a queued attachment is recovered as external
+# input when its mode says so, and not when it does not; injected context of
+# any type, known or not, is a step of its own.
+steps:
+  - input: do the thing
+  - call: {text: Doing it.}
+  - queued: {text: also check the tests, mode: prompt}
+  - queued: {text: "<task-notification>...</task-notification>", mode: task-notification}
+  - inject: {type: todo_reminder, text: your todo list is empty}
+  - inject: {type: a_type_that_did_not_exist_when_this_was_written, text: something new}

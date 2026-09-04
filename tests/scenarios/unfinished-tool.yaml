@@ -1,0 +1,8 @@
+# A tool whose result never arrived is kept with an unavailable result and
+# reported as unresolved. When the result arrives later, the tool node is
+# revised in a later round and the reference is resolved, never dropped.
+steps:
+  - input: start something long
+  - call: {text: Working, tool: {name: Bash, input: {command: sleep 1000}}}
+    checkpoint: open
+  - result: {of: s2-tool, text: finally done, after: 1000s}

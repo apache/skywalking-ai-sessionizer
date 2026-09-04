@@ -1,0 +1,9 @@
+checkpoints:
+  final:
+    kinds: {agent.launch_ack: 1, runtime.notification: 1, agent.output: 1, agent.call: 1, talk: 2, stream: 2}
+    talks_on: {main: 1, helper: 1}
+    runs_in: {talk/main/s1-cycle: 2}          # the person's cycle, and the notification's
+    relations: {starts: 1, reports: 1, ends_with: 1}
+    nodes:
+      output/helper: {kind: agent.output, stream: helper}   # the child's output is the child's
+      stream/helper: {kind: stream}

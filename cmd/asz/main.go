@@ -52,6 +52,7 @@ Usage:
   asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
+  asz scenario build|check FILE ...    build a session from a scenario, or check one; see asz scenario
   asz version                          print the version
 
 Flags:
@@ -87,6 +88,9 @@ func main() {
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
+	if cmd == "scenario" {
+		os.Exit(cmdScenario(os.Args[2:]))
+	}
 	if cmd == "version" {
 		fmt.Printf("asz %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return

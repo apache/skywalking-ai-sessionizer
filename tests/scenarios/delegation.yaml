@@ -1,0 +1,8 @@
+# Delegation stays inside one talk: the launch acknowledgement, the child's
+# stream, the notification and the resumed work are one readable interaction,
+# in two runs. The child's output belongs to the child.
+steps:
+  - input: delegate this
+  - call:
+      agent: {name: helper, prompt: help with this, steps: [{call: {text: helper finished}}], notify: true}
+  - call: {text: Turn complete.}

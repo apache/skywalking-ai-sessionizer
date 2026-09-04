@@ -1,0 +1,5 @@
+checkpoints:
+  final:
+    kinds: {tool: 1, llm.call: 2}
+    nodes:
+      tool/t1: {kind: tool, refs: 2, attrs: {result: available, result_join: exact_unique, timing: unavailable}}

@@ -1,0 +1,11 @@
+# Records the runtime re-emitted before a reset, with their run rewritten,
+# do not duplicate the conversation: the first copy is kept.
+steps:
+  - input: one
+  - call: {text: Working on one, tool: {name: Bash, input: {command: echo one}, result: one}}
+  - call: {text: One complete.}
+  - input: two
+  - call: {text: Working on two, tool: {name: Bash, input: {command: echo two}, result: two}}
+  - call: {text: Two complete.}
+    checkpoint: clean
+  - replay: 5

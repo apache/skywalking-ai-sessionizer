@@ -1,0 +1,3 @@
+checkpoints:
+  final:
+    kinds: {turn.duration: 1, control.command: 1, control.notice: 1}

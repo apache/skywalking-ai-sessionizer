@@ -1,0 +1,7 @@
+checkpoints:
+  final:
+    rounds: 1
+    kinds: {session: 1, stream: 2, talk: 4, epoch: 2, llm.call: 8, tool: 3, message.external: 3, agent.call: 1, agent.launch_ack: 1, agent.output: 1, runtime.notification: 1}
+    talks_on: {main: 3, helper: 1}
+    relations: {starts: 1, reports: 1, ends_with: 1}
+    unresolved: {open: 0}

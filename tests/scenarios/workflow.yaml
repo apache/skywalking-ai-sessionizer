@@ -1,0 +1,12 @@
+# A workflow's children are resolved through their batch: the launch result
+# names the run, the run's journal names each child, and every child gets a
+# parent.
+steps:
+  - input: run the workflow
+  - call:
+      workflow:
+        name: check
+        children:
+          - {name: part-0, prompt: do part 0, steps: [{call: {text: part 0 done}}]}
+          - {name: part-1, prompt: do part 1, steps: [{call: {text: part 1 done}}]}
+          - {name: part-2, prompt: do part 2, steps: [{call: {text: part 2 done}}]}

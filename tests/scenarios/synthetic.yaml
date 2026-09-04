@@ -1,0 +1,6 @@
+# An assistant-role record the client made is a synthetic message, separated
+# from agent output.
+steps:
+  - input: do the thing
+  - call: {text: Doing it.}
+  - error: "API Error: connection reset"

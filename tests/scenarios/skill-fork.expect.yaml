@@ -1,0 +1,6 @@
+checkpoints:
+  final:
+    kinds: {agent.call: 1, agent.output: 1, stream: 2}
+    relations: {starts: 1, ends_with: 1}
+    unresolved_kinds: {spawn_of_child: none}
+    talks_on: {main: 1, forked: 1}

@@ -1,0 +1,4 @@
+checkpoints:
+  final:
+    kinds: {epoch.boundary: 1, epoch.summary: 1, epoch: 2, talk: 3}
+    relations: {follows: 1, summarizes: 1}

@@ -1,0 +1,3 @@
+checkpoints:
+  final:
+    kinds: {message.external: 2, context.injection: 3}

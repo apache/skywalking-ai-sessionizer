@@ -65,6 +65,11 @@ internal/view/                  reads a conversation and serves it as a page
 internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
+internal/adapters/mock/         the mock dialect: Session Data a scenario writes directly
+internal/scenario/              scenarios: the model, the clock, and the two writers (collector side)
+internal/scenario/expect/       expectation files evaluated over a root (server side)
+internal/scenario/run/          the runner that wires build, collect, parse and check; command and tests only
+tests/scenarios/                the assembly tests, one scenario and one expectation file each
 internal/config/                YAML configuration
 tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
 ```
@@ -72,11 +77,17 @@ tests/adapter/claudecode/local/ end-to-end suite over a synthetic fixture corpus
 `pkg/` is public because third-party adapters and consumers need it. Built-in adapters stay in
 `internal/`.
 
+**Scenarios are the tests.** A property of assembly is a scenario under `tests/scenarios/` with
+an expectation file beside it, run in both formats by `tests/scenario_test.go`. Go tests remain
+only for what a scenario cannot express: crashes, races, captured raw shapes, and package units.
+Add a scenario before adding a Go test.
+
 **Two sides, one contract.** The collector side (`internal/adapters/...`) lands Session Data. The
 server side (`internal/assemble`, `internal/parse`, `internal/view`, `internal/verify`,
 `pkg/sessionflow`) assembles and serves it. They share `internal/storage`, `internal/index`,
 `pkg/sessiondata` and `pkg/model`, and they meet only at the storage root. Neither imports the
-other; `tests/boundary` fails when one does. `cmd/asz` is the only place that wires them together.
+other; `tests/boundary` fails when one does. `cmd/asz` is the only place that wires them together,
+and `internal/scenario/run` is the one other wiring package, for the command and the tests only.
 This is what keeps a later split into a collector binary and a server binary, talking over a
 network, a packaging change rather than a refactor.
 

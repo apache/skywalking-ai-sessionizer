@@ -127,6 +127,18 @@ otherwise. `/api/status` reports the mode, the source, the last and the next ref
 of the last pass, and the list page shows the same. On a storage root copied from another machine
 there is no source, so the page serves what is there and shows no refresh.
 
+## scenario
+
+```text
+asz scenario build FILE --format {claude-code|sd} --out DIR [--at TIME] [--scale FACTOR] [--repeat N] [--through CHECKPOINT]
+asz scenario check FILE [--format {claude-code|sd|all}] [--out DIR] [--at TIME] [--scale FACTOR]
+```
+
+`build` turns a scenario file into the input a session leaves behind, under `DIR`, with a
+`DIR/asz.yaml` for the ordinary commands to collect and parse it. `check` runs the scenario as a
+test against its expectation file, in every format, at every checkpoint. See
+[Scenarios](../guides/scenario.md).
+
 ## push
 
 Sends every landed file and every round not yet sent to the OpenTelemetry logs receiver at

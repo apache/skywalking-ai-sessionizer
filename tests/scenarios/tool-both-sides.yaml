@@ -1,0 +1,6 @@
+# A tool is one step with both sides, the request and the result, and its
+# timing is unavailable rather than inferred from timestamps.
+steps:
+  - input: run something
+  - call: {text: Working, tool: {id: t1, name: Bash, input: {command: echo hi}, result: hi}}
+  - call: {text: Done.}

@@ -1,0 +1,6 @@
+checkpoints:
+  final:
+    kinds: {tool: 2}
+    nodes:
+      tool/t1: {attrs: {result: available}}
+      tool/t2: {attrs: {result: available}}

@@ -1,0 +1,6 @@
+checkpoints:
+  clean:
+    kinds: {talk: 2, run: 2, llm.call: 4, tool: 2, message.external: 2}
+  final:
+    written: true                            # evidence advanced, so the watermark moves
+    kinds: {talk: 2, run: 2, llm.call: 4, tool: 2, message.external: 2}   # and nothing is duplicated

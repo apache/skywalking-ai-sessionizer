@@ -1,0 +1,22 @@
+checkpoints:
+  delegated:
+    rounds: 1
+    kinds: {talk: 2, stream: 2, thinking: 1, tool: 2, agent.call: 1, agent.launch_ack: 1, runtime.notification: 1, agent.output: 1, context.injection: 1}
+    talks_on: {main: 1, checker: 1}
+    relations: {starts: 1, reports: 1, ends_with: 1}
+    nodes:
+      tool/tool-run-make-build: {refs: 2, attrs: {name: Bash, result: available}}
+      tool/srvtool-websearch: {refs: 2, attrs: {name: WebSearch, result: available}}
+  final:
+    rounds: 2
+    delta: true
+    kinds: {talk: 3, epoch: 3, epoch.boundary: 1, epoch.summary: 1, message.synthetic: 1, llm.call: 6}
+    relations: {follows: 1, summarizes: 1}
+    unresolved: {open: 0}
+    session: {from: +0s, to: +11.1s}         # the first input, and the reset
+    view:
+      state: verified
+      talks: 3
+      rounds: 2
+      files: 6                                # four landed files and two rounds
+      first_talk: {label: run the build, reply: Build passed and tests are green., runs: 2}

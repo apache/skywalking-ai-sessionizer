@@ -1,0 +1,24 @@
+# A conversation grows a round at a time. Each checkpoint lands one more turn,
+# and every round after the first is a delta that starts past the evidence
+# the round before consumed.
+steps:
+  - input: set up the project
+  - call: {text: Working on turn 1, tool: {name: Bash, input: {command: echo turn-1}, result: turn-1}}
+  - call: {text: Turn 1 complete.}
+    checkpoint: turn1
+  - input: add a build target
+  - call: {text: Working on turn 2, tool: {name: Bash, input: {command: echo turn-2}, result: turn-2}}
+  - call: {text: Turn 2 complete.}
+    checkpoint: turn2
+  - input: check the tests
+  - call:
+      agent: {name: checker, prompt: help with turn 3, steps: [{call: {text: helper finished turn 3}}], notify: true}
+  - call: {text: Turn 3 complete.}
+    checkpoint: turn3
+  - input: fix the failing case
+  - call: {text: Turn 4 complete.}
+    checkpoint: turn4
+  - input: review everything
+  - call:
+      agent: {name: reviewer, prompt: help with turn 5, steps: [{call: {text: helper finished turn 5}}], notify: true}
+  - call: {text: Turn 5 complete.}

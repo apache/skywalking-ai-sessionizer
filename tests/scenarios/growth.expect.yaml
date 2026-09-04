@@ -1,0 +1,12 @@
+checkpoints:
+  turn1: {rounds: 1, written: true, talks_on: {main: 1}}
+  turn2: {rounds: 2, written: true, delta: true, talks_on: {main: 2}}
+  turn3: {rounds: 3, written: true, delta: true, talks_on: {main: 3, checker: 1}, kinds: {stream: 2}}
+  turn4: {rounds: 4, written: true, delta: true, talks_on: {main: 4}}
+  final:
+    rounds: 5
+    written: true
+    delta: true
+    kinds: {stream: 3, talk: 7, agent.call: 2, agent.output: 2}
+    talks_on: {main: 5, checker: 1, reviewer: 1}
+    relations: {starts: 2, reports: 2, ends_with: 2}

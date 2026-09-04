@@ -1,0 +1,6 @@
+# A tool result whose runtime enrichment is a bare string still keeps its
+# record, so the tool joins to its result like any other.
+steps:
+  - input: read a file
+  - call: {text: Reading, tool: {id: t1, name: Read, input: {file_path: /tmp/x}, result: {text: file contents, string: true}}}
+  - call: {text: Also, tool: {id: t2, name: Bash, input: {command: ls}, result: listed}}

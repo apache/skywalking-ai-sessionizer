@@ -47,6 +47,16 @@
   unresolved references, so a list of conversations needs no fold. All are evidence, so they
   reproduce with the round and sit inside its digest.
 
+## Scenarios
+
+- `asz scenario build` turns a short YAML scenario, written in the model's own words, into the
+  input a session leaves behind: Claude Code's own files for the adapter to collect, or Session
+  Data landed directly under a new `mock/1` dialect. `asz scenario check` runs a scenario as a
+  test against an expectation file, in both formats and at every checkpoint, and checks the
+  properties every chain must have. The rounds are never mocked; the ordinary parser writes them.
+  The project's own assembly tests are now scenarios under `tests/scenarios/`, and the Go
+  transcript builder they used became the `claude-code` writer.
+
 ## Read
 
 - `asz.view`, version 1.0, is one conversation rebuilt from its rounds and its landed files as one

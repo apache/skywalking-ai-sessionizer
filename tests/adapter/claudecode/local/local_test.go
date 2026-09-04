@@ -329,3 +329,22 @@ func keys(m map[string]claudecode.Session) []string {
 
 var _ = verify.Session
 var _ = index.New
+
+func hasFlag(rec sessiondata.Record, name string) bool {
+	for _, f := range rec.Flags {
+		if f == name {
+			return true
+		}
+	}
+	return false
+}
+
+// content is every readable piece of a record, joined, for a substring check.
+func content(rec sessiondata.Record) string {
+	var b strings.Builder
+	for _, p := range rec.Parts {
+		b.WriteString(p.Text)
+		b.Write(p.Data)
+	}
+	return b.String()
+}

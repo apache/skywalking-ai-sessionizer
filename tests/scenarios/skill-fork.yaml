@@ -1,0 +1,6 @@
+# A skill fork announces its child only in the parent's result block. The
+# child's parent is resolved from that block, so nothing is left unresolved.
+steps:
+  - input: use the skill
+  - call:
+      skill: {name: collect, agent: forked, steps: [{call: {text: skill finished}}]}

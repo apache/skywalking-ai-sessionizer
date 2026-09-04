@@ -1,0 +1,16 @@
+# Three turns, the second delegated: the whole shape of a session, assembled
+# into one conversation with a child stream.
+interval: 1s
+steps:
+  - input: first thing
+  - call: {text: Working on turn 1, tool: {name: Bash, input: {command: echo turn-1}, result: turn-1}}
+  - call: {text: Turn 1 complete.}
+  - input: second thing, delegate it
+  - call: {text: Working on turn 2, tool: {name: Bash, input: {command: echo turn-2}, result: turn-2}}
+  - call:
+      agent: {name: helper, prompt: help with turn 2, steps: [{call: {text: helper finished turn 2, usage: {out: 20}}}], notify: true}
+      usage: {out: 15}
+  - call: {text: Turn 2 complete.}
+  - input: third thing
+  - call: {text: Working on turn 3, tool: {name: Bash, input: {command: echo turn-3}, result: turn-3}}
+  - call: {text: Turn 3 complete.}

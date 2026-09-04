@@ -1,0 +1,8 @@
+# A context reset cuts an epoch on the stream, the summary is paired with its
+# boundary by containment, and the new epoch follows the old one.
+steps:
+  - input: before the reset
+  - call: {text: Working before.}
+  - reset: {summary: summary of the work so far}
+  - input: after the reset
+  - call: {text: Working after.}
