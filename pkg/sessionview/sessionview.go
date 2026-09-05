@@ -193,8 +193,9 @@ type Segment struct {
 // Node is one entity of the fold with what its record says, and its
 // children: a talk holds runs, a run holds steps, a call holds what it
 // produced. Text is the readable text of the part the node stands on,
-// clipped to 2,000 bytes, with the full size in Bytes; a viewer wanting the
-// whole record reads it by address. A talk adds its summary: Label, Reply,
+// clipped to the longest prefix of whole characters within 2,000 bytes,
+// with the full size in Bytes; a viewer wanting the whole record reads it
+// by address. A talk adds its summary: Label, Reply,
 // Runs, Steps, Tools, From, To, Child and Segment. A tool or agent call adds
 // Name and what came back.
 type Node struct {
@@ -246,13 +247,16 @@ type Node struct {
 	Edges    []Edge `json:"edges,omitempty"`
 }
 
-// Edge is one relation seen from a node.
+// Edge is one relation seen from a node. Edges are listed by relation id
+// and then direction, so the same fold gives the same list every time.
 type Edge struct {
 	Type    string `json:"type"`
 	Other   string `json:"other"`
 	Dir     string `json:"dir"` // "out" or "in"
 	Quality string `json:"quality"`
 	Via     string `json:"via,omitempty"`
+	// ID is the relation's id, for ordering; it is not written.
+	ID string `json:"-"`
 }
 
 // Relation is one relation of the fold.

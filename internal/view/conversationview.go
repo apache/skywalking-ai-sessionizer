@@ -90,6 +90,12 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	rounds, roundFiles, problems, state := c.rounds(digests)
 	v.Rounds = rounds
 	v.Files = append(files, roundFiles...)
+	if len(c.problems) > 0 {
+		problems = append(append([]string{}, c.problems...), problems...)
+		if state == sessionview.StateVerified {
+			state = sessionview.StateIncomplete
+		}
+	}
 	v.Summary.State, v.Summary.Problems = state, problems
 
 	talks := c.Talks()
@@ -202,7 +208,7 @@ func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.R
 		return nil, nil, append(problems, err.Error()), sessionview.StateIncomplete
 	}
 	var prevDigest, prevInput string
-	var prevThrough uint64
+	var prevThrough, prevRound uint64
 	for _, rf := range list {
 		r, err := chain.Open(rf.Path)
 		if err != nil {
@@ -212,7 +218,15 @@ func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.R
 		}
 		h := r.Header
 		ok := true
-		if h.Previous != prevDigest {
+		if h.Round != prevRound+1 {
+			// A missing round: this one cannot link to what is not there,
+			// and nothing after it folds.
+			problems = append(problems, fmt.Sprintf("round %d is missing before round %d", prevRound+1, h.Round))
+			ok = false
+			if state == sessionview.StateVerified {
+				state = sessionview.StateIncomplete
+			}
+		} else if h.Previous != prevDigest {
 			problems = append(problems, fmt.Sprintf("round %d names previous %s, the round before is %s", h.Round, firstN(h.Previous, 12), firstN(prevDigest, 12)))
 			ok, state = false, sessionview.StateMismatch
 		}
@@ -258,7 +272,7 @@ func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.R
 			Lines: countByte(data, '\n'), Bytes: int64(len(data)),
 			Digest: digestOf(data), FromTime: millisPtr(h.FromTime), ThroughTime: millisPtr(h.ThroughTime),
 		})
-		prevDigest, prevInput, prevThrough = r.Commit.Digest, h.InputDigest, h.ThroughSeq
+		prevDigest, prevInput, prevThrough, prevRound = r.Commit.Digest, h.InputDigest, h.ThroughSeq, h.Round
 	}
 	return rounds, files, problems, state
 }

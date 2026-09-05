@@ -97,6 +97,10 @@ type Conversation struct {
 	// whole Conversation, and the view with it, when a round arrives.
 	builtMu sync.Mutex
 	built   *sessionview.Conversation
+
+	// problems is what stopped the fold short of the chain's last file, in
+	// words, for the document to carry.
+	problems []string
 }
 
 // Load folds a conversation and builds its lookups, once.
@@ -106,15 +110,22 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	if c, ok := s.loaded[id]; ok {
 		return c, nil
 	}
-	v, err := sessionflow.OpenChain(s.zone.Root(), id).Fold()
+	// The fold goes as far as the chain holds. A round that is missing or
+	// broken is reported in the document, not returned as an error, so a
+	// reader sees what could be folded and what could not; only a chain with
+	// no usable round at all is an error, because there is nothing to show.
+	v, problems, err := sessionflow.OpenChain(s.zone.Root(), id).FoldPartial()
 	if err != nil {
 		return nil, err
 	}
 	if v.Round == 0 {
+		if len(problems) > 0 {
+			return nil, fmt.Errorf("view: %s: %s", id, problems[0])
+		}
 		return nil, fmt.Errorf("view: no rounds for %s; run asz parse", id)
 	}
 	c := &Conversation{
-		ID: id, View: v, Session: v.Session, zone: s.zone,
+		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems,
 		at:   map[[2]uint64]int64{},
 		from: map[string][]*sessionflow.Relation{},
 		to:   map[string][]*sessionflow.Relation{},
@@ -206,11 +217,11 @@ func (c *Conversation) Streams() []*sessionflow.Node {
 	return out
 }
 
-// Edges returns every relation touching a node, both directions.
+// Edges returns every relation touching a node, both directions, by id.
 func (c *Conversation) Edges(id string) []*sessionflow.Relation {
 	out := append([]*sessionflow.Relation(nil), c.from[id]...)
 	out = append(out, c.to[id]...)
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
@@ -237,11 +248,19 @@ func (s *Server) List() ([]string, error) {
 	return out, nil
 }
 
-// Millis renders a time as unix milliseconds, or 0 when unobserved.
+// Millis renders an observed time as unix milliseconds, or 0 when
+// unobserved. It floors, as time.Time does, so a time before 1970 rounds
+// the same way everywhere; a duration is not a time and takes
+// durationMillis.
 func Millis(ns int64) int64 {
 	if ns == 0 {
 		return 0
 	}
+	return time.Unix(0, ns).UnixMilli()
+}
+
+// durationMillis renders an elapsed time as milliseconds, toward zero.
+func durationMillis(ns int64) int64 {
 	return ns / int64(time.Millisecond)
 }
 

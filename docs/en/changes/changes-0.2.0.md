@@ -77,6 +77,15 @@
   the session was parsed in. A server holding the same files, such as the SkyWalking OAP, builds the same
   document. See the format page.
 
+- A chain with a missing or broken round is served as a document with the gap written into
+  `summary.state` and `summary.problems`, the fold stopping before it, where it was an error in
+  place of the document; the format page always required this.
+- A node's edges are ordered by relation id and then direction, so the same fold renders the same
+  document every time, and a property of every scenario checks that it does.
+- An observed time renders to the millisecond by flooring, as `time.Time` does, so a time before
+  1970 rounds the same everywhere; an elapsed time still divides toward zero.
+- A text preview keeps the longest prefix of whole characters within 2,000 bytes rather than
+  cutting a character in two.
 - The conversation list's time span is the session node's, when it began and its last activity,
   the same pair the document and the wire carry; it was the span of the talks, which ended before
   a reset's boundary.

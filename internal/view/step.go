@@ -26,9 +26,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -137,12 +139,21 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 		ID: n.ID, Kind: n.Kind, Parent: n.Parent, Stream: n.Stream,
 		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: n.Attrs,
 	}
+	// Both directions together, by relation id and then direction, so the
+	// same fold renders the same edges in the same order every time; a
+	// relation from a node to itself appears once in each direction.
 	for _, r := range c.from[n.ID] {
-		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.To, Dir: "out", Quality: r.Quality, Via: r.Via})
+		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.To, Dir: "out", Quality: r.Quality, Via: r.Via, ID: r.ID})
 	}
 	for _, r := range c.to[n.ID] {
-		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.From, Dir: "in", Quality: r.Quality, Via: r.Via})
+		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.From, Dir: "in", Quality: r.Quality, Via: r.Via, ID: r.ID})
 	}
+	sort.SliceStable(out.Edges, func(i, j int) bool {
+		if out.Edges[i].ID != out.Edges[j].ID {
+			return out.Edges[i].ID < out.Edges[j].ID
+		}
+		return out.Edges[i].Dir < out.Edges[j].Dir
+	})
 	// The content a reader sees, taken from the part this node points at.
 	//
 	// Only a leaf carries content. A provider call is a container - its text,
@@ -249,7 +260,7 @@ func (c *Conversation) fillRequestToResult(out *step, n *sessionflow.Node) {
 	if from == 0 || to == 0 || to < from {
 		return
 	}
-	out.RequestToResultMS = Millis(to - from)
+	out.RequestToResultMS = durationMillis(to - from)
 	out.RequestToResultBy = a.Join
 }
 
@@ -380,11 +391,17 @@ func carriesContent(kind string) bool {
 	return true
 }
 
+// clip keeps the longest prefix of whole characters within the preview
+// budget, so a preview never ends in a broken character.
 func clip(t string) string {
 	if len(t) <= preview {
 		return t
 	}
-	return t[:preview]
+	cut := preview
+	for cut > 0 && !utf8.RuneStart(t[cut]) {
+		cut--
+	}
+	return t[:cut]
 }
 
 func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64) {

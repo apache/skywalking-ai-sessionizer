@@ -920,6 +920,20 @@ func ViewCoversTheSession(root, session string) ([]string, error) {
 	if len(doc.Talks) != len(v.NodesByKind(model.KindTalk)) || doc.Summary.Talks != len(doc.Talks) {
 		bad("%d talks in the document, %d in the fold, summary says %d", len(doc.Talks), len(v.NodesByKind(model.KindTalk)), doc.Summary.Talks)
 	}
+	// The same fold renders the same document, byte for byte.
+	again, err := view.New(storage.NewZone(root), nil).Load(session)
+	if err != nil {
+		return nil, err
+	}
+	doc2, err := again.Build()
+	if err != nil {
+		return nil, err
+	}
+	a, _ := json.Marshal(doc)
+	b, _ := json.Marshal(doc2)
+	if string(a) != string(b) {
+		bad("two builds of the same fold differ")
+	}
 	// The session's own range.
 	if sn := v.Nodes[sessionflow.NodeID("session", session)]; sn != nil {
 		var attrs struct {

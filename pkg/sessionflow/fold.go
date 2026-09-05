@@ -209,6 +209,38 @@ func (c *Chain) Fold() (*View, error) {
 	return v, nil
 }
 
+// FoldPartial reads the rounds of a chain in order and folds as far as the
+// chain holds: a round that is missing, that does not read, or that does
+// not link to the one before stops the fold, and what it found wrong is
+// returned in words with the view of the rounds before it. A reader that
+// shows a conversation uses this, so a broken chain is a document with its
+// problems written in rather than an error in place of one; anything that
+// needs a whole chain uses Fold.
+func (c *Chain) FoldPartial() (*View, []string, error) {
+	files, err := c.List()
+	if err != nil {
+		return nil, nil, err
+	}
+	v := NewView(c.id)
+	var problems []string
+	for _, rf := range files {
+		if rf.Round != v.Round+1 {
+			problems = append(problems, fmt.Sprintf("round %d is missing; the chain stops at round %d", v.Round+1, v.Round))
+			break
+		}
+		r, err := c.Open(rf.Path)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("round %d does not read: %v", rf.Round, err))
+			break
+		}
+		if err := v.Apply(r); err != nil {
+			problems = append(problems, fmt.Sprintf("round %d does not fold: %v", rf.Round, err))
+			break
+		}
+	}
+	return v, problems, nil
+}
+
 // OpenUnresolved returns the entries still outstanding, sorted by id.
 //
 // Reporting these is not optional. An assembler that silently drops what it

@@ -33,7 +33,9 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
+	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // Package chain_test holds what a scenario cannot express: a crash between
@@ -324,5 +326,63 @@ func TestRepackRefusesTheSameRoot(t *testing.T) {
 	s.through("one")
 	if _, err := repack.Session(s.zone, s.zone, s.session, 4<<20, time.Now()); err == nil {
 		t.Fatal("repack into the same root must be refused")
+	}
+}
+
+// A chain with a round missing is a document with the gap written in, not
+// an error: the fold stops before the gap, the state says incomplete, the
+// rounds after the gap are listed and not verified. Anything that needs a
+// whole chain still refuses it.
+func TestDocumentReportsAMissingRound(t *testing.T) {
+	s := newStage(t, growing)
+	s.through("one")
+	s.parse()
+	s.through("two")
+	s.parse()
+	s.through("three")
+	s.parse()
+	chain := sessionflow.OpenChain(s.zone.Root(), s.session)
+	files, err := chain.List()
+	if err != nil || len(files) != 3 {
+		t.Fatalf("rounds: %d, %v", len(files), err)
+	}
+	if err := os.Chmod(files[1].Path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(files[1].Path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chain.Verify(); err == nil {
+		t.Fatal("a chain with round 2 missing verified")
+	}
+
+	c, err := view.New(s.zone, nil).Load(s.session)
+	if err != nil {
+		t.Fatalf("a chain with a missing round did not load as a document: %v", err)
+	}
+	doc, err := c.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Summary.State != sessionview.StateIncomplete {
+		t.Fatalf("state %q, want incomplete: %v", doc.Summary.State, doc.Summary.Problems)
+	}
+	if doc.Head.Round != 1 {
+		t.Fatalf("head is round %d, want 1, the last round before the gap", doc.Head.Round)
+	}
+	mentioned := false
+	for _, p := range doc.Summary.Problems {
+		if strings.Contains(p, "round 2") {
+			mentioned = true
+		}
+	}
+	if !mentioned {
+		t.Fatalf("the problems do not name round 2: %v", doc.Summary.Problems)
+	}
+	if len(doc.Rounds) != 2 || !doc.Rounds[0].Verified || doc.Rounds[1].Round != 3 || doc.Rounds[1].Verified {
+		t.Fatalf("rounds: %+v", doc.Rounds)
+	}
+	if len(doc.Talks) == 0 {
+		t.Fatal("the document holds nothing of the round before the gap")
 	}
 }

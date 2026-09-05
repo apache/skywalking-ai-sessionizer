@@ -82,8 +82,10 @@ fails when the committed file no longer matches what the code produces.
 
 Verification is content, not an error. A gap in the chain or a failed digest is written into
 `summary.state` and `summary.problems`, each round says whether it verified, and the rest of the
-document holds whatever could still be folded. A viewer shows the problem; it never gets an error
-instead of a document.
+document holds whatever could still be folded: the fold stops before a missing or broken round,
+`head` names the last round it reached, and the rounds after the gap are listed and not verified.
+A viewer shows the problem; it never gets an error instead of a document. Only a chain with no
+usable round at all is an error, because there is nothing to show.
 
 ## A node in `talks`
 
@@ -103,13 +105,13 @@ instead of a document.
 | `id`, `kind`, `parent`, `stream`, `attrs` | the node as the fold holds it; `kind` is one of the node kinds of Session Flow |
 | `at` | when its record happened, from the record; `0` when nothing observed it |
 | `ref`, `refs` | the record it stands on and every record it covers, as `{seq, row, block}`, kept so a viewer can show the evidence |
-| `text`, `state`, `bytes` | the part the node stands on: its readable text, clipped to 2,000 bytes, whether the content is `available`, and its full size. For a `data` part the text is the data as compact JSON. A reader wanting the whole record reads it by address. |
+| `text`, `state`, `bytes` | the part the node stands on: its readable text, clipped to the longest prefix of whole characters within 2,000 bytes, whether the content is `available`, and its full size. For a `data` part the text is the data as compact JSON. A reader wanting the whole record reads it by address. |
 | `usage`, `flags`, `dropped` | what else the referenced record says, copied once: on an `llm.call`, the token counts `in`, `out`, `cache_read`, `cache_write` from the one record `usage_at` names, never a sum over fragments; the record's `flags`; and its `dropped` list, so a viewer can say what was left out and why |
-| a talk adds | `label`, `reply` (the first 2,000 bytes of its last assistant message), `runs`, `steps`, `tools`, `from`, `to`, `child`, `segment` |
+| a talk adds | `label`, `reply` (its last assistant message, clipped the same way), `runs`, `steps`, `tools`, `from`, `to`, `child`, `segment` |
 | a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly |
 | a `turn.duration` step adds | `duration_ms`, `duration_measured_by` |
 | `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced |
-| `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, so a viewer draws cross-stream flow without searching `relations` |
+| `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, ordered by relation id and then direction, so a viewer draws cross-stream flow without searching `relations` and the same fold gives the same list |
 
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
 the fold and the records say. Where the fold says `unavailable`, the document says it too.
