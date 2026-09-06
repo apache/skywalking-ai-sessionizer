@@ -43,10 +43,18 @@ var renderer embed.FS
 const AssetPrefix = "/assets/conversation-view/"
 
 func init() {
-	// The Go mime table knows no font type; without this the fonts would be
-	// served as octet streams, which a browser still uses but a strict one
-	// logs about.
-	_ = mime.AddExtensionType(".woff2", "font/woff2")
+	// The types the page relies on, fixed here rather than left to the
+	// operating system: Go's own table knows no font type, and Windows
+	// names a script application/javascript where a module import wants
+	// text/javascript.
+	for ext, typ := range map[string]string{
+		".js":    "text/javascript; charset=utf-8",
+		".css":   "text/css; charset=utf-8",
+		".json":  "application/json",
+		".woff2": "font/woff2",
+	} {
+		_ = mime.AddExtensionType(ext, typ)
+	}
 }
 
 var pinLine = regexp.MustCompile(`(?m)^commit ([0-9a-f]{40})$`)
