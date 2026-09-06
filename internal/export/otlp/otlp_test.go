@@ -19,61 +19,26 @@ package otlp_test
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
-// A small wire-format decoder, independent of the encoder, so the test reads
-// what a receiver would read rather than what the encoder meant to write.
-type field struct {
-	num  int
-	wire int
-	u    uint64
-	b    []byte
-}
-
-func decode(t *testing.T, b []byte) []field {
-	t.Helper()
-	var out []field
-	for len(b) > 0 {
-		tag, n := binary.Uvarint(b)
-		if n <= 0 {
-			t.Fatalf("bad tag at %d bytes from the end", len(b))
-		}
-		b = b[n:]
-		f := field{num: int(tag >> 3), wire: int(tag & 7)}
-		switch f.wire {
-		case 0:
-			v, n := binary.Uvarint(b)
-			f.u, b = v, b[n:]
-		case 1:
-			f.u, b = binary.LittleEndian.Uint64(b), b[8:]
-		case 2:
-			l, n := binary.Uvarint(b)
-			b = b[n:]
-			f.b, b = b[:l], b[l:]
-		default:
-			t.Fatalf("unexpected wire type %d", f.wire)
-		}
-		out = append(out, f)
-	}
-	return out
-}
+// Every test runs over both transports: the same request must reach the
+// receiver whichever connection carries it.
+var protocols = []string{otlp.ProtocolGRPC, otlp.ProtocolHTTP}
 
 // decodedLog is one record as a receiver sees it.
 type decodedLog struct {
@@ -82,112 +47,40 @@ type decodedLog struct {
 	attrs map[string]string
 }
 
-func attrsOf(t *testing.T, kvs []field) map[string]string {
-	t.Helper()
-	out := map[string]string{}
-	for _, kv := range kvs {
-		var key, val string
-		for _, f := range decode(t, kv.b) {
-			switch f.num {
-			case 1:
-				key = string(f.b)
-			case 2:
-				for _, v := range decode(t, f.b) {
-					switch v.num {
-					case 1:
-						val = string(v.b)
-					case 3:
-						val = "int:" + strconv.FormatInt(int64(v.u), 10)
-					}
+// parseRequests reads what the receiver accepted: the resource attributes
+// of every resource, and every record in order.
+func parseRequests(reqs []*collogspb.ExportLogsServiceRequest) (resources []map[string]string, logs []decodedLog) {
+	for _, req := range reqs {
+		for _, rl := range req.GetResourceLogs() {
+			resources = append(resources, otlptest.Attrs(rl.GetResource().GetAttributes()))
+			for _, sl := range rl.GetScopeLogs() {
+				for _, r := range sl.GetLogRecords() {
+					logs = append(logs, decodedLog{time: r.GetTimeUnixNano(), body: r.GetBody().GetStringValue(), attrs: otlptest.Attrs(r.GetAttributes())})
 				}
 			}
 		}
-		out[key] = val
-	}
-	return out
-}
-
-// parseRequest decodes an ExportLogsServiceRequest into resource attributes
-// and records.
-func parseRequest(t *testing.T, body []byte) (resources []map[string]string, logs []decodedLog) {
-	t.Helper()
-	for _, rl := range decode(t, body) {
-		if rl.num != 1 {
-			continue
-		}
-		var res map[string]string
-		for _, f := range decode(t, rl.b) {
-			switch f.num {
-			case 1: // Resource
-				var kvs []field
-				for _, a := range decode(t, f.b) {
-					if a.num == 1 {
-						kvs = append(kvs, a)
-					}
-				}
-				res = attrsOf(t, kvs)
-			case 2: // ScopeLogs
-				for _, s := range decode(t, f.b) {
-					if s.num != 2 {
-						continue
-					}
-					var rec decodedLog
-					var kvs []field
-					for _, r := range decode(t, s.b) {
-						switch r.num {
-						case 1:
-							rec.time = r.u
-						case 5:
-							for _, v := range decode(t, r.b) {
-								if v.num == 1 {
-									rec.body = string(v.b)
-								}
-							}
-						case 6:
-							kvs = append(kvs, r)
-						}
-					}
-					rec.attrs = attrsOf(t, kvs)
-					logs = append(logs, rec)
-				}
-			}
-		}
-		resources = append(resources, res)
 	}
 	return resources, logs
 }
 
-// receiver is an OTLP/HTTP logs endpoint that keeps every request.
-type receiver struct {
-	mu   sync.Mutex
-	reqs [][]byte
-	fail bool
+func startReceiver(t *testing.T) *otlptest.Receiver {
+	t.Helper()
+	rcv, err := otlptest.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rcv.Close)
+	return rcv
 }
 
-func (r *receiver) handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v1/logs" || req.Header.Get("Content-Type") != "application/x-protobuf" {
-			http.Error(w, "wrong path or content type", http.StatusBadRequest)
-			return
-		}
-		body := make([]byte, 0, 1<<16)
-		buf := make([]byte, 1<<16)
-		for {
-			n, err := req.Body.Read(buf)
-			body = append(body, buf[:n]...)
-			if err != nil {
-				break
-			}
-		}
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if r.fail {
-			http.Error(w, "down", http.StatusServiceUnavailable)
-			return
-		}
-		r.reqs = append(r.reqs, body)
-		w.WriteHeader(http.StatusOK)
-	})
+func clientFor(t *testing.T, rcv *otlptest.Receiver, protocol string) otlp.Client {
+	t.Helper()
+	c, err := rcv.Client(protocol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
 }
 
 // zoneWithOneSession builds a root with one landed file of two records, a
@@ -259,11 +152,15 @@ func zoneWithOneSession(t *testing.T) (*storage.Zone, []string) {
 }
 
 func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
+	for _, protocol := range protocols {
+		t.Run(protocol, func(t *testing.T) { testPushSendsEveryFileOnce(t, protocol) })
+	}
+}
+
+func testPushSendsEveryFileOnce(t *testing.T, protocol string) {
 	z, files := zoneWithOneSession(t)
-	rcv := &receiver{}
-	srv := httptest.NewServer(rcv.handler())
-	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code", Layer: "AI_AGENT", InstanceID: "sender-1"}
+	rcv := startReceiver(t)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, protocol), Version: "test", ServiceName: "Claude Code", Layer: "AI_AGENT", InstanceID: "sender-1"}
 
 	st, err := p.Pass()
 	if err != nil {
@@ -273,13 +170,7 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 		t.Fatalf("first pass: files=%d requests=%d errors=%v, want %d files in one request", st.Files, st.Requests, st.Errors, len(files))
 	}
 
-	var all []decodedLog
-	var resources []map[string]string
-	for _, req := range rcv.reqs {
-		res, logs := parseRequest(t, req)
-		resources = append(resources, res...)
-		all = append(all, logs...)
-	}
+	resources, all := parseRequests(rcv.Requests())
 	if len(all) != len(files) {
 		t.Fatalf("receiver decoded %d records, want one per file, %d", len(all), len(files))
 	}
@@ -363,12 +254,12 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 	}
 
 	// A second pass sends nothing: every file is write-once and recorded.
-	before := len(rcv.reqs)
+	before := len(rcv.Requests())
 	st, err = p.Pass()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Files != 0 || len(rcv.reqs) != before {
+	if st.Files != 0 || len(rcv.Requests()) != before {
 		t.Fatalf("second pass re-sent %d files", st.Files)
 	}
 	if _, err := os.Stat(filepath.Join(z.Root(), "push.state")); err != nil {
@@ -377,11 +268,16 @@ func TestPushSendsEveryFileOnceWithItsAttributes(t *testing.T) {
 }
 
 func TestPushLeavesFilesForTheNextPassWhenTheReceiverFails(t *testing.T) {
+	for _, protocol := range protocols {
+		t.Run(protocol, func(t *testing.T) { testPushLeavesFilesForTheNextPass(t, protocol) })
+	}
+}
+
+func testPushLeavesFilesForTheNextPass(t *testing.T, protocol string) {
 	z, files := zoneWithOneSession(t)
-	rcv := &receiver{fail: true}
-	srv := httptest.NewServer(rcv.handler())
-	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code"}
+	rcv := startReceiver(t)
+	rcv.Fail(true)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, protocol), Version: "test", ServiceName: "Claude Code"}
 
 	st, err := p.Pass()
 	if err != nil {
@@ -390,9 +286,7 @@ func TestPushLeavesFilesForTheNextPassWhenTheReceiverFails(t *testing.T) {
 	if len(st.Errors) == 0 || st.Files != 0 {
 		t.Fatalf("a failed request must mark nothing pushed: files=%d errors=%v", st.Files, st.Errors)
 	}
-	rcv.mu.Lock()
-	rcv.fail = false
-	rcv.mu.Unlock()
+	rcv.Fail(false)
 	st, err = p.Pass()
 	if err != nil {
 		t.Fatal(err)
@@ -407,10 +301,8 @@ func TestPushLeavesFilesForTheNextPassWhenTheReceiverFails(t *testing.T) {
 // own request.
 func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
 	z, files := zoneWithOneSession(t)
-	rcv := &receiver{}
-	srv := httptest.NewServer(rcv.handler())
-	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code", BatchBytes: 1}
+	rcv := startReceiver(t)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code", BatchBytes: 1}
 	st, err := p.Pass()
 	if err != nil || len(st.Errors) != 0 {
 		t.Fatal(err, st.Errors)
@@ -418,11 +310,47 @@ func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
 	if st.Requests != len(files) || st.Files != len(files) {
 		t.Fatalf("a one-byte budget must send a request per file: %d requests for %d files, %d marked", st.Requests, len(files), st.Files)
 	}
-	for i, req := range rcv.reqs {
-		_, logs := parseRequest(t, req)
+	for i, req := range rcv.Requests() {
+		_, logs := parseRequests([]*collogspb.ExportLogsServiceRequest{req})
 		if len(logs) != 1 || logs[0].body != files[i] {
 			t.Fatalf("request %d must carry file %d alone and whole", i, i)
 		}
+	}
+}
+
+// A client refuses an endpoint of the wrong shape for its transport, and
+// an unreachable receiver is reported by the pass, not by the client.
+func TestClientRefusesAnEndpointOfTheWrongShape(t *testing.T) {
+	if _, err := otlp.NewClient(otlp.Options{Protocol: otlp.ProtocolGRPC, Endpoint: "http://127.0.0.1:11800"}); err == nil {
+		t.Fatal("a grpc client accepted a URL")
+	}
+	if _, err := otlp.NewClient(otlp.Options{Protocol: otlp.ProtocolHTTP, Endpoint: "127.0.0.1:12800"}); err == nil {
+		t.Fatal("an http client accepted host:port")
+	}
+	if _, err := otlp.NewClient(otlp.Options{Protocol: "tcp", Endpoint: "127.0.0.1:1"}); err == nil {
+		t.Fatal("an unknown protocol was accepted")
+	}
+	if _, err := otlp.NewClient(otlp.Options{}); err == nil {
+		t.Fatal("an empty endpoint was accepted")
+	}
+	z, _ := zoneWithOneSession(t)
+	for _, o := range []otlp.Options{
+		{Protocol: otlp.ProtocolGRPC, Endpoint: "127.0.0.1:1", Timeout: 2 * time.Second},
+		{Protocol: otlp.ProtocolHTTP, Endpoint: "http://127.0.0.1:1", Timeout: 2 * time.Second},
+	} {
+		c, err := otlp.NewClient(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := &otlp.Pusher{Zone: z, Client: c, Version: "test", ServiceName: "Claude Code"}
+		st, err := p.Pass()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(st.Errors) == 0 || st.Files != 0 {
+			t.Fatalf("%s: an unreachable receiver must fail the pass and mark nothing: files=%d errors=%v", o.Protocol, st.Files, st.Errors)
+		}
+		_ = c.Close()
 	}
 }
 
@@ -431,19 +359,20 @@ func TestPushSendsAFileLargerThanTheBudgetAlone(t *testing.T) {
 // header names.
 func TestServiceIsTheRuntimeThatProducedTheSession(t *testing.T) {
 	z, _ := zoneWithOneSession(t)
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: "http://127.0.0.1:1"}, Version: "test"}
+	rcv := startReceiver(t)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test"}
 	if err := p.Prepare(); err == nil {
 		t.Fatal("Prepare accepted a pusher with no service name and no runtime names")
 	}
-	rcv := &receiver{}
-	srv := httptest.NewServer(rcv.handler())
-	defer srv.Close()
-	p = &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test",
+	if err := (&otlp.Pusher{Zone: z, Version: "test", ServiceName: "x"}).Prepare(); err == nil {
+		t.Fatal("Prepare accepted a pusher with no client")
+	}
+	p = &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test",
 		Runtimes: map[string]string{"test": "Test Runtime"}}
 	if _, err := p.Pass(); err != nil {
 		t.Fatal(err)
 	}
-	res, _ := parseRequest(t, rcv.reqs[0])
+	res, _ := parseRequests(rcv.Requests())
 	if res[0]["service.name"] != "Test Runtime" {
 		t.Fatalf("service.name is %q; the header's adapter test/0 names the runtime Test Runtime", res[0]["service.name"])
 	}
@@ -454,10 +383,8 @@ func TestServiceIsTheRuntimeThatProducedTheSession(t *testing.T) {
 // one is sent as given.
 func TestInstanceIsUserAtHostUnlessConfigured(t *testing.T) {
 	z, _ := zoneWithOneSession(t)
-	rcv := &receiver{}
-	srv := httptest.NewServer(rcv.handler())
-	defer srv.Close()
-	p := &otlp.Pusher{Zone: z, Client: &otlp.Client{Endpoint: srv.URL}, Version: "test", ServiceName: "Claude Code"}
+	rcv := startReceiver(t)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code"}
 	if err := p.Prepare(); err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +399,7 @@ func TestInstanceIsUserAtHostUnlessConfigured(t *testing.T) {
 	if p.InstanceID != id {
 		t.Fatalf("instance id changed between Prepare and Pass: %s -> %s", id, p.InstanceID)
 	}
-	res, _ := parseRequest(t, rcv.reqs[0])
+	res, _ := parseRequests(rcv.Requests())
 	if res[0]["service.instance.id"] != id {
 		t.Fatalf("resource carries %q, want %q", res[0]["service.instance.id"], id)
 	}

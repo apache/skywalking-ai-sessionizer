@@ -7,7 +7,9 @@ pull requests against `main`.
 
 ## Build and test
 
-Go 1.27 or later. The module has one dependency, a YAML parser, and adding another needs a reason.
+Go 1.27 or later. The module depends on a YAML parser and, for the OTLP push, on the OpenTelemetry
+protocol's own Go modules: the protocol definitions, gRPC and protobuf. Adding another needs a
+reason.
 
 ```sh
 make build          # -> ./bin/asz

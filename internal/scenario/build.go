@@ -109,7 +109,8 @@ adapters:
 # To export the session with asz push, name the receiver:
 # export:
 #   otlp:
-#     endpoint: http://127.0.0.1:12800
+#     protocol: grpc
+#     endpoint: 127.0.0.1:11800
 `, out, source)
 	// A file that starts with what the build writes is the build's, with
 	// whatever a person appended, such as the export block for a push.

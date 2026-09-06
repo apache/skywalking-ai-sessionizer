@@ -1,14 +1,15 @@
 # Export over OpenTelemetry
 
 `asz push` sends what the storage root holds to an OpenTelemetry logs receiver: every landed
-file and every round, over OTLP/HTTP with a protobuf body, to the receiver's `/v1/logs`. The
-SkyWalking OAP accepts it on its REST port, and so does an OpenTelemetry Collector.
+file and every round, as OTLP logs over gRPC, or over HTTP with a protobuf body. The SkyWalking
+OAP accepts both, on its gRPC port and on its REST port, and so does an OpenTelemetry Collector.
 
 ```yaml
 # asz.yaml
 export:
   otlp:
-    endpoint: http://127.0.0.1:12800
+    protocol: grpc              # the default; http posts to the receiver's /v1/logs instead
+    endpoint: 127.0.0.1:11800   # the OAP's gRPC port; with http, http://127.0.0.1:12800
 ```
 
 ```sh
@@ -32,6 +33,24 @@ is a small record, and the same conversation is 306 records.
 Landed files and rounds are both write-once, so each is sent once. `push.state` in the storage
 root lists what was sent, with the digest each file had; a file is recorded only after the request
 carrying it succeeded, so a failed request leaves it for the next pass.
+
+## Transport
+
+The request is the `ExportLogsServiceRequest` of the OpenTelemetry protocol, built from the
+protocol's own Go definitions and sent by the gRPC client of the official module, or posted
+over HTTP with a protobuf body. Nothing about the encoding is the project's own, so any OTLP
+logs receiver reads it.
+
+| `protocol` | Endpoint | How a request travels |
+| --- | --- | --- |
+| `grpc`, the default | `host:port`, such as `127.0.0.1:11800` for the OAP | One connection is opened for the run and every request of a pass is one `Export` call on it. OTLP defines `Export` as a single call and answer, not a stream, so a pass is a sequence of calls on one HTTP/2 connection. `tls: true` makes the connection a TLS one, verified against the system's roots |
+| `http` | The receiver's base URL, such as `http://127.0.0.1:12800` for the OAP; `/v1/logs` is appended | Each request is one POST with `Content-Type: application/x-protobuf`. The scheme decides whether the connection is TLS |
+
+`headers` travel with every request on both transports, as gRPC metadata or as HTTP headers,
+which is where an authorization token goes. A receiver that answers with a partial success,
+saying it rejected some records, is treated as having refused the request: it does not say which
+records, so the request is sent again whole on the next pass, and a receiver keeps the first copy
+of a file it already holds.
 
 ## What every record carries
 
@@ -73,9 +92,9 @@ inside the session's range and cannot go stale. A round is stamped with the sess
 activity as of that round, so a receiver's newest row per conversation is the head. Every record
 also carries the time it was observed.
 
-Every scenario in the test suite is pushed to a receiver and checked against the two tables
-above, in both formats, so a change to the wire that this page does not describe fails the build.
-See [Scenarios](../guides/scenario.md).
+Every scenario in the test suite is pushed to a receiver over both transports and checked against
+the two tables above, in both formats, so a change to the wire that this page does not describe
+fails the build. See [Scenarios](../guides/scenario.md).
 
 ## Checking what a receiver gets
 
@@ -86,9 +105,11 @@ way to see the records before pointing at a backend:
 receivers:
   otlp:
     protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 32   # the default is 4 MiB, below the 8 MiB batches; see Size
       http:
-        endpoint: 0.0.0.0:4318
-        max_request_body_size: 33554432   # the default is 20 MiB, enough for the 8 MiB batches; see Size
+        endpoint: 0.0.0.0:4318      # the default limit is 20 MiB, enough
 exporters:
   file:
     path: /out/logs.json
@@ -99,12 +120,13 @@ service:
       exporters: [file]
 ```
 
-Point `export.otlp.endpoint` at `http://127.0.0.1:4318`, run `asz push -once`, and read
-`logs.json`: one JSON line per request, with the resource, the scope and the records as the
-Collector understood them. `make e2e-collector` does exactly this with a generated session and a
-Collector container, then checks every record against the root and rebuilds the root from what
-the Collector wrote; CI runs it on every change. Writing each record's body to `asz.file` under a new root gives a
-root that `asz verify` and `asz view` read like the original.
+Point `export.otlp.endpoint` at `127.0.0.1:4317`, or with `protocol: http` at
+`http://127.0.0.1:4318`, run `asz push -once`, and read `logs.json`: one JSON line per request,
+with the resource, the scope and the records as the Collector understood them.
+`make e2e-collector` does exactly this with a generated session and a Collector container, once
+over each transport, then checks every record against the root and rebuilds the root from what
+the Collector wrote; CI runs it on every change. Writing each record's body to `asz.file` under a
+new root gives a root that `asz verify` and `asz view` read like the original.
 
 ## Size
 
@@ -116,6 +138,7 @@ a request of its own. A landed file is cut at
 unit larger than the budget: a source record is landed whole, and a round covering one landed
 file is published whole. The largest source record in the measured corpus is 4.5 MB.
 
-The receiver's limit must cover the largest single request. The OAP accepts 10 MiB over HTTP and
-50 MB over gRPC by default. An OpenTelemetry Collector accepts 20 MiB over HTTP and 4 MiB over
-gRPC unless its receiver is configured otherwise.
+The receiver's limit must cover the largest single request. The OAP accepts 50 MB over gRPC and
+10 MiB over HTTP by default. An OpenTelemetry Collector accepts 4 MiB over gRPC and 20 MiB over
+HTTP unless its receiver is configured otherwise, so its gRPC receiver needs
+`max_recv_msg_size_mib` raised, as the example above does.

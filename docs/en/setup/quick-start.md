@@ -28,7 +28,8 @@ Or build it yourself.
 
 ## Build
 
-Go 1.27 or later. The module has one dependency, a YAML parser.
+Go 1.27 or later. The module depends on a YAML parser and on the OpenTelemetry protocol's Go
+modules for the push.
 
 ```sh
 git clone https://github.com/apache/skywalking-ai-sessionizer.git

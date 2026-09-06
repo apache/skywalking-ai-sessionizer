@@ -51,11 +51,18 @@ type Export struct {
 }
 
 // OTLP configures the OpenTelemetry logs push: every landed file and every
-// round, one log record per file, over OTLP/HTTP.
+// round, one log record per file, over OTLP/gRPC or OTLP/HTTP.
 type OTLP struct {
-	// Endpoint is the receiver's base URL; the logs path is appended. Empty
+	// Protocol is the transport: grpc, the default, or http.
+	Protocol string `yaml:"protocol"`
+	// Endpoint is where the receiver listens. For grpc it is host:port, the
+	// OAP's gRPC port 11800 by default; for http it is the receiver's base
+	// URL, the OAP's REST port 12800, and the logs path is appended. Empty
 	// means asz push has nowhere to send and refuses to run.
 	Endpoint string `yaml:"endpoint"`
+	// TLS makes the gRPC connection a TLS one, verified against the
+	// system's roots. Over HTTP the scheme of the endpoint decides.
+	TLS bool `yaml:"tls"`
 	// ServiceName is the service every record is attributed to. Empty means
 	// the runtime the adapter reads, Claude Code for claude-code-local.
 	ServiceName string `yaml:"service_name"`
@@ -70,7 +77,8 @@ type OTLP struct {
 	Headers map[string]string `yaml:"headers"`
 	// BatchBytes is how many file bytes one request carries at most. A file
 	// larger than this is sent alone. The default, 8 MiB, keeps a request
-	// under the 10 MiB the OAP's HTTP server accepts.
+	// under the 10 MiB the OAP's HTTP server accepts, and well under the
+	// 50 MB its gRPC server accepts.
 	BatchBytes int64 `yaml:"batch_bytes"`
 	// Interval is how long asz push sleeps between passes in watch mode.
 	Interval time.Duration `yaml:"interval"`
@@ -147,6 +155,7 @@ func Default() *Config {
 		}},
 		Parse: Parse{MaxRoundBytes: 2 << 20},
 		Export: Export{OTLP: OTLP{
+			Protocol:   "grpc",
 			Layer:      "AI_AGENT",
 			BatchBytes: 8 << 20,
 			Interval:   5 * time.Second,
@@ -184,8 +193,14 @@ func Load(path string) (*Config, error) {
 		cfg.Parse.MaxRoundBytes = loaded.Parse.MaxRoundBytes
 	}
 	o := &loaded.Export.OTLP
+	if o.Protocol != "" {
+		cfg.Export.OTLP.Protocol = o.Protocol
+	}
 	if o.Endpoint != "" {
 		cfg.Export.OTLP.Endpoint = o.Endpoint
+	}
+	if o.TLS {
+		cfg.Export.OTLP.TLS = true
 	}
 	if o.ServiceName != "" {
 		cfg.Export.OTLP.ServiceName = o.ServiceName
@@ -237,6 +252,9 @@ func (c *Config) Validate() error {
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)
 		}
+	}
+	if p := c.Export.OTLP.Protocol; p != "grpc" && p != "http" {
+		return fmt.Errorf("config: export.otlp.protocol is %q, want grpc or http", p)
 	}
 	return nil
 }

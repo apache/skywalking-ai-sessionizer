@@ -66,7 +66,7 @@ scenarios: build
 		echo "== $$f"; $(BIN_DIR)/asz scenario check $$f || exit 1; \
 	done
 
-## e2e-collector: push a generated session into a real OpenTelemetry Collector and verify what it wrote (needs docker)
+## e2e-collector: push a generated session into a real OpenTelemetry Collector over both transports and verify what it wrote (needs docker)
 .PHONY: e2e-collector
 e2e-collector: build
 	tools/e2e-collector.sh

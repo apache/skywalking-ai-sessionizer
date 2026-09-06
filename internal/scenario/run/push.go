@@ -23,18 +23,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
+
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
@@ -43,52 +43,47 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
-// receiver is an OTLP/HTTP logs endpoint that keeps every request, and can
-// be told to refuse them.
-type receiver struct {
-	mu   sync.Mutex
-	reqs [][]byte
-	fail bool
-}
-
-func (r *receiver) handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path != "/v1/logs" || req.Header.Get("Content-Type") != "application/x-protobuf" {
-			http.Error(w, "wrong path or content type", http.StatusBadRequest)
-			return
-		}
-		var body bytes.Buffer
-		_, _ = body.ReadFrom(req.Body)
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if r.fail {
-			http.Error(w, "down", http.StatusServiceUnavailable)
-			return
-		}
-		r.reqs = append(r.reqs, body.Bytes())
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
 // The file kinds the export page names.
 var wireKinds = map[string]bool{
 	"transcript": true, "agent_meta": true, "journal": true, "workflow_manifest": true, "workflow_script": true, "round": true,
 }
 
-// pushFollowsTheWire pushes the finished session to a receiver and checks
-// every request against the export page: the resource, one record per file
-// with the file's bytes and digest, the attributes each format carries and
-// the ones it must not, the stamp a receiver bounds a read on, delivery
-// once and at least once, and the export path: writing every body back
-// gives a root that verifies and folds the same.
+// pushFollowsTheWire pushes the finished session to a receiver, over each
+// transport in turn, and checks every request against the export page: the
+// resource, one record per file with the file's bytes and digest, the
+// attributes each format carries and the ones it must not, the stamp a
+// receiver bounds a read on, delivery once and at least once, and the
+// export path: writing every body back gives a root that verifies and
+// folds the same.
 func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Push) ([]string, error) {
-	rcv := &receiver{}
-	srv := httptest.NewServer(rcv.handler())
-	defer srv.Close()
+	var problems []string
+	for _, protocol := range []string{otlp.ProtocolGRPC, otlp.ProtocolHTTP} {
+		found, err := pushOver(protocol, out, session, f, want)
+		if err != nil {
+			return nil, fmt.Errorf("over %s: %w", protocol, err)
+		}
+		for _, p := range found {
+			problems = append(problems, "push_follows_the_wire over "+protocol+": "+p)
+		}
+	}
+	return problems, nil
+}
+
+func pushOver(protocol, out, session string, f scenario.Format, want *expect.Push) ([]string, error) {
+	rcv, err := otlptest.Start()
+	if err != nil {
+		return nil, err
+	}
+	defer rcv.Close()
+	client, err := rcv.Client(protocol)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
 	_ = os.Remove(filepath.Join(out, "push.state"))
 	newPusher := func() *otlp.Pusher {
 		return &otlp.Pusher{
-			Zone: storage.NewZone(out), Client: &otlp.Client{Endpoint: srv.URL}, Version: "check",
+			Zone: storage.NewZone(out), Client: client, Version: "check",
 			ServiceName: "Scenario Check", InstanceID: "scenario-check", Layer: "AI_AGENT",
 			// One byte: every file is larger than the budget, so every file
 			// travels alone, in its own request.
@@ -98,7 +93,7 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	}
 	var out2 []string
 	bad := func(format string, a ...any) {
-		out2 = append(out2, "push_follows_the_wire: "+fmt.Sprintf(format, a...))
+		out2 = append(out2, fmt.Sprintf(format, a...))
 	}
 
 	// With no service configured, a session is attributed to the runtime
@@ -114,24 +109,18 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	if f == scenario.FormatClaudeCode {
 		wantService = claudecode.RuntimeName
 	}
-	for i, req := range rcv.reqs {
-		groups, err := otlp.Decode(req)
-		if err != nil {
-			return nil, err
-		}
-		for _, g := range groups {
-			if got := attrMap(g.Resource)["service.name"]; got != wantService {
+	for i, req := range rcv.Requests() {
+		for _, g := range req.GetResourceLogs() {
+			if got := otlptest.Attrs(g.GetResource().GetAttributes())["service.name"]; got != wantService {
 				bad("request %d without a configured service names %q, want the runtime %q", i, got, wantService)
 			}
 		}
 	}
-	rcv.mu.Lock()
-	rcv.reqs = nil
-	rcv.mu.Unlock()
+	rcv.Reset()
 	_ = os.Remove(filepath.Join(out, "push.state"))
 
 	// A refused pass leaves everything for the next one.
-	rcv.fail = true
+	rcv.Fail(true)
 	st, err := newPusher().Pass()
 	if err != nil {
 		return nil, err
@@ -139,9 +128,7 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	if st.Files != 0 || len(st.Errors) == 0 {
 		bad("a refused request marked %d files pushed with %d errors; it must mark none", st.Files, len(st.Errors))
 	}
-	rcv.mu.Lock()
-	rcv.fail = false
-	rcv.mu.Unlock()
+	rcv.Fail(false)
 
 	files, err := landedAndRounds(out, session)
 	if err != nil {
@@ -159,18 +146,15 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	}
 
 	// Every request: the resource and the scope, as the page lists them.
-	var records []otlp.Record
-	for i, req := range rcv.reqs {
-		groups, err := otlp.Decode(req)
-		if err != nil {
-			return nil, err
-		}
+	var records []*logspb.LogRecord
+	for i, req := range rcv.Requests() {
+		groups := req.GetResourceLogs()
 		if len(groups) != 1 {
 			bad("request %d carries %d resources, want 1", i, len(groups))
 			continue
 		}
 		g := groups[0]
-		res := attrMap(g.Resource)
+		res := otlptest.Attrs(g.GetResource().GetAttributes())
 		for k, v := range map[string]string{
 			"service.name": "Scenario Check", "service.instance.id": "scenario-check", "service.layer": "AI_AGENT",
 			"telemetry.sdk.name": "asz", "telemetry.sdk.version": "check", "telemetry.sdk.language": "go",
@@ -179,10 +163,15 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 				bad("request %d resource %s is %q, want %q", i, k, res[k], v)
 			}
 		}
-		if g.ScopeName != otlp.ScopeName || g.ScopeVersion != "check" {
-			bad("request %d scope is %s %s", i, g.ScopeName, g.ScopeVersion)
+		if len(g.GetScopeLogs()) != 1 {
+			bad("request %d carries %d scopes, want 1", i, len(g.GetScopeLogs()))
+			continue
 		}
-		records = append(records, g.Records...)
+		scope := g.GetScopeLogs()[0]
+		if scope.GetScope().GetName() != otlp.ScopeName || scope.GetScope().GetVersion() != "check" {
+			bad("request %d scope is %s %s", i, scope.GetScope().GetName(), scope.GetScope().GetVersion())
+		}
+		records = append(records, scope.GetLogRecords()...)
 	}
 
 	// Every record: one file, its bytes, its digest, and the attributes the
@@ -191,7 +180,7 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	kinds := map[string]bool{}
 	latest := sessionLatest(files)
 	for _, r := range records {
-		a := attrMap(r.Attrs)
+		a := otlptest.Attrs(r.GetAttributes())
 		f, ok := files[a["asz.file"]]
 		if !ok {
 			bad("record names %q, which is not a file of the session", a["asz.file"])
@@ -199,7 +188,7 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 		}
 		seen[a["asz.file"]] = true
 		kinds[a["asz.file.kind"]] = true
-		if r.Body != string(f.data) {
+		if r.GetBody().GetStringValue() != string(f.data) {
 			bad("%s: the body is not the file's bytes", f.rel)
 		}
 		if a["asz.file.digest"] != f.digest {
@@ -214,8 +203,8 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 		if a["asz.session"] != session {
 			bad("%s: session %q", f.rel, a["asz.session"])
 		}
-		if r.Severity != 9 || r.SeverityText != "INFO" || r.ObservedNano == 0 {
-			bad("%s: severity %d %q observed %d", f.rel, r.Severity, r.SeverityText, r.ObservedNano)
+		if r.GetSeverityNumber() != logspb.SeverityNumber_SEVERITY_NUMBER_INFO || r.GetSeverityText() != "INFO" || r.GetObservedTimeUnixNano() == 0 {
+			bad("%s: severity %d %q observed %d", f.rel, r.GetSeverityNumber(), r.GetSeverityText(), r.GetObservedTimeUnixNano())
 		}
 		timed, from, through := f.from != "", f.from, f.through
 		if (a["asz.from_time"] != "") != timed || a["asz.from_time"] != from || a["asz.through_time"] != through {
@@ -240,8 +229,8 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 			if !timed {
 				want = latest
 			}
-			if want != "" && r.TimeNano != uint64(stampNS(want)) {
-				bad("%s: stamped %d, want %s", f.rel, r.TimeNano, want)
+			if want != "" && r.GetTimeUnixNano() != uint64(stampNS(want)) {
+				bad("%s: stamped %d, want %s", f.rel, r.GetTimeUnixNano(), want)
 			}
 		case "sf":
 			if a["asz.conversation"] != session || a["asz.round"] != fmt.Sprintf("int:%d", f.round) {
@@ -261,8 +250,8 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 				a["asz.conversation.segments"] != fmt.Sprintf("int:%d", h.Segments) || a["asz.conversation.unresolved"] != fmt.Sprintf("int:%d", h.Unresolved) {
 				bad("%s: list attributes %v, the header says %q %d %d %d %d %d", f.rel, listAttrs(a), h.Title, h.Talks, h.Steps, h.Streams, h.Segments, h.Unresolved)
 			}
-			if r.TimeNano != uint64(stampNS(h.SessionThroughTime)) {
-				bad("%s: stamped %d, want the session's last activity %s", f.rel, r.TimeNano, h.SessionThroughTime)
+			if r.GetTimeUnixNano() != uint64(stampNS(h.SessionThroughTime)) {
+				bad("%s: stamped %d, want the session's last activity %s", f.rel, r.GetTimeUnixNano(), h.SessionThroughTime)
 			}
 		}
 	}
@@ -280,12 +269,12 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	}
 
 	// Sent once: a second pass sends nothing.
-	before := len(rcv.reqs)
+	before := len(rcv.Requests())
 	st, err = newPusher().Pass()
 	if err != nil {
 		return nil, err
 	}
-	if st.Files != 0 || len(rcv.reqs) != before {
+	if st.Files != 0 || len(rcv.Requests()) != before {
 		bad("a second pass sent %d files again", st.Files)
 	}
 
@@ -294,12 +283,12 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	twin := out + "-wire"
 	defer os.RemoveAll(twin)
 	for _, r := range records {
-		a := attrMap(r.Attrs)
+		a := otlptest.Attrs(r.GetAttributes())
 		path := filepath.Join(twin, filepath.FromSlash(a["asz.file"]))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(path, []byte(r.Body), 0o444); err != nil {
+		if err := os.WriteFile(path, []byte(r.GetBody().GetStringValue()), 0o444); err != nil {
 			return nil, err
 		}
 	}
@@ -414,18 +403,6 @@ func sessionLatest(files map[string]*wireFile) string {
 		}
 	}
 	return latest
-}
-
-func attrMap(attrs []otlp.Attr) map[string]string {
-	m := map[string]string{}
-	for _, a := range attrs {
-		if a.IsInt {
-			m[a.Key] = fmt.Sprintf("int:%d", a.Int)
-		} else {
-			m[a.Key] = a.Str
-		}
-	}
-	return m
 }
 
 func listAttrs(a map[string]string) map[string]string {

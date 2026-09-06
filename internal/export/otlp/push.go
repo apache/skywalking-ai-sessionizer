@@ -34,6 +34,11 @@ import (
 	"strings"
 	"time"
 
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -50,8 +55,9 @@ import (
 // Landed files and rounds are both write-once, so a file is sent once;
 // push.state in the root records which ones were.
 type Pusher struct {
-	Zone   *storage.Zone
-	Client *Client
+	Zone *storage.Zone
+	// Client is the receiver, over either transport; see NewClient.
+	Client Client
 	// Version is what the sender reports about itself.
 	Version string
 	// ServiceName is the service every record is attributed to, when one is
@@ -91,8 +97,8 @@ const ScopeName = "github.com/apache/skywalking-ai-sessionizer"
 // instance id, which is a new UUID when none was configured. Pass calls it,
 // and a caller may call it first to learn the instance id.
 func (p *Pusher) Prepare() error {
-	if p.Client == nil || p.Client.Endpoint == "" {
-		return errors.New("otlp: no endpoint")
+	if p.Client == nil {
+		return errors.New("otlp: no client")
 	}
 	if p.ServiceName == "" && len(p.Runtimes) == 0 {
 		return errors.New("otlp: no service name and no runtime names")
@@ -187,7 +193,7 @@ type batch struct {
 	st    *Stats
 	state *pushState
 
-	groups  []ResourceLogs
+	groups  []*logspb.ResourceLogs
 	byKey   map[string]int
 	bytes   int64
 	pending []pendingFile
@@ -202,32 +208,44 @@ type batch struct {
 
 type pendingFile struct{ rel, digest string }
 
-func (b *batch) group(resource []Attr) *ResourceLogs {
-	key := fmt.Sprint(resource)
+// group is the resource a session's records go under: one per service,
+// since everything else on the resource is the same for the whole pass.
+func (b *batch) group(session string) *logspb.ResourceLogs {
+	service := b.services[session]
+	if service == "" {
+		service = b.p.ServiceName
+	}
 	if b.byKey == nil {
 		b.byKey = map[string]int{}
 	}
-	if i, ok := b.byKey[key]; ok {
-		return &b.groups[i]
+	if i, ok := b.byKey[service]; ok {
+		return b.groups[i]
 	}
-	b.groups = append(b.groups, ResourceLogs{Resource: resource, ScopeName: ScopeName, ScopeVersion: b.p.Version})
-	b.byKey[key] = len(b.groups) - 1
-	return &b.groups[len(b.groups)-1]
+	g := &logspb.ResourceLogs{
+		Resource: &resourcepb.Resource{Attributes: b.resource(service)},
+		ScopeLogs: []*logspb.ScopeLogs{{
+			Scope: &commonpb.InstrumentationScope{Name: ScopeName, Version: b.p.Version},
+		}},
+	}
+	b.groups = append(b.groups, g)
+	b.byKey[service] = len(b.groups) - 1
+	return g
 }
 
-func (b *batch) add(resource []Attr, r Record, rel, digest string) error {
+func (b *batch) add(session string, r *logspb.LogRecord, rel, digest string) error {
+	size := int64(len(r.GetBody().GetStringValue()))
 	// A file that does not fit next to what is already batched goes after
 	// it. A file larger than the whole budget therefore travels alone: the
 	// batch before it is sent first, and the file after it starts a new one.
-	if b.bytes > 0 && b.bytes+int64(len(r.Body)) > b.p.BatchBytes {
+	if b.bytes > 0 && b.bytes+size > b.p.BatchBytes {
 		if err := b.flush(); err != nil {
 			return err
 		}
 	}
-	g := b.group(resource)
-	g.Records = append(g.Records, r)
-	b.bytes += int64(len(r.Body))
-	b.st.Bytes += int64(len(r.Body))
+	g := b.group(session)
+	g.ScopeLogs[0].LogRecords = append(g.ScopeLogs[0].LogRecords, r)
+	b.bytes += size
+	b.st.Bytes += size
 	b.pending = append(b.pending, pendingFile{rel, digest})
 	return nil
 }
@@ -236,14 +254,13 @@ func (b *batch) flush() error {
 	if len(b.groups) == 0 {
 		return nil
 	}
-	err := b.p.Client.Export(Encode(b.groups))
+	err := b.p.Client.Export(&collogspb.ExportLogsServiceRequest{ResourceLogs: b.groups})
 	b.st.Requests++
-	groups, pending := b.groups, b.pending
+	pending := b.pending
 	b.groups, b.byKey, b.bytes, b.pending = nil, nil, 0, nil
 	if err != nil {
 		return err
 	}
-	_ = groups
 	for _, f := range pending {
 		b.state.mark(f.rel, f.digest)
 	}
@@ -284,22 +301,41 @@ func (p *Pusher) serviceOf(files []storage.LandedFile) string {
 }
 
 // resource names the sender and the service a session's records belong to.
-func (b *batch) resource(session string) []Attr {
-	service := b.services[session]
-	if service == "" {
-		service = b.p.ServiceName
-	}
-	attrs := []Attr{
-		{Key: "service.name", Str: service},
-		{Key: "service.instance.id", Str: b.p.InstanceID},
-		{Key: "telemetry.sdk.name", Str: "asz"},
-		{Key: "telemetry.sdk.version", Str: b.p.Version},
-		{Key: "telemetry.sdk.language", Str: "go"},
+func (b *batch) resource(service string) []*commonpb.KeyValue {
+	attrs := []*commonpb.KeyValue{
+		str("service.name", service),
+		str("service.instance.id", b.p.InstanceID),
+		str("telemetry.sdk.name", "asz"),
+		str("telemetry.sdk.version", b.p.Version),
+		str("telemetry.sdk.language", "go"),
 	}
 	if b.p.Layer != "" {
-		attrs = append(attrs, Attr{Key: "service.layer", Str: b.p.Layer})
+		attrs = append(attrs, str("service.layer", b.p.Layer))
 	}
 	return attrs
+}
+
+// The attribute kinds the exporter sends: strings and integers.
+
+func str(key, val string) *commonpb.KeyValue {
+	return &commonpb.KeyValue{Key: key, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: val}}}
+}
+
+func integer(key string, val int64) *commonpb.KeyValue {
+	return &commonpb.KeyValue{Key: key, Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: val}}}
+}
+
+// record is one file as one log record: the file's bytes as the body, at
+// severity INFO, stamped as the caller decided.
+func record(stamp, observed uint64, body []byte, attrs []*commonpb.KeyValue) *logspb.LogRecord {
+	return &logspb.LogRecord{
+		TimeUnixNano:         stamp,
+		ObservedTimeUnixNano: observed,
+		SeverityNumber:       logspb.SeverityNumber_SEVERITY_NUMBER_INFO,
+		SeverityText:         "INFO",
+		Body:                 &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: string(body)}},
+		Attributes:           attrs,
+	}
 }
 
 // addLanded sends one landed file as one record.
@@ -318,21 +354,21 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, fil
 	// routes, indexes and verifies on them, and reads the body only to serve
 	// it. Session and sequence are what a round's {seq, row} reference names,
 	// and a row is a line of this body.
-	attrs := []Attr{
-		{Key: "asz.format", Str: "sd"},
-		{Key: "asz.format.version", Str: hdr.Schema},
-		{Key: "asz.file", Str: rel},
-		{Key: "asz.file.kind", Str: string(hdr.Kind)},
-		{Key: "asz.file.digest", Str: digest},
-		{Key: "asz.lines", Int: int64(bytes.Count(data, []byte("\n"))), IsInt: true},
-		{Key: "asz.session", Str: session},
-		{Key: "asz.seq", Int: int64(lf.Seq), IsInt: true},
+	attrs := []*commonpb.KeyValue{
+		str("asz.format", "sd"),
+		str("asz.format.version", hdr.Schema),
+		str("asz.file", rel),
+		str("asz.file.kind", string(hdr.Kind)),
+		str("asz.file.digest", digest),
+		integer("asz.lines", int64(bytes.Count(data, []byte("\n")))),
+		str("asz.session", session),
+		integer("asz.seq", int64(lf.Seq)),
 	}
 	if lf.Stream != "" {
-		attrs = append(attrs, Attr{Key: "asz.stream", Str: lf.Stream})
+		attrs = append(attrs, str("asz.stream", lf.Stream))
 	}
 	if lf.RunID != "" {
-		attrs = append(attrs, Attr{Key: "asz.run", Str: lf.RunID})
+		attrs = append(attrs, str("asz.run", lf.RunID))
 	}
 	// The record time range of the file lets a receiver place it in time
 	// without decoding the body. A file whose records carry no time, such
@@ -346,15 +382,14 @@ func (b *batch) addLanded(rel string, lf storage.LandedFile, session string, fil
 	// the range and, unlike a range, cannot go stale as the session grows.
 	stamp := b.sessionLatest(session, files)
 	if from, through, hi, ok := timeRange(data); ok {
-		attrs = append(attrs, Attr{Key: "asz.from_time", Str: from}, Attr{Key: "asz.through_time", Str: through})
+		attrs = append(attrs, str("asz.from_time", from), str("asz.through_time", through))
 		stamp = uint64(hi)
 	}
 	if stamp == 0 {
 		stamp = parseTime(hdr.At)
 	}
 	now := uint64(b.p.Now().UnixNano())
-	rec := Record{TimeNano: stamp, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
-	return b.add(b.resource(session), rec, rel, digest)
+	return b.add(session, record(stamp, now, data, attrs), rel, digest)
 }
 
 // addRound sends one round file as one record. A round carries no time of
@@ -389,41 +424,41 @@ func (b *batch) addRound(rel, path, conv string) error {
 		session = conv
 	}
 	digest := digestOf(data)
-	attrs := []Attr{
-		{Key: "asz.format", Str: "sf"},
-		{Key: "asz.format.version", Str: hdr.Schema},
-		{Key: "asz.file", Str: rel},
-		{Key: "asz.file.kind", Str: "round"},
-		{Key: "asz.file.digest", Str: digest},
-		{Key: "asz.lines", Int: int64(bytes.Count(data, []byte("\n"))), IsInt: true},
-		{Key: "asz.session", Str: session},
-		{Key: "asz.conversation", Str: hdr.Conversation},
-		{Key: "asz.round", Int: hdr.Round, IsInt: true},
+	attrs := []*commonpb.KeyValue{
+		str("asz.format", "sf"),
+		str("asz.format.version", hdr.Schema),
+		str("asz.file", rel),
+		str("asz.file.kind", "round"),
+		str("asz.file.digest", digest),
+		integer("asz.lines", int64(bytes.Count(data, []byte("\n")))),
+		str("asz.session", session),
+		str("asz.conversation", hdr.Conversation),
+		integer("asz.round", hdr.Round),
 	}
 	// A round's header carries the record time range of the files it
 	// consumed; it travels as the same pair.
 	if hdr.FromTime != "" && hdr.ThroughTime != "" {
-		attrs = append(attrs, Attr{Key: "asz.from_time", Str: hdr.FromTime}, Attr{Key: "asz.through_time", Str: hdr.ThroughTime})
+		attrs = append(attrs, str("asz.from_time", hdr.FromTime), str("asz.through_time", hdr.ThroughTime))
 	}
 	// The session's own range as of this round: when it began, and its last
 	// activity so far. Only a round carries it. A landed file can travel
 	// before any round exists and the last activity keeps moving, so on a
 	// landed file the value would be missing or stale.
 	if hdr.SessionFrom != "" && hdr.SessionThru != "" {
-		attrs = append(attrs, Attr{Key: "asz.session.from_time", Str: hdr.SessionFrom}, Attr{Key: "asz.session.through_time", Str: hdr.SessionThru})
+		attrs = append(attrs, str("asz.session.from_time", hdr.SessionFrom), str("asz.session.through_time", hdr.SessionThru))
 	}
 	// What a list of conversations shows, as of this round, copied off the
 	// header so a receiver lists conversations without decoding a body.
 	if hdr.Talks != nil {
 		if hdr.Title != "" {
-			attrs = append(attrs, Attr{Key: "asz.conversation.title", Str: hdr.Title})
+			attrs = append(attrs, str("asz.conversation.title", hdr.Title))
 		}
 		attrs = append(attrs,
-			Attr{Key: "asz.conversation.talks", Int: *hdr.Talks, IsInt: true},
-			Attr{Key: "asz.conversation.steps", Int: *hdr.Steps, IsInt: true},
-			Attr{Key: "asz.conversation.streams", Int: *hdr.Streams, IsInt: true},
-			Attr{Key: "asz.conversation.segments", Int: *hdr.Segments, IsInt: true},
-			Attr{Key: "asz.conversation.unresolved", Int: *hdr.Unresolved, IsInt: true})
+			integer("asz.conversation.talks", *hdr.Talks),
+			integer("asz.conversation.steps", *hdr.Steps),
+			integer("asz.conversation.streams", *hdr.Streams),
+			integer("asz.conversation.segments", *hdr.Segments),
+			integer("asz.conversation.unresolved", *hdr.Unresolved))
 	}
 	// A round is stamped with the session's last activity as of the round,
 	// which only widens, so a receiver's newest row per conversation is the
@@ -433,14 +468,13 @@ func (b *batch) addRound(rel, path, conv string) error {
 	if stamp == 0 {
 		stamp = now
 	}
-	rec := Record{TimeNano: stamp, ObservedNano: now, Severity: 9, SeverityText: "INFO", Body: string(data), Attrs: attrs}
 	if _, known := b.services[session]; !known {
 		files, err := storage.LandedFiles(b.p.Zone, session)
 		if err == nil {
 			b.services[session] = b.p.serviceOf(files)
 		}
 	}
-	return b.add(b.resource(session), rec, rel, digest)
+	return b.add(session, record(stamp, now, data, attrs), rel, digest)
 }
 
 // sessionLatest is the latest record time among a session's landed files,

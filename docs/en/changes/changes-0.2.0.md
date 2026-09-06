@@ -14,8 +14,8 @@
 
 ## Export
 
-- `asz push` sends every landed file and every round to an OpenTelemetry logs receiver over
-  OTLP/HTTP, one log record per file with the file's bytes as the body, so a receiver stores the
+- `asz push` sends every landed file and every round to an OpenTelemetry logs receiver as OTLP
+  logs, over gRPC by default or over HTTP, one log record per file with the file's bytes as the body, so a receiver stores the
   file as landed and checks its digest at once. Records name the sender with `telemetry.sdk.name`,
   the format and its version, the file, its kind, its digest and its line count, and the session
   and sequence a round's reference resolves against. Each file is sent once; `push.state` records
@@ -29,7 +29,9 @@
   each start. A round's record also carries `asz.conversation.title` and the
   fold's counts, and every record is stamped with a time inside the session's range, so a receiver
   lists conversations and bounds its reads without decoding a body.
-  The protobuf encoding is written in the project, so the module still has one dependency. Each
+  The request is built from the OpenTelemetry protocol's own Go definitions and sent over gRPC
+  by default, one connection per run and one call per batch, or over HTTP with a protobuf body;
+  `export.otlp.protocol` chooses, and the OAP accepts both. Each
   record also carries `asz.from_time` and `asz.through_time`, the record time range of the file,
   so a receiver can place a file in time without decoding it, and a round's record carries
   `asz.session.from_time` and `asz.session.through_time`, the session's range as of that round.

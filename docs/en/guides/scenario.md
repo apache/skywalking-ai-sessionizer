@@ -32,7 +32,8 @@ there, commented:
 ```yaml
 export:
   otlp:
-    endpoint: http://127.0.0.1:12800
+    protocol: grpc
+    endpoint: 127.0.0.1:11800
 ```
 
 The pushed records say where they came from. A `claude-code` build is landed by the Claude Code
@@ -175,7 +176,7 @@ the end, so three rounds sit over landed files cut at each stage, and the final 
 cover the session as one parse would.
 
 The push is checked too. Every scenario, in both formats, is pushed to a receiver in the test,
-one file per request, and every request is compared with the tables of
+over gRPC and then over HTTP, one file per request, and every request is compared with the tables of
 [Export over OpenTelemetry](../setup/export-otlp.md): the resource and the scope, one record per
 file with the file's bytes and digest, the attributes a landed file carries and the ones only a
 round carries, the record time range and the list attributes, and the stamp a receiver bounds a

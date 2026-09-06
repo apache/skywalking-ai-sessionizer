@@ -115,7 +115,9 @@ make docker         # the container image, as CI builds and publishes it
 make help           # all targets
 ```
 
-Go 1.27+. One dependency: `gopkg.in/yaml.v3`.
+Go 1.27+. Dependencies: `gopkg.in/yaml.v3`, and for the OTLP push the protocol's own Go modules,
+`go.opentelemetry.io/proto/otlp`, `google.golang.org/grpc` and `google.golang.org/protobuf`.
+Nothing else; adding one needs a reason.
 
 Every source file carries the Apache-2.0 header; `make license-fix` inserts missing ones.
 `license-eye` is pinned to v0.9.0 — v0.7.0 does not build under Go 1.26.

@@ -84,7 +84,9 @@ parse:
 ```yaml
 export:
   otlp:
+    protocol: grpc
     endpoint: ""
+    tls: false
     service_name: ""
     instance_id: ""
     layer: AI_AGENT
@@ -94,12 +96,14 @@ export:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `endpoint` | empty | The OpenTelemetry logs receiver's base URL; `/v1/logs` is appended. The SkyWalking OAP listens on its REST port, `http://127.0.0.1:12800` by default. Empty means `asz push` refuses to run. |
+| `protocol` | `grpc` | The transport: `grpc`, or `http` with a protobuf body. The SkyWalking OAP accepts both. |
+| `endpoint` | empty | Where the receiver listens. For `grpc`, `host:port`: the OAP's gRPC port, `127.0.0.1:11800` by default. For `http`, the receiver's base URL, to which `/v1/logs` is appended: the OAP's REST port, `http://127.0.0.1:12800`. Empty means `asz push` refuses to run. |
+| `tls` | `false` | For `grpc`, connect with TLS, verified against the system's roots. For `http`, the scheme of the endpoint decides. |
 | `service_name` | empty | The service every record is attributed to. Empty means the runtime that produced each session, read off its landed header: `Claude Code` for `claude-code-local`, `Mock Agent` for `mock`. One service per kind of agent. |
 | `instance_id` | empty | Sent as `service.instance.id`: who is pushing, in words the people reading the receiver recognise, for example a mailbox such as `wusheng@tetrate.io`, a name, or a machine. Empty means `user@host` of the machine running `asz push`, which is stable across restarts. |
 | `layer` | `AI_AGENT` | Sent as `service.layer`, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores. |
-| `headers` | none | Headers added to every request, for example `Authorization`. |
-| `batch_bytes` | `8388608` | How many file bytes one request carries at most, 8 MiB, which keeps a request under the 10 MiB the OAP's HTTP server accepts. A file larger than this is sent alone, in a request of its own. |
+| `headers` | none | Sent with every request, as gRPC metadata or as HTTP headers, for example `Authorization`. |
+| `batch_bytes` | `8388608` | How many file bytes one request carries at most, 8 MiB, which keeps a request under the 10 MiB the OAP's HTTP server accepts and well under the 50 MB its gRPC server accepts. A file larger than this is sent alone, in a request of its own. |
 | `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |
 
 See [Export over OpenTelemetry](export-otlp.md) for what is sent.
