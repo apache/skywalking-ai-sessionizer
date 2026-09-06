@@ -86,8 +86,9 @@ binaries are built from the working tree. It writes into `dist/`:
 - the source package, `apache-skywalking-ai-sessionizer-$VERSION-src.tgz`, which is `git archive`
   of the tag and so holds exactly what is committed;
 - one binary package per platform, `apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>`,
-  as `.tgz` for macOS and Linux and `.zip` for Windows, each holding the binary, `LICENSE` and
-  `NOTICE`;
+  as `.tgz` for macOS and Linux and `.zip` for Windows, each holding the binary, the `LICENSE`
+  and `NOTICE` of a binary distribution, generated into `dist-material/`, and `licenses/`, the
+  license text of every module built into the binary;
 - a `.sha512` checksum and an `.asc` signature beside every package.
 
 The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon and Intel, Linux on
@@ -151,7 +152,10 @@ Everyone voting should check these before a +1:
    `.asc` and `.sha512`.
 2. `shasum -a 512 -c <package>.sha512` passes for each.
 3. `gpg --verify <package>.asc` passes for each, against KEYS.
-4. `LICENSE` and `NOTICE` are in every package, and every source file carries the license header.
+4. `LICENSE` and `NOTICE` are in every package, a binary package also carries `licenses/`, the
+   `NOTICE` of a binary package carries the notices of the bundled modules, and every source file
+   carries the license header. `make dep-licenses-check` says whether `dist-material/` is what
+   the dependencies resolve to.
 5. The source package builds and tests: unpack it, then `make build && make test`.
 6. A binary works on real data, whether built from source or unpacked from the package for your
    platform: `asz version`, `asz sources`, `asz collect -once`, `asz parse`, `asz verify`.
