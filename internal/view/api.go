@@ -43,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/c/", s.page)
 	mux.Handle("/favicon.svg", svg(faviconSVG))
 	mux.Handle("/logo.svg", svg(logoSVG))
+	mux.Handle("/logo-blue.svg", svg(logoBlueSVG))
 	mux.Handle(AssetPrefix, assets())
 	mux.HandleFunc("/api/status", s.apiStatus)
 	mux.HandleFunc("/api/conversations", s.apiList)

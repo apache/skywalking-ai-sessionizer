@@ -18,6 +18,7 @@
 package view
 
 import (
+	"bytes"
 	"embed"
 	"io/fs"
 	"mime"
@@ -99,6 +100,11 @@ var faviconSVG []byte
 
 //go:embed logo.svg
 var logoSVG []byte
+
+// The logo is drawn white, for a dark ground. A light theme gets the
+// brand-blue variant, derived the way Horizon derives it for its own top
+// bar, so the two hosts show the same mark on the same ground.
+var logoBlueSVG = bytes.ReplaceAll(logoSVG, []byte(`fill="#fff"`), []byte(`fill="#1368B3"`))
 
 // index lists the conversations. It is the only page that knows there is more
 // than one of them.

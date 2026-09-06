@@ -95,6 +95,16 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 		if !strings.Contains(page, `id="theme"`) || !strings.Contains(page, "host-shell/themes.json") || !strings.Contains(page, `"asz.theme"`) {
 			t.Fatal("a page has no theme picker, or one that does not share the saved choice")
 		}
+		// The logo follows the ground: white on a dark theme, brand blue on
+		// a light one, as Horizon's top bar shows it.
+		if !strings.Contains(page, `class="logo-dark" src="/logo.svg"`) && !strings.Contains(page, `logo-dark" src="/logo.svg"`) ||
+			!strings.Contains(page, `src="/logo-blue.svg"`) || !strings.Contains(page, `html[data-appearance="light"] .logo-dark { display: none; }`) {
+			t.Fatal("a page does not switch the logo with the theme's appearance")
+		}
+	}
+	blue := get("/logo-blue.svg")
+	if blue.Code != http.StatusOK || !strings.Contains(blue.Body.String(), `fill="#1368B3"`) || strings.Contains(blue.Body.String(), `fill="#fff"`) {
+		t.Fatalf("the blue logo is not the white one recoloured: %d", blue.Code)
 	}
 }
 

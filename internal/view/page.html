@@ -47,6 +47,10 @@
 .asz-header { display: flex; align-items: center; gap: 14px; padding: 7px 14px; border-bottom: 1px solid var(--sw-line); background: var(--sw-bg-1); }
 .asz-brand { display: flex; align-items: center; gap: 8px; color: var(--sw-fg-0); text-decoration: none; font-weight: var(--sw-fw-semibold); white-space: nowrap; }
 .asz-brand img { height: 22px; }
+/* White on a dark ground, brand blue on a light one, as Horizon's top bar does. */
+.logo-light { display: none; }
+html[data-appearance="light"] .logo-dark { display: none; }
+html[data-appearance="light"] .logo-light { display: block; }
 .asz-brand small { color: var(--sw-fg-2); font-weight: var(--sw-fw-regular); }
 .asz-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sw-fg-0); font-weight: var(--sw-fw-medium); }
 .asz-title code { margin-left: 8px; color: var(--sw-fg-2); font-family: var(--sw-mono); font-size: var(--sw-fs-xs); font-weight: var(--sw-fw-regular); }
@@ -66,7 +70,7 @@
 <body>
 <div class="asz-page">
   <header class="asz-header">
-    <a class="asz-brand" href="/" aria-label="SkyWalking AI Sessionizer"><img src="/logo.svg" alt="SkyWalking"><span>AI Sessionizer</span></a>
+    <a class="asz-brand" href="/" aria-label="SkyWalking AI Sessionizer"><img class="logo-dark" src="/logo.svg" alt="SkyWalking"><img class="logo-light" src="/logo-blue.svg" alt="SkyWalking"><span>AI Sessionizer</span></a>
     <div class="asz-title" id="title"></div>
     <a class="asz-list" href="/">All conversations</a>
     <label>Theme<select id="theme" aria-label="Theme"></select></label>
