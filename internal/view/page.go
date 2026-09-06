@@ -18,12 +18,70 @@
 package view
 
 import (
-	_ "embed"
+	"embed"
+	"io/fs"
+	"mime"
 	"net/http"
+	"regexp"
+	"strings"
 )
 
 //go:embed page.html
 var pageHTML []byte
+
+// The conversation renderer: Horizon's @skywalking-horizon-ui/conversation-view,
+// built from the Horizon commit named in conversation-view/HORIZON_COMMIT and
+// committed here, with Horizon's design tokens, themes and fonts, so this page
+// and the SkyWalking UI draw a conversation identically and asz builds
+// without a JavaScript toolchain. tools/conversation-view.sh rebuilds it
+// from the pin, and CI fails when the copy differs from that build.
+//
+//go:embed conversation-view
+var renderer embed.FS
+
+// AssetPrefix is where the page loads the renderer from.
+const AssetPrefix = "/assets/conversation-view/"
+
+func init() {
+	// The Go mime table knows no font type; without this the fonts would be
+	// served as octet streams, which a browser still uses but a strict one
+	// logs about.
+	_ = mime.AddExtensionType(".woff2", "font/woff2")
+}
+
+var pinLine = regexp.MustCompile(`(?m)^commit ([0-9a-f]{40})$`)
+
+// HorizonCommit is the Horizon commit the embedded renderer was built from.
+func HorizonCommit() string {
+	b, err := renderer.ReadFile("conversation-view/HORIZON_COMMIT")
+	if err != nil {
+		return ""
+	}
+	if m := pinLine.FindSubmatch(b); m != nil {
+		return string(m[1])
+	}
+	return ""
+}
+
+// assets serves the renderer's files. They change only when the pin does,
+// so a browser may keep them for a day; a redeploy under a new pin serves
+// new bytes under the same paths, which a day-old cache would miss, and the
+// page's own HTML is never cached.
+func assets() http.Handler {
+	sub, err := fs.Sub(renderer, "conversation-view")
+	if err != nil {
+		panic(err)
+	}
+	files := http.StripPrefix(AssetPrefix, http.FileServer(http.FS(sub)))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") || strings.HasSuffix(r.URL.Path, "HORIZON_COMMIT") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		files.ServeHTTP(w, r)
+	})
+}
 
 //go:embed index.html
 var indexHTML []byte

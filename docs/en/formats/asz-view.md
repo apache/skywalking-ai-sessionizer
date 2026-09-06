@@ -150,6 +150,8 @@ values as the JSON.
 
 `asz view` serves the document at `/api/c/{id}/view` and builds it once per fold, so a second reader
 pays nothing until a new round arrives. `asz conversation -json ID` prints the same document to
-standard output, and `-yaml` prints it as YAML, for a terminal or a diff; the page stays the page.
+standard output, and `-yaml` prints it as YAML, for a terminal or a diff. The page draws the same
+document with Horizon's conversation renderer, which asz embeds from a pinned Horizon commit, so a
+conversation looks the same in `asz view` and in the SkyWalking UI.
 The largest conversation measured, 357 talks and 16,121 steps, is 19 MB as one document and was
 built in 0.7 s.

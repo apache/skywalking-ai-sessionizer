@@ -206,3 +206,12 @@ MIT and Apache-2.0 licenses
 
     gopkg.in/yaml.v3 v3.0.1 MIT and Apache-2.0
 
+========================================================================
+OFL-1.1 licenses
+========================================================================
+
+The conversation renderer the asz viewer embeds carries two fonts, under the
+SIL Open Font License, Version 1.1; their texts are in licenses/.
+
+    Inter (github.com/rsms/inter) OFL-1.1, licenses/license-inter-font.txt
+    JetBrains Mono (github.com/JetBrains/JetBrainsMono) OFL-1.1, licenses/license-jetbrains-mono-font.txt

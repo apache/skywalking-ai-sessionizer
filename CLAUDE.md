@@ -62,6 +62,7 @@ internal/parse/                 one round: assemble, compare against the chain, 
 internal/storage/               landing zone, atomic writes, cursors, session/index state, locks
 internal/verify/                contiguity and digest checks over landed data
 internal/view/                  reads a conversation and serves it as a page
+internal/view/conversation-view/ Horizon's conversation renderer, built from the pinned commit in HORIZON_COMMIT; never edited here
 internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
@@ -97,8 +98,9 @@ while landing. No configuration of Claude Code required, and it works on history
 **Phase 2 (implemented):** assembly into a conversation, published as an append-only chain of
 immutable rounds — see `design-notes/02` and the assembly doc.
 **Phase 3 (in progress):** read and export. `asz view` serves the conversations as a page: a list at
-`/`, and one conversation at `/c/{id}` with its transcript, its flow timeline and the evidence behind
-every step. It reads the folded chain on demand. With the local Claude Code adapter it also runs the
+`/`, and one conversation at `/c/{id}` drawn by Horizon's conversation renderer, embedded from a
+pinned Horizon commit so asz and the SkyWalking UI draw a conversation identically; the page adds
+the landed record behind a step, which only asz has. It reads the folded chain on demand. With the local Claude Code adapter it also runs the
 collector and the parser in the same process, once or on the watch interval, and the list page shows
 the last and the next refresh. A static export and OTLP push belong here too; both add measurement
 only, never structure.

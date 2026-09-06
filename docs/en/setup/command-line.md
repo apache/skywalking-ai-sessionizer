@@ -130,6 +130,14 @@ Serves the conversations as a page on `ADDR`, `127.0.0.1:8787` by default. The l
 one conversation at `/c/{id}`. The page reads the folded chain on demand and caches nothing beyond
 the process.
 
+A conversation is drawn by Horizon's conversation renderer, the same one the SkyWalking UI uses
+for the conversations the OAP holds, so the two draw a conversation identically. asz embeds the
+renderer's build from a pinned Horizon commit, with Horizon's themes and fonts, so the page needs
+nothing from the network but its own API. The page's address carries the reader's position, the
+talk, the selected step and the stream being read, so a link lands on the same step. Beyond what
+Horizon can show, the Evidence tab opens the landed record behind a step, since only asz has the
+files.
+
 With the `claude-code-local` adapter, when its source directory exists on the machine, the same
 process also runs the collector and the parser: once with `-once`, or on the collector interval
 otherwise. `/api/status` reports the mode, the source, the last and the next refresh and the counts

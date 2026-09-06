@@ -71,6 +71,16 @@ scenarios: build
 e2e-collector: build
 	tools/e2e-collector.sh
 
+## conversation-view: rebuild the conversation renderer asz view embeds from the pinned Horizon commit (needs node 24 and pnpm)
+.PHONY: conversation-view
+conversation-view:
+	tools/conversation-view.sh update
+
+## conversation-view-check: fail when the embedded renderer is not what the pinned Horizon commit builds
+.PHONY: conversation-view-check
+conversation-view-check:
+	tools/conversation-view.sh check
+
 ## asz-view-example: regenerate the complete example document on the asz.view format page from the fixture scenario
 .PHONY: asz-view-example
 asz-view-example: build
@@ -129,6 +139,15 @@ dep-licenses: $(BIN_DIR)/license-eye
 	@rm -rf dist-material/licenses
 	$(BIN_DIR)/license-eye dependency resolve --summary dist-material/LICENSE.tpl --output dist-material/licenses
 	tools/dep-notices.sh dist-material/NOTICE
+	@$(MAKE) --no-print-directory font-licenses OUT=dist-material/licenses
+
+# The two fonts the embedded conversation renderer carries are bundled into
+# the binary too, under the SIL Open Font License; license-eye resolves Go
+# modules only, so their texts are copied beside the modules' by hand.
+.PHONY: font-licenses
+font-licenses:
+	@cp internal/view/conversation-view/host-shell/fonts/LICENSE-inter.txt $(OUT)/license-inter-font.txt
+	@cp internal/view/conversation-view/host-shell/fonts/LICENSE-jetbrains-mono.txt $(OUT)/license-jetbrains-mono-font.txt
 
 ## dep-licenses-check: fail when dist-material is not what go.mod resolves to, so a changed dependency cannot ship without its license
 .PHONY: dep-licenses-check
@@ -136,6 +155,7 @@ dep-licenses-check: $(BIN_DIR)/license-eye
 	@tmp=$$(mktemp -d) && cp dist-material/LICENSE.tpl $$tmp/ && \
 	  $(BIN_DIR)/license-eye -v warn dependency resolve --summary $$tmp/LICENSE.tpl --output $$tmp/licenses >/dev/null && \
 	  tools/dep-notices.sh $$tmp/NOTICE && \
+	  $(MAKE) --no-print-directory font-licenses OUT=$$tmp/licenses && \
 	  if diff -r $$tmp dist-material; then rm -rf $$tmp; echo "dist-material matches the dependencies"; \
 	  else rm -rf $$tmp; echo "dist-material is out of date: run 'make dep-licenses' and commit the result"; exit 1; fi
 

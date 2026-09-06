@@ -1,0 +1,27 @@
+[
+  {
+    "id": "horizon",
+    "label": "Horizon",
+    "appearance": "dark"
+  },
+  {
+    "id": "meridian",
+    "label": "Meridian",
+    "appearance": "dark"
+  },
+  {
+    "id": "obsidian",
+    "label": "Obsidian",
+    "appearance": "dark"
+  },
+  {
+    "id": "daybreak",
+    "label": "Daybreak",
+    "appearance": "light"
+  },
+  {
+    "id": "aurora",
+    "label": "Aurora",
+    "appearance": "dark"
+  }
+]

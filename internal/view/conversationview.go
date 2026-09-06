@@ -18,6 +18,7 @@
 package view
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -25,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,7 +50,19 @@ func (s *Server) apiView(w http.ResponseWriter, id string) {
 		fail(w, err, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, v)
+	// Encoded whole before it is sent, so the answer carries its length and
+	// the page can show the download against it. A document is tens of
+	// megabytes at most, and it is built whole in memory already.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	_, _ = w.Write(buf.Bytes())
 }
 
 // Build makes the asz.view document: the fold, every talk as a tree with

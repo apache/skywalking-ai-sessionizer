@@ -48,23 +48,6 @@ type (
 
 const preview = 2000
 
-func (s *Server) apiTalk(w http.ResponseWriter, id, talk string) {
-	c, err := s.Load(id)
-	if err != nil {
-		fail(w, err, http.StatusNotFound)
-		return
-	}
-	n := c.View.Nodes[talk]
-	if n == nil {
-		fail(w, fmt.Errorf("no such talk: %s", talk), http.StatusNotFound)
-		return
-	}
-	// Every record this talk cites, read with one pass per landed file. Read
-	// one at a time, a step at row N costs a scan to row N; a talk of several
-	// hundred steps then rescans the same file hundreds of times.
-	writeJSON(w, c.step(n, 0, c.records(c.refsUnder(n))))
-}
-
 // refsUnder collects every landed position the subtree reads content from.
 func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
 	var out []*sessionflow.Ref
@@ -415,9 +398,9 @@ func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64) {
 		fail(w, err, http.StatusNotFound)
 		return
 	}
-	writeJSON(w, map[string]any{
-		"seq": seq, "row": row, "record": rec, "at": Millis(c.at[[2]uint64{seq, row}]),
-	})
+	// The record as landed, and nothing around it: the renderer prints it
+	// whole and reads its dropped list off the top.
+	writeJSON(w, rec)
 }
 
 // record reads one landed record whole.

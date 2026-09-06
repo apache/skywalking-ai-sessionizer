@@ -30,6 +30,10 @@ side.
 
 - `make check` passes. CI runs the same targets and one required check fans them in.
 - Every source file carries the Apache license header. `make license-fix` inserts missing ones.
+- The conversation renderer `asz view` embeds is Horizon's `@skywalking-horizon-ui/conversation-view`,
+  built from the commit named in `internal/view/conversation-view/HORIZON_COMMIT` and committed
+  here. `tools/conversation-view.sh update COMMIT` moves the pin and rebuilds the copy, with node
+  24 and pnpm; CI rebuilds it from the pin and fails when the committed copy differs.
 - A changed dependency changes `dist-material/`: `make dep-licenses` regenerates the LICENSE with
   a section per license and one text per module, from `go.mod`, and the NOTICE with the notice of
   every module built into the binary that ships one. Every binary package and the container image

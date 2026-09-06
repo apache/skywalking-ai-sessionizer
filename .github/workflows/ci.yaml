@@ -123,6 +123,24 @@ jobs:
       - name: Push into a Collector and verify its output
         run: tools/e2e-collector.sh
 
+  # The conversation renderer asz view embeds is Horizon's, built from the
+  # commit pinned in internal/view/conversation-view/HORIZON_COMMIT and
+  # committed here. This rebuilds it from that commit and fails when the
+  # committed copy differs, so the copy cannot drift from its source.
+  conversation-view:
+    name: Conversation view
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10, the commit on the ASF allow-list
+        with:
+          version: 10.33.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build the renderer from the pinned Horizon commit and compare
+        run: make conversation-view-check
+
   # Builds every platform on every run so a broken cross-compile is caught
   # at once, and keeps the packages as an artifact. When a release is
   # released on GitHub, after the vote where there is one, the packages and
@@ -270,7 +288,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, lint, docker, binaries, collector]
+    needs: [license, build, lint, docker, binaries, collector, conversation-view]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

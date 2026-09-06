@@ -18,24 +18,45 @@
 -->
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="horizon" data-appearance="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SkyWalking AI Sessionizer</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/assets/conversation-view/host-shell/horizon-theme.css">
+<script>
+// The saved theme, before the first paint, so a reload does not flash. The
+// conversation page offers the choice; this page follows it.
+(function () {
+  try {
+    var t = JSON.parse(localStorage.getItem("asz.theme") || "null");
+    if (t && t.id) { document.documentElement.dataset.theme = t.id; document.documentElement.dataset.appearance = t.appearance || "dark"; }
+  } catch (e) {}
+})();
+</script>
 <style>
+/* The page's own names for Horizon's design tokens, so it follows the theme
+   the conversation page picked. */
 :root {
-  color-scheme: dark;
-  --bg: #07111f; --surface: #0d1929; --surface-2: #111f32; --surface-3: #17283d;
-  --line: #263b55; --line-soft: #1b2d43;
-  --text: #e9f0f8; --muted: #9cb0c7; --faint: #6f859f;
-  --green: #35c980; --teal: #31c7bd; --blue: #58a8ff; --orange: #f4a641;
-  --purple: #ac8cff; --pink: #ef6eae; --red: #ff6f78; --focus: #b8d8ff;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: var(--sw-bg-0);
+  --surface: var(--sw-bg-1);
+  --surface-2: var(--sw-bg-2);
+  --surface-3: var(--sw-bg-3);
+  --line: var(--sw-line);
+  --line-soft: var(--sw-line-2);
+  --text: var(--sw-fg-0);
+  --muted: var(--sw-fg-1);
+  --faint: var(--sw-fg-2);
+  --green: var(--sw-ok);
+  --teal: var(--sw-cyan);
+  --blue: var(--sw-accent);
+  --orange: var(--sw-warn);
+  --purple: var(--sw-purple);
+  --pink: var(--sw-pink);
+  --red: var(--sw-err);
+  --focus: var(--sw-accent);
+  font-family: var(--sw-sans);
 }
 * { box-sizing: border-box; }
 html { background: var(--bg); }
@@ -43,7 +64,7 @@ body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); }
 button, input { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+code, .mono { font-family: var(--sw-mono); }
 .kicker { color: var(--faint); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 
 .compact-header { display: flex; align-items: center; justify-content: space-between; gap: 14px;
@@ -88,7 +109,7 @@ tbody tr { cursor: pointer; }
 tbody tr:hover td { background: rgba(88,168,255,.05); }
 .title { display: block; color: var(--text); font-size: 14px; font-weight: 600; }
 .sub { display: block; margin-top: 3px; color: var(--faint); font-size: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  font-family: var(--sw-mono); }
 .big { color: var(--text); font-weight: 600; }
 .warn { color: var(--orange); }
 .bar { display: inline-block; width: 74px; height: 5px; margin-left: 8px; border-radius: 3px;
