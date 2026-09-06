@@ -25,16 +25,34 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
+
+// Throttled is a receiver asking the sender to slow down: 429 over HTTP,
+// with the Retry-After it gives when it gives one, or ResourceExhausted
+// over gRPC. A pass stops at it and leaves the rest for the next pass.
+type Throttled struct {
+	After  time.Duration
+	Detail string
+}
+
+func (t *Throttled) Error() string {
+	if t.After > 0 {
+		return fmt.Sprintf("otlp: the receiver asked to slow down, retry after %s: %s", t.After, t.Detail)
+	}
+	return "otlp: the receiver asked to slow down: " + t.Detail
+}
 
 // The two transports OTLP defines for logs. Both carry the same request;
 // only the connection differs. gRPC is the default: one long-lived HTTP/2
@@ -133,6 +151,9 @@ func (c *grpcClient) Export(req *collogspb.ExportLogsServiceRequest) error {
 	}
 	resp, err := c.logs.Export(ctx, req)
 	if err != nil {
+		if status.Code(err) == codes.ResourceExhausted {
+			return &Throttled{Detail: c.conn.Target() + ": " + err.Error()}
+		}
 		return fmt.Errorf("otlp: %s: %w", c.conn.Target(), err)
 	}
 	return rejected(resp)
@@ -178,6 +199,13 @@ func (c *httpClient) Export(req *collogspb.ExportLogsServiceRequest) error {
 	}
 	defer resp.Body.Close()
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode == http.StatusTooManyRequests {
+		t := &Throttled{Detail: c.url + " answered " + resp.Status}
+		if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
+			t.After = time.Duration(secs) * time.Second
+		}
+		return t
+	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		snippet := answer
 		if len(snippet) > 400 {

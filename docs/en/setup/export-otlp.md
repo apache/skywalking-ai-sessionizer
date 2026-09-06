@@ -128,6 +128,25 @@ over each transport, then checks every record against the root and rebuilds the 
 the Collector wrote; CI runs it on every change. Writing each record's body to `asz.file` under a
 new root gives a root that `asz verify` and `asz view` read like the original.
 
+## Rate
+
+A first push sends the whole history of the storage root, which can be hundreds of megabytes, as
+fast as the receiver takes it. `export.otlp.max_bytes_per_minute` caps what goes on the wire: a
+pass waits before a request until a minute's budget, refilled continuously and never holding more
+than a minute's worth, covers the request's encoded size. The budget starts full, so a pass that
+sends a few new files never waits, and a request larger than a minute's budget waits for a full
+one and leaves it empty. Zero, the default, is no limit. `asz push -once` still sends everything
+before it exits, and the pass line's `paused=` field says how long it waited.
+
+A pass goes session by session, the session landed first going first: its files, then its
+rounds. A receiver rebuilds a session once it holds both, so during a long first push the sessions
+become complete one after another rather than all at the end.
+
+A receiver that answers `429` over HTTP or `ResourceExhausted` over gRPC is asking the sender to
+slow down. The pass stops there, leaves the rest for the next pass, and empties the budget, so the
+next request waits a whole minute's worth when a rate is set. In watch mode a `Retry-After` longer
+than the interval is honored.
+
 ## Size
 
 A request carries at most `export.otlp.batch_bytes` of file bytes, 8 MiB by default, which keeps a

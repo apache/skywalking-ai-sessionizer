@@ -57,6 +57,8 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		InstanceID:  o.InstanceID,
 		Layer:       o.Layer,
 		BatchBytes:  o.BatchBytes,
+
+		MaxBytesPerMinute: o.MaxBytesPerMinute,
 	}
 	if err := p.Prepare(); err != nil {
 		return err
@@ -69,32 +71,44 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 	if o.Protocol == otlp.ProtocolHTTP {
 		endpoint = o.Endpoint + "/v1/logs over HTTP"
 	}
-	fmt.Printf("storage root: %s\nendpoint    : %s\nservice     : %s\ninstance    : %s\nlayer       : %s\n",
-		zoneRoot, endpoint, service, p.InstanceID, o.Layer)
-	pass := func() error {
+	rate := "no limit"
+	if o.MaxBytesPerMinute > 0 {
+		rate = humanBytes(o.MaxBytesPerMinute) + " per minute"
+	}
+	fmt.Printf("storage root: %s\nendpoint    : %s\nservice     : %s\ninstance    : %s\nlayer       : %s\nrate        : %s\n",
+		zoneRoot, endpoint, service, p.InstanceID, o.Layer, rate)
+	pass := func() (*otlp.Stats, error) {
 		start := time.Now()
 		st, err := p.Pass()
 		if err != nil {
-			return err
+			return nil, err
 		}
-		fmt.Printf("[%s] files=%d bytes=%s requests=%d errors=%d (%s)\n",
-			time.Now().Format("15:04:05"), st.Files, humanBytes(st.Bytes), st.Requests,
-			len(st.Errors), time.Since(start).Round(time.Millisecond))
+		fmt.Printf("[%s] files=%d bytes=%s wire=%s requests=%d paused=%s errors=%d (%s)\n",
+			time.Now().Format("15:04:05"), st.Files, humanBytes(st.Bytes), humanBytes(st.Wire), st.Requests,
+			st.Paused.Round(time.Second), len(st.Errors), time.Since(start).Round(time.Millisecond))
 		for _, e := range st.Errors {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
 		}
 		if len(st.Errors) > 0 {
-			return fmt.Errorf("pass incomplete: %d error(s); unsent files are retried on the next pass", len(st.Errors))
+			return st, fmt.Errorf("pass incomplete: %d error(s); unsent files are retried on the next pass", len(st.Errors))
 		}
-		return nil
+		return st, nil
 	}
 	if once {
-		return pass()
+		_, err := pass()
+		return err
 	}
 	for {
-		if err := pass(); err != nil {
+		st, err := pass()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
-		time.Sleep(o.Interval)
+		// A receiver that asked to slow down and named a wait gets it,
+		// when it is longer than the interval.
+		wait := o.Interval
+		if st != nil && st.Throttled && st.RetryAfter > wait {
+			wait = st.RetryAfter
+		}
+		time.Sleep(wait)
 	}
 }

@@ -36,6 +36,14 @@
   so a receiver can place a file in time without decoding it, and a round's record carries
   `asz.session.from_time` and `asz.session.through_time`, the session's range as of that round.
 
+- `export.otlp.max_bytes_per_minute` caps what `asz push` puts on the wire, for the first push of
+  a large history: a pass waits before a request until a minute's budget covers it. Zero, the
+  default, is no limit. A pass now goes session by session, the session landed first going first,
+  each session's files followed by its rounds, so a receiver holds complete sessions one after
+  another during a long push. A receiver answering `429` or `ResourceExhausted` stops the pass,
+  which leaves the rest for the next one and honors a `Retry-After` in watch mode. The pass line
+  gained `wire=` and `paused=`.
+
 ## Assembly
 
 - A round is cut at `parse.max_round_bytes`, 2 MiB by default, the same budget as a landed file,

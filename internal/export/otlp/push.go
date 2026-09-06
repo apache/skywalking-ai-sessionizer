@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -79,15 +81,93 @@ type Pusher struct {
 	// BatchBytes is how many file bytes one request carries at most. A file
 	// larger than the budget is sent alone, in a request of its own.
 	BatchBytes int64
-	Now        func() time.Time
+	// MaxBytesPerMinute caps what goes on the wire: a pass waits before a
+	// request until a minute's budget, refilled continuously, holds the
+	// request's size. Zero, the default, is no limit. A first push of a
+	// large history is what it is for: 800 MB of landed files would
+	// otherwise go out as fast as the receiver takes them.
+	MaxBytesPerMinute int64
+	Now               func() time.Time
+	// Sleep is how the pass waits. The tests replace it with a clock.
+	Sleep func(time.Duration)
+
+	limit *limiter
 }
 
 // Stats reports what one pass did.
 type Stats struct {
 	Files    int
 	Bytes    int64
+	Wire     int64 // bytes on the wire, requests as encoded
 	Requests int
-	Errors   []error
+	Paused   time.Duration // how long the pass waited for budget
+	// Throttled says the receiver asked the sender to slow down and the
+	// pass stopped there; RetryAfter is the wait it named, if any.
+	Throttled  bool
+	RetryAfter time.Duration
+	Errors     []error
+}
+
+// limiter is a token bucket in bytes: a minute's budget, refilled
+// continuously and never holding more than a minute's worth. It starts
+// full, so a small pass never waits.
+type limiter struct {
+	rate   int64
+	tokens float64
+	last   time.Time
+	now    func() time.Time
+	sleep  func(time.Duration)
+}
+
+func newLimiter(rate int64, now func() time.Time, sleep func(time.Duration)) *limiter {
+	return &limiter{rate: rate, tokens: float64(rate), last: now(), now: now, sleep: sleep}
+}
+
+func (l *limiter) refill() {
+	now := l.now()
+	if elapsed := now.Sub(l.last); elapsed > 0 {
+		l.tokens += elapsed.Minutes() * float64(l.rate)
+		if l.tokens > float64(l.rate) {
+			l.tokens = float64(l.rate)
+		}
+	}
+	l.last = now
+}
+
+// take waits until n bytes may go, and returns how long it waited. A
+// request larger than a minute's budget waits for a full bucket, goes,
+// and leaves it empty, so the next request waits a whole minute.
+func (l *limiter) take(n int64) time.Duration {
+	if l == nil || l.rate <= 0 {
+		return 0
+	}
+	l.refill()
+	need := float64(n)
+	if need > float64(l.rate) {
+		need = float64(l.rate)
+	}
+	var waited time.Duration
+	if l.tokens < need {
+		short := (need - l.tokens) / float64(l.rate) * float64(time.Minute)
+		waited = time.Duration(math.Ceil(short/float64(time.Millisecond))) * time.Millisecond
+		l.sleep(waited)
+		l.refill()
+	}
+	l.tokens -= need
+	if l.tokens < 0 {
+		l.tokens = 0
+	}
+	return waited
+}
+
+// drain empties the bucket: after a receiver asked to slow down, the next
+// request waits a whole minute's budget.
+func (l *limiter) drain() {
+	if l == nil {
+		return
+	}
+	l.refill()
+	l.tokens = 0
 }
 
 // ScopeName identifies the sender in every request.
@@ -109,6 +189,12 @@ func (p *Pusher) Prepare() error {
 	if p.Now == nil {
 		p.Now = time.Now
 	}
+	if p.Sleep == nil {
+		p.Sleep = time.Sleep
+	}
+	if p.limit == nil {
+		p.limit = newLimiter(p.MaxBytesPerMinute, p.Now, p.Sleep)
+	}
 	if p.InstanceID == "" {
 		id, err := defaultInstance()
 		if err != nil {
@@ -119,8 +205,11 @@ func (p *Pusher) Prepare() error {
 	return nil
 }
 
-// Pass sends what is not yet sent, in landed order: each session's landed
-// files by sequence, then each conversation's rounds by number.
+// Pass sends what is not yet sent, session by session, the session landed
+// first going first: its landed files by sequence, then the rounds of its
+// conversation. A receiver rebuilds a session once it holds the session's
+// files and rounds, so under a rate limit the sessions of a long first
+// push become complete one after another rather than all at the end.
 func (p *Pusher) Pass() (*Stats, error) {
 	if err := p.Prepare(); err != nil {
 		return nil, err
@@ -130,57 +219,118 @@ func (p *Pusher) Pass() (*Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessions, err := sessionDirs(p.Zone.Root())
+	sessions, err := p.sessionsOldestFirst()
 	if err != nil {
 		return nil, err
 	}
 	b := &batch{p: p, st: st, state: state, services: map[string]string{}}
-	for _, session := range sessions {
-		files, err := storage.LandedFiles(p.Zone, session)
-		if err != nil {
-			st.Errors = append(st.Errors, err)
-			continue
+	sent := map[string]bool{}
+	for _, s := range sessions {
+		if b.stop != nil {
+			break
 		}
 		// A session's records are attributed to the runtime that produced
-		// them, which its landed headers name. The rounds of its
-		// conversation follow the session.
-		b.services[session] = p.serviceOf(files)
-		for _, lf := range files {
+		// them, which its landed headers name.
+		b.services[s.id] = p.serviceOf(s.files)
+		for _, lf := range s.files {
+			if b.stop != nil {
+				break
+			}
 			rel, _ := filepath.Rel(p.Zone.Root(), lf.Path)
 			rel = filepath.ToSlash(rel)
 			if state.pushed(rel) {
 				continue
 			}
-			if err := b.addLanded(rel, lf, session, files); err != nil {
+			if err := b.addLanded(rel, lf, s.id, s.files); err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 			}
 		}
+		b.addRounds(s.id)
+		sent[s.id] = true
 	}
+	// A conversation that is not a session of this root, such as one
+	// assembled from several, goes after the sessions.
 	convs, err := conversationDirs(p.Zone.Root())
 	if err != nil {
 		st.Errors = append(st.Errors, err)
 	}
 	for _, conv := range convs {
-		rounds, err := roundFiles(p.Zone.Root(), conv)
-		if err != nil {
-			st.Errors = append(st.Errors, err)
-			continue
+		if b.stop != nil {
+			break
 		}
-		for _, path := range rounds {
-			rel, _ := filepath.Rel(p.Zone.Root(), path)
-			rel = filepath.ToSlash(rel)
-			if state.pushed(rel) {
-				continue
-			}
-			if err := b.addRound(rel, path, conv); err != nil {
-				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
-			}
+		if !sent[conv] {
+			b.addRounds(conv)
 		}
 	}
-	if err := b.flush(); err != nil {
-		st.Errors = append(st.Errors, err)
+	if b.stop == nil {
+		if err := b.flush(); err != nil {
+			st.Errors = append(st.Errors, err)
+		}
+	}
+	if b.stop != nil {
+		st.Throttled, st.RetryAfter = true, b.stop.After
 	}
 	return st, nil
+}
+
+// addRounds queues every round of a conversation not yet sent.
+func (b *batch) addRounds(conv string) {
+	rounds, err := roundFiles(b.p.Zone.Root(), conv)
+	if err != nil {
+		b.st.Errors = append(b.st.Errors, err)
+		return
+	}
+	for _, path := range rounds {
+		if b.stop != nil {
+			return
+		}
+		rel, _ := filepath.Rel(b.p.Zone.Root(), path)
+		rel = filepath.ToSlash(rel)
+		if b.state.pushed(rel) {
+			continue
+		}
+		if err := b.addRound(rel, path, conv); err != nil {
+			b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", rel, err))
+		}
+	}
+}
+
+// session is one session of the root with its landed files, and when the
+// first of them was landed.
+type session struct {
+	id     string
+	files  []storage.LandedFile
+	landed time.Time
+}
+
+// sessionsOldestFirst lists the root's sessions in the order they were
+// first landed, so a long first push sends history in order.
+func (p *Pusher) sessionsOldestFirst() ([]session, error) {
+	names, err := sessionDirs(p.Zone.Root())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]session, 0, len(names))
+	for _, id := range names {
+		files, err := storage.LandedFiles(p.Zone, id)
+		if err != nil {
+			return nil, err
+		}
+		s := session{id: id, files: files}
+		if len(files) > 0 {
+			if fi, err := os.Stat(files[0].Path); err == nil {
+				s.landed = fi.ModTime()
+			}
+		}
+		out = append(out, s)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].landed.Equal(out[j].landed) {
+			return out[i].id < out[j].id
+		}
+		return out[i].landed.Before(out[j].landed)
+	})
+	return out, nil
 }
 
 func (p *Pusher) statePath() string { return filepath.Join(p.Zone.Root(), "push.state") }
@@ -197,6 +347,10 @@ type batch struct {
 	byKey   map[string]int
 	bytes   int64
 	pending []pendingFile
+
+	// stop is set when the receiver asked to slow down: nothing more is
+	// sent this pass.
+	stop *Throttled
 
 	// services is the service each session's records are attributed to.
 	services map[string]string
@@ -254,11 +408,20 @@ func (b *batch) flush() error {
 	if len(b.groups) == 0 {
 		return nil
 	}
-	err := b.p.Client.Export(&collogspb.ExportLogsServiceRequest{ResourceLogs: b.groups})
+	req := &collogspb.ExportLogsServiceRequest{ResourceLogs: b.groups}
+	size := int64(proto.Size(req))
+	b.st.Paused += b.p.limit.take(size)
+	err := b.p.Client.Export(req)
 	b.st.Requests++
+	b.st.Wire += size
 	pending := b.pending
 	b.groups, b.byKey, b.bytes, b.pending = nil, nil, 0, nil
 	if err != nil {
+		var t *Throttled
+		if errors.As(err, &t) {
+			b.stop = t
+			b.p.limit.drain()
+		}
 		return err
 	}
 	for _, f := range pending {

@@ -80,6 +80,10 @@ type OTLP struct {
 	// under the 10 MiB the OAP's HTTP server accepts, and well under the
 	// 50 MB its gRPC server accepts.
 	BatchBytes int64 `yaml:"batch_bytes"`
+	// MaxBytesPerMinute caps what asz push puts on the wire per minute. A
+	// pass waits before a request until a minute's budget holds it. Zero,
+	// the default, is no limit.
+	MaxBytesPerMinute int64 `yaml:"max_bytes_per_minute"`
 	// Interval is how long asz push sleeps between passes in watch mode.
 	Interval time.Duration `yaml:"interval"`
 }
@@ -216,6 +220,9 @@ func Load(path string) (*Config, error) {
 	}
 	if o.BatchBytes > 0 {
 		cfg.Export.OTLP.BatchBytes = o.BatchBytes
+	}
+	if o.MaxBytesPerMinute > 0 {
+		cfg.Export.OTLP.MaxBytesPerMinute = o.MaxBytesPerMinute
 	}
 	if o.Interval > 0 {
 		cfg.Export.OTLP.Interval = o.Interval

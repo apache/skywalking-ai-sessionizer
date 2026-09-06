@@ -91,6 +91,7 @@ export:
     instance_id: ""
     layer: AI_AGENT
     batch_bytes: 8388608
+    max_bytes_per_minute: 0
     interval: 5s
 ```
 
@@ -104,6 +105,7 @@ export:
 | `layer` | `AI_AGENT` | Sent as `service.layer`, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores. |
 | `headers` | none | Sent with every request, as gRPC metadata or as HTTP headers, for example `Authorization`. |
 | `batch_bytes` | `8388608` | How many file bytes one request carries at most, 8 MiB, which keeps a request under the 10 MiB the OAP's HTTP server accepts and well under the 50 MB its gRPC server accepts. A file larger than this is sent alone, in a request of its own. |
+| `max_bytes_per_minute` | `0` | At most this many bytes on the wire per minute: a pass waits before a request until a minute's budget covers it. Zero is no limit. See [Rate](export-otlp.md#rate). |
 | `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |
 
 See [Export over OpenTelemetry](export-otlp.md) for what is sent.

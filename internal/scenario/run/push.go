@@ -260,6 +260,22 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 			bad("%s was never sent", rel)
 		}
 	}
+	// A session's rounds follow its files, so a receiver holds a complete
+	// session as soon as the pass has passed it.
+	lastLanded, firstRound := -1, -1
+	for i, r := range records {
+		switch otlptest.Attrs(r.GetAttributes())["asz.format"] {
+		case "sd":
+			lastLanded = i
+		case "sf":
+			if firstRound < 0 {
+				firstRound = i
+			}
+		}
+	}
+	if firstRound >= 0 && firstRound < lastLanded {
+		bad("a round was sent at position %d before the last landed file at %d; a session's rounds follow its files", firstRound, lastLanded)
+	}
 	if want != nil {
 		for _, k := range want.Kinds {
 			if !kinds[k] {

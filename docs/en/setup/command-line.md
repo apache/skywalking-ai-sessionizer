@@ -155,11 +155,13 @@ Sends every landed file and every round not yet sent to the OpenTelemetry logs r
 `export.otlp.interval`. One line per pass:
 
 ```text
-[10:12:03] files=306 bytes=47.9MB requests=5 errors=0 (1.1s)
+[10:12:03] files=306 bytes=47.9MB wire=48.0MB requests=5 paused=0s errors=0 (1.1s)
 ```
 
-A pass with errors exits non-zero with `-once`; the files whose requests failed are not recorded
-as sent and go again on the next pass. See [Export over OpenTelemetry](export-otlp.md).
+`wire` is what went out, the requests as encoded, and `paused` is how long the pass waited for
+budget under `export.otlp.max_bytes_per_minute`. A pass with errors exits non-zero with `-once`;
+the files whose requests failed are not recorded as sent and go again on the next pass. See
+[Export over OpenTelemetry](export-otlp.md).
 
 ## glossary
 

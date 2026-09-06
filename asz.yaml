@@ -123,4 +123,8 @@ export:
     # HTTP server accepts. And how long push sleeps between passes in
     # watch mode.
     batch_bytes: 8388608
+    # At most this many bytes on the wire per minute, for the first push
+    # of a large history: a pass waits before a request until a minute's
+    # budget covers it. 0 means no limit.
+    max_bytes_per_minute: 0
     interval: 5s

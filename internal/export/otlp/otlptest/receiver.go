@@ -29,7 +29,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
+	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -47,6 +49,10 @@ type Receiver struct {
 	mu   sync.Mutex
 	reqs []*collogspb.ExportLogsServiceRequest
 	fail bool
+	// throttle makes the receiver ask the sender to slow down, naming
+	// retryAfter over HTTP when it is set.
+	throttle   bool
+	retryAfter time.Duration
 
 	web  *httptest.Server
 	rpc  *grpc.Server
@@ -103,6 +109,18 @@ func (r *Receiver) Fail(fail bool) {
 	r.fail = fail
 }
 
+// Throttle makes the receiver answer every request with 429 over HTTP,
+// with a Retry-After of after when after is set, and ResourceExhausted
+// over gRPC; or accept again.
+func (r *Receiver) Throttle(on bool, after time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.throttle, r.retryAfter = on, after
+}
+
+// errThrottled is the receiver asking to slow down.
+var errThrottled = errors.New("slow down")
+
 // Close stops both listeners.
 func (r *Receiver) Close() {
 	r.web.Close()
@@ -114,6 +132,9 @@ func (r *Receiver) accept(req *collogspb.ExportLogsServiceRequest) error {
 	defer r.mu.Unlock()
 	if r.fail {
 		return errors.New("down")
+	}
+	if r.throttle {
+		return errThrottled
 	}
 	r.reqs = append(r.reqs, req)
 	return nil
@@ -137,6 +158,16 @@ func (r *Receiver) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if err := r.accept(&msg); err != nil {
+		if errors.Is(err, errThrottled) {
+			r.mu.Lock()
+			after := r.retryAfter
+			r.mu.Unlock()
+			if after > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(int(after/time.Second)))
+			}
+			http.Error(w, err.Error(), http.StatusTooManyRequests)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -152,6 +183,9 @@ type logsServer struct {
 
 func (s *logsServer) Export(_ context.Context, req *collogspb.ExportLogsServiceRequest) (*collogspb.ExportLogsServiceResponse, error) {
 	if err := s.r.accept(req); err != nil {
+		if errors.Is(err, errThrottled) {
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
+		}
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &collogspb.ExportLogsServiceResponse{}, nil

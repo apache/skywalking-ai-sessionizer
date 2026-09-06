@@ -20,6 +20,7 @@ package otlp_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -402,5 +403,142 @@ func TestInstanceIsUserAtHostUnlessConfigured(t *testing.T) {
 	res, _ := parseRequests(rcv.Requests())
 	if res[0]["service.instance.id"] != id {
 		t.Fatalf("resource carries %q, want %q", res[0]["service.instance.id"], id)
+	}
+}
+
+// fakeClock drives a pusher's Now and Sleep: sleeping moves the clock.
+type fakeClock struct {
+	now   time.Time
+	slept time.Duration
+	calls int
+}
+
+func (c *fakeClock) wire(p *otlp.Pusher) {
+	p.Now = func() time.Time { return c.now }
+	p.Sleep = func(d time.Duration) { c.calls++; c.slept += d; c.now = c.now.Add(d) }
+}
+
+// A rate limit paces the requests of a pass and delivers everything; no
+// limit never waits.
+func TestRateLimitPacesAPass(t *testing.T) {
+	z, files := zoneWithOneSession(t)
+	rcv := startReceiver(t)
+	clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	// Every file alone, and a minute's budget smaller than any request, so
+	// every request after the first waits for a full bucket.
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code",
+		BatchBytes: 1, MaxBytesPerMinute: 64}
+	clock.wire(p)
+	st, err := p.Pass()
+	if err != nil || len(st.Errors) != 0 {
+		t.Fatal(err, st.Errors)
+	}
+	if st.Files != len(files) || st.Requests != len(files) {
+		t.Fatalf("a paced pass must still send everything: files=%d requests=%d", st.Files, st.Requests)
+	}
+	if st.Paused != clock.slept || clock.calls != len(files)-1 || st.Paused != time.Duration(len(files)-1)*time.Minute {
+		t.Fatalf("paused %s over %d waits, want %d minutes: one full bucket per request after the first", st.Paused, clock.calls, len(files)-1)
+	}
+	if st.Wire == 0 || st.Wire < st.Bytes {
+		t.Fatalf("wire bytes %d must count the encoded requests, at least the %d file bytes", st.Wire, st.Bytes)
+	}
+
+	z2, _ := zoneWithOneSession(t)
+	free := &fakeClock{now: clock.now}
+	p = &otlp.Pusher{Zone: z2, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code", BatchBytes: 1}
+	free.wire(p)
+	if st, err := p.Pass(); err != nil || st.Paused != 0 || free.calls != 0 {
+		t.Fatalf("no limit must never wait: paused %s over %d waits, err %v", st.Paused, free.calls, err)
+	}
+}
+
+// A receiver asking to slow down stops the pass, marks nothing, names the
+// wait it gave, and empties the budget; the next pass sends everything.
+func TestThrottledReceiverStopsThePass(t *testing.T) {
+	for _, protocol := range protocols {
+		t.Run(protocol, func(t *testing.T) {
+			z, files := zoneWithOneSession(t)
+			rcv := startReceiver(t)
+			rcv.Throttle(true, 7*time.Second)
+			clock := &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+			p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, protocol), Version: "test", ServiceName: "Claude Code",
+				BatchBytes: 1, MaxBytesPerMinute: 1 << 20}
+			clock.wire(p)
+			st, err := p.Pass()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !st.Throttled || st.Files != 0 || st.Requests != 1 || len(st.Errors) != 1 {
+				t.Fatalf("a throttled pass must stop at the first request and mark nothing: throttled=%v files=%d requests=%d errors=%v", st.Throttled, st.Files, st.Requests, st.Errors)
+			}
+			var throttled *otlp.Throttled
+			if !errors.As(st.Errors[0], &throttled) {
+				t.Fatalf("the error is not Throttled: %v", st.Errors[0])
+			}
+			if protocol == otlp.ProtocolHTTP && st.RetryAfter != 7*time.Second {
+				t.Fatalf("retry after %s, the receiver said 7s", st.RetryAfter)
+			}
+			if protocol == otlp.ProtocolGRPC && st.RetryAfter != 0 {
+				t.Fatalf("gRPC names no wait, got %s", st.RetryAfter)
+			}
+			rcv.Throttle(false, 0)
+			st, err = p.Pass()
+			if err != nil || len(st.Errors) != 0 || st.Files != len(files) {
+				t.Fatalf("the next pass must send everything: files=%d errors=%v err=%v", st.Files, st.Errors, err)
+			}
+			if st.Paused == 0 {
+				t.Fatal("after a throttle the budget is empty, so the next request must wait")
+			}
+		})
+	}
+}
+
+// A pass goes session by session, the session landed first going first,
+// each session's files followed by its rounds.
+func TestPassSendsSessionsOldestFirstWithTheirRounds(t *testing.T) {
+	z, _ := zoneWithOneSession(t)
+	// A second session with a smaller name, landed later: name order would
+	// put it first, landing order puts it second.
+	dir := z.StreamDir("sess0", "main")
+	path := filepath.Join(dir, storage.LandedName("transcript", storage.Stamp(time.Unix(0, 0)), 1))
+	err := storage.WriteAtomic(path, storage.PermLanded, func(w io.Writer) error {
+		hdr := &sessiondata.Header{Seq: 1, At: "2026-09-05T00:00:00Z", Kind: sessiondata.KindTranscript,
+			Adapter: "test/0", Dialect: "test/1", Src: "-Users-me-proj/sess0.jsonl", Session: "sess0", Stream: "main"}
+		sw, err := sessiondata.NewWriter(w, hdr)
+		if err != nil {
+			return err
+		}
+		if err := sw.Write(&sessiondata.Record{Ord: 1, Sha: "z", Bytes: 1, Time: "2026-09-05T01:00:00Z", Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Text: "later", State: "available", Bytes: 5}}}); err != nil {
+			return err
+		}
+		return sw.Close()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	round := filepath.Join(z.Root(), "_conversations", "sess0", "rounds", "r000001-000000000000.sf")
+	if err := os.MkdirAll(filepath.Dir(round), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(round, []byte("{\"t\":\"header\",\"schema\":\"sf/1\",\"conversation\":\"sess0\",\"session\":\"sess0\",\"round\":1}\n{\"t\":\"commit\",\"digest\":\"000000000000\"}\n"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	rcv := startReceiver(t)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code", BatchBytes: 1}
+	if st, err := p.Pass(); err != nil || len(st.Errors) != 0 {
+		t.Fatal(err, st.Errors)
+	}
+	var order []string
+	for _, r := range otlptest.Records(rcv.Requests()) {
+		a := otlptest.Attrs(r.GetAttributes())
+		order = append(order, a["asz.session"]+"/"+a["asz.format"])
+	}
+	want := []string{"sess1/sd", "sess1/sd", "sess1/sf", "sess0/sd", "sess0/sf"}
+	if strings.Join(order, " ") != strings.Join(want, " ") {
+		t.Fatalf("sent %v, want %v: the session landed first goes first, its rounds after its files", order, want)
 	}
 }
