@@ -91,6 +91,11 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 	if !strings.Contains(index, view.AssetPrefix+"host-shell/horizon-theme.css") || strings.Contains(index, "fonts.googleapis.com") {
 		t.Fatal("the list page does not use the host shell's theme")
 	}
+	for _, page := range []string{index, body} {
+		if !strings.Contains(page, `id="theme"`) || !strings.Contains(page, "host-shell/themes.json") || !strings.Contains(page, `"asz.theme"`) {
+			t.Fatal("a page has no theme picker, or one that does not share the saved choice")
+		}
+	}
 }
 
 // Only the document and a record are served under a conversation: the

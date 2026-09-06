@@ -80,6 +80,8 @@ code, .mono { font-family: var(--sw-mono); }
 .refresh .dot.busy { animation: pulse 1s ease-in-out infinite; }
 .refresh .warn { color: var(--orange); }
 @keyframes pulse { 50% { opacity: .25; } }
+.theme-pick { margin-left: 9px; padding-left: 9px; border-left: 1px solid var(--line); color: var(--faint); font-size: 11px; white-space: nowrap; }
+.theme-pick select { margin-left: 6px; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
 .compact-status { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
 .compact-status strong { color: var(--text); font-weight: 650; }
 
@@ -127,7 +129,8 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
 <body>
 <header class="compact-header">
   <a class="compact-brand" href="/" aria-label="SkyWalking AI Sessionizer"><img class="compact-logo" src="/logo.svg" alt="SkyWalking"><small>AI Sessionizer</small></a>
-  <div class="compact-status"><span id="totals" class="totals"></span><span id="refresh" class="refresh" hidden></span></div>
+  <div class="compact-status"><span id="totals" class="totals"></span><span id="refresh" class="refresh" hidden></span>
+    <label class="theme-pick">Theme<select id="theme" aria-label="Theme"></select></label></div>
 </header>
 
 <div class="wrap">
@@ -261,6 +264,27 @@ document.querySelectorAll("[data-sort]").forEach(b => b.onclick = () => {
   document.querySelectorAll("[data-sort]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
   draw();
 });
+
+// ---- theme: the host shell's themes, the choice kept in the browser and
+// shared with the conversation page ----
+(function () {
+  const select = $("theme");
+  fetch("/assets/conversation-view/host-shell/themes.json").then(r => r.json()).then(themes => {
+    const current = document.documentElement.dataset.theme;
+    for (const t of themes) {
+      const o = document.createElement("option");
+      o.value = t.id; o.textContent = t.label; o.selected = t.id === current;
+      select.appendChild(o);
+    }
+    select.onchange = () => {
+      const t = themes.find(x => x.id === select.value);
+      if (!t) return;
+      document.documentElement.dataset.theme = t.id;
+      document.documentElement.dataset.appearance = t.appearance;
+      try { localStorage.setItem("asz.theme", JSON.stringify(t)); } catch (e) {}
+    };
+  }).catch(() => { select.parentElement.hidden = true; });
+})();
 </script>
 </body>
 </html>
