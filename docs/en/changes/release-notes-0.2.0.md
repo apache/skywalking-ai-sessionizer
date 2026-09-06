@@ -1,5 +1,3 @@
-# Changes in 0.2.0
-
 ## Collection
 
 - The default landing budget, `max_delta_bytes`, is 2 MiB rather than 8 MiB. A landed file
@@ -137,3 +135,10 @@
   today. They are generated into `dist-material/` by `license-eye` and a small script over the
   build, the way the other SkyWalking repositories do it, and CI fails when the committed copy is
   not what the dependencies resolve to.
+
+#### Where to get it
+- Binary packages for macOS, Linux and Windows, with a sha512 beside each: attached to this release
+- Container image: `ghcr.io/apache/skywalking-ai-sessionizer:0.2.0`
+- From source: `git checkout v0.2.0 && make build`, or `make binaries` for every platform
+- Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v0.2.0/docs/README.md
+- Full changelog: https://github.com/apache/skywalking-ai-sessionizer/blob/v0.2.0/docs/en/changes/changes-0.2.0.md
