@@ -1,0 +1,51 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Records the original file lost. A person trimmed the transcript, a child's
+# file was deleted, a result never reached the disk. The collector lands what
+# exists and numbers the lines it finds, so the landed data verifies and the
+# chain is intact. The loss shows in the structure instead: every reference
+# into what is gone stays open as unresolved, and the document stays
+# verified, because nothing asz holds is damaged.
+title: lost records
+steps:
+  - input: read the configuration
+  # The result never reached the file; the call did.
+  - call:
+      text: Reading it.
+      tool: {name: Read, input: {path: asz.yaml}, result: {text: "storage:\n  root: ./data", lost: true}}
+  # The call is gone; its result, arriving on its own, is not.
+  - call:
+      text: Checking the port.
+      tool: {name: Bash, input: {command: lsof -i :8787}}
+    lost: true
+  - result: {of: s3-tool, text: "asz 8787 LISTEN"}
+  # The child's file was deleted; the launch and the notification stay.
+  - call:
+      text: Asking the helper.
+      agent: {name: helper, prompt: read the docs, lost: true, notify: true, steps: [{call: {text: The docs say 11800.}}]}
+  # The launch and the notification are gone; the child's file is not.
+  - call:
+      text: Asking the reviewer.
+      agent: {name: reviewer, prompt: review the change, notify: true, steps: [{call: {text: Looks right.}}]}
+    lost: true
+  # The person's message is gone; the reply to it is not.
+  - input: thanks
+    lost: true
+  - call: {text: You are welcome.}

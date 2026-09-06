@@ -110,6 +110,10 @@ type Event struct {
 	Text   string
 	// Replayed marks a copy the runtime re-emitted, with its run rewritten.
 	Replayed bool
+	// Lost marks a record the original file does not hold. It is planned
+	// like any other, so the clock, the ids and the parent chain are what
+	// they would be, and every writer leaves it out.
+	Lost bool
 
 	// A fragment.
 	Frag  FragKind
@@ -150,6 +154,20 @@ type Stream struct {
 	Prompt string
 	Tool   string
 	Batch  string
+	// Lost says the stream's file never reached the collector.
+	Lost bool
+}
+
+// lostStreams is the set of child streams whose file never reached the
+// collector. A writer writes nothing for them: no transcript and no meta.
+func (p *Plan) lostStreams() map[string]bool {
+	out := map[string]bool{}
+	for _, s := range p.Streams {
+		if s.Lost {
+			out[s.ID] = true
+		}
+	}
+	return out
 }
 
 // Run is one workflow run: its children and the files filed with it.
@@ -244,6 +262,9 @@ type lane struct {
 	first  bool
 	n      int
 	prefix string
+	// lost says the whole stream's file is lost: every record on the lane
+	// is marked lost as it is planned.
+	lost bool
 }
 
 type planner struct {
@@ -275,11 +296,12 @@ func (b *planner) emit(e Event) {
 }
 
 func (b *planner) step(l *lane, s *Step, id string) error {
+	lost := l.lost || s.Lost
 	switch {
 	case s.Input != "":
 		at := b.tick(l, s.After)
 		run := id + "-cycle"
-		e := Event{Kind: EvInput, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-input", Run: run, Text: s.Input}
+		e := Event{Kind: EvInput, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-input", Run: run, Text: s.Input, Lost: lost}
 		if l.stream != "main" {
 			e.Parent = l.last
 		}
@@ -287,12 +309,12 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 		l.last = e.ID
 	case s.Queued != nil:
 		at := b.tick(l, s.After)
-		e := Event{Kind: EvQueued, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-queued", Parent: l.last, Text: s.Queued.Text, Mode: s.Queued.Mode}
+		e := Event{Kind: EvQueued, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-queued", Parent: l.last, Text: s.Queued.Text, Mode: s.Queued.Mode, Lost: lost}
 		b.emit(e)
 		l.last = e.ID
 	case s.Inject != nil:
 		at := b.tick(l, s.After)
-		e := Event{Kind: EvInject, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-inject", Parent: l.last, Type: s.Inject.Type, Text: s.Inject.Text}
+		e := Event{Kind: EvInject, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-inject", Parent: l.last, Type: s.Inject.Type, Text: s.Inject.Text, Lost: lost}
 		b.emit(e)
 		l.last = e.ID
 	case s.Call != nil:
@@ -301,24 +323,24 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 		at := b.tick(l, s.After)
 		r := s.Result
 		e := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-result", Parent: l.last,
-			Run: b.runOf(l), Of: r.Of, Text: r.Text, Failed: r.Failed, StringEnrichment: r.String}
+			Run: b.runOf(l), Of: r.Of, Text: r.Text, Failed: r.Failed, StringEnrichment: r.String, Lost: lost || r.Lost}
 		b.emit(e)
 		l.last = e.ID
 	case s.Error != "":
 		at := b.tick(l, s.After)
 		e := Event{Kind: EvSynthetic, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-synthetic", Parent: l.last,
-			Call: id + "-synthetic-call", Req: id + "-req", Text: s.Error}
+			Call: id + "-synthetic-call", Req: id + "-req", Text: s.Error, Lost: lost}
 		b.emit(e)
 		l.last = e.ID
 	case s.Reset != nil:
 		at := b.tick(l, s.After)
-		boundary := Event{Kind: EvBoundary, Stream: l.stream, At: at, ID: id + "-boundary", Continues: l.last}
+		boundary := Event{Kind: EvBoundary, Stream: l.stream, At: at, ID: id + "-boundary", Continues: l.last, Lost: lost}
 		b.emit(boundary)
 		// The summary is timestamped before the boundary that produced it,
 		// as the runtime writes it, so anything ordering an epoch by time
 		// gets it backwards. That is the property a scenario must reproduce.
 		summary := Event{Kind: EvSummary, Stream: l.stream, At: at.Add(-400 * time.Millisecond), ID: id + "-summary",
-			Parent: boundary.ID, Run: id + "-cycle-compact", Text: s.Reset.Summary}
+			Parent: boundary.ID, Run: id + "-cycle-compact", Text: s.Reset.Summary, Lost: lost}
 		b.emit(summary)
 		l.last = summary.ID
 	case s.Replay > 0:
@@ -326,7 +348,7 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 	case s.System != nil:
 		at := b.tick(l, s.After)
 		e := Event{Kind: EvSystem, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-sys-" + s.System.Subtype, Parent: l.last,
-			Type: s.System.Subtype, Fields: s.System.Fields}
+			Type: s.System.Subtype, Fields: s.System.Fields, Lost: lost}
 		b.emit(e)
 		l.last = e.ID
 	}
@@ -334,6 +356,8 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 }
 
 // runOf is the run a record on a lane belongs to: the last input's cycle.
+// A lost input still opened its run: the runtime stamped the records after
+// it with that run, whatever the file holds now.
 func (b *planner) runOf(l *lane) string {
 	for i := len(b.p.Events) - 1; i >= 0; i-- {
 		e := &b.p.Events[i]
@@ -346,6 +370,7 @@ func (b *planner) runOf(l *lane) string {
 
 func (b *planner) call(l *lane, s *Step, id string) error {
 	c := s.Call
+	lost := l.lost || s.Lost
 	at := b.tick(l, s.After)
 	usage := Usage{In: 2, Out: 40, CacheRead: 900, CacheWrite: 100}
 	if c.Usage != nil {
@@ -402,6 +427,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		f.ID = fmt.Sprintf("%s-call-f%d", id, i+1)
 		f.Parent = l.last
 		f.Call, f.Req, f.Usage = call, req, usage
+		f.Lost = lost
 		f.Last = i == len(frags)-1
 		f.Stop = "end_turn"
 		if tool != nil {
@@ -417,7 +443,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		r := c.Tool.Result
 		rat := b.tick(l, r.After)
 		e := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: rat, ID: id + "-result", Parent: l.last, Run: run,
-			Of: tool.ID, Text: r.Text, Failed: r.Failed, StringEnrichment: r.String}
+			Of: tool.ID, Text: r.Text, Failed: r.Failed, StringEnrichment: r.String, Lost: lost || r.Lost}
 		b.emit(e)
 		l.last = e.ID
 	case c.Agent != nil:
@@ -425,18 +451,18 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		child := agentID(a.Name)
 		ack := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: b.tick(l, 100*time.Millisecond), ID: id + "-ack",
 			Parent: l.last, Run: run, Of: tool.ID, Text: "launched",
-			Ack: &Ack{Child: child, Prompt: a.Prompt, Label: a.Name}}
+			Ack: &Ack{Child: child, Prompt: a.Prompt, Label: a.Name}, Lost: lost}
 		b.emit(ack)
 		l.last = ack.ID
-		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: a.Name, Prompt: a.Prompt, Tool: tool.ID})
-		cl := &lane{stream: child, t: ack.At, first: true, prefix: a.Name}
+		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: a.Name, Prompt: a.Prompt, Tool: tool.ID, Lost: a.Lost})
+		cl := &lane{stream: child, t: ack.At, first: true, prefix: a.Name, lost: a.Lost}
 		if a.After == 0 {
 			cl.t = cl.t.Add(b.scaled(b.p.interval))
 		} else {
 			cl.t = cl.t.Add(b.scaled(a.After))
 		}
 		if a.Prompt != "" {
-			prompt := Event{Kind: EvInput, Stream: child, At: cl.t, ID: child + "-prompt", Run: child + "-cycle", Text: a.Prompt}
+			prompt := Event{Kind: EvInput, Stream: child, At: cl.t, ID: child + "-prompt", Run: child + "-cycle", Text: a.Prompt, Lost: a.Lost}
 			cl.first = false
 			b.emit(prompt)
 			cl.last = prompt.ID
@@ -450,7 +476,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 			}
 			nat := b.tick(l, 0)
 			notice := Event{Kind: EvNotice, Stream: l.stream, Batch: l.batch, At: nat, ID: id + "-notice", Parent: l.last,
-				Run: id + "-cycle-notification", NoticeTool: tool.ID, NoticeChild: child,
+				Run: id + "-cycle-notification", NoticeTool: tool.ID, NoticeChild: child, Lost: lost,
 				Text: "<task-notification>\n<task-id>" + child + "</task-id>\n<tool-use-id>" + tool.ID + "</tool-use-id>\n<status>completed</status>\n</task-notification>"}
 			b.emit(notice)
 			l.last = notice.ID
@@ -459,12 +485,12 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		sk := c.Skill
 		child := agentID(sk.Agent)
 		res := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: b.tick(l, 0), ID: id + "-result", Parent: l.last, Run: run,
-			Of: tool.ID, Text: "forked", Fork: &Fork{Child: child}}
+			Of: tool.ID, Text: "forked", Fork: &Fork{Child: child}, Lost: lost}
 		b.emit(res)
 		l.last = res.ID
-		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: sk.Agent, Tool: tool.ID})
-		cl := &lane{stream: child, t: res.At.Add(b.scaled(b.p.interval)), prefix: sk.Agent}
-		prompt := Event{Kind: EvInput, Stream: child, At: cl.t, ID: child + "-prompt", Run: child + "-cycle", Text: "run the skill " + sk.Name}
+		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: sk.Agent, Tool: tool.ID, Lost: sk.Lost})
+		cl := &lane{stream: child, t: res.At.Add(b.scaled(b.p.interval)), prefix: sk.Agent, lost: sk.Lost}
+		prompt := Event{Kind: EvInput, Stream: child, At: cl.t, ID: child + "-prompt", Run: child + "-cycle", Text: "run the skill " + sk.Name, Lost: sk.Lost}
 		b.emit(prompt)
 		cl.last = prompt.ID
 		if err := b.steps(cl, sk.Steps); err != nil {
@@ -474,7 +500,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		w := c.Workflow
 		runID := "wf_" + strings.ReplaceAll(w.Name, " ", "-")
 		res := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: b.tick(l, 0), ID: id + "-result", Parent: l.last, Run: run,
-			Of: tool.ID, Text: "workflow launched", Launch: &Launch{Run: runID, Name: w.Name}}
+			Of: tool.ID, Text: "workflow launched", Launch: &Launch{Run: runID, Name: w.Name}, Lost: lost}
 		b.emit(res)
 		l.last = res.ID
 		r := Run{ID: runID, Name: w.Name, Script: "export const meta = {\n  name: '" + w.Name + "',\n}", ScriptProject: w.ScriptProject}
@@ -482,11 +508,11 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		for _, ch := range w.Children {
 			child := agentID(w.Name + "/" + ch.Name)
 			r.Children = append(r.Children, child)
-			b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: ch.Name, Prompt: ch.Prompt, Batch: runID})
+			b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: ch.Name, Prompt: ch.Prompt, Batch: runID, Lost: ch.Lost})
 			t = t.Add(b.scaled(b.p.interval))
 			r.Journal = append(r.Journal, JournalLine{Type: "started", Child: child, At: t})
-			cl := &lane{stream: child, batch: runID, t: t, prefix: ch.Name}
-			prompt := Event{Kind: EvInput, Stream: child, Batch: runID, At: t, ID: child + "-prompt", Run: child + "-cycle", Text: ch.Prompt}
+			cl := &lane{stream: child, batch: runID, t: t, prefix: ch.Name, lost: ch.Lost}
+			prompt := Event{Kind: EvInput, Stream: child, Batch: runID, At: t, ID: child + "-prompt", Run: child + "-cycle", Text: ch.Prompt, Lost: ch.Lost}
 			if prompt.Text == "" {
 				prompt.Text = "do " + ch.Name
 			}
@@ -520,7 +546,9 @@ func (b *planner) steps(l *lane, steps []Step) error {
 
 // replay copies the last n main-stream records with the run rewritten, as
 // the runtime does before a reset. The copies keep their ids and times: the
-// later copy is the worse one, and the assembler must keep the first.
+// later copy is the worse one, and the assembler must keep the first. The
+// runtime copies from memory, so a copy is written even when its original
+// was lost from the file.
 func (b *planner) replay(n int) {
 	var idx []int
 	for i := len(b.p.Events) - 1; i >= 0 && len(idx) < n; i-- {
@@ -530,7 +558,7 @@ func (b *planner) replay(n int) {
 	}
 	for i := len(idx) - 1; i >= 0; i-- {
 		e := b.p.Events[idx[i]]
-		e.Replayed = true
+		e.Replayed, e.Lost = true, false
 		if e.Run != "" {
 			e.Run = "replayed-cycle"
 		}

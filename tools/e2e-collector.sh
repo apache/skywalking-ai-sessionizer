@@ -53,7 +53,11 @@ YAML
 push_over() {
   protocol="$1"; endpoint="$2"
   root="$WORK/$protocol"
+  # Two scenarios in one root: every kind of file the export page names,
+  # and a session whose original lost records, so what the Collector gets
+  # back is a session with open references, rebuilt and verified as such.
   ./bin/asz scenario build tests/scenarios/all-kinds.yaml --format claude-code --out "$root" --at 2026-06-01T09:00:00Z --repeat 2 >/dev/null
+  ./bin/asz scenario build tests/scenarios/lost-records.yaml --format claude-code --out "$root" --at 2026-06-01T10:00:00Z >/dev/null
   ./bin/asz collect -once -config "$root/asz.yaml" >/dev/null
   ./bin/asz parse -config "$root/asz.yaml" >/dev/null
   ./bin/asz verify -config "$root/asz.yaml" >/dev/null

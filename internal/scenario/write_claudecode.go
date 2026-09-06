@@ -36,8 +36,15 @@ import (
 func writeClaudeCode(p *Plan, root string) ([]string, error) {
 	proj := filepath.Join(root, p.Project)
 	w := &ccWriter{p: p, files: map[string][]string{}}
+	lost := p.lostStreams()
 	for i := range p.Events {
-		if err := w.event(&p.Events[i]); err != nil {
+		e := &p.Events[i]
+		// A lost record leaves no line; a lost stream leaves no file. The
+		// records around them are written as they are, still naming them.
+		if e.Lost || lost[e.Stream] {
+			continue
+		}
+		if err := w.event(e); err != nil {
 			return nil, err
 		}
 	}
@@ -72,6 +79,9 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 		return nil, err
 	}
 	for _, s := range p.Streams {
+		if s.Lost {
+			continue
+		}
 		lines := w.files[s.ID]
 		if s.Batch != "" {
 			if err := put(fmt.Sprintf("%s/subagents/workflows/%s/agent-%s.jsonl", p.Session, s.Batch, s.ID), lines); err != nil {

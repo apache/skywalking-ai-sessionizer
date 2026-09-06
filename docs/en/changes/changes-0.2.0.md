@@ -64,6 +64,15 @@
   an OTLP receiver in the test and checked against the export page, one file per request, both
   formats and all six file kinds, then rebuilt from the wire and verified.
 
+- A scenario can say what the original lost. `lost: true` on a step leaves its records out of
+  the file, on a `result` only the result, and on an `agent`, a `skill` or a workflow child the
+  child's whole file, while the clock, the ids and the parent chain move as if the records were
+  there. Both writers leave the same records out, so the landed data verifies and the loss shows
+  as open references. `tests/scenarios/lost-records.yaml` covers each kind of loss, is pushed
+  over both transports like every scenario, and is pushed into the real Collector in CI next to
+  the scenario that holds every kind of file, so a session with open references is rebuilt and
+  verified from what the Collector wrote.
+
 ## Read
 
 - `asz.view`, version 1.0, is one conversation rebuilt from its rounds and its landed files as one

@@ -61,6 +61,13 @@ type Step struct {
 	// Checkpoint names a point a build can stop at, so a test can land what
 	// exists so far, parse it, and check the fold before the rest arrives.
 	Checkpoint string `yaml:"checkpoint"`
+	// Lost says the original file does not hold what this step wrote: a
+	// person trimmed the transcript, or the write never reached the disk.
+	// The step still happened, so the clock and the ids move as if the
+	// records were there, and the record after them still names them as
+	// its parent. A writer leaves them out, in either format, and the
+	// collector lands what exists.
+	Lost bool `yaml:"lost"`
 
 	// Input is a person's message: it opens a run and a talk.
 	Input string `yaml:"input"`
@@ -146,6 +153,8 @@ type Result struct {
 	// String writes the runtime's enrichment as a bare string rather than
 	// an object, a shape a real corpus has on a noticeable share of results.
 	String bool `yaml:"string"`
+	// Lost says the result never reached the file, while the call did.
+	Lost bool `yaml:"lost"`
 }
 
 // UnmarshalYAML lets a result be a plain string.
@@ -174,6 +183,9 @@ type Agent struct {
 	After  time.Duration `yaml:"after"`
 	Steps  []Step        `yaml:"steps"`
 	Notify bool          `yaml:"notify"`
+	// Lost says the child's file never reached the collector, nor its meta
+	// file. The parent's records about the child stay.
+	Lost bool `yaml:"lost"`
 }
 
 // Skill is a fork: a child announced only by the parent's result block,
@@ -182,6 +194,8 @@ type Skill struct {
 	Name  string `yaml:"name"`
 	Agent string `yaml:"agent"`
 	Steps []Step `yaml:"steps"`
+	// Lost says the child's file never reached the collector.
+	Lost bool `yaml:"lost"`
 }
 
 // Workflow starts several children as one batch. ScriptProject files the
@@ -198,6 +212,9 @@ type Child struct {
 	Name   string `yaml:"name"`
 	Prompt string `yaml:"prompt"`
 	Steps  []Step `yaml:"steps"`
+	// Lost says the child's file never reached the collector. The run's
+	// journal still names the child.
+	Lost bool `yaml:"lost"`
 }
 
 // Reset is a context reset and the summary that replaced the context.
@@ -277,6 +294,9 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool) 
 		}
 		if s.Replay > 0 && !main {
 			return fmt.Errorf("%s: replay belongs to the main stream", at)
+		}
+		if s.Replay > 0 && s.Lost {
+			return fmt.Errorf("%s: a replay copies what the runtime holds in memory; mark the original step lost instead", at)
 		}
 		if s.Reset != nil && !main {
 			return fmt.Errorf("%s: a reset belongs to the main stream", at)

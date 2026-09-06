@@ -86,7 +86,7 @@ steps:
   - reset: {summary: "Summary: the build was run and checked."}
 ```
 
-Every step is exactly one of these, plus an optional `after` and `checkpoint`:
+Every step is exactly one of these, plus an optional `after`, `checkpoint` and `lost`:
 
 | Step | What it writes |
 | --- | --- |
@@ -105,6 +105,31 @@ child is announced only in the parent's result. A `workflow: {name, children: [{
 steps}]}` starts children as one batch, with a journal, a manifest and a script. Ids are stable and
 the same in every format: the step's position names its records, a tool is `tool/<id>`, a run is
 `<step>-cycle`, a child stream's id is derived from its name.
+
+### Records the original lost
+
+`lost: true` on a step says the original file does not hold what the step wrote: a person trimmed
+the transcript, or the write never reached the disk. The step still happened. The clock and the
+ids move as if the records were there, and the record after them still names them as its parent,
+so the loss shows where it shows in a real corpus: in references the assembler cannot resolve. On
+a `result` inside a `tool`, only the result is lost and the call stays. On an `agent`, a `skill` or
+a workflow child, the child's file never reached the collector, nor its meta file, while the
+parent's records about the child stay.
+
+```yaml
+steps:
+  - call: {text: Reading it., tool: {name: Read, result: {text: "root: ./data", lost: true}}}
+  - call: {text: Checking the port., tool: {name: Bash}}
+    lost: true                                  # the call is gone; the result below is not
+  - result: {of: s2-tool, text: "8787 LISTEN"}
+  - call: {text: Asking the helper., agent: {name: helper, lost: true, steps: [{call: {text: Done.}}]}}
+```
+
+Both formats leave the same records out. The collector numbers the lines it finds, so the landed
+data verifies and the chain is intact, and the document stays `verified`: nothing asz holds is
+damaged, and the incompleteness is in the evidence. What a check sees is the `unresolved` list, a
+`tool_result` for the first step, a `tool_use` for the second, a `child_stream` for the third.
+`tests/scenarios/lost-records.yaml` covers every kind of loss.
 
 ## Check
 

@@ -1,0 +1,49 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Five kinds of loss, each an open reference and nothing else: the
+# structure around them is kept, the document is verified, and every
+# property holds, since the landed data is intact and only the original
+# was not. The lost child leaves no file, so the root has four files, not
+# six; the child whose launch was lost is a stream nothing starts.
+checkpoints:
+  final:
+    rounds: 1
+    written: true
+    kinds: {talk: 2, tool: 2, llm.call: 4, stream: 2, agent.launch_ack: 1, runtime.notification: 1, agent.output: 1}
+    talks_on: {main: 1, reviewer: 1}
+    relations: {starts: 0, ends_with: 1, reports: 0}
+    unresolved: {open: 5, resolved: 0}
+    unresolved_kinds:
+      tool_result: open        # the result of s2-tool never reached the file
+      tool_use: open           # a result names s3-tool, whose call is gone
+      child_stream: open       # the helper was launched, its file is gone
+      notified_child: open     # the helper's notification names a stream that never landed
+      spawn_of_child: open     # the reviewer's file landed, the call that started it is gone
+    nodes:
+      tool/s2-tool: {refs: 1, attrs: {result: unavailable}}
+      stream/helper: {absent: true}
+      stream/reviewer: {kind: stream}
+    view:
+      state: verified
+      talks: 2
+      files: 4
+      rounds: 1
+push:
+  kinds: [transcript, agent_meta, round]

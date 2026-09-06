@@ -164,18 +164,45 @@ func run(root, logs string) error {
 		kinds[r.kind]++
 		sessions[r.session] = true
 	}
-	for _, k := range []string{"transcript", "agent_meta", "journal", "workflow_manifest", "workflow_script", "round"} {
-		if kinds[k] == 0 {
-			return fmt.Errorf("no record of kind %s reached the Collector; it received %v", k, kinds)
-		}
-	}
+	// Every file of the root reached the Collector, and every kind the root
+	// holds is among the records. The all-kinds scenario is built into the
+	// root, so that is every kind the export page names.
 	files := 0
+	rootKinds := map[string]int{}
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err == nil && !d.IsDir() && (strings.HasSuffix(path, ".sd") || strings.HasSuffix(path, ".sf")) {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		switch {
+		case strings.HasSuffix(path, ".sf"):
 			files++
+			rootKinds["round"]++
+		case strings.HasSuffix(path, ".sd"):
+			files++
+			data, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return nil
+			}
+			first, _, _ := bytes.Cut(data, []byte("\n"))
+			var h struct {
+				Kind string `json:"kind"`
+			}
+			if json.Unmarshal(first, &h) == nil {
+				rootKinds[h.Kind]++
+			}
 		}
 		return nil
 	})
+	for k, n := range rootKinds {
+		if kinds[k] != n {
+			return fmt.Errorf("the root holds %d files of kind %s, the Collector received %d; it received %v", n, k, kinds[k], kinds)
+		}
+	}
+	for _, k := range []string{"transcript", "agent_meta", "journal", "workflow_manifest", "workflow_script", "round"} {
+		if rootKinds[k] == 0 {
+			return fmt.Errorf("the root holds no file of kind %s, so the check exercised less than the export page names", k)
+		}
+	}
 	if len(recs) != files {
 		return fmt.Errorf("the Collector received %d records, the root holds %d files", len(recs), files)
 	}

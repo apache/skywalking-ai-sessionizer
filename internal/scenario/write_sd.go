@@ -62,15 +62,23 @@ func writeSD(p *Plan, root string, now time.Time) ([]string, error) {
 	w := &sdWriter{p: p, z: z, state: state, now: now}
 
 	// Streams first, main before its children, then the runs' files, so the
-	// sequences a round refers to come out in landed order.
+	// sequences a round refers to come out in landed order. A lost record
+	// is left out and the records after it are numbered as the collector
+	// would number the lines it finds; a lost stream lands nothing.
+	lost := p.lostStreams()
 	byStream := map[string][]*Event{}
 	for i := range p.Events {
 		e := &p.Events[i]
+		if e.Lost || lost[e.Stream] {
+			continue
+		}
 		byStream[e.Stream] = append(byStream[e.Stream], e)
 	}
 	order := []string{"main"}
 	for _, s := range p.Streams {
-		order = append(order, s.ID)
+		if !s.Lost {
+			order = append(order, s.ID)
+		}
 	}
 	for _, stream := range order {
 		if err := w.stream(stream, byStream[stream]); err != nil {
@@ -78,7 +86,7 @@ func writeSD(p *Plan, root string, now time.Time) ([]string, error) {
 		}
 	}
 	for _, s := range p.Streams {
-		if s.Batch != "" {
+		if s.Batch != "" || s.Lost {
 			continue
 		}
 		if err := w.meta(s); err != nil {
