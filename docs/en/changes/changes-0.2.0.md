@@ -130,3 +130,10 @@
 
 - Session Data's reader and writer can carry a record as the bytes of its line, unchanged, which
   is what a repack and a receiver on a wire need so file digests still match.
+
+## Packaging
+
+- Every binary package and the container image carry the license of every dependency built into
+  the binary, under `licenses/`, with a LICENSE that lists each module under its license. They are
+  generated from `go.mod` by `license-eye` into `dist-material/`, the way the other SkyWalking
+  repositories do it, and CI fails when the committed copy is not what `go.mod` resolves to.

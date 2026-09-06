@@ -58,11 +58,13 @@ jobs:
           go-version: '1.27'
           cache: true
       # The skywalking-eyes actions bring their own Go, pinned below what
-      # go.mod requires, and the dependency check runs go with it. Both
+      # go.mod requires, and the dependency check runs go with it. The
       # checks run through the Makefile instead, with the toolchain the
-      # module declares, which is what make check does locally.
+      # module declares, which is what make check does locally. The last
+      # one regenerates the dependency licenses every binary package
+      # carries and fails when the committed copy differs.
       - name: Check license headers and dependency licenses
-        run: make license-check dep-check
+        run: make license-check dep-check dep-licenses-check
 
   build:
     name: Build and Test

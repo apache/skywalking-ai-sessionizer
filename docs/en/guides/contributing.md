@@ -30,6 +30,9 @@ side.
 
 - `make check` passes. CI runs the same targets and one required check fans them in.
 - Every source file carries the Apache license header. `make license-fix` inserts missing ones.
+- A changed dependency changes `dist-material/`: `make dep-licenses` regenerates the LICENSE with
+  a section per license and one text per module, from `go.mod`, and every binary package and the
+  container image carry them. `make check` fails when the committed copy is out of date.
 - Comments, docs and commit messages are plain English. Someone reading this project is often not
   a native English speaker, and the code is the hard part. No abbreviations, no slang, no figurative
   words where a common one works. Short sentences, one idea each.

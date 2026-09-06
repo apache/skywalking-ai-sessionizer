@@ -123,6 +123,20 @@ license-fix: $(BIN_DIR)/license-eye
 dep-check: $(BIN_DIR)/license-eye
 	$(BIN_DIR)/license-eye dependency check
 
+## dep-licenses: regenerate dist-material/LICENSE and dist-material/licenses from go.mod; every binary package carries them
+.PHONY: dep-licenses
+dep-licenses: $(BIN_DIR)/license-eye
+	@rm -rf dist-material/licenses
+	$(BIN_DIR)/license-eye dependency resolve --summary dist-material/LICENSE.tpl --output dist-material/licenses
+
+## dep-licenses-check: fail when dist-material is not what go.mod resolves to, so a changed dependency cannot ship without its license
+.PHONY: dep-licenses-check
+dep-licenses-check: $(BIN_DIR)/license-eye
+	@tmp=$$(mktemp -d) && cp dist-material/LICENSE.tpl $$tmp/ && \
+	  $(BIN_DIR)/license-eye -v warn dependency resolve --summary $$tmp/LICENSE.tpl --output $$tmp/licenses >/dev/null && \
+	  if diff -r $$tmp dist-material; then rm -rf $$tmp; echo "dist-material matches go.mod"; \
+	  else rm -rf $$tmp; echo "dist-material is out of date: run 'make dep-licenses' and commit the result"; exit 1; fi
+
 ## tidy: verify go.mod and go.sum are current
 .PHONY: tidy
 tidy:
@@ -134,20 +148,20 @@ tidy:
 docker: ## Build the container image, as CI builds and publishes it
 	docker build --build-arg VERSION=$(VERSION) -t skywalking-ai-sessionizer:dev .
 
-## binaries: cross-compile every platform in PLATFORMS and package each with LICENSE and NOTICE into dist/
+## binaries: cross-compile every platform in PLATFORMS and package each with the LICENSE, the NOTICE and the dependency licenses into dist/
 .PHONY: binaries
 binaries:
 	@mkdir -p $(DIST)/build
 	@for t in $(PLATFORMS); do \
 	  os=$${t%/*}; arch=$${t#*/}; out=$(DIST)/build/$$os-$$arch; ext=""; \
 	  if [ "$$os" = windows ]; then ext=.exe; fi; \
-	  mkdir -p $$out && cp LICENSE NOTICE $$out/ && \
+	  mkdir -p $$out && cp dist-material/LICENSE NOTICE $$out/ && rm -rf $$out/licenses && cp -R dist-material/licenses $$out/licenses && \
 	  echo "building $$os/$$arch" && \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
 	  if [ "$$os" = windows ]; then \
-	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && (cd $$out && zip -q ../../$(PKG_BASE)-$$os-$$arch.zip $(BINARY)$$ext LICENSE NOTICE); \
+	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && (cd $$out && zip -qr ../../$(PKG_BASE)-$$os-$$arch.zip $(BINARY)$$ext LICENSE NOTICE licenses); \
 	  else \
-	    tar -C $$out -czf $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz $(BINARY) LICENSE NOTICE; \
+	    tar -C $$out -czf $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz $(BINARY) LICENSE NOTICE licenses; \
 	  fi; \
 	done
 	@ls -la $(DIST)/$(PKG_BASE)-*
@@ -182,7 +196,7 @@ release:
 	@cd $(DIST) && for f in *.tgz *.zip; do gpg --armor --detach-sign --yes "$$f"; done
 	@ls -la $(DIST)/*.tgz* $(DIST)/*.zip*
 
-check: vet lint license-check dep-check test
+check: vet lint license-check dep-check dep-licenses-check test
 
 ## clean: remove build output
 .PHONY: clean
