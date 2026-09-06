@@ -122,8 +122,7 @@ docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
 
 | Tag | Points at |
 | --- | --- |
-| `0.1.0` | that release, never moved |
-| `0.1` | the newest patch of that line |
+| `0.2.0` | that release, never moved |
 | `latest` | the newest release |
 | `main` | the development head |
 | `<commit id>` | one commit, by its complete id, never moved |

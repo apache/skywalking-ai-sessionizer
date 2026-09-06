@@ -55,8 +55,8 @@ tools/release.sh complete
 It asks for the version, or takes it as an argument, checks that the tag is on GitHub and carries
 the release notes, and creates the GitHub release: tag `v$VERSION`, title `$VERSION`, the notes as
 stored in the tag, not a draft, not a prerelease. That is all it does. CI publishes the container
-image under `$VERSION`, its `major.minor` line, and `latest` when it is the newest release, when
-the released event fires, and attaches the binary packages for every platform, with their
+image under `$VERSION`, and under `latest` when it is the newest release, when the released
+event fires, and attaches the binary packages for every platform, with their
 checksums, to the release, which is where people download them.
 
 A release that predates this workflow, or a publish that failed, is published by running the CI

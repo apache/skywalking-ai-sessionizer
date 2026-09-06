@@ -245,6 +245,11 @@ jobs:
               # The development head. latest is reserved for releases.
               tags="$tags,$image:main" ;;
             release:refs/tags/v*|workflow_dispatch:refs/tags/v*)
+              # A release is published under the version the tag names and
+              # nothing looser: no major.minor line, since a reader who
+              # pulls 0.2 cannot tell which release answered. latest is the
+              # one floating tag, and it names the newest release only, so
+              # promoting a patch of an older line must not drag it backwards.
               version="${ref#refs/tags/v}"
               tags="$tags,$image:$version"
               case "$version" in
@@ -252,9 +257,6 @@ jobs:
                   # A pre-release such as 0.2.0-rc1 moves no floating tag.
                   ;;
                 *)
-                  tags="$tags,$image:${version%.*}"
-                  # latest must name the newest release, so promoting a patch
-                  # of an older line must not drag it backwards.
                   highest=$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-' | head -1)
                   if [ "v$version" = "$highest" ]; then tags="$tags,$image:latest"; fi ;;
               esac ;;

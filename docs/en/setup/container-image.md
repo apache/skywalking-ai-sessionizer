@@ -20,8 +20,7 @@ read the same way it is on a host.
 
 | Tag | Points at | Moves |
 | --- | --- | --- |
-| `0.1.0` | that release | never |
-| `0.1` | the newest patch release of that line | on each patch |
+| `0.2.0` | that release | never |
 | `latest` | the newest release | on each release |
 | `main` | the development head | on each push to `main` |
 | `<commit id>` | one commit, by its complete 40-character id | never |
