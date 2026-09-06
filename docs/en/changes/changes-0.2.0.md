@@ -134,6 +134,8 @@
 ## Packaging
 
 - Every binary package and the container image carry the license of every dependency built into
-  the binary, under `licenses/`, with a LICENSE that lists each module under its license. They are
-  generated from `go.mod` by `license-eye` into `dist-material/`, the way the other SkyWalking
-  repositories do it, and CI fails when the committed copy is not what `go.mod` resolves to.
+  the binary, under `licenses/`, a LICENSE that lists each module under its license, and a NOTICE
+  that carries the notice of every bundled module that ships one, gRPC-Go and the YAML parser
+  today. They are generated into `dist-material/` by `license-eye` and a small script over the
+  build, the way the other SkyWalking repositories do it, and CI fails when the committed copy is
+  not what the dependencies resolve to.

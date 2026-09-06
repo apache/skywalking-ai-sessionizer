@@ -40,9 +40,10 @@ LABEL org.opencontainers.image.title="SkyWalking AI Sessionizer" \
       org.opencontainers.image.source="https://github.com/apache/skywalking-ai-sessionizer" \
       org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=build /out/asz /usr/local/bin/asz
-# The project's license and notice, and the license of every dependency
-# built into the binary, as a binary distribution must carry them.
-COPY dist-material/LICENSE NOTICE /licenses/
+# The project's license and notice, the notices of the dependencies that
+# ship one, and the license of every dependency built into the binary, as
+# a binary distribution must carry them.
+COPY dist-material/LICENSE dist-material/NOTICE /licenses/
 COPY dist-material/licenses /licenses/licenses
 WORKDIR /asz
 VOLUME ["/asz/data"]
