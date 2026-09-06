@@ -292,14 +292,10 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 			return nil, err
 		}
 	}
-	rep, err := verify.Session(storage.NewZone(twin), session)
-	if err != nil {
-		bad("the root rebuilt from the wire does not verify: %v", err)
-	} else if !rep.OK() {
-		bad("the root rebuilt from the wire has %d problem(s): %v", rep.Problems, rep.Details())
-	}
-	if _, err := sessionflow.OpenChain(twin, session).Verify(); err != nil {
-		bad("the chain rebuilt from the wire does not verify: %v", err)
+	// The wire carries the root as it is, damage included: what asz verify
+	// says of the rebuilt root is what it says of the root that was pushed.
+	for _, p := range verifyDiffers(out, twin, session) {
+		bad("%s", p)
 	}
 	a, err := expect.Summarize(out, session)
 	if err != nil {
@@ -314,6 +310,35 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 		bad("the fold of the root rebuilt from the wire differs: %s", d)
 	}
 	return out2, nil
+}
+
+// verifyDiffers compares what asz verify says of two roots holding the same
+// session: the stream problems and the chain problems must be the same.
+func verifyDiffers(a, b, session string) []string {
+	var out []string
+	sa, err := verify.Session(storage.NewZone(a), session)
+	if err != nil {
+		return []string{"the root does not verify: " + err.Error()}
+	}
+	sb, err := verify.Session(storage.NewZone(b), session)
+	if err != nil {
+		return []string{"the root rebuilt from the wire does not verify: " + err.Error()}
+	}
+	if sa.Problems != sb.Problems {
+		out = append(out, fmt.Sprintf("the root rebuilt from the wire has %d stream problem(s) %v, the root pushed has %d %v", sb.Problems, sb.Details(), sa.Problems, sa.Details()))
+	}
+	ca, err := verify.Chain(storage.NewZone(a), session, nil)
+	if err != nil {
+		return append(out, "the chain does not verify: "+err.Error())
+	}
+	cb, err := verify.Chain(storage.NewZone(b), session, nil)
+	if err != nil {
+		return append(out, "the chain rebuilt from the wire does not verify: "+err.Error())
+	}
+	if strings.Join(ca.Details(), "; ") != strings.Join(cb.Details(), "; ") {
+		out = append(out, fmt.Sprintf("the chain rebuilt from the wire reports %v, the chain pushed reports %v", cb.Details(), ca.Details()))
+	}
+	return out
 }
 
 // wireFile is one file of the session as the receiver must see it.

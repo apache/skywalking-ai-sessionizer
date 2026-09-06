@@ -73,6 +73,20 @@
   the scenario that holds every kind of file, so a session with open references is rebuilt and
   verified from what the Collector wrote.
 
+- An expectation file can say what a person deleted from the storage root. `lose` on a checkpoint
+  names landed files by stream or run and kind, and the runner deletes them after that
+  checkpoint's parse, so every later check runs over a root missing a file a round bound to. The
+  structure survives in the rounds, the document reports `incomplete` and names the round and the
+  sequence, and later rounds are whole. `tests/scenarios/lost-file.yaml` is the example. `view`
+  gained `problems` and a checkpoint gained `verify: {problems: N}`, and the document's state must
+  agree with `asz verify` in every scenario.
+
+- `asz verify` binds every round to the landed files it consumed, the way the page always did: a
+  file a round names that is gone, or that no longer digests to what the round consumed, is
+  reported by round and sequence, and the command exits non-zero. It was silent before when the
+  lost file was the only one of its stream, since the stream checks see only what exists. The
+  page and the command now share the one check.
+
 ## Read
 
 - `asz.view`, version 1.0, is one conversation rebuilt from its rounds and its landed files as one

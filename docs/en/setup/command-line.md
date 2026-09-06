@@ -171,8 +171,10 @@ words instead.
 ## verify
 
 Checks every landed file against its digest and every round against its commit digest, for one
-session or all of them. It reads the storage root only, so it works without the source files and
-without a collector.
+session or all of them, and binds every round to the landed files it consumed: a round whose file
+is gone, or whose files no longer digest to what it consumed, is reported by round and sequence.
+It reads the storage root only, so it works without the source files and without a collector, and
+it exits non-zero when anything is wrong.
 
 ```text
 checked 44 session(s), 5867 stream(s), 359292 records

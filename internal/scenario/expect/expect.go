@@ -36,6 +36,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -113,12 +114,74 @@ type Checkpoint struct {
 	// Delta says the round this checkpoint wrote is a delta: fewer nodes
 	// than the fold, and starting past the first landed file.
 	Delta *bool `yaml:"delta"`
+	// Lose names landed files to delete after this checkpoint's parse and
+	// before its checks: what a person deletes from a storage root after a
+	// round has bound to it. The checks that follow, here and at every
+	// later checkpoint, run over the damaged root.
+	Lose []Lose `yaml:"lose"`
+	// Verify is what asz verify must report.
+	Verify *Verify `yaml:"verify"`
+}
+
+// Lose names one landed file by what it holds rather than by its sequence,
+// since the two formats land the same files in a different order: the
+// stream or run it belongs to, its kind, and which one of that kind on that
+// stream, counting from one.
+type Lose struct {
+	Stream string `yaml:"stream"`
+	Run    string `yaml:"run"`
+	Kind   string `yaml:"kind"`
+	Nth    int    `yaml:"nth"`
+}
+
+// Verify is what asz verify must report over the root: how many problems,
+// counting the streams and the chain together.
+type Verify struct {
+	Problems *int `yaml:"problems"`
+}
+
+// landedPrefix is the file name prefix a landed file of each kind carries.
+var landedPrefix = map[string]string{
+	"transcript": "transcript", "agent_meta": "meta", "journal": "journal",
+	"workflow_manifest": "manifest", "workflow_script": "script",
+}
+
+// Resolve finds the landed file a Lose names among a session's files. The
+// stream is the resolved stream id; the caller turns a scenario name into
+// one.
+func (l Lose) Resolve(files []storage.LandedFile, stream string) (*storage.LandedFile, error) {
+	nth := l.Nth
+	if nth == 0 {
+		nth = 1
+	}
+	prefix, known := landedPrefix[l.Kind]
+	if l.Kind != "" && !known {
+		return nil, fmt.Errorf("lose: unknown kind %q; the kinds are transcript, agent_meta, journal, workflow_manifest, workflow_script", l.Kind)
+	}
+	seen := 0
+	for i := range files {
+		f := &files[i]
+		if l.Run != "" && f.RunID != l.Run {
+			continue
+		}
+		if l.Run == "" && f.Stream != stream {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(filepath.Base(f.Path), prefix+"-") {
+			continue
+		}
+		seen++
+		if seen == nth {
+			return f, nil
+		}
+	}
+	return nil, fmt.Errorf("lose: no landed file %d of kind %q on stream %q run %q; the session has %d files", nth, l.Kind, l.Stream, l.Run, len(files))
 }
 
 // Empty reports a checkpoint with nothing to check.
 func (cp *Checkpoint) Empty() bool {
 	return cp.Rounds == nil && cp.Written == nil && len(cp.Kinds) == 0 && len(cp.TalksOn) == 0 && len(cp.RunsIn) == 0 &&
-		len(cp.Relations) == 0 && cp.Unresolved == nil && len(cp.UnresolvedKinds) == 0 && len(cp.Nodes) == 0 &&
+		len(cp.Relations) == 0 && cp.Unresolved == nil && len(cp.UnresolvedKinds) == 0 && len(cp.Nodes) == 0 && cp.Verify == nil &&
 		cp.Session == nil && cp.View == nil && cp.Delta == nil
 }
 
@@ -159,12 +222,14 @@ type Session struct {
 
 // View is what the asz.view document must say.
 type View struct {
-	State     string `yaml:"state"`
-	Talks     *int   `yaml:"talks"`
-	Steps     *int   `yaml:"steps"`
-	Files     *int   `yaml:"files"`
-	Rounds    *int   `yaml:"rounds"`
-	FirstTalk *Talk  `yaml:"first_talk"`
+	State string `yaml:"state"`
+	// Problems is how many problems the summary lists.
+	Problems  *int  `yaml:"problems"`
+	Talks     *int  `yaml:"talks"`
+	Steps     *int  `yaml:"steps"`
+	Files     *int  `yaml:"files"`
+	Rounds    *int  `yaml:"rounds"`
+	FirstTalk *Talk `yaml:"first_talk"`
 }
 
 // Talk is what a talk in the document must say.
@@ -205,6 +270,10 @@ type Context struct {
 	At      time.Time
 	Round   *parse.Round
 }
+
+// Stream turns a scenario's stream name into the stream's id; a name that
+// is not a scenario name is returned as it is.
+func (c *Context) Stream(name string) string { return c.resolve(name) }
 
 func (c *Context) resolve(s string) string {
 	parts := strings.Split(s, "/")
@@ -373,6 +442,21 @@ func Evaluate(root string, cp *Checkpoint, ctx *Context) ([]string, error) {
 		}
 		out = append(out, lines...)
 	}
+	if cp.Verify != nil {
+		z := storage.NewZone(root)
+		streams, err := verify.Session(z, ctx.Session)
+		if err != nil {
+			return nil, err
+		}
+		chain, err := verify.Chain(z, ctx.Session, nil)
+		if err != nil {
+			return nil, err
+		}
+		got := streams.Problems + chain.Problems
+		if cp.Verify.Problems != nil && got != *cp.Verify.Problems {
+			bad("verify: %d problem(s) (%v %v), want %d", got, streams.Details(), chain.Details(), *cp.Verify.Problems)
+		}
+	}
 	return out, nil
 }
 
@@ -390,6 +474,9 @@ func checkView(root, session string, want *View) ([]string, error) {
 	bad := func(format string, a ...any) { out = append(out, fmt.Sprintf(format, a...)) }
 	if want.State != "" && doc.Summary.State != want.State {
 		bad("view.state is %s (%v), want %s", doc.Summary.State, doc.Summary.Problems, want.State)
+	}
+	if want.Problems != nil && len(doc.Summary.Problems) != *want.Problems {
+		bad("view.problems is %d (%v), want %d", len(doc.Summary.Problems), doc.Summary.Problems, *want.Problems)
 	}
 	if want.Talks != nil && doc.Summary.Talks != *want.Talks {
 		bad("view.talks is %d, want %d", doc.Summary.Talks, *want.Talks)
@@ -848,8 +935,29 @@ func ViewCoversTheSession(root, session string) ([]string, error) {
 	bad := func(format string, a ...any) {
 		out = append(out, "view_covers_the_session: "+fmt.Sprintf(format, a...))
 	}
-	if doc.Summary.State != sessionview.StateVerified {
-		bad("state is %s: %v", doc.Summary.State, doc.Summary.Problems)
+	// The document's state is what asz verify says of the root: verified,
+	// incomplete when a round names a file that is gone, mismatch when the
+	// evidence changed. A root a scenario damaged must be reported as such.
+	chainRep, err := verify.Chain(storage.NewZone(root), session, nil)
+	if err != nil {
+		return nil, err
+	}
+	wantState := sessionview.StateVerified
+	verifiedRound := map[uint64]bool{}
+	for _, rr := range chainRep.Rounds {
+		verifiedRound[rr.Round] = rr.OK()
+		switch {
+		case rr.Damaged():
+			wantState = sessionview.StateMismatch
+		case !rr.OK() && wantState == sessionview.StateVerified:
+			wantState = sessionview.StateIncomplete
+		}
+	}
+	if doc.Summary.State != wantState {
+		bad("state is %s (%v), asz verify says %s (%v)", doc.Summary.State, doc.Summary.Problems, wantState, chainRep.Details())
+	}
+	if len(doc.Summary.Problems) != chainRep.Problems {
+		bad("the document lists %d problem(s) %v, asz verify %d %v", len(doc.Summary.Problems), doc.Summary.Problems, chainRep.Problems, chainRep.Details())
 	}
 	// Every round, verified, and the head.
 	chain := sessionflow.OpenChain(root, session)
@@ -861,8 +969,8 @@ func ViewCoversTheSession(root, session string) ([]string, error) {
 		bad("%d rounds in the document, %d on disk; head %d/%s against %d/%s", len(doc.Rounds), len(files), doc.Head.Round, firstN(doc.Head.Digest, 12), v.Round, firstN(v.Digest, 12))
 	}
 	for _, r := range doc.Rounds {
-		if !r.Verified {
-			bad("round %d is not verified", r.Round)
+		if r.Verified != verifiedRound[r.Round] {
+			bad("round %d is verified: %v, asz verify says %v", r.Round, r.Verified, verifiedRound[r.Round])
 		}
 	}
 	// Every landed file, as on disk.

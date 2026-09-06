@@ -35,7 +35,6 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
-	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
 const usage = `asz - SkyWalking AI Sessionizer: conversation-level observability for long-lived AI agents
@@ -457,7 +456,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	// A conversation's rounds are checked too. They are a digest chain, so a
 	// missing or edited round is detectable in a way landed files are not, and
 	// the check costs one pass over a directory that is far smaller than the data.
-	chains, rounds, err := verifyChains(zoneRoot, want)
+	chains, rounds, chainProblems, err := verifyChains(zoneRoot, want)
 	if err != nil {
 		return err
 	}
@@ -465,6 +464,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		fmt.Printf("checked %d conversation chain(s), %d round(s)\n", chains, rounds)
 	}
 
+	problems += chainProblems
 	if problems > 0 {
 		return fmt.Errorf("%d contiguity or integrity problem(s)", problems)
 	}
@@ -472,28 +472,38 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	return nil
 }
 
-// verifyChains walks every conversation chain in the zone.
-func verifyChains(root, want string) (chains, rounds int, err error) {
+// verifyChains walks every conversation chain in the zone, and binds each
+// round to the landed files it consumed: a file a round names that is gone
+// is reported here, since the stream checks see only what exists.
+func verifyChains(root, want string) (chains, rounds, problems int, err error) {
 	base := filepath.Join(root, "_conversations")
 	items, rerr := os.ReadDir(base)
 	if rerr != nil {
 		if os.IsNotExist(rerr) {
-			return 0, 0, nil
+			return 0, 0, 0, nil
 		}
-		return 0, 0, rerr
+		return 0, 0, 0, rerr
 	}
+	z := storage.NewZone(root)
 	for _, d := range items {
 		if !d.IsDir() || (want != "" && d.Name() != want) {
 			continue
 		}
-		files, verr := sessionflow.OpenChain(root, d.Name()).Verify()
+		rep, verr := verify.Chain(z, d.Name(), nil)
 		if verr != nil {
-			return chains, rounds, verr
+			return chains, rounds, problems, verr
 		}
 		chains++
-		rounds += len(files)
+		rounds += len(rep.Rounds)
+		problems += rep.Problems
+		if !rep.OK() {
+			fmt.Printf("%s: %d problem(s) in the chain\n", rep.Conversation, rep.Problems)
+			for _, line := range rep.Details() {
+				fmt.Printf("   %s\n", line)
+			}
+		}
 	}
-	return chains, rounds, nil
+	return chains, rounds, problems, nil
 }
 
 func cmdShow(cfg *config.Config, _ config.Adapter, _ bool) error {

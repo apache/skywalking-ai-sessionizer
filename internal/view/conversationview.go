@@ -21,7 +21,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
@@ -194,85 +194,51 @@ func (c *Conversation) sessions() []string {
 	return out
 }
 
-// rounds lists the chain from each round's header and file, and checks it:
-// the digest of each round, its link to the round before, and its input
-// digest over the landed files it names, computed as the parser computed
-// it. What fails is reported as content, never as an error, so a reader
-// still gets whatever folds.
+// rounds lists the chain from each round's header and file, and checks it
+// the way asz verify does: the digest of each round, its link to the round
+// before, and its input digest over the landed files it names, computed as
+// the parser computed it. What fails is reported as content, never as an
+// error, so a reader still gets whatever folds.
 func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.Round, files []sessionview.File, problems []string, state string) {
 	problems = []string{}
 	state = sessionview.StateVerified
-	chain := sessionflow.OpenChain(c.zone.Root(), c.ID)
-	list, err := chain.List()
+	rep, err := verify.Chain(c.zone, c.ID, digests)
 	if err != nil {
 		return nil, nil, append(problems, err.Error()), sessionview.StateIncomplete
 	}
-	var prevDigest, prevInput string
-	var prevThrough, prevRound uint64
-	for _, rf := range list {
-		r, err := chain.Open(rf.Path)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("round %d: %v", rf.Round, err))
+	for _, rr := range rep.Rounds {
+		problems = append(problems, rr.Problems...)
+		if rr.OpenError != "" {
 			state = sessionview.StateMismatch
 			continue
 		}
-		h := r.Header
-		ok := true
-		if h.Round != prevRound+1 {
-			// A missing round: this one cannot link to what is not there,
-			// and nothing after it folds.
-			problems = append(problems, fmt.Sprintf("round %d is missing before round %d", prevRound+1, h.Round))
-			ok = false
-			if state == sessionview.StateVerified {
-				state = sessionview.StateIncomplete
-			}
-		} else if h.Previous != prevDigest {
-			problems = append(problems, fmt.Sprintf("round %d names previous %s, the round before is %s", h.Round, firstN(h.Previous, 12), firstN(prevDigest, 12)))
-			ok, state = false, sessionview.StateMismatch
+		// Changed evidence is a mismatch; evidence that is gone leaves the
+		// document incomplete, and a mismatch is never downgraded.
+		switch {
+		case rr.Damaged():
+			state = sessionview.StateMismatch
+		case !rr.OK() && state == sessionview.StateVerified:
+			state = sessionview.StateIncomplete
 		}
-		if h.FromSeq != prevThrough+1 {
-			problems = append(problems, fmt.Sprintf("round %d starts at seq %d, the round before ended at %d", h.Round, h.FromSeq, prevThrough))
-			ok = false
-			if state == sessionview.StateVerified {
-				state = sessionview.StateIncomplete
-			}
-		}
-		var added []string
-		for seq := h.FromSeq; seq <= h.ThroughSeq; seq++ {
-			d, have := digests[seq]
-			if !have {
-				problems = append(problems, fmt.Sprintf("round %d: landed file seq %d is missing", h.Round, seq))
-				ok = false
-				if state == sessionview.StateVerified {
-					state = sessionview.StateIncomplete
-				}
-				continue
-			}
-			added = append(added, d)
-		}
-		if ok && sessionflow.ChainInputDigest(prevInput, added) != h.InputDigest {
-			problems = append(problems, fmt.Sprintf("round %d: the input digest does not match the landed files", h.Round))
-			ok, state = false, sessionview.StateMismatch
-		}
-		data, _ := os.ReadFile(rf.Path)
+		h := rr.Header
+		data, _ := os.ReadFile(rr.Path)
 		var previous *string
 		if h.Previous != "" {
 			p := h.Previous
 			previous = &p
 		}
 		rounds = append(rounds, sessionview.Round{
-			Round: h.Round, Digest: r.Commit.Digest, Previous: previous,
+			Round: h.Round, Digest: rr.Digest, Previous: previous,
 			FromSeq: h.FromSeq, ThroughSeq: h.ThroughSeq, InputDigest: h.InputDigest,
 			FromTime: millisPtr(h.FromTime), ThroughTime: millisPtr(h.ThroughTime),
-			Verified: ok,
+			Verified: rr.OK(),
 		})
 		round := h.Round
 		files = append(files, sessionview.File{
-			File: c.relPath(rf.Path), Format: "sf", Kind: "round", Round: &round,
+			File: c.relPath(rr.Path), Format: "sf", Kind: "round", Round: &round,
 			Lines: countByte(data, '\n'), Bytes: int64(len(data)),
 			Digest: digestOf(data), FromTime: millisPtr(h.FromTime), ThroughTime: millisPtr(h.ThroughTime),
 		})
-		prevDigest, prevInput, prevThrough, prevRound = r.Commit.Digest, h.InputDigest, h.ThroughSeq, h.Round
 	}
 	return rounds, files, problems, state
 }
@@ -358,13 +324,6 @@ func countByte(b []byte, x byte) int {
 		}
 	}
 	return n
-}
-
-func firstN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }
 
 // millisOf renders a record time a round header carries as unix

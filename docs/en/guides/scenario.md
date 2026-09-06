@@ -137,6 +137,18 @@ damaged, and the incompleteness is in the evidence. What a check sees is the `un
 asz scenario check FILE [--format claude-code|sd|all] [--out DIR] [--at TIME] [--scale FACTOR]
 ```
 
+A checkpoint may also say what a person deleted from the storage root. `lose` names landed files
+by what they hold, a stream or a run and a kind, since the two formats land the same files in a
+different order, and the runner deletes them after the checkpoint's parse, once a round has bound
+to them. Every check from there on runs over the damaged root: the structure survives, because it
+lives in the rounds, the text of the lost file is gone, the document says `incomplete` and names
+the round and the sequence, `asz verify` reports the same, and the session goes on into later
+rounds. Three properties cannot hold on such a root and are set off with a reason: a re-cut root
+holds only what is on disk, a source line of the lost file has no landed record, and re-deriving
+from the landed files changes the fold. `tests/scenarios/lost-file.yaml` is the example, and its
+loss travels over the wire like anything else: the root rebuilt from the push reports exactly what
+the pushed root reports.
+
 For each format, and at each checkpoint in order, `check` builds through the checkpoint, collects
 when the format needs it, parses, and compares the fold with the expectation file beside the
 scenario, `NAME.expect.yaml`. At the end it runs the properties every chain must have, and with
@@ -159,7 +171,12 @@ checkpoints:
     unresolved: {open: 0, resolved: 0}
     unresolved_kinds: {tool_result: none}
     session: {from: +0s, to: +11.1s}      # the session node's range, as deltas from --at
-    view: {state: verified, talks: 3, files: 6, first_talk: {label: run the build, runs: 2}}
+    view: {state: verified, problems: 0, talks: 3, files: 6, first_talk: {label: run the build, runs: 2}}
+    verify: {problems: 0}                 # what asz verify reports over the root
+  helped:
+    lose: [{stream: checker, kind: transcript}]   # deleted from the root after this checkpoint's parse
+    view: {state: incomplete, problems: 1}
+    verify: {problems: 1}
 properties:                               # all on unless set false
   reproducible: true
   fold_equals_parse: true

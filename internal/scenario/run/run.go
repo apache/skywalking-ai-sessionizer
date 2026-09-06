@@ -171,6 +171,15 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 			want = &expect.Checkpoint{}
 		}
 		ctx := &expect.Context{Session: built.Session, Names: names(built.Plan), At: opts.At, Round: round}
+		// What a person deletes from the root after the round bound to it.
+		// Every check from here on runs over the damaged root.
+		for _, l := range want.Lose {
+			rel, err := lose(out, built.Session, l, ctx)
+			if err != nil {
+				return nil, "", err
+			}
+			rep.say("%s %s: lost %s", f, name, rel)
+		}
 		problems, err := expect.Evaluate(out, want, ctx)
 		if err != nil {
 			return nil, "", err
@@ -296,6 +305,28 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		return nil, "", err
 	}
 	return summary, session, nil
+}
+
+// lose deletes one landed file of the session, as a person would: the file
+// is read-only, so it is made writable first. It returns the path relative
+// to the root.
+func lose(out, session string, l expect.Lose, ctx *expect.Context) (string, error) {
+	files, err := storage.LandedFiles(storage.NewZone(out), session)
+	if err != nil {
+		return "", err
+	}
+	f, err := l.Resolve(files, ctx.Stream(l.Stream))
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(f.Path, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Remove(f.Path); err != nil {
+		return "", err
+	}
+	rel, _ := filepath.Rel(out, f.Path)
+	return filepath.ToSlash(rel), nil
 }
 
 // collect lands a runtime format's source through its adapter. An sd build

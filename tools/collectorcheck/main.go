@@ -40,7 +40,6 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
-	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
 // The shape the Collector's file exporter writes: one JSON line per
@@ -236,8 +235,12 @@ func run(root, logs string) error {
 		if !rep.OK() {
 			return fmt.Errorf("%s rebuilt from the Collector has %d problem(s): %v", s, rep.Problems, rep.Details())
 		}
-		if _, err := sessionflow.OpenChain(twin, s).Verify(); err != nil {
+		chain, err := verify.Chain(storage.NewZone(twin), s, nil)
+		if err != nil {
 			return fmt.Errorf("%s: the chain rebuilt from the Collector: %w", s, err)
+		}
+		if !chain.OK() {
+			return fmt.Errorf("%s: the chain rebuilt from the Collector has %d problem(s): %v", s, chain.Problems, chain.Details())
 		}
 		a, err := parse.View(root, s)
 		if err != nil {

@@ -1,0 +1,51 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# The helper's transcript is deleted after round 1 bound to it. The
+# structure is unchanged, since it lives in the round: the helper's talk,
+# its output and the relations that start and end its stream are all still
+# there. The document says incomplete and names round 1 and the sequence,
+# asz verify reports the same one problem, and the session goes on: round 2
+# is a whole delta over the files that exist, and the count of problems
+# stays one.
+checkpoints:
+  helped:
+    rounds: 1
+    kinds: {talk: 2, llm.call: 3, stream: 2, agent.output: 1}
+    talks_on: {main: 1, helper: 1}
+    relations: {starts: 1, reports: 1, ends_with: 1}
+    lose: [{stream: helper, kind: transcript}]
+    view: {state: incomplete, problems: 1, talks: 2, files: 3, rounds: 1}
+    verify: {problems: 1}
+  final:
+    rounds: 2
+    written: true
+    delta: true
+    kinds: {talk: 3, llm.call: 4, stream: 2, agent.output: 1}
+    talks_on: {main: 2, helper: 1}
+    relations: {starts: 1, reports: 1, ends_with: 1}
+    unresolved: {open: 0, resolved: 0}
+    view: {state: incomplete, problems: 1, talks: 3, files: 5, rounds: 2}
+    verify: {problems: 1}
+properties:
+  repack_keeps_structure: false   # a re-cut root holds only what is on disk
+  every_line_a_record: false      # the lost file's source lines have no landed record
+  bundle: false                   # re-deriving from the landed files changes the fold
+push:
+  kinds: [transcript, agent_meta, round]
