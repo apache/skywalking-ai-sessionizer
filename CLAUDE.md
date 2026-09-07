@@ -63,7 +63,8 @@ internal/storage/               landing zone, atomic writes, cursors, session/in
 internal/verify/                contiguity and digest checks over landed data
 internal/view/                  reads a conversation and serves it as a page
 internal/view/conversation-view/ Horizon's conversation renderer, built from the pinned commit in HORIZON_COMMIT; never edited here
-internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file
+internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file, and the metrics spool
+internal/metrics/               derives the runtime's own metric family from landed Session Data into the spool; collector side
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/mock/         the mock dialect: Session Data a scenario writes directly

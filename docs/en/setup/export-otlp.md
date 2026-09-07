@@ -128,6 +128,33 @@ over each transport, then checks every record against the root and rebuilds the 
 the Collector wrote; CI runs it on every change. Writing each record's body to `asz.file` under a
 new root gives a root that `asz verify` and `asz view` read like the original.
 
+## Metrics
+
+`asz push` sends metrics as well, when an adapter produces them, and they are Claude Code's own
+metric family, name for name and attribute for attribute with the runtime's OpenTelemetry
+exporter, so a receiver holds one family whichever produced it. Phase one is the one measure both
+can supply exactly:
+
+| Metric | Attributes | Unit |
+| --- | --- | --- |
+| `claude_code.token.usage` | `type` (`input`, `output`, `cacheRead`, `cacheCreation`), `model`, `query_source` (`main`, `subagent`), `session.id` | `tokens`, a monotonic delta sum, one point per minute and attribute set |
+
+With `metrics: true` on the `claude-code-local` adapter, the collector derives the points from
+the landed files: one count per call, never per fragment, since a main transcript repeats the
+usage on every fragment of a call, summed per minute the way the runtime's SDK sums over its
+export interval, with `query_source` from the stream the call was made on. It cannot derive what
+a transcript does not carry: cost, latency, active time, lines of code, commits, pull requests,
+the session start type, or the tokens of the runtime's auxiliary calls, which never reach a
+transcript. Those are the runtime's exporter's alone. The first derivation over a root with
+history is bounded by `metrics_lookback`, 24 hours unless set, so switching the flag on does not
+send a year of tokens; every later pass derives each new file whole.
+
+The points wait in the storage root's `_metrics/` spool, one write-once file per landed file
+with points, and go out in order under the same budget and the same once-only rule as the files.
+On the way out the resource is normalised to asz's identity, the service, the layer, the sender,
+so the OAP holds one service for the runtime. A receiver that answers with a partial success is
+treated as having refused the request, as for logs.
+
 ## Rate
 
 A first push sends the whole history of the storage root, which can be hundreds of megabytes, as

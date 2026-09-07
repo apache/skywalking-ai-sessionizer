@@ -36,8 +36,10 @@ import (
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/protobuf/proto"
 
@@ -78,6 +80,12 @@ type Pusher struct {
 	InstanceID string
 	// Layer is the receiver's layer for the service, sent as service.layer.
 	Layer string
+	// MetricsService is the service the metrics spool is attributed to: the
+	// requests the local adapter derived and the ones the runtime's exporter
+	// sent both concern the one runtime, and they leave under its name so a
+	// receiver holds one service whichever produced the points. Empty means
+	// ServiceName.
+	MetricsService string
 	// BatchBytes is how many file bytes one request carries at most. A file
 	// larger than the budget is sent alone, in a request of its own.
 	BatchBytes int64
@@ -100,7 +108,9 @@ type Stats struct {
 	Bytes    int64
 	Wire     int64 // bytes on the wire, requests as encoded
 	Requests int
-	Paused   time.Duration // how long the pass waited for budget
+	// Metrics is how many spooled metrics requests were sent.
+	Metrics int
+	Paused  time.Duration // how long the pass waited for budget
 	// Throttled says the receiver asked the sender to slow down and the
 	// pass stopped there; RetryAfter is the wait it named, if any.
 	Throttled  bool
@@ -202,6 +212,9 @@ func (p *Pusher) Prepare() error {
 		}
 		p.InstanceID = id
 	}
+	if p.MetricsService == "" {
+		p.MetricsService = p.ServiceName
+	}
 	return nil
 }
 
@@ -267,10 +280,102 @@ func (p *Pusher) Pass() (*Stats, error) {
 			st.Errors = append(st.Errors, err)
 		}
 	}
+	if b.stop == nil {
+		p.pushSpool(b)
+	}
 	if b.stop != nil {
 		st.Throttled, st.RetryAfter = true, b.stop.After
 	}
 	return st, nil
+}
+
+// pushSpool sends the metrics spool: every request not yet sent, in the
+// order it was put, one request each, under the same budget and the same
+// once-only rule as the files. The resource is normalised on the way out
+// to asz's identity, so a receiver holds one service for the runtime
+// whether asz derived the points or the runtime's exporter sent them.
+func (p *Pusher) pushSpool(b *batch) {
+	st, state := b.st, b.state
+	files, err := storage.NewSpool(p.Zone).List()
+	if err != nil {
+		st.Errors = append(st.Errors, err)
+		return
+	}
+	for _, sf := range files {
+		rel, _ := filepath.Rel(p.Zone.Root(), sf.Path)
+		rel = filepath.ToSlash(rel)
+		if state.pushed(rel) {
+			continue
+		}
+		if p.MetricsService == "" {
+			st.Errors = append(st.Errors, fmt.Errorf("%s: no service to attribute metrics to", rel))
+			return
+		}
+		data, err := os.ReadFile(sf.Path)
+		if err != nil {
+			st.Errors = append(st.Errors, err)
+			continue
+		}
+		var req collmetricspb.ExportMetricsServiceRequest
+		if err := proto.Unmarshal(data, &req); err != nil {
+			st.Errors = append(st.Errors, fmt.Errorf("%s: not a metrics request: %w", rel, err))
+			continue
+		}
+		for _, rm := range req.ResourceMetrics {
+			p.normalise(rm)
+		}
+		size := int64(proto.Size(&req))
+		st.Paused += p.limit.take(size)
+		err = p.Client.ExportMetrics(&req)
+		st.Requests++
+		st.Wire += size
+		if err != nil {
+			st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
+			var t *Throttled
+			if errors.As(err, &t) {
+				b.stop = t
+				p.limit.drain()
+				return
+			}
+			continue
+		}
+		state.mark(rel, digestOf(data))
+		st.Metrics++
+		if err := state.save(p.statePath(), p.Now()); err != nil {
+			st.Errors = append(st.Errors, err)
+		}
+	}
+}
+
+// normalise puts asz's identity on a resource: the runtime as the service,
+// the layer, who is pushing, and the sender. Everything else the resource
+// carried, such as the runtime's own version, stays.
+func (p *Pusher) normalise(rm *metricspb.ResourceMetrics) {
+	if rm.Resource == nil {
+		rm.Resource = &resourcepb.Resource{}
+	}
+	ours := map[string]string{
+		"service.name": p.MetricsService, "service.instance.id": p.InstanceID,
+		"telemetry.sdk.name": "asz", "telemetry.sdk.version": p.Version, "telemetry.sdk.language": "go",
+	}
+	if p.Layer != "" {
+		ours["service.layer"] = p.Layer
+	}
+	kept := rm.Resource.Attributes[:0]
+	for _, kv := range rm.Resource.Attributes {
+		if _, replaced := ours[kv.GetKey()]; !replaced {
+			kept = append(kept, kv)
+		}
+	}
+	keys := make([]string, 0, len(ours))
+	for k := range ours {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		kept = append(kept, str(k, ours[k]))
+	}
+	rm.Resource.Attributes = kept
 }
 
 // addRounds queues every round of a conversation not yet sent.

@@ -25,6 +25,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
+	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 )
@@ -38,6 +39,7 @@ import (
 type refresher struct {
 	srv      *view.Server
 	zone     *storage.Zone
+	deriver  *metrics.Deriver
 	col      *claudecode.Collector
 	match    func(claudecode.Session) bool
 	interval time.Duration
@@ -70,9 +72,14 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ad config.Adapter, maxRo
 	if once {
 		mode = config.ModeOnce
 	}
+	deriver, err := newDeriver(zone, ad)
+	if err != nil {
+		return nil, err
+	}
 	r := &refresher{
 		srv:      srv,
 		zone:     zone,
+		deriver:  deriver,
 		col:      claudecode.New(src, zone, ad.Collector.MaxDeltaBytes),
 		match:    claudecode.NewMatcher(ad.Include, ad.Exclude).Match,
 		interval: ad.Collector.Interval,
@@ -111,6 +118,18 @@ func (r *refresher) pass() {
 			errs = append(errs, lerr)
 		} else {
 			sessions = all
+		}
+	}
+	if r.deriver != nil {
+		// The first pass derives history once; later passes only what moved.
+		var scope []string
+		if !r.full {
+			scope = sessions
+		}
+		if ms, derr := r.deriver.Pass(scope); derr != nil {
+			errs = append(errs, derr)
+		} else {
+			errs = append(errs, ms.Errors...)
 		}
 	}
 	rounds := 0

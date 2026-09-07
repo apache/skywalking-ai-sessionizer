@@ -319,6 +319,24 @@ the binary are unreachable in shipped builds.
 Content defaults are also restrictive: prompts and responses are redacted unless explicitly enabled,
 content is truncated, and reasoning is always redacted.
 
+### The same metrics from the transcripts
+
+With `metrics: true`, this adapter derives the runtime's own metric family from what it landed,
+name for name and attribute for attribute with the exporter, so a receiver holds one family
+whichever produced it. Phase one is the overlap, `claude_code.token.usage`: one count per call,
+taken from the usage the last fragment repeats, never per fragment; `query_source` is `main` for
+the session's own transcript and `subagent` for a child's; `model` is `message.model`;
+`session.id` is the session. Points are monotonic delta sums per minute, as the exporter's SDK
+aggregates over its interval, and a call is counted once however many landed files its records
+reach, since the runtime re-emits records before a context reset and the exporter counted one API
+call once.
+
+What the transcripts do not carry is not derived: cost, per-request latency, tool execution time,
+active time, lines of code, commits, pull requests, the session start type, and the tokens of the
+runtime's auxiliary calls, which never reach a transcript. Those come from the exporter alone.
+The first derivation over a root with history reaches back `metrics_lookback`, 24 hours unless
+set. See [Metrics](../setup/export-otlp.md#metrics).
+
 ## Local data hazards
 
 Behaviours that will break a naive reader:

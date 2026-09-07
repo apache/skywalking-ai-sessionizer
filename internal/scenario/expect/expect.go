@@ -82,6 +82,7 @@ type Properties struct {
 	RepackKeepsStructure  *bool `yaml:"repack_keeps_structure"`
 	PushFollowsTheWire    *bool `yaml:"push_follows_the_wire"`
 	ViewCoversTheSession  *bool `yaml:"view_covers_the_session"`
+	MetricsMatchThePlan   *bool `yaml:"metrics_match_the_plan"`
 }
 
 // On reports whether a property is enabled.

@@ -43,8 +43,27 @@ import (
 )
 
 // The shape the Collector's file exporter writes: one JSON line per
-// request, in OTLP's JSON mapping.
+// request, in OTLP's JSON mapping; a logs request or a metrics request.
 type export struct {
+	ResourceMetrics []struct {
+		Resource struct {
+			Attributes []attr `json:"attributes"`
+		} `json:"resource"`
+		ScopeMetrics []struct {
+			Metrics []struct {
+				Name string `json:"name"`
+				Unit string `json:"unit"`
+				Sum  struct {
+					AggregationTemporality any  `json:"aggregationTemporality"`
+					IsMonotonic            bool `json:"isMonotonic"`
+					DataPoints             []struct {
+						AsInt      string `json:"asInt"`
+						Attributes []attr `json:"attributes"`
+					} `json:"dataPoints"`
+				} `json:"sum"`
+			} `json:"metrics"`
+		} `json:"scopeMetrics"`
+	} `json:"resourceMetrics"`
 	ResourceLogs []struct {
 		Resource struct {
 			Attributes []attr `json:"attributes"`
@@ -113,6 +132,10 @@ func run(root, logs string) error {
 	var recs []rec
 	services := map[string]int{}
 	requests := 0
+	// The token metric, as the Collector received it: points by query
+	// source and type, and how many requests carried it.
+	tokens := map[string]int64{}
+	metricRequests := 0
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -120,6 +143,28 @@ func run(root, logs string) error {
 		var e export
 		if err := json.Unmarshal(line, &e); err != nil {
 			return fmt.Errorf("a line the exporter wrote is not OTLP JSON: %w", err)
+		}
+		if len(e.ResourceMetrics) > 0 {
+			metricRequests++
+			for _, rm := range e.ResourceMetrics {
+				res := attrs(rm.Resource.Attributes)
+				if res["service.name"] == "" || res["service.layer"] == "" || res["telemetry.sdk.name"] != "asz" {
+					return fmt.Errorf("a metrics request carries the resource %v; asz's identity is missing", res)
+				}
+				for _, sm := range rm.ScopeMetrics {
+					for _, m := range sm.Metrics {
+						if m.Name != "claude_code.token.usage" || m.Unit != "tokens" || !m.Sum.IsMonotonic {
+							return fmt.Errorf("a metrics request carries %s %s monotonic=%v", m.Name, m.Unit, m.Sum.IsMonotonic)
+						}
+						for _, dp := range m.Sum.DataPoints {
+							a := attrs(dp.Attributes)
+							n, _ := strconv.ParseInt(dp.AsInt, 10, 64)
+							tokens[a["query_source"]+"/"+a["type"]] += n
+						}
+					}
+				}
+			}
+			continue
 		}
 		requests++
 		for _, rl := range e.ResourceLogs {
@@ -257,6 +302,14 @@ func run(root, logs string) error {
 		talks := len(b.NodesByKind(model.KindTalk))
 		fmt.Printf("%s: %d talks, %d nodes, round %d, rebuilt from the Collector and verified\n", s, talks, len(b.Nodes), b.Round)
 	}
-	fmt.Printf("ok: %d requests, %d records, kinds %v, resources %v\n", requests, len(recs), kinds, services)
+	// The metrics the local adapter derived reached the Collector too:
+	// every planned session has calls with usage, so tokens must arrive
+	// under both query sources and all four types.
+	for _, k := range []string{"main/input", "main/output", "main/cacheRead", "main/cacheCreation", "subagent/input", "subagent/output"} {
+		if tokens[k] <= 0 {
+			return fmt.Errorf("no %s tokens reached the Collector; it received %v", k, tokens)
+		}
+	}
+	fmt.Printf("ok: %d requests, %d records, kinds %v, resources %v; %d metrics requests, tokens %v\n", requests, len(recs), kinds, services, metricRequests, tokens)
 	return nil
 }

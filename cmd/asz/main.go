@@ -32,6 +32,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
+	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -648,19 +649,44 @@ func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
 	}
 	col := claudecode.New(root, storage.NewZone(zoneRoot), ad.Collector.MaxDeltaBytes)
 	match := claudecode.NewMatcher(ad.Include, ad.Exclude).Match
+	deriver, err := newDeriver(storage.NewZone(zoneRoot), ad)
+	if err != nil {
+		return err
+	}
 
 	fmt.Printf("source root : %s\nstorage root: %s\n", root, zoneRoot)
+	if deriver != nil {
+		fmt.Printf("metrics     : %s, derived from the landed files, look-back %s on the first pass\n", metrics.TokenUsage, lookbackWord(deriver.Lookback))
+	}
 
+	first := true
 	pass := func() error {
 		start := time.Now()
 		st, err := col.CollectAll(match)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("[%s] sessions=%d sources=%d landed=%d records=%d bytes=%s indexed=%d gone=%d conflicts=%d busy=%d pending=%d errors=%d (%s)\n",
+		derived := ""
+		if deriver != nil {
+			// The first pass looks at every session, so history that was
+			// landed before the flag went on is derived once; later passes
+			// look only at what this pass changed.
+			var sessions []string
+			if !first {
+				sessions = st.Changed
+			}
+			ms, err := deriver.Pass(sessions)
+			if err != nil {
+				return err
+			}
+			st.Errors = append(st.Errors, ms.Errors...)
+			derived = fmt.Sprintf(" metrics=%d", ms.Requests)
+		}
+		first = false
+		fmt.Printf("[%s] sessions=%d sources=%d landed=%d records=%d bytes=%s indexed=%d gone=%d conflicts=%d busy=%d pending=%d%s errors=%d (%s)\n",
 			time.Now().Format("15:04:05"), st.Sessions, st.SourcesSeen, st.SourcesLanded,
 			st.Records, humanBytes(st.Bytes), st.Indexed, st.SourcesGone, st.Conflicts,
-			st.Busy, st.Pending, len(st.Errors), time.Since(start).Round(time.Millisecond))
+			st.Busy, st.Pending, derived, len(st.Errors), time.Since(start).Round(time.Millisecond))
 		for _, e := range st.Errors {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
 		}
@@ -681,6 +707,25 @@ func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
 		}
 		time.Sleep(ad.Collector.Interval)
 	}
+}
+
+// newDeriver is the metrics derivation an adapter asked for, or nil.
+func newDeriver(zone *storage.Zone, ad config.Adapter) (*metrics.Deriver, error) {
+	if !ad.Metrics {
+		return nil, nil
+	}
+	lookback, err := ad.Lookback()
+	if err != nil {
+		return nil, err
+	}
+	return &metrics.Deriver{Zone: zone, Options: metrics.Options{Lookback: lookback, Version: version}}, nil
+}
+
+func lookbackWord(d time.Duration) string {
+	if d == 0 {
+		return "none"
+	}
+	return d.String()
 }
 
 func humanBytes(n int64) string {

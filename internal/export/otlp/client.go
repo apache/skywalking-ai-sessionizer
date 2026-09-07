@@ -30,6 +30,7 @@ import (
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -71,6 +72,8 @@ type Client interface {
 	// sent again whole on the next pass, and a receiver keeps the first
 	// copy of a file it already holds.
 	Export(req *collogspb.ExportLogsServiceRequest) error
+	// ExportMetrics sends one metrics request, with the same rules.
+	ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) error
 	Close() error
 }
 
@@ -117,6 +120,7 @@ func NewClient(o Options) (Client, error) {
 type grpcClient struct {
 	conn    *grpc.ClientConn
 	logs    collogspb.LogsServiceClient
+	metrics collmetricspb.MetricsServiceClient
 	headers map[string]string
 	timeout time.Duration
 }
@@ -133,7 +137,8 @@ func newGRPC(o Options) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("otlp: %w", err)
 	}
-	return &grpcClient{conn: conn, logs: collogspb.NewLogsServiceClient(conn), headers: o.Headers, timeout: o.timeout()}, nil
+	return &grpcClient{conn: conn, logs: collogspb.NewLogsServiceClient(conn), metrics: collmetricspb.NewMetricsServiceClient(conn),
+		headers: o.Headers, timeout: o.timeout()}, nil
 }
 
 func (o Options) timeout() time.Duration {
@@ -143,27 +148,49 @@ func (o Options) timeout() time.Duration {
 	return o.Timeout
 }
 
-func (c *grpcClient) Export(req *collogspb.ExportLogsServiceRequest) error {
+func (c *grpcClient) context() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
-	defer cancel()
 	for k, v := range c.headers {
 		ctx = metadata.AppendToOutgoingContext(ctx, k, v)
 	}
+	return ctx, cancel
+}
+
+func (c *grpcClient) failure(err error) error {
+	if status.Code(err) == codes.ResourceExhausted {
+		return &Throttled{Detail: c.conn.Target() + ": " + err.Error()}
+	}
+	return fmt.Errorf("otlp: %s: %w", c.conn.Target(), err)
+}
+
+func (c *grpcClient) Export(req *collogspb.ExportLogsServiceRequest) error {
+	ctx, cancel := c.context()
+	defer cancel()
 	resp, err := c.logs.Export(ctx, req)
 	if err != nil {
-		if status.Code(err) == codes.ResourceExhausted {
-			return &Throttled{Detail: c.conn.Target() + ": " + err.Error()}
-		}
-		return fmt.Errorf("otlp: %s: %w", c.conn.Target(), err)
+		return c.failure(err)
 	}
 	return rejected(resp)
 }
 
+func (c *grpcClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) error {
+	ctx, cancel := c.context()
+	defer cancel()
+	resp, err := c.metrics.Export(ctx, req)
+	if err != nil {
+		return c.failure(err)
+	}
+	if ps := resp.GetPartialSuccess(); ps.GetRejectedDataPoints() > 0 {
+		return fmt.Errorf("otlp: the receiver rejected %d data point(s): %s", ps.GetRejectedDataPoints(), ps.GetErrorMessage())
+	}
+	return nil
+}
+
 func (c *grpcClient) Close() error { return c.conn.Close() }
 
-// httpClient posts each request to the receiver's /v1/logs.
+// httpClient posts each request to the receiver's /v1/logs or /v1/metrics.
 type httpClient struct {
-	url     string
+	base    string
 	headers map[string]string
 	http    *http.Client
 }
@@ -173,20 +200,55 @@ func newHTTP(o Options) (Client, error) {
 		return nil, fmt.Errorf("otlp: an http endpoint is a URL such as http://127.0.0.1:12800: %s", o.Endpoint)
 	}
 	return &httpClient{
-		url:     strings.TrimRight(o.Endpoint, "/") + "/v1/logs",
+		base:    strings.TrimRight(o.Endpoint, "/"),
 		headers: o.Headers,
 		http:    &http.Client{Timeout: o.timeout()},
 	}, nil
 }
 
 func (c *httpClient) Export(req *collogspb.ExportLogsServiceRequest) error {
-	body, err := proto.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("otlp: %w", err)
-	}
-	hr, err := http.NewRequest(http.MethodPost, c.url, bytes.NewReader(body))
+	answer, err := c.post(c.base+"/v1/logs", req)
 	if err != nil {
 		return err
+	}
+	var out collogspb.ExportLogsServiceResponse
+	if len(answer) > 0 {
+		if err := proto.Unmarshal(answer, &out); err != nil {
+			return fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.base, err)
+		}
+	}
+	return rejected(&out)
+}
+
+func (c *httpClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) error {
+	answer, err := c.post(c.base+"/v1/metrics", req)
+	if err != nil {
+		return err
+	}
+	var out collmetricspb.ExportMetricsServiceResponse
+	if len(answer) > 0 {
+		if err := proto.Unmarshal(answer, &out); err != nil {
+			return fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.base, err)
+		}
+	}
+	if ps := out.GetPartialSuccess(); ps.GetRejectedDataPoints() > 0 {
+		return fmt.Errorf("otlp: the receiver rejected %d data point(s): %s", ps.GetRejectedDataPoints(), ps.GetErrorMessage())
+	}
+	return nil
+}
+
+// post sends one request as protobuf and returns the answer's body when it
+// is an OTLP response, or nothing when the receiver answered with anything
+// else, such as an empty body from a proxy, which is a full success as far
+// as it says.
+func (c *httpClient) post(url string, req proto.Message) ([]byte, error) {
+	body, err := proto.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("otlp: %w", err)
+	}
+	hr, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
 	}
 	hr.Header.Set("Content-Type", "application/x-protobuf")
 	hr.Header.Set("User-Agent", "asz")
@@ -195,33 +257,28 @@ func (c *httpClient) Export(req *collogspb.ExportLogsServiceRequest) error {
 	}
 	resp, err := c.http.Do(hr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode == http.StatusTooManyRequests {
-		t := &Throttled{Detail: c.url + " answered " + resp.Status}
+		t := &Throttled{Detail: url + " answered " + resp.Status}
 		if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
 			t.After = time.Duration(secs) * time.Second
 		}
-		return t
+		return nil, t
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		snippet := answer
 		if len(snippet) > 400 {
 			snippet = snippet[:400]
 		}
-		return fmt.Errorf("otlp: %s answered %s: %s", c.url, resp.Status, strings.TrimSpace(string(snippet)))
+		return nil, fmt.Errorf("otlp: %s answered %s: %s", url, resp.Status, strings.TrimSpace(string(snippet)))
 	}
-	// A receiver answers in the request's encoding. Anything else, such as
-	// an empty body from a proxy, is a full success as far as it says.
-	var out collogspb.ExportLogsServiceResponse
-	if len(answer) > 0 && strings.HasPrefix(resp.Header.Get("Content-Type"), "application/x-protobuf") {
-		if err := proto.Unmarshal(answer, &out); err != nil {
-			return fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.url, err)
-		}
+	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/x-protobuf") {
+		return nil, nil
 	}
-	return rejected(&out)
+	return answer, nil
 }
 
 func (c *httpClient) Close() error {

@@ -30,11 +30,13 @@ import (
 	"time"
 
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
+	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
@@ -55,10 +57,10 @@ var wireKinds = map[string]bool{
 // receiver bounds a read on, delivery once and at least once, and the
 // export path: writing every body back gives a root that verifies and
 // folds the same.
-func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Push) ([]string, error) {
+func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Push, tokens map[string]int64, checkTokens bool) ([]string, error) {
 	var problems []string
 	for _, protocol := range []string{otlp.ProtocolGRPC, otlp.ProtocolHTTP} {
-		found, err := pushOver(protocol, out, session, f, want)
+		found, err := pushOver(protocol, out, session, f, want, tokens, checkTokens)
 		if err != nil {
 			return nil, fmt.Errorf("over %s: %w", protocol, err)
 		}
@@ -69,7 +71,7 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	return problems, nil
 }
 
-func pushOver(protocol, out, session string, f scenario.Format, want *expect.Push) ([]string, error) {
+func pushOver(protocol, out, session string, f scenario.Format, want *expect.Push, tokens map[string]int64, checkTokens bool) ([]string, error) {
 	rcv, err := otlptest.Start()
 	if err != nil {
 		return nil, err
@@ -141,8 +143,8 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 	if len(st.Errors) != 0 {
 		return nil, fmt.Errorf("push: %v", st.Errors)
 	}
-	if st.Files != len(files) || st.Requests != len(files) {
-		bad("pushed %d files in %d requests; the session has %d files and a one-byte budget sends each alone", st.Files, st.Requests, len(files))
+	if st.Files != len(files) || st.Requests-st.Metrics != len(files) {
+		bad("pushed %d files in %d requests; the session has %d files and a one-byte budget sends each alone", st.Files, st.Requests-st.Metrics, len(files))
 	}
 
 	// Every request: the resource and the scope, as the page lists them.
@@ -284,14 +286,56 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 		}
 	}
 
+	// The metrics spool reached the wire under asz's identity, and the
+	// points say what the plan says: every call's usage once, under the
+	// stream that made it, name for name with the runtime's own exporter.
+	if checkTokens {
+		for _, p := range tokensOnTheWire(rcv, session) {
+			bad("%s", p)
+		}
+		got := map[string]int64{}
+		for _, req := range rcv.MetricsRequests() {
+			for _, rm := range req.GetResourceMetrics() {
+				for _, sm := range rm.GetScopeMetrics() {
+					for _, m := range sm.GetMetrics() {
+						if m.GetName() != metrics.TokenUsage {
+							continue
+						}
+						for _, dp := range m.GetSum().GetDataPoints() {
+							a := otlptest.Attrs(dp.GetAttributes())
+							got[a["query_source"]+"/"+a["type"]] += dp.GetAsInt()
+						}
+					}
+				}
+			}
+		}
+		for k, v := range tokens {
+			if got[k] != v {
+				bad("metrics: %s on the wire is %d, the plan says %d", k, got[k], v)
+			}
+		}
+		for k, v := range got {
+			if _, planned := tokens[k]; !planned {
+				bad("metrics: %s on the wire is %d, the plan has no such tokens", k, v)
+			}
+		}
+		if st.Metrics == 0 && len(tokens) > 0 {
+			bad("metrics: the plan has tokens but the push sent no metrics request")
+		}
+	}
+
 	// Sent once: a second pass sends nothing.
 	before := len(rcv.Requests())
+	beforeMetrics := len(rcv.MetricsRequests())
 	st, err = newPusher().Pass()
 	if err != nil {
 		return nil, err
 	}
 	if st.Files != 0 || len(rcv.Requests()) != before {
 		bad("a second pass sent %d files again", st.Files)
+	}
+	if st.Metrics != 0 || len(rcv.MetricsRequests()) != beforeMetrics {
+		bad("a second pass sent %d metrics requests again", st.Metrics)
 	}
 
 	// The export path: every body written to its path gives a root that
@@ -326,6 +370,52 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 		bad("the fold of the root rebuilt from the wire differs: %s", d)
 	}
 	return out2, nil
+}
+
+// tokensOnTheWire checks the shape of every metrics request as the export
+// page states it: asz's identity on the resource, the runtime's metric with
+// its unit, monotonic delta sums, one-minute points that name the session.
+func tokensOnTheWire(rcv *otlptest.Receiver, session string) []string {
+	var out []string
+	bad := func(format string, a ...any) { out = append(out, "metrics: "+fmt.Sprintf(format, a...)) }
+	for i, req := range rcv.MetricsRequests() {
+		for _, rm := range req.GetResourceMetrics() {
+			res := otlptest.Attrs(rm.GetResource().GetAttributes())
+			for k, v := range map[string]string{
+				"service.name": "Scenario Check", "service.instance.id": "scenario-check", "service.layer": "AI_AGENT",
+				"telemetry.sdk.name": "asz", "telemetry.sdk.version": "check", "telemetry.sdk.language": "go",
+			} {
+				if res[k] != v {
+					bad("request %d resource %s is %q, want %q", i, k, res[k], v)
+				}
+			}
+			for _, sm := range rm.GetScopeMetrics() {
+				if sm.GetScope().GetName() != metrics.ScopeName {
+					bad("request %d scope is %q", i, sm.GetScope().GetName())
+				}
+				for _, m := range sm.GetMetrics() {
+					if m.GetName() != metrics.TokenUsage || m.GetUnit() != "tokens" {
+						bad("request %d carries metric %s %s", i, m.GetName(), m.GetUnit())
+						continue
+					}
+					sum := m.GetSum()
+					if sum == nil || sum.GetAggregationTemporality() != metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA || !sum.GetIsMonotonic() {
+						bad("request %d: %s is not a monotonic delta sum", i, m.GetName())
+					}
+					for _, dp := range sum.GetDataPoints() {
+						a := otlptest.Attrs(dp.GetAttributes())
+						if a["session.id"] != session || a["type"] == "" || (a["query_source"] != metrics.SourceMain && a["query_source"] != metrics.SourceSubagent) || a["model"] == "" {
+							bad("request %d: a point carries %v", i, a)
+						}
+						if dp.GetTimeUnixNano() != dp.GetStartTimeUnixNano()+uint64(time.Minute) || dp.GetAsInt() <= 0 {
+							bad("request %d: a point is not one minute of a positive count", i)
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
 }
 
 // verifyDiffers compares what asz verify says of two roots holding the same

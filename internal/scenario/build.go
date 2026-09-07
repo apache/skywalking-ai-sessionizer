@@ -104,6 +104,10 @@ adapters:
   - name: claude-code-local
     enabled: true
     source_root: %s
+    # The runtime's own metric family, derived from what is landed, with
+    # no look-back: a scenario is history by construction.
+    metrics: true
+    metrics_lookback: none
     collector:
       mode: once
 # To export the session with asz push, name the receiver:

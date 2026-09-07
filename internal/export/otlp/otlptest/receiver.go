@@ -34,6 +34,7 @@ import (
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 	"google.golang.org/grpc"
@@ -46,9 +47,10 @@ import (
 
 // Receiver listens on both transports and keeps what it accepted.
 type Receiver struct {
-	mu   sync.Mutex
-	reqs []*collogspb.ExportLogsServiceRequest
-	fail bool
+	mu      sync.Mutex
+	reqs    []*collogspb.ExportLogsServiceRequest
+	metrics []*collmetricspb.ExportMetricsServiceRequest
+	fail    bool
 	// throttle makes the receiver ask the sender to slow down, naming
 	// retryAfter over HTTP when it is set.
 	throttle   bool
@@ -70,6 +72,7 @@ func Start() (*Receiver, error) {
 	}
 	r.rpc = grpc.NewServer(grpc.MaxRecvMsgSize(64 << 20))
 	collogspb.RegisterLogsServiceServer(r.rpc, &logsServer{r: r})
+	collmetricspb.RegisterMetricsServiceServer(r.rpc, &metricsServer{r: r})
 	go func() { _ = r.rpc.Serve(lis) }()
 	r.addr = lis.Addr().String()
 	return r, nil
@@ -95,11 +98,18 @@ func (r *Receiver) Requests() []*collogspb.ExportLogsServiceRequest {
 	return append([]*collogspb.ExportLogsServiceRequest(nil), r.reqs...)
 }
 
+// MetricsRequests is every metrics request accepted so far, in order.
+func (r *Receiver) MetricsRequests() []*collmetricspb.ExportMetricsServiceRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*collmetricspb.ExportMetricsServiceRequest(nil), r.metrics...)
+}
+
 // Reset forgets every request accepted so far.
 func (r *Receiver) Reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.reqs = nil
+	r.reqs, r.metrics = nil, nil
 }
 
 // Fail makes the receiver refuse every request, or accept them again.
@@ -130,20 +140,37 @@ func (r *Receiver) Close() {
 func (r *Receiver) accept(req *collogspb.ExportLogsServiceRequest) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.refusal(); err != nil {
+		return err
+	}
+	r.reqs = append(r.reqs, req)
+	return nil
+}
+
+func (r *Receiver) acceptMetrics(req *collmetricspb.ExportMetricsServiceRequest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.refusal(); err != nil {
+		return err
+	}
+	r.metrics = append(r.metrics, req)
+	return nil
+}
+
+func (r *Receiver) refusal() error {
 	if r.fail {
 		return errors.New("down")
 	}
 	if r.throttle {
 		return errThrottled
 	}
-	r.reqs = append(r.reqs, req)
 	return nil
 }
 
 // serveHTTP is what an OTLP/HTTP receiver expects: a protobuf body posted
-// to /v1/logs, answered with a protobuf response.
+// to /v1/logs or /v1/metrics, answered with a protobuf response.
 func (r *Receiver) serveHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.URL.Path != "/v1/logs" || req.Header.Get("Content-Type") != "application/x-protobuf" {
+	if (req.URL.Path != "/v1/logs" && req.URL.Path != "/v1/metrics") || req.Header.Get("Content-Type") != "application/x-protobuf" {
 		http.Error(w, "wrong path or content type", http.StatusBadRequest)
 		return
 	}
@@ -152,28 +179,64 @@ func (r *Receiver) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.URL.Path == "/v1/metrics" {
+		var msg collmetricspb.ExportMetricsServiceRequest
+		if err := proto.Unmarshal(body, &msg); err != nil {
+			http.Error(w, "not an ExportMetricsServiceRequest: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := r.acceptMetrics(&msg); err != nil {
+			r.refuse(w, err)
+			return
+		}
+		out, _ := proto.Marshal(&collmetricspb.ExportMetricsServiceResponse{})
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		_, _ = w.Write(out)
+		return
+	}
 	var msg collogspb.ExportLogsServiceRequest
 	if err := proto.Unmarshal(body, &msg); err != nil {
 		http.Error(w, "not an ExportLogsServiceRequest: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := r.accept(&msg); err != nil {
-		if errors.Is(err, errThrottled) {
-			r.mu.Lock()
-			after := r.retryAfter
-			r.mu.Unlock()
-			if after > 0 {
-				w.Header().Set("Retry-After", strconv.Itoa(int(after/time.Second)))
-			}
-			http.Error(w, err.Error(), http.StatusTooManyRequests)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		r.refuse(w, err)
 		return
 	}
 	out, _ := proto.Marshal(&collogspb.ExportLogsServiceResponse{})
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	_, _ = w.Write(out)
+}
+
+// refuse answers a refusal the way a receiver does: 429 with the wait it
+// names for a throttle, 503 for anything else.
+func (r *Receiver) refuse(w http.ResponseWriter, err error) {
+	if errors.Is(err, errThrottled) {
+		r.mu.Lock()
+		after := r.retryAfter
+		r.mu.Unlock()
+		if after > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(after/time.Second)))
+		}
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusServiceUnavailable)
+}
+
+type metricsServer struct {
+	collmetricspb.UnimplementedMetricsServiceServer
+	r *Receiver
+}
+
+func (s *metricsServer) Export(_ context.Context, req *collmetricspb.ExportMetricsServiceRequest) (*collmetricspb.ExportMetricsServiceResponse, error) {
+	if err := s.r.acceptMetrics(req); err != nil {
+		if errors.Is(err, errThrottled) {
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
+		}
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+	return &collmetricspb.ExportMetricsServiceResponse{}, nil
 }
 
 type logsServer struct {

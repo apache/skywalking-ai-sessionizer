@@ -43,6 +43,8 @@ this machine. Every command runs once per enabled adapter.
 | `source_root` | empty | Where Claude Code keeps its files. Empty resolves it the way Claude Code does: `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME/claude`, then `~/.claude`, each followed by `projects`. Set it only to collect from a copy or a mounted directory. |
 | `include` | empty | Session filters, see below. Empty means every session is a candidate. |
 | `exclude` | `/private/tmp/**` | Session filters, see below. |
+| `metrics` | `false` | Derive the runtime's own metric family from the landed files, `claude_code.token.usage` in phase one, name for name with the runtime's exporter. See [Metrics](export-otlp.md#metrics). |
+| `metrics_lookback` | `24h` | How far back the first derivation over a root reaches. A duration such as `24h`, or a number of days such as `7d`; `0` or `none` derives everything. Later passes derive every new file whole. |
 
 ### Session filters
 

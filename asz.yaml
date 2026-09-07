@@ -53,6 +53,15 @@ adapters:
     exclude:
       - /private/tmp/**
 
+    # The runtime's own metric family, derived from the landed files and
+    # sent by asz push: claude_code.token.usage, name for name and
+    # attribute for attribute with Claude Code's OpenTelemetry exporter, so
+    # a receiver holds one family whichever produced it. The first
+    # derivation over a root with history reaches back metrics_lookback,
+    # 24h unless set; 0 or none means everything.
+    metrics: false
+    metrics_lookback: 24h
+
     collector:
       # watch polls the source continuously. once makes a single pass and
       # exits, which is the backfill path over history that already exists.

@@ -30,6 +30,11 @@ import (
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
+	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
@@ -540,5 +545,56 @@ func TestPassSendsSessionsOldestFirstWithTheirRounds(t *testing.T) {
 	want := []string{"sess1/sd", "sess1/sd", "sess1/sf", "sess0/sd", "sess0/sf"}
 	if strings.Join(order, " ") != strings.Join(want, " ") {
 		t.Fatalf("sent %v, want %v: the session landed first goes first, its rounds after its files", order, want)
+	}
+}
+
+// A spooled metrics request is sent once over either transport, under
+// asz's identity, and marked pushed like a file.
+func TestPushSendsTheMetricsSpoolUnderTheServiceIdentity(t *testing.T) {
+	for _, protocol := range protocols {
+		t.Run(protocol, func(t *testing.T) {
+			z, _ := zoneWithOneSession(t)
+			req := &collmetricspb.ExportMetricsServiceRequest{ResourceMetrics: []*metricspb.ResourceMetrics{{
+				Resource: &resourcepb.Resource{Attributes: []*commonpb.KeyValue{
+					{Key: "service.name", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "claude-code"}}},
+					{Key: "service.version", Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "2.1.245"}}},
+				}},
+				ScopeMetrics: []*metricspb.ScopeMetrics{{Metrics: []*metricspb.Metric{{Name: "claude_code.token.usage", Unit: "tokens",
+					Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{DataPoints: []*metricspb.NumberDataPoint{{TimeUnixNano: 1, Value: &metricspb.NumberDataPoint_AsInt{AsInt: 7}}}}}}}}},
+			}}}
+			data, err := proto.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.NewSpool(z).Put("otlp", data, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			rcv := startReceiver(t)
+			p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, protocol), Version: "test", ServiceName: "",
+				Runtimes: map[string]string{"test": "Test Runtime"}, MetricsService: "Claude Code", Layer: "AI_AGENT", InstanceID: "sender-1"}
+			st, err := p.Pass()
+			if err != nil || len(st.Errors) != 0 {
+				t.Fatal(err, st.Errors)
+			}
+			if st.Metrics != 1 {
+				t.Fatalf("sent %d metrics requests, want 1", st.Metrics)
+			}
+			got := rcv.MetricsRequests()
+			if len(got) != 1 {
+				t.Fatalf("the receiver holds %d metrics requests", len(got))
+			}
+			res := otlptest.Attrs(got[0].GetResourceMetrics()[0].GetResource().GetAttributes())
+			if res["service.name"] != "Claude Code" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI_AGENT" ||
+				res["telemetry.sdk.name"] != "asz" || res["service.version"] != "2.1.245" {
+				t.Fatalf("resource on the wire: %v", res)
+			}
+			if got[0].GetResourceMetrics()[0].GetScopeMetrics()[0].GetMetrics()[0].GetSum().GetDataPoints()[0].GetAsInt() != 7 {
+				t.Fatal("the points did not travel unchanged")
+			}
+			st, err = p.Pass()
+			if err != nil || st.Metrics != 0 || len(rcv.MetricsRequests()) != 1 {
+				t.Fatalf("a second pass sent the spool again: %d, %v", st.Metrics, err)
+			}
+		})
 	}
 }

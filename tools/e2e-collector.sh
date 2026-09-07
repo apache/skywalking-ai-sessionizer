@@ -46,6 +46,9 @@ service:
     logs:
       receivers: [otlp]
       exporters: [file]
+    metrics:
+      receivers: [otlp]
+      exporters: [file]
 YAML
 
 # push_over PROTOCOL ENDPOINT: build a session, start a Collector, push the

@@ -41,7 +41,7 @@ repeats every `interval`; with `-once` or `mode: once` it makes one pass and exi
 pass:
 
 ```text
-[17:14:09] sessions=44 sources=5867 landed=5867 records=359292 bytes=1.0GB indexed=359292 gone=0 conflicts=0 busy=0 pending=0 errors=0 (2m39.473s)
+[17:14:09] sessions=44 sources=5867 landed=5867 records=359292 bytes=1.0GB indexed=359292 gone=0 conflicts=0 busy=0 pending=0 metrics=5210 errors=0 (2m39.473s)
 ```
 
 | Field | Meaning |
@@ -54,6 +54,7 @@ pass:
 | `conflicts` | a source was rotated, truncated or rewritten behind its cursor. Collection stopped for it. |
 | `busy` | a session skipped because another collector holds its lock |
 | `pending` | a source still had data when the per-pass limit was reached |
+| `metrics` | metrics requests derived this pass, with `metrics: true` on the adapter; absent otherwise |
 | `errors` | listed on standard error after the line |
 
 `pending` or `errors` above zero means the pass did not collect everything, and the command exits
@@ -163,11 +164,12 @@ Sends every landed file and every round not yet sent to the OpenTelemetry logs r
 `export.otlp.interval`. One line per pass:
 
 ```text
-[10:12:03] files=306 bytes=47.9MB wire=48.0MB requests=5 paused=0s errors=0 (1.1s)
+[10:12:03] files=306 metrics=41 bytes=47.9MB wire=48.0MB requests=46 paused=0s errors=0 (1.1s)
 ```
 
-`wire` is what went out, the requests as encoded, and `paused` is how long the pass waited for
-budget under `export.otlp.max_bytes_per_minute`. A pass with errors exits non-zero with `-once`;
+`metrics` counts the spooled metrics requests sent, `wire` is what went out, the requests as
+encoded, and `paused` is how long the pass waited for budget under
+`export.otlp.max_bytes_per_minute`. A pass with errors exits non-zero with `-once`;
 the files whose requests failed are not recorded as sent and go again on the next pass. See
 [Export over OpenTelemetry](export-otlp.md).
 

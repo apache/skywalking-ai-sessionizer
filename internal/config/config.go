@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -88,6 +90,31 @@ type OTLP struct {
 	Interval time.Duration `yaml:"interval"`
 }
 
+// Lookback is the metrics look-back as a duration: 24h when unset, zero
+// for 0 or none, and a d suffix counts days, since a look-back is spoken of
+// in days.
+func (a Adapter) Lookback() (time.Duration, error) {
+	s := strings.TrimSpace(a.MetricsLookback)
+	switch s {
+	case "":
+		return 24 * time.Hour, nil
+	case "0", "none":
+		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("config: metrics_lookback %q is not a number of days", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("config: metrics_lookback %q is not a duration such as 24h or 7d", s)
+	}
+	return d, nil
+}
+
 // Storage locates the landing zone.
 type Storage struct {
 	// Root is where landed data is written. Default "./data", i.e. beside the
@@ -115,6 +142,17 @@ type Adapter struct {
 	// matching. Anything else is a glob against the source directory name.
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
+
+	// Metrics turns on the runtime's own metric family, derived from the
+	// landed files: the same names and attributes the runtime's exporter
+	// sends, so a receiver sees one family whichever produced it. Phase one
+	// is token usage. It cannot be on while a claude-code-otlp adapter with
+	// metrics is enabled, since the two would count the same tokens twice.
+	Metrics bool `yaml:"metrics"`
+	// MetricsLookback bounds the first derivation over a root that has
+	// history: a minute older than this is not derived. A duration such as
+	// 24h or 7d; empty means 24h; 0 or none means everything.
+	MetricsLookback string `yaml:"metrics_lookback"`
 
 	Collector Collector `yaml:"collector"`
 }
@@ -151,6 +189,9 @@ func Default() *Config {
 			Name:    AdapterClaudeCodeLocal,
 			Enabled: true,
 			Exclude: []string{"/private/tmp/**"},
+			// The look-back is written out, as every default is, so the
+			// file says what the first derivation reaches back to.
+			MetricsLookback: "24h",
 			Collector: Collector{
 				Mode:          ModeWatch,
 				Interval:      5 * time.Second,
@@ -258,6 +299,9 @@ func (c *Config) Validate() error {
 		seen[a.Name] = true
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)
+		}
+		if _, err := a.Lookback(); err != nil {
+			return fmt.Errorf("adapter %q: %w", a.Name, err)
 		}
 	}
 	if p := c.Export.OTLP.Protocol; p != "grpc" && p != "http" {

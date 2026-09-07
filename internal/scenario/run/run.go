@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/repack"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
@@ -161,6 +162,11 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		if err := collect(f, out); err != nil {
 			return nil, "", err
 		}
+		// The runtime's metric family, derived as the collector derives it,
+		// after each landing and before anything later happens to the root.
+		if err := derive(out); err != nil {
+			return nil, "", err
+		}
 		round, err = parseAll(out, built.Session, ex.Parse.MaxRoundBytes)
 		if err != nil {
 			rep.fail("%s %s: parse: %v", f, name, err)
@@ -235,7 +241,9 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		{"immutable_rounds", ex.Properties.ImmutableRounds, func() ([]string, error) { return expect.ImmutableRounds(out, session) }},
 		{"records_well_formed", ex.Properties.RecordsWellFormed, func() ([]string, error) { return expect.RecordsWellFormed(out, session) }},
 		{"repack_keeps_structure", ex.Properties.RepackKeepsStructure, func() ([]string, error) { return repackKeepsStructure(out, session, ex.Parse.MaxRoundBytes) }},
-		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) { return pushFollowsTheWire(out, session, f, ex.Push) }},
+		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) {
+			return pushFollowsTheWire(out, session, f, ex.Push, expectedTokens(built.Plan), expect.On(ex.Properties.MetricsMatchThePlan))
+		}},
 		{"view_covers_the_session", ex.Properties.ViewCoversTheSession, func() ([]string, error) { return expect.ViewCoversTheSession(out, session) }},
 		{"reproducible", ex.Properties.Reproducible, func() ([]string, error) {
 			// Two parses of identical landed evidence must produce identical
@@ -327,6 +335,20 @@ func lose(out, session string, l expect.Lose, ctx *expect.Context) (string, erro
 	}
 	rel, _ := filepath.Rel(out, f.Path)
 	return filepath.ToSlash(rel), nil
+}
+
+// derive writes the runtime's metric family for what is landed and not yet
+// derived, with no look-back: a scenario is history by construction.
+func derive(out string) error {
+	d := &metrics.Deriver{Zone: storage.NewZone(out), Options: metrics.Options{Version: "check", Now: func() time.Time { return time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) }}}
+	st, err := d.Pass(nil)
+	if err != nil {
+		return err
+	}
+	if len(st.Errors) != 0 {
+		return fmt.Errorf("metrics: %v", st.Errors)
+	}
+	return nil
 }
 
 // collect lands a runtime format's source through its adapter. An sd build
@@ -512,6 +534,41 @@ func names(p *scenario.Plan) map[string]string {
 	out := map[string]string{"main": "main"}
 	for _, s := range p.Streams {
 		out[s.Label] = s.ID
+	}
+	return out
+}
+
+// expectedTokens is what the plan says the runtime's exporter would have
+// counted: every call's usage once, whatever its fragments repeat, under
+// the stream that made it, main or a child. A lost call left no record, a
+// lost stream left no file, and a replayed copy is the same call again.
+func expectedTokens(p *scenario.Plan) map[string]int64 {
+	lost := map[string]bool{}
+	for _, s := range p.Streams {
+		if s.Lost {
+			lost[s.ID] = true
+		}
+	}
+	seen := map[string]bool{}
+	out := map[string]int64{}
+	for i := range p.Events {
+		e := &p.Events[i]
+		if e.Kind != scenario.EvFragment || e.Lost || lost[e.Stream] || seen[e.Call] {
+			continue
+		}
+		seen[e.Call] = true
+		source := metrics.SourceSubagent
+		if e.Stream == "main" {
+			source = metrics.SourceMain
+		}
+		for typ, n := range map[string]int{
+			metrics.TypeInput: e.Usage.In, metrics.TypeOutput: e.Usage.Out,
+			metrics.TypeCacheRead: e.Usage.CacheRead, metrics.TypeCacheCreation: e.Usage.CacheWrite,
+		} {
+			if n > 0 {
+				out[source+"/"+typ] += int64(n)
+			}
+		}
 	}
 	return out
 }
