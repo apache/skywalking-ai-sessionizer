@@ -33,6 +33,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeotlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
@@ -132,5 +133,59 @@ func TestReceiverWithMetricsOffDropsThem(t *testing.T) {
 	}
 	if st := rcv.Stats(); st.Metrics != 0 || st.MetricsDropped != 1 {
 		t.Fatalf("stats %+v", st)
+	}
+}
+
+// The whole path of the runtime's own metrics: sent by the exporter to the
+// receiver, landed in the spool, sent on by asz push under asz's identity
+// with the points untouched, and sent once.
+func TestReceivedMetricsReachTheReceiverOfThePush(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	rcv := &claudecodeotlp.Receiver{Zone: z, Listen: "127.0.0.1:0", LandMetrics: true}
+	if err := rcv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer rcv.Stop()
+	runtime, err := otlp.NewClient(otlp.Options{Protocol: otlp.ProtocolGRPC, Endpoint: rcv.Addr(), Timeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	if err := runtime.ExportMetrics(request()); err != nil {
+		t.Fatal(err)
+	}
+
+	oap, err := otlptest.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oap.Close()
+	for _, protocol := range []string{otlp.ProtocolGRPC, otlp.ProtocolHTTP} {
+		client, err := oap.Client(protocol)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := &otlp.Pusher{Zone: z, Client: client, Version: "test", ServiceName: "Claude Code", InstanceID: "sender-1", Layer: "AI_AGENT"}
+		st, err := p.Pass()
+		if err != nil || len(st.Errors) != 0 {
+			t.Fatal(err, st.Errors)
+		}
+		_ = client.Close()
+		got := oap.MetricsRequests()
+		if protocol == otlp.ProtocolGRPC {
+			if st.Metrics != 1 || len(got) != 1 {
+				t.Fatalf("%s: sent %d, the receiver holds %d", protocol, st.Metrics, len(got))
+			}
+			res := otlptest.Attrs(got[0].GetResourceMetrics()[0].GetResource().GetAttributes())
+			if res["service.name"] != "Claude Code" || res["service.instance.id"] != "sender-1" || res["service.layer"] != "AI_AGENT" {
+				t.Fatalf("resource on the wire: %v", res)
+			}
+			m := got[0].GetResourceMetrics()[0].GetScopeMetrics()[0].GetMetrics()[0]
+			if m.GetName() != "claude_code.token.usage" || m.GetSum().GetDataPoints()[0].GetAsInt() != 42 {
+				t.Fatalf("the runtime's points did not travel unchanged: %v", m)
+			}
+		} else if st.Metrics != 0 || len(got) != 1 {
+			t.Fatalf("a second pass over the other transport sent the request again: %d, %d", st.Metrics, len(got))
+		}
 	}
 }
