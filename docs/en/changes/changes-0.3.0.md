@@ -34,3 +34,10 @@
   budget and once-only rule as the files. `metrics_lookback`, 24 hours unless set, bounds the
   first derivation over a root with history. Every scenario checks the points on the wire against
   its plan, and the Collector job verifies the tokens that arrive.
+
+- `claude-code-otlp` is a second adapter for the runtime: an OpenTelemetry receiver its own
+  exporter is pointed at, gRPC and HTTP with protobuf on one `listen` port. Phase one lands the
+  metrics requests it receives in the same spool, bytes as received, for `asz push`; logs and
+  traces are accepted and dropped, counted in the status. It runs beside the local adapter under
+  `asz collect` and `asz view`. `metrics` may be on for one adapter, never both, and the
+  configuration refuses to load otherwise, so the same tokens are never counted twice.

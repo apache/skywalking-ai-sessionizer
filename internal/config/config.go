@@ -143,12 +143,17 @@ type Adapter struct {
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
 
-	// Metrics turns on the runtime's own metric family, derived from the
-	// landed files: the same names and attributes the runtime's exporter
-	// sends, so a receiver sees one family whichever produced it. Phase one
-	// is token usage. It cannot be on while a claude-code-otlp adapter with
-	// metrics is enabled, since the two would count the same tokens twice.
+	// Metrics, on claude-code-local, turns on the runtime's own metric
+	// family derived from the landed files: the same names and attributes
+	// the runtime's exporter sends, so a receiver sees one family whichever
+	// produced it. Phase one is token usage. On claude-code-otlp it says
+	// the received metrics are landed and pushed. It cannot be on for both
+	// at once, since the two would count the same tokens twice.
 	Metrics bool `yaml:"metrics"`
+	// Listen, on claude-code-otlp, is the address the receiver listens on
+	// for the runtime's exporter, such as 127.0.0.1:4317, over gRPC and
+	// HTTP with protobuf on the one port.
+	Listen string `yaml:"listen"`
 	// MetricsLookback bounds the first derivation over a root that has
 	// history: a minute older than this is not derived. A duration such as
 	// 24h or 7d; empty means 24h; 0 or none means everything.
@@ -179,6 +184,9 @@ const (
 
 	// AdapterClaudeCodeLocal reads Claude Code's local files. Pull posture.
 	AdapterClaudeCodeLocal = "claude-code-local"
+	// AdapterClaudeCodeOTLP receives what Claude Code's own OpenTelemetry
+	// exporter sends. Push posture, the runtime's side.
+	AdapterClaudeCodeOTLP = "claude-code-otlp"
 )
 
 // Default returns the configuration used when none is supplied.
@@ -192,6 +200,19 @@ func Default() *Config {
 			// The look-back is written out, as every default is, so the
 			// file says what the first derivation reaches back to.
 			MetricsLookback: "24h",
+			Collector: Collector{
+				Mode:          ModeWatch,
+				Interval:      5 * time.Second,
+				MaxDeltaBytes: 2 << 20,
+			},
+		}, {
+			// The runtime's own exporter, received. Off until pointed at:
+			// the file names the address the runtime would be given, and
+			// metrics on here means the local adapter leaves them to it.
+			Name:    AdapterClaudeCodeOTLP,
+			Enabled: false,
+			Listen:  "127.0.0.1:4317",
+			Metrics: true,
 			Collector: Collector{
 				Mode:          ModeWatch,
 				Interval:      5 * time.Second,
@@ -289,6 +310,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: storage.root must not be empty")
 	}
 	seen := map[string]bool{}
+	localMetrics, receiverMetrics := false, false
 	for i, a := range c.Adapters {
 		if a.Name == "" {
 			return fmt.Errorf("config: adapters[%d] has no name", i)
@@ -297,6 +319,15 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("config: duplicate adapter %q", a.Name)
 		}
 		seen[a.Name] = true
+		if a.Name == AdapterClaudeCodeOTLP && a.Enabled {
+			if a.Listen == "" {
+				return fmt.Errorf("config: adapter %q needs listen, the address the runtime's exporter is pointed at, such as 127.0.0.1:4317", a.Name)
+			}
+			receiverMetrics = receiverMetrics || a.Metrics
+		}
+		if a.Name == AdapterClaudeCodeLocal && a.Enabled && a.Metrics {
+			localMetrics = true
+		}
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)
 		}
@@ -306,6 +337,12 @@ func (c *Config) Validate() error {
 	}
 	if p := c.Export.OTLP.Protocol; p != "grpc" && p != "http" {
 		return fmt.Errorf("config: export.otlp.protocol is %q, want grpc or http", p)
+	}
+	// The same tokens must not be counted twice: derived from the
+	// transcripts and received from the runtime's exporter are two sources
+	// of one metric, and a root sends one of them.
+	if localMetrics && receiverMetrics {
+		return fmt.Errorf("config: %s has metrics on while %s is enabled with metrics; the two would count the same tokens twice, so turn one off", AdapterClaudeCodeLocal, AdapterClaudeCodeOTLP)
 	}
 	return nil
 }

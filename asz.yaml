@@ -62,6 +62,17 @@ adapters:
     metrics: false
     metrics_lookback: 24h
 
+  # The runtime's own OpenTelemetry exporter, received here. Point Claude
+  # Code at listen with CLAUDE_CODE_ENABLE_TELEMETRY=1,
+  # OTEL_METRICS_EXPORTER=otlp and OTEL_EXPORTER_OTLP_ENDPOINT, over gRPC
+  # or http/protobuf. Phase one lands its metrics in the spool for asz push;
+  # logs and traces are accepted and dropped. metrics may be on here or on
+  # claude-code-local, never both, so the same tokens are not counted twice.
+  - name: claude-code-otlp
+    enabled: false
+    listen: 127.0.0.1:4317
+    metrics: true
+
     collector:
       # watch polls the source continuously. once makes a single pass and
       # exits, which is the backfill path over history that already exists.

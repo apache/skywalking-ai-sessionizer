@@ -57,11 +57,44 @@ func TestRepoConfigSpellsOutEveryValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Adapters) != 1 {
-		t.Fatalf("adapters: got %d, want 1", len(got.Adapters))
+	if len(got.Adapters) != 2 {
+		t.Fatalf("adapters: got %d, want the local adapter and the receiver", len(got.Adapters))
 	}
-	a := got.Adapters[0]
-	if a.Collector.Mode == "" || a.Collector.Interval == 0 || a.Collector.MaxDeltaBytes == 0 {
-		t.Fatalf("collector values not spelled out: %+v", a.Collector)
+	for _, a := range got.Adapters {
+		if a.Collector.Mode == "" || a.Collector.Interval == 0 || a.Collector.MaxDeltaBytes == 0 {
+			t.Fatalf("%s: collector values not spelled out: %+v", a.Name, a.Collector)
+		}
+	}
+}
+
+// The receiver adapter needs an address, and the same tokens are never
+// counted twice: local derivation and the runtime's exporter cannot both
+// have metrics on.
+func TestReceiverNeedsAnAddressAndMetricsComeFromOneSource(t *testing.T) {
+	cfg := Default()
+	if cfg.Adapters[1].Name != AdapterClaudeCodeOTLP {
+		t.Fatalf("the defaults list %s second, want the receiver", cfg.Adapters[1].Name)
+	}
+	cfg.Adapters[1].Enabled = true
+	cfg.Adapters[1].Listen = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a receiver without listen was accepted")
+	}
+	cfg.Adapters[1].Listen = "127.0.0.1:4317"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a receiver with metrics beside a local adapter without metrics must be accepted: %v", err)
+	}
+	cfg.Adapters[0].Metrics = true
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("metrics on both adapters was accepted")
+	}
+	cfg.Adapters[1].Metrics = false
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("local metrics beside a receiver without metrics must be accepted: %v", err)
+	}
+	cfg.Adapters[1].Enabled = false
+	cfg.Adapters[1].Metrics = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a disabled receiver must not count: %v", err)
 	}
 }

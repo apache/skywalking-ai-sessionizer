@@ -149,8 +149,14 @@ transcript. Those are the runtime's exporter's alone. The first derivation over 
 history is bounded by `metrics_lookback`, 24 hours unless set, so switching the flag on does not
 send a year of tokens; every later pass derives each new file whole.
 
+The other source of the same family is the runtime's exporter itself: the `claude-code-otlp`
+adapter receives what Claude Code sends and lands each metrics request in the same spool, bytes as
+received. One root sends one source: `metrics` may be on for the local adapter or for the
+receiver, and the configuration refuses both.
+
 The points wait in the storage root's `_metrics/` spool, one write-once file per landed file
-with points, and go out in order under the same budget and the same once-only rule as the files.
+with points or per request received, and go out in order under the same budget and the same
+once-only rule as the files.
 On the way out the resource is normalised to asz's identity, the service, the layer, the sender,
 so the OAP holds one service for the runtime. A receiver that answers with a partial success is
 treated as having refused the request, as for logs.

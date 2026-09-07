@@ -44,6 +44,7 @@ this machine. Every command runs once per enabled adapter.
 | `include` | empty | Session filters, see below. Empty means every session is a candidate. |
 | `exclude` | `/private/tmp/**` | Session filters, see below. |
 | `metrics` | `false` | Derive the runtime's own metric family from the landed files, `claude_code.token.usage` in phase one, name for name with the runtime's exporter. See [Metrics](export-otlp.md#metrics). |
+| `listen` | none | On `claude-code-otlp` only: the address the runtime's exporter is pointed at, such as `127.0.0.1:4317`, serving gRPC and HTTP with protobuf on the one port. |
 | `metrics_lookback` | `24h` | How far back the first derivation over a root reaches. A duration such as `24h`, or a number of days such as `7d`; `0` or `none` derives everything. Later passes derive every new file whole. |
 
 ### Session filters
@@ -111,6 +112,24 @@ export:
 | `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |
 
 See [Export over OpenTelemetry](export-otlp.md) for what is sent.
+
+## The receiver adapter
+
+```yaml
+adapters:
+  - name: claude-code-otlp
+    enabled: true
+    listen: 127.0.0.1:4317
+    metrics: true
+```
+
+`claude-code-otlp` receives what Claude Code's own OpenTelemetry exporter sends, with the
+runtime configured as its documentation says: `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
+`OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` at `listen`, over gRPC or
+`http/protobuf`. Phase one lands its metrics in the storage root's spool for `asz push`; logs and
+traces are accepted and dropped. It runs while `asz collect` or `asz view` runs, beside the
+local adapter, and not with `-once`. `metrics` may be on here or on `claude-code-local`, never
+on both: the configuration refuses to load, since the two would count the same tokens twice.
 
 ## Precedence
 

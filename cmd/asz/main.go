@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeotlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
@@ -163,18 +164,68 @@ func main() {
 		os.Exit(2)
 	}
 
+	// The receiver adapters listen beside whatever else the command does:
+	// collect and view run for as long as the process does, and a receiver
+	// only makes sense while something is listening. The local adapter runs
+	// in the foreground, as before.
+	var local []config.Adapter
 	for _, ad := range cfg.Adapters {
 		if !ad.Enabled {
 			continue
 		}
-		if ad.Name != config.AdapterClaudeCodeLocal {
+		switch ad.Name {
+		case config.AdapterClaudeCodeLocal:
+			local = append(local, ad)
+		case config.AdapterClaudeCodeOTLP:
+			if cmd != "collect" && cmd != "view" {
+				continue
+			}
+			if *once {
+				fmt.Fprintf(os.Stderr, "%s: the receiver runs in watch mode only; not started with -once\n", ad.Name)
+				continue
+			}
+			if err := startReceiver(cfg, ad); err != nil {
+				fatal(err)
+			}
+		default:
 			fmt.Fprintf(os.Stderr, "skipping unknown adapter %q\n", ad.Name)
-			continue
 		}
+	}
+	for _, ad := range local {
 		if err := run(cfg, ad, *once); err != nil {
 			fatal(err)
 		}
 	}
+	if len(local) == 0 && receivers > 0 {
+		// Nothing else keeps the process alive: the receivers do.
+		select {}
+	}
+}
+
+// receivers counts the receiver adapters started.
+var receivers int
+
+// startReceiver opens a claude-code-otlp receiver on its address and leaves
+// it listening for the life of the process.
+func startReceiver(cfg *config.Config, ad config.Adapter) error {
+	zoneRoot, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
+		return err
+	}
+	r := &claudecodeotlp.Receiver{Zone: storage.NewZone(zoneRoot), Listen: ad.Listen, LandMetrics: ad.Metrics}
+	if err := r.Start(); err != nil {
+		return err
+	}
+	receivers++
+	what := "metrics landed in the spool"
+	if !ad.Metrics {
+		what = "metrics accepted and dropped, metrics: false"
+	}
+	fmt.Printf("receiver    : %s on %s, gRPC and HTTP; %s; logs and traces accepted and dropped\n", ad.Name, r.Addr(), what)
+	return nil
 }
 
 func cmdSources(_ *config.Config, ad config.Adapter, _ bool) error {

@@ -67,6 +67,7 @@ internal/export/otlp/           sends landed files and rounds to an OpenTelemetr
 internal/metrics/               derives the runtime's own metric family from landed Session Data into the spool; collector side
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
+internal/adapters/claudecodeotlp/ the claude-code-otlp adapter: a receiver for the runtime's own exporter, metrics into the spool
 internal/adapters/mock/         the mock dialect: Session Data a scenario writes directly
 internal/scenario/              scenarios: the model, the clock, and the two writers (collector side)
 internal/scenario/expect/       expectation files evaluated over a root (server side)

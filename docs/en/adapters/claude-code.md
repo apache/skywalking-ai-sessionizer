@@ -337,6 +337,17 @@ runtime's auxiliary calls, which never reach a transcript. Those come from the e
 The first derivation over a root with history reaches back `metrics_lookback`, 24 hours unless
 set. See [Metrics](../setup/export-otlp.md#metrics).
 
+### The runtime's exporter, received
+
+`claude-code-otlp` is the other adapter for this runtime: an OpenTelemetry receiver its
+exporter is pointed at, over gRPC or HTTP with protobuf on one port. Phase one lands the metrics
+requests it receives in the spool, bytes as received, and `asz push` sends them under asz's
+identity; logs and traces are accepted and dropped. It lands no transcript and reads none, so it
+adds no structure; the two adapters meet only in the spool, and `metrics` is on for one of them.
+The runtime's events, with the latency and cost a transcript never carries, are the second phase,
+and the question there is whether they land as Session Data joined to `llm.call` by the request
+id or travel untouched.
+
 ## Local data hazards
 
 Behaviours that will break a naive reader:
