@@ -326,10 +326,12 @@ family from what it landed, under the exporter's metric name, so a receiver hold
 whichever produced the points. Phase one is `claude_code.token.usage`: the usage of a call is its
 last fragment's in line order, as the assembler reads it, and only a finished call counts;
 `query_source` is `main` for the session's own transcript and `subagent` for a child's; `model`
-is `message.model`; `session.id` is the session. The exporter's account, organisation, speed,
-effort and attribution labels are not on a transcript and are not added, and neither are its
-auxiliary calls. Points are monotonic delta sums per minute whose windows never overlap, and a
-call is counted once however many landed files its records reach.
+is `message.model`; `session.id` is the session. The exporter's account, organisation, terminal,
+speed, effort and attribution labels are not on a transcript and are not added, and neither are
+its auxiliary calls. Points are monotonic delta sums per minute whose windows never overlap, a
+double for every type as the exporter writes them, and a call is counted once however many
+landed files its records reach. A capture of the exporter's own request is the parity fixture
+the derivation is tested against.
 
 What the transcripts do not carry is not derived: cost, per-request latency, tool execution time,
 active time, lines of code, commits, pull requests, the session start type, and the tokens of the

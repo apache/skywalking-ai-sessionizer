@@ -1,0 +1,115 @@
+{
+ "resourceMetrics": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "host.arch",
+      "value": {
+       "stringValue": "arm64"
+      }
+     },
+     {
+      "key": "os.type",
+      "value": {
+       "stringValue": "darwin"
+      }
+     },
+     {
+      "key": "os.version",
+      "value": {
+       "stringValue": "25.6.0"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "claude-code"
+      }
+     },
+     {
+      "key": "service.version",
+      "value": {
+       "stringValue": "2.1.260"
+      }
+     }
+    ]
+   },
+   "scopeMetrics": [
+    {
+     "scope": {
+      "name": "com.anthropic.claude_code",
+      "version": "2.1.260"
+     },
+     "metrics": [
+      {
+       "name": "claude_code.session.count",
+       "description": "Count of CLI sessions started",
+       "sum": {
+        "dataPoints": [
+         {
+          "attributes": [
+           {
+            "key": "user.id",
+            "value": {
+             "stringValue": "redacted"
+            }
+           },
+           {
+            "key": "session.id",
+            "value": {
+             "stringValue": "redacted"
+            }
+           },
+           {
+            "key": "organization.id",
+            "value": {
+             "stringValue": "redacted"
+            }
+           },
+           {
+            "key": "user.email",
+            "value": {
+             "stringValue": "redacted"
+            }
+           },
+           {
+            "key": "user.account_uuid",
+            "value": {
+             "stringValue": "redacted"
+            }
+           },
+           {
+            "key": "user.account_id",
+            "value": {
+             "stringValue": "redacted"
+            }
+           },
+           {
+            "key": "terminal.type",
+            "value": {
+             "stringValue": "non-interactive"
+            }
+           },
+           {
+            "key": "start_type",
+            "value": {
+             "stringValue": "fresh"
+            }
+           }
+          ],
+          "startTimeUnixNano": "1788764580903000000",
+          "timeUnixNano": "1788764582903000000",
+          "asDouble": 1
+         }
+        ],
+        "aggregationTemporality": "AGGREGATION_TEMPORALITY_DELTA",
+        "isMonotonic": true
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

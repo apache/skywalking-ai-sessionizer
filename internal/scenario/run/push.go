@@ -303,7 +303,7 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 						}
 						for _, dp := range m.GetSum().GetDataPoints() {
 							a := otlptest.Attrs(dp.GetAttributes())
-							got[a["query_source"]+"/"+a["type"]] += dp.GetAsInt()
+							got[a["query_source"]+"/"+a["type"]] += int64(dp.GetAsDouble())
 						}
 					}
 				}
@@ -315,7 +315,7 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 			}
 		}
 		for k, v := range got {
-			if _, planned := tokens[k]; !planned {
+			if _, planned := tokens[k]; !planned && v != 0 {
 				bad("metrics: %s on the wire is %d, the plan has no such tokens", k, v)
 			}
 		}
@@ -420,8 +420,8 @@ func tokensOnTheWire(rcv *otlptest.Receiver, session string) (out []string) {
 						if a["session.id"] != session || a["type"] == "" || (a["query_source"] != metrics.SourceMain && a["query_source"] != metrics.SourceSubagent) || a["model"] == "" {
 							bad("request %d: a point carries %v", i, a)
 						}
-						if dp.GetTimeUnixNano() <= dp.GetStartTimeUnixNano() || dp.GetAsInt() <= 0 {
-							bad("request %d: a point is not a positive window of a positive count", i)
+						if _, ok := dp.GetValue().(*metricspb.NumberDataPoint_AsDouble); !ok || dp.GetTimeUnixNano() <= dp.GetStartTimeUnixNano() || dp.GetAsDouble() < 0 {
+							bad("request %d: a point is not a positive window of a double count", i)
 						}
 						key := a["query_source"] + "/" + a["type"] + "/" + a["model"]
 						windows[key] = append(windows[key], window{dp.GetStartTimeUnixNano(), dp.GetTimeUnixNano()})

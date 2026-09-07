@@ -64,7 +64,7 @@ internal/verify/                contiguity and digest checks over landed data
 internal/view/                  reads a conversation and serves it as a page
 internal/view/conversation-view/ Horizon's conversation renderer, built from the pinned commit in HORIZON_COMMIT; never edited here
 internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file, and the metrics spool
-internal/metrics/               derives the runtime's own metric family from landed Session Data into the spool; collector side
+internal/metrics/               derives the runtime's token metric from landed Session Data into the spool; collector side; testdata holds a redacted capture of the runtime's exporter
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/claudecodeotlp/ the claude-code-otlp adapter: a receiver for the runtime's own exporter, metrics into the spool

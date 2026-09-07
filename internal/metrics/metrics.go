@@ -92,6 +92,24 @@ const (
 	TypeCacheCreation = "cacheCreation"
 )
 
+// Labels the exporter puts on its token points that a transcript cannot
+// supply, so the derivation leaves them out. The parity test holds the
+// difference between the derived point and a captured one to this list.
+var NotDerivedLabels = []string{
+	"user.id", "user.email", "user.account_uuid", "user.account_id", "organization.id",
+	"terminal.type", "effort", "speed",
+	"agent.name", "skill.name", "plugin.name", "marketplace.name", "mcp_server.name", "mcp_tool.name",
+}
+
+// NotDerivedMetrics are the exporter's other metrics, which a transcript
+// cannot supply and which are never estimated. The parity test fails when
+// a capture carries a metric that is on neither list.
+var NotDerivedMetrics = []string{
+	"claude_code.session.count", "claude_code.lines_of_code.count", "claude_code.pull_request.count",
+	"claude_code.commit.count", "claude_code.cost.usage", "claude_code.code_edit_tool.decision",
+	"claude_code.active_time.total",
+}
+
 // The query sources the transcripts can tell apart. The exporter's third,
 // auxiliary, is a call that never reaches a transcript.
 const (
@@ -392,13 +410,13 @@ func deriveFile(lf storage.LandedFile, next *storage.LandedFile, since time.Time
 		if !since.IsZero() && minute.Add(time.Minute).Before(since) {
 			continue
 		}
+		// A point for every type, zero included: the exporter writes all
+		// four for each call, and a receiver reading one family should not
+		// see a type appear and vanish by source.
 		for typ, n := range map[string]int{
 			TypeInput: c.usage.Input, TypeOutput: c.usage.Output,
 			TypeCacheRead: c.usage.CacheRead, TypeCacheCreation: c.usage.CacheWrite,
 		} {
-			if n == 0 {
-				continue
-			}
 			k := point{series: series{model: c.model, source: c.source, typ: typ}, session: hdr.Session, minute: minute}
 			sums[k] += int64(n)
 		}
@@ -499,11 +517,13 @@ func request(points []point, version string) *collmetricspb.ExportMetricsService
 		if p.series.model != "" {
 			attrs = append(attrs, str("model", p.series.model))
 		}
+		// A double, as the exporter's SDK encodes its counters, so a
+		// receiver reads one value kind from both sources.
 		dps = append(dps, &metricspb.NumberDataPoint{
 			Attributes:        attrs,
 			StartTimeUnixNano: uint64(p.start.UnixNano()),
 			TimeUnixNano:      uint64(p.end.UnixNano()),
-			Value:             &metricspb.NumberDataPoint_AsInt{AsInt: p.value},
+			Value:             &metricspb.NumberDataPoint_AsDouble{AsDouble: float64(p.value)},
 		})
 	}
 	return &collmetricspb.ExportMetricsServiceRequest{ResourceMetrics: []*metricspb.ResourceMetrics{{

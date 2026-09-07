@@ -115,7 +115,7 @@ func aged(t *testing.T, path string, at time.Time) {
 }
 
 type got struct {
-	value      int64
+	value      float64
 	start, end time.Time
 }
 
@@ -153,7 +153,10 @@ func points(t *testing.T, z *storage.Zone) (map[string][]got, int) {
 					for _, dp := range sum.DataPoints {
 						a := otlptest.Attrs(dp.Attributes)
 						k := a["query_source"] + "/" + a["type"] + "/" + a["model"] + "#" + a["session.id"]
-						out[k] = append(out[k], got{value: dp.GetAsInt(), start: time.Unix(0, int64(dp.StartTimeUnixNano)).UTC(), end: time.Unix(0, int64(dp.TimeUnixNano)).UTC()})
+						if _, ok := dp.Value.(*metricspb.NumberDataPoint_AsDouble); !ok {
+							t.Fatalf("a derived point is not a double, as the exporter encodes its counters")
+						}
+						out[k] = append(out[k], got{value: dp.GetAsDouble(), start: time.Unix(0, int64(dp.StartTimeUnixNano)).UTC(), end: time.Unix(0, int64(dp.TimeUnixNano)).UTC()})
 					}
 				}
 			}
@@ -162,12 +165,24 @@ func points(t *testing.T, z *storage.Zone) (map[string][]got, int) {
 	return out, len(files)
 }
 
-func total(ps []got) int64 {
-	var n int64
+func total(ps []got) float64 {
+	var n float64
 	for _, p := range ps {
 		n += p.value
 	}
 	return n
+}
+
+// nonzero keeps the series that carry tokens: the exporter and the
+// derivation both write a point for every type, zero included.
+func nonzero(m map[string][]got) map[string][]got {
+	out := map[string][]got{}
+	for k, ps := range m {
+		if total(ps) != 0 {
+			out[k] = ps
+		}
+	}
+	return out
 }
 
 var base = time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
@@ -202,7 +217,7 @@ func TestUsageIsTheLastFragmentOfAFinishedCall(t *testing.T) {
 		t.Fatalf("derived %d files into %d requests, want 2 and 2", st.Files, st.Requests)
 	}
 	got, _ := points(t, z)
-	want := map[string]int64{
+	want := map[string]float64{
 		"main/input/claude-opus-5#s1": 15, "main/output/claude-opus-5#s1": 120,
 		"main/cacheRead/claude-opus-5#s1": 1900, "main/cacheCreation/claude-opus-5#s1": 50,
 		"main/input/claude-sonnet-5#s1": 7, "main/output/claude-sonnet-5#s1": 30,
@@ -210,11 +225,11 @@ func TestUsageIsTheLastFragmentOfAFinishedCall(t *testing.T) {
 	}
 	for k, v := range want {
 		if total(got[k]) != v {
-			t.Fatalf("%s = %d, want %d; all: %v", k, total(got[k]), v, got)
+			t.Fatalf("%s = %v, want %v; all: %v", k, total(got[k]), v, got)
 		}
 	}
-	if len(got) != len(want) {
-		t.Fatalf("%d series, want %d: an unfinished call must not count: %v", len(got), len(want), got)
+	if len(nonzero(got)) != len(want) {
+		t.Fatalf("%d series with tokens, want %d: an unfinished call must not count: %v", len(nonzero(got)), len(want), got)
 	}
 	// A second pass derives nothing; a new file is derived whole.
 	if st, err = d.Pass(nil); err != nil || st.Files != 0 || st.Requests != 0 {

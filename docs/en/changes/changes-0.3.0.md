@@ -43,6 +43,13 @@
 - A receiver's partial success is a success the protocol says not to retry: the rejected records
   or points are counted on the pass line as `rejected`, and the files are marked sent.
 
+- A capture of what Claude Code 2.1.260 itself sent to the receiver, with every identifying value
+  replaced, is the parity fixture: a test holds the derived token metric to it, the same name,
+  unit, description, kind, value encoding and token types, the same session, model, query source
+  and type labels, and a difference that is exactly the labels and metrics the export page lists
+  as not derived. The derivation now writes doubles and a point for every type, zero included, as
+  the exporter does. `tools/otlpdump` prints a spooled request as the protocol's JSON.
+
 - `claude-code-otlp` is a second adapter for the runtime: an OpenTelemetry receiver its own
   exporter is pointed at, gRPC and HTTP with protobuf on one `listen` port. Phase one lands the
   metrics requests it receives in the same spool, bytes as received, for `asz push`; logs and

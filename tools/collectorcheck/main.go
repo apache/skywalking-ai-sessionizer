@@ -57,8 +57,9 @@ type export struct {
 					AggregationTemporality any  `json:"aggregationTemporality"`
 					IsMonotonic            bool `json:"isMonotonic"`
 					DataPoints             []struct {
-						AsInt      string `json:"asInt"`
-						Attributes []attr `json:"attributes"`
+						AsInt      string  `json:"asInt"`
+						AsDouble   float64 `json:"asDouble"`
+						Attributes []attr  `json:"attributes"`
 					} `json:"dataPoints"`
 				} `json:"sum"`
 			} `json:"metrics"`
@@ -161,7 +162,10 @@ func run(root, logs string) error {
 						}
 						for _, dp := range m.Sum.DataPoints {
 							a := attrs(dp.Attributes)
-							n, _ := strconv.ParseInt(dp.AsInt, 10, 64)
+							n := int64(dp.AsDouble)
+							if dp.AsInt != "" {
+								n, _ = strconv.ParseInt(dp.AsInt, 10, 64)
+							}
 							if a["sender"] == "telemetrygen" {
 								// Received from the exporter and forwarded as sent:
 								// the unit is the exporter's to set, and this one

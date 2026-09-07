@@ -137,14 +137,20 @@ copy of it, and this table says exactly which part:
 | | The runtime's exporter | Derived from the transcripts |
 | --- | --- | --- |
 | metric | `claude_code.token.usage`, `Number of tokens used`, unit `tokens`, a monotonic delta sum | the same name, description, unit and kind |
-| `type` | `input`, `output`, `cacheRead`, `cacheCreation` | the same four |
-| `query_source` | `main`, `subagent`, `auxiliary` | `main` and `subagent`, from the stream the call was made on; the auxiliary calls never reach a transcript |
+| `type` | `input`, `output`, `cacheRead`, `cacheCreation`, a point for each even when zero | the same four, zero included |
+| `query_source` | `main`, `subagent`, `auxiliary` | `main` and `subagent`, from the stream the call was made on; the auxiliary calls, such as the Haiku call that names a session, never reach a transcript |
 | `model`, `session.id` | yes | yes |
-| account, organisation, user, `speed`, `effort`, agent, skill, plugin and MCP attribution | yes | no; a transcript does not carry them |
+| `user.id`, `user.email`, `user.account_uuid`, `user.account_id`, `organization.id`, `terminal.type`, `effort`, `speed`, and the agent, skill, plugin and MCP attribution | yes | no; a transcript does not carry them |
 | the other seven metrics: cost, active time, lines of code, commits, pull requests, sessions started, edit decisions | yes | no, and never estimated |
-| instrumentation scope | `com.anthropic.claude_code` | asz's own, so a receiver that keys on the scope sees two streams of one name; the OAP keys on the name and the labels |
+| resource | `service.name` `claude-code`, `service.version`, `host.arch`, `os.type`, `os.version` | `service.name` `claude-code`; asz normalises both on the way out |
+| instrumentation scope | `com.anthropic.claude_code`, versioned as the runtime | asz's own, so a receiver that keys on the scope sees two streams of one name; the OAP keys on the name and the labels |
 | a point's window | the exporter's export interval, wall clock | the minute the call's last fragment ended, see below |
-| value | as the exporter encodes it | an integer |
+| value | a double | a double |
+
+The right-hand column is held to a capture of what Claude Code 2.1.260 sent to asz's receiver
+from one short session, kept under `internal/metrics/testdata` with every identifying value
+replaced, by a test that fails when the exporter sends a label or a metric this table does not
+account for. `go run ./tools/otlpdump -redact FILE.pb` prints any spooled request the same way.
 
 With `metrics: true` on the `claude-code-local` adapter, the collector derives the points from
 the landed files by the assembler's own rule: the usage of a call is its last fragment's in line
