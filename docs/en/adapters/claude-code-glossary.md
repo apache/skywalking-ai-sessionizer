@@ -51,6 +51,7 @@ extraction together, because they sit in the same file.
 | `message.assistant` | `text block` | an assistant record |  |
 | `message.external` | `origin.kind == "human"` | a user record | also a queued_command attachment whose commandMode is "prompt" |
 | `message.synthetic` | `message.model == "<synthetic>"` | an assistant record | the client wrote it; no model produced it |
+| `model` | `message.model` | an assistant record | <synthetic> on a record the client fabricated |
 | `notification` | `origin.kind == "task-notification"` | record |  |
 | `parent` | `parentUuid` | record |  |
 | `redacted` | `redacted_thinking` | a content block |  |

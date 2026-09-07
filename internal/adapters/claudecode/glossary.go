@@ -53,6 +53,8 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.RoleTool, Native: "tool_use_id", Where: "a tool_result block, a notification, a sidecar"},
 	model.Term{Unified: model.RoleChild, Native: "toolUseResult.agentId", Where: "a launch result, a journal record"},
 	model.Term{Unified: model.RoleTime, Native: "timestamp", Where: "record"},
+	model.Term{Unified: model.RoleModel, Native: "message.model", Where: "an assistant record",
+		Note: "<synthetic> on a record the client fabricated"},
 	model.Term{Unified: model.RoleTrigger, Native: "origin.kind", Where: "record, and attachment.origin.kind"},
 
 	// ---- structure the model derived; the runtime records none of it ----

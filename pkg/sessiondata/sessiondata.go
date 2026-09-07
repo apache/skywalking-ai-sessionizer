@@ -213,6 +213,12 @@ type Record struct {
 	// still carries a usage block, and its output count is a streaming stub of
 	// a few tokens.
 	Usage *Usage `json:"usage,omitempty"`
+	// Model is the provider model a call ran on, as the runtime named it, on
+	// the records of that call. It is what a token count is reported under,
+	// so a metric per model can be produced from the landed data alone.
+	// Empty on records landed before it was kept, and on records that are
+	// not a call.
+	Model string `json:"model,omitempty"`
 
 	Parts []Part `json:"parts,omitempty"`
 

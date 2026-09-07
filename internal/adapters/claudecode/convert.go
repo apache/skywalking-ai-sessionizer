@@ -86,6 +86,7 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 	tur, hasTUR := decodeToolResult(d.ToolUseResult)
 	rec.ID, rec.Parent = d.UUID, d.ParentUUID
 	rec.Call, rec.Run = d.Message.ID, d.PromptID
+	rec.Model = d.Message.Model
 	rec.Continues = d.LogicalParentUUID
 	rec.Time = d.Timestamp
 	rec.Trigger = triggerName(triggerOf(&d))

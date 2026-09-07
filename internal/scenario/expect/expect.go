@@ -752,7 +752,7 @@ type recordView struct {
 	ID, Parent, Call, Run, Continues, Tool, Child, RecBatch, Label, StartedBy string
 	From, Time, Trigger                                                       string
 	Flags                                                                     string
-	Usage                                                                     string
+	Usage, Model                                                              string
 	Parts                                                                     string
 	Dropped                                                                   int
 }
@@ -781,7 +781,7 @@ func viewOf(hdr *sessiondata.Header, r *sessiondata.Record) recordView {
 		ID: r.ID, Parent: r.Parent, Call: r.Call, Run: r.Run, Continues: r.Continues, Tool: r.Tool, Child: r.Child,
 		RecBatch: r.Batch, Label: r.Label, StartedBy: r.StartedBy,
 		From: string(r.From), Time: r.Time, Trigger: r.Trigger,
-		Flags: strings.Join(flags, ","), Usage: usage, Parts: strings.Join(parts, ";"), Dropped: len(r.Dropped),
+		Flags: strings.Join(flags, ","), Usage: usage, Model: r.Model, Parts: strings.Join(parts, ";"), Dropped: len(r.Dropped),
 	}
 }
 
@@ -875,7 +875,7 @@ func RecordsWellFormed(root, session string) ([]string, error) {
 		"from": true, "time": true, "trigger": true, "flags": true,
 		"id": true, "parent": true, "call": true, "run": true, "continues": true, "tool": true, "child": true,
 		"batch": true, "label": true, "started_by": true,
-		"parts": true, "usage": true, "dropped": true,
+		"parts": true, "usage": true, "model": true, "dropped": true,
 	}
 	var out []string
 	for _, lf := range files {

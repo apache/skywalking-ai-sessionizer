@@ -290,7 +290,7 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 		r.From, r.Flags = sessiondata.FromRuntime, []string{"injected"}
 		r.Parts = []sessiondata.Part{textPart(e.Text)}
 	case EvFragment:
-		r.From, r.Call = sessiondata.FromAgent, e.Call
+		r.From, r.Call, r.Model = sessiondata.FromAgent, e.Call, ccModel
 		u := e.Usage
 		r.Usage = &sessiondata.Usage{Input: u.In, Output: u.Out, CacheRead: u.CacheRead, CacheWrite: u.CacheWrite}
 		if e.Last {
@@ -341,7 +341,7 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 		r.From, r.Trigger, r.Tool, r.Child = sessiondata.FromExternal, model.TriggerNotification, e.NoticeTool, e.NoticeChild
 		r.Parts = []sessiondata.Part{textPart(e.Text)}
 	case EvSynthetic:
-		r.From, r.Call, r.Flags = sessiondata.FromAgent, e.Call, []string{"synthetic"}
+		r.From, r.Call, r.Flags, r.Model = sessiondata.FromAgent, e.Call, []string{"synthetic"}, "<synthetic>"
 		r.Usage = &sessiondata.Usage{}
 		r.Parts = []sessiondata.Part{textPart(e.Text)}
 	case EvBoundary:

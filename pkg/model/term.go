@@ -127,7 +127,7 @@ func Vocabulary() []string {
 		RelInSegment, RelRetries, RelCancels, RelInputOf,
 		// the roles a record plays, which a reader meets in a reference
 		RoleID, RoleParent, RoleCall, RoleRun, RoleBatch, RoleStream,
-		RoleContinues, RoleTool, RoleChild, RoleTime, RoleTrigger,
+		RoleContinues, RoleTool, RoleChild, RoleTime, RoleTrigger, RoleModel,
 		// qualification
 		ExactUnique, ExactAmbiguous, StrongInference, WeakInference, Unresolved, Conflict,
 		ContentAvailable, ContentRedacted, ContentOmitted, ContentHashOnly,
@@ -151,4 +151,5 @@ const (
 	RoleChild     = "child"
 	RoleTime      = "time"
 	RoleTrigger   = "trigger"
+	RoleModel     = "model"
 )

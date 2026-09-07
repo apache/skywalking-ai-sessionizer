@@ -48,6 +48,7 @@ func Fields() map[string]string {
 		"from":       "who produced the record: the agent, something outside it, or the runtime",
 		"flags":      "short facts about the record that do not belong in a field of their own",
 		"usage":      "tokens the provider reported for this call",
+		"model":      "the provider model the call ran on, as the runtime named it",
 		"parts":      "the pieces of the record, in the order they were written",
 		"dropped":    "what was left out of this record, how big it was, and why",
 

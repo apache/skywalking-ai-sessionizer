@@ -76,6 +76,7 @@ role names. The part level carries what the content is.
 | `from` | who produced it: `agent`, `external`, `runtime`. A record's type is not what a record is; most records that look like a person are a tool answering. |
 | `time`, `trigger`, `flags` | when, what started the loop, and states such as `finished` |
 | `usage` | what the provider reported: input, output, cache read and cache write tokens. Meaningful only where the call finished. |
+| `model` | the provider model the call ran on, as the runtime named it, on the records of a call. What a token count is reported under. Empty on records landed before it was kept. |
 | `parts` | the content |
 | `dropped` | what the conversion chose to leave out, with its size and the reason |
 

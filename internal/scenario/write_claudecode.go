@@ -136,6 +136,10 @@ type ccWriter struct {
 
 func ccTime(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z") }
 
+// ccModel is the model every planned call ran on, written by both writers
+// so a metric per model can be checked across the formats.
+const ccModel = "claude-opus-5"
+
 // rec adds the envelope every Claude Code record carries.
 func (w *ccWriter) rec(m map[string]any, stream string) string {
 	for k, v := range map[string]any{
@@ -224,7 +228,7 @@ func (w *ccWriter) event(e *Event) error {
 		}
 		w.add(s, w.rec(map[string]any{
 			"type": "assistant", "uuid": e.ID, "parentUuid": parentOf(e.Parent), "requestId": e.Req, "timestamp": ccTime(e.At),
-			"message": map[string]any{"id": e.Call, "type": "message", "role": "assistant", "model": "claude-opus-5",
+			"message": map[string]any{"id": e.Call, "type": "message", "role": "assistant", "model": ccModel,
 				"stop_reason": stop, "content": []map[string]any{block}, "usage": ccUsage(e.Usage)},
 		}, s))
 	case EvResult:

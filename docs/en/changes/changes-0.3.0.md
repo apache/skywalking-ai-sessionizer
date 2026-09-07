@@ -2,6 +2,13 @@
 
 > In development, not yet released. `tools/release.sh prepare 0.3.0` removes this note.
 
+## Collection
+
+- A landed record keeps the provider model a call ran on, as `model`, the name the runtime wrote
+  on the record. It is what a token count is reported under, so a metric per model can be
+  produced from the landed data alone. Records landed before this carry none, and the glossary
+  says where the runtime writes it.
+
 ## Read
 - The conversation page is drawn by Horizon's conversation renderer,
   `@skywalking-horizon-ui/conversation-view`, embedded from a pinned Horizon commit with Horizon's
