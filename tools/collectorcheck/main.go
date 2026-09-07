@@ -136,6 +136,9 @@ func run(root, logs string) error {
 	// source and type, and how many requests carried it.
 	tokens := map[string]int64{}
 	metricRequests := 0
+	// Points from the runtime's exporter, received by the claude-code-otlp
+	// adapter and pushed on: the exporter marks them with sender.
+	received := 0
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -153,12 +156,22 @@ func run(root, logs string) error {
 				}
 				for _, sm := range rm.ScopeMetrics {
 					for _, m := range sm.Metrics {
-						if m.Name != "claude_code.token.usage" || m.Unit != "tokens" || !m.Sum.IsMonotonic {
-							return fmt.Errorf("a metrics request carries %s %s monotonic=%v", m.Name, m.Unit, m.Sum.IsMonotonic)
+						if m.Name != "claude_code.token.usage" || !m.Sum.IsMonotonic {
+							return fmt.Errorf("a metrics request carries %s monotonic=%v", m.Name, m.Sum.IsMonotonic)
 						}
 						for _, dp := range m.Sum.DataPoints {
 							a := attrs(dp.Attributes)
 							n, _ := strconv.ParseInt(dp.AsInt, 10, 64)
+							if a["sender"] == "telemetrygen" {
+								// Received from the exporter and forwarded as sent:
+								// the unit is the exporter's to set, and this one
+								// sets none.
+								received++
+								continue
+							}
+							if m.Unit != "tokens" {
+								return fmt.Errorf("a derived point of %s carries the unit %q, want tokens", m.Name, m.Unit)
+							}
 							tokens[a["query_source"]+"/"+a["type"]] += n
 						}
 					}
@@ -310,6 +323,12 @@ func run(root, logs string) error {
 			return fmt.Errorf("no %s tokens reached the Collector; it received %v", k, tokens)
 		}
 	}
-	fmt.Printf("ok: %d requests, %d records, kinds %v, resources %v; %d metrics requests, tokens %v\n", requests, len(recs), kinds, services, metricRequests, tokens)
+	// The other source reached the Collector too: points a real external
+	// exporter sent to asz's receiver, landed, and pushed on.
+	if received == 0 {
+		return fmt.Errorf("no point from the exporter through the receiver reached the Collector; it received %d metrics requests", metricRequests)
+	}
+	fmt.Printf("ok: %d requests, %d records, kinds %v, resources %v; %d metrics requests, derived tokens %v, %d points received from the exporter\n",
+		requests, len(recs), kinds, services, metricRequests, tokens, received)
 	return nil
 }

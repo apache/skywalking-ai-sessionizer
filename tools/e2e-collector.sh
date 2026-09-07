@@ -22,8 +22,15 @@
 set -eu
 cd "$(dirname "$0")/.."
 IMAGE="${OTELCOL_IMAGE:-otel/opentelemetry-collector-contrib:0.158.0}"
+# The Collector project's own OTLP exporter, telemetrygen: a real external
+# exporter to point at asz's receiver, in place of Claude Code's.
+GEN_IMAGE="${TELEMETRYGEN_IMAGE:-ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v0.158.0}"
 GRPC_PORT="${OTELCOL_GRPC_PORT:-14317}"
 HTTP_PORT="${OTELCOL_HTTP_PORT:-14318}"
+# Where asz's receiver listens for the exporter, reachable from a container
+# as host.docker.internal. Both address families, since the name may resolve
+# to either.
+RECEIVE_PORT="${ASZ_RECEIVE_PORT:-14417}"
 WORK="$(mktemp -d)"
 trap 'docker rm -f asz-e2e-otelcol >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
 
@@ -92,6 +99,51 @@ YAML
     if [ "$i" = 5 ]; then echo "push over $protocol failed five times"; exit 1; fi
     sleep 2
   done
+
+  # The second source of the same metric: the runtime's own exporter. A
+  # second root runs the receiver adapter alone, a real external exporter
+  # sends it the token metric over gRPC and over HTTP, and the spool is
+  # pushed to the same Collector. The check then wants points from both
+  # sources, told apart by the sender attribute the exporter is given.
+  received="$WORK/$protocol-received"
+  mkdir -p "$received"
+  cat > "$received/asz.yaml" <<YAML
+storage:
+  root: $received
+adapters:
+  - name: claude-code-local
+    enabled: false
+  - name: claude-code-otlp
+    enabled: true
+    listen: ":$RECEIVE_PORT"
+    metrics: true
+export:
+  otlp:
+    protocol: $protocol
+    endpoint: $endpoint
+YAML
+  ./bin/asz collect -config "$received/asz.yaml" > "$received/collect.log" 2>&1 &
+  receiver_pid=$!
+  for i in $(seq 1 30); do
+    if curl -s -o /dev/null "http://127.0.0.1:$RECEIVE_PORT/v1/metrics"; then break; fi
+    sleep 1
+  done
+  echo "== the exporter sends to asz's receiver on $RECEIVE_PORT, gRPC then HTTP"
+  for transport in "" "--otlp-http"; do
+    # shellcheck disable=SC2086
+    docker run --rm --add-host=host.docker.internal:host-gateway "$GEN_IMAGE" metrics \
+      --otlp-endpoint "host.docker.internal:$RECEIVE_PORT" --otlp-insecure $transport \
+      --metrics 3 --rate 0 --metric-type Sum --aggregation-temporality delta \
+      --otlp-metric-name claude_code.token.usage --service claude-code \
+      --telemetry-attributes 'type="input"' --telemetry-attributes 'query_source="main"' \
+      --telemetry-attributes 'session.id="telemetrygen"' --telemetry-attributes 'sender="telemetrygen"' >/dev/null 2>&1 \
+      || { echo "the exporter could not send to the receiver"; cat "$received/collect.log"; exit 1; }
+  done
+  kill "$receiver_pid" >/dev/null 2>&1 || true
+  wait "$receiver_pid" 2>/dev/null || true
+  head -3 "$received/collect.log"
+  ls "$received/_metrics" | grep -c '\.pb$' | sed 's/^/spooled requests from the exporter: /'
+  ./bin/asz push -once -config "$received/asz.yaml"
   # The file exporter flushes on its own schedule; give it a moment.
   for i in $(seq 1 20); do
     if [ -s "$WORK/otelcol/logs.json" ]; then break; fi

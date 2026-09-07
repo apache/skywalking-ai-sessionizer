@@ -191,14 +191,51 @@ func main() {
 			fmt.Fprintf(os.Stderr, "skipping unknown adapter %q\n", ad.Name)
 		}
 	}
-	for _, ad := range local {
+	// sources and collect are the local adapter's own. view serves the
+	// root, with the adapter's refresh when one is enabled. Every other
+	// command reads or sends the root and runs once, with the local
+	// adapter's settings when one is enabled and the defaults otherwise, so
+	// a root fed by the receiver alone can still be parsed, verified and
+	// pushed.
+	switch cmd {
+	case "sources":
+		if len(local) == 0 {
+			fatal(fmt.Errorf("%s: no enabled %s adapter", cmd, config.AdapterClaudeCodeLocal))
+		}
+		for _, ad := range local {
+			if err := run(cfg, ad, *once); err != nil {
+				fatal(err)
+			}
+		}
+	case "collect":
+		for _, ad := range local {
+			if err := run(cfg, ad, *once); err != nil {
+				fatal(err)
+			}
+		}
+		if len(local) == 0 {
+			if receivers == 0 {
+				fatal(fmt.Errorf("%s: no enabled adapter", cmd))
+			}
+			// Nothing else keeps the process alive: the receivers do.
+			select {}
+		}
+	case "view":
+		var ad config.Adapter
+		if len(local) > 0 {
+			ad = local[0]
+		}
 		if err := run(cfg, ad, *once); err != nil {
 			fatal(err)
 		}
-	}
-	if len(local) == 0 && receivers > 0 {
-		// Nothing else keeps the process alive: the receivers do.
-		select {}
+	default:
+		ad := config.Default().Adapters[0]
+		if len(local) > 0 {
+			ad = local[0]
+		}
+		if err := run(cfg, ad, *once); err != nil {
+			fatal(err)
+		}
 	}
 }
 
