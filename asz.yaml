@@ -62,17 +62,6 @@ adapters:
     metrics: false
     metrics_lookback: 24h
 
-  # The runtime's own OpenTelemetry exporter, received here. Point Claude
-  # Code at listen with CLAUDE_CODE_ENABLE_TELEMETRY=1,
-  # OTEL_METRICS_EXPORTER=otlp and OTEL_EXPORTER_OTLP_ENDPOINT, over gRPC
-  # or http/protobuf. Phase one lands its metrics in the spool for asz push;
-  # logs and traces are accepted and dropped. metrics may be on here or on
-  # claude-code-local, never both, so the same tokens are not counted twice.
-  - name: claude-code-otlp
-    enabled: false
-    listen: 127.0.0.1:4317
-    metrics: true
-
     collector:
       # watch polls the source continuously. once makes a single pass and
       # exits, which is the backfill path over history that already exists.
@@ -88,6 +77,17 @@ adapters:
       # receiver has to accept. A change applies to new files only: asz
       # repack re-cuts an existing root into a new one.
       max_delta_bytes: 2097152
+
+  # The runtime's own OpenTelemetry exporter, received here. Point Claude
+  # Code at listen with CLAUDE_CODE_ENABLE_TELEMETRY=1,
+  # OTEL_METRICS_EXPORTER=otlp and OTEL_EXPORTER_OTLP_ENDPOINT, over gRPC
+  # or http/protobuf. Phase one lands its metrics in the spool for asz push;
+  # logs and traces are accepted and dropped. metrics may be on here or on
+  # claude-code-local, never both, so the same tokens are not counted twice.
+  - name: claude-code-otlp
+    enabled: false
+    listen: 127.0.0.1:4317
+    metrics: true
 
 parse:
   # The largest round file the parser writes, in bytes. A round travels
@@ -148,3 +148,8 @@ export:
     # budget covers it. 0 means no limit.
     max_bytes_per_minute: 0
     interval: 5s
+    # The two things a push sends, each on its own switch: the landed files
+    # and rounds as OTLP logs, and the metrics spool. A receiver that takes
+    # one and not the other is sent what it takes; both off is refused.
+    logs: true
+    metrics: true

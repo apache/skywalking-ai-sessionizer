@@ -598,3 +598,40 @@ func TestPushSendsTheMetricsSpoolUnderTheServiceIdentity(t *testing.T) {
 		})
 	}
 }
+
+// The two things a push sends are switched on their own: with logs off
+// only the spool goes, with metrics off only the files, and neither is
+// marked pushed while it is off.
+func TestPushSendsOnlyWhatIsSwitchedOn(t *testing.T) {
+	spooled := func(z *storage.Zone) {
+		data, _ := proto.Marshal(&collmetricspb.ExportMetricsServiceRequest{})
+		if _, err := storage.NewSpool(z).Put("otlp", data, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	z, files := zoneWithOneSession(t)
+	spooled(z)
+	rcv := startReceiver(t)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code", NoLogs: true}
+	st, err := p.Pass()
+	if err != nil || len(st.Errors) != 0 || st.Files != 0 || st.Metrics != 1 || len(rcv.Requests()) != 0 || len(rcv.MetricsRequests()) != 1 {
+		t.Fatalf("logs off: files=%d metrics=%d logs on the wire=%d metrics on the wire=%d err=%v %v", st.Files, st.Metrics, len(rcv.Requests()), len(rcv.MetricsRequests()), err, st.Errors)
+	}
+	p = &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code"}
+	if st, err = p.Pass(); err != nil || st.Files != len(files) || st.Metrics != 0 {
+		t.Fatalf("the files were not left for a pass with logs on: files=%d metrics=%d err=%v", st.Files, st.Metrics, err)
+	}
+
+	z2, files2 := zoneWithOneSession(t)
+	spooled(z2)
+	rcv2 := startReceiver(t)
+	p = &otlp.Pusher{Zone: z2, Client: clientFor(t, rcv2, otlp.ProtocolHTTP), Version: "test", ServiceName: "Claude Code", NoMetrics: true}
+	st, err = p.Pass()
+	if err != nil || len(st.Errors) != 0 || st.Files != len(files2) || st.Metrics != 0 || len(rcv2.MetricsRequests()) != 0 {
+		t.Fatalf("metrics off: files=%d metrics=%d metrics on the wire=%d err=%v %v", st.Files, st.Metrics, len(rcv2.MetricsRequests()), err, st.Errors)
+	}
+	p = &otlp.Pusher{Zone: z2, Client: clientFor(t, rcv2, otlp.ProtocolHTTP), Version: "test", ServiceName: "Claude Code"}
+	if st, err = p.Pass(); err != nil || st.Metrics != 1 || st.Files != 0 {
+		t.Fatalf("the spool was not left for a pass with metrics on: files=%d metrics=%d err=%v", st.Files, st.Metrics, err)
+	}
+}

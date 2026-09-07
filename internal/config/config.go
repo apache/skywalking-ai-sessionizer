@@ -19,6 +19,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -88,7 +89,21 @@ type OTLP struct {
 	MaxBytesPerMinute int64 `yaml:"max_bytes_per_minute"`
 	// Interval is how long asz push sleeps between passes in watch mode.
 	Interval time.Duration `yaml:"interval"`
+	// Logs and Metrics switch the two things a push sends: the landed
+	// files and rounds as OTLP logs, and the metrics spool. Both are on
+	// unless set false, so a receiver that takes one and not the other is
+	// sent what it takes. A push with both off is refused.
+	Logs    *bool `yaml:"logs"`
+	Metrics *bool `yaml:"metrics"`
 }
+
+// SendLogs says whether a push sends the landed files and rounds.
+func (o OTLP) SendLogs() bool { return o.Logs == nil || *o.Logs }
+
+// SendMetrics says whether a push sends the metrics spool.
+func (o OTLP) SendMetrics() bool { return o.Metrics == nil || *o.Metrics }
+
+func boolPtr(b bool) *bool { return &b }
 
 // Lookback is the metrics look-back as a duration: 24h when unset, zero
 // for 0 or none, and a d suffix counts days, since a look-back is spoken of
@@ -213,11 +228,6 @@ func Default() *Config {
 			Enabled: false,
 			Listen:  "127.0.0.1:4317",
 			Metrics: true,
-			Collector: Collector{
-				Mode:          ModeWatch,
-				Interval:      5 * time.Second,
-				MaxDeltaBytes: 2 << 20,
-			},
 		}},
 		Parse: Parse{MaxRoundBytes: 2 << 20},
 		Export: Export{OTLP: OTLP{
@@ -225,6 +235,8 @@ func Default() *Config {
 			Layer:      "AI_AGENT",
 			BatchBytes: 8 << 20,
 			Interval:   5 * time.Second,
+			Logs:       boolPtr(true),
+			Metrics:    boolPtr(true),
 		}},
 	}
 }
@@ -252,7 +264,11 @@ func Load(path string) (*Config, error) {
 	if len(loaded.Adapters) > 0 {
 		cfg.Adapters = loaded.Adapters
 		for i := range cfg.Adapters {
-			cfg.Adapters[i].Collector.applyDefaults()
+			// A receiver is a server: it polls nothing and lands no
+			// transcript, so the collector settings do not apply to it.
+			if cfg.Adapters[i].Name != AdapterClaudeCodeOTLP {
+				cfg.Adapters[i].Collector.applyDefaults()
+			}
 		}
 	}
 	if loaded.Parse.MaxRoundBytes > 0 {
@@ -288,6 +304,12 @@ func Load(path string) (*Config, error) {
 	}
 	if o.Interval > 0 {
 		cfg.Export.OTLP.Interval = o.Interval
+	}
+	if o.Logs != nil {
+		cfg.Export.OTLP.Logs = o.Logs
+	}
+	if o.Metrics != nil {
+		cfg.Export.OTLP.Metrics = o.Metrics
 	}
 	return cfg, cfg.Validate()
 }
@@ -328,6 +350,12 @@ func (c *Config) Validate() error {
 		if a.Name == AdapterClaudeCodeLocal && a.Enabled && a.Metrics {
 			localMetrics = true
 		}
+		if a.Name == AdapterClaudeCodeOTLP {
+			if a.Collector != (Collector{}) || a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 || a.MetricsLookback != "" {
+				return fmt.Errorf("config: adapter %q is a receiver: it takes listen and metrics, not collector, source_root, include, exclude or metrics_lookback", a.Name)
+			}
+			continue
+		}
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)
 		}
@@ -337,6 +365,9 @@ func (c *Config) Validate() error {
 	}
 	if p := c.Export.OTLP.Protocol; p != "grpc" && p != "http" {
 		return fmt.Errorf("config: export.otlp.protocol is %q, want grpc or http", p)
+	}
+	if !c.Export.OTLP.SendLogs() && !c.Export.OTLP.SendMetrics() {
+		return errors.New("config: export.otlp has both logs and metrics off; a push would send nothing")
 	}
 	// The same tokens must not be counted twice: derived from the
 	// transcripts and received from the runtime's exporter are two sources

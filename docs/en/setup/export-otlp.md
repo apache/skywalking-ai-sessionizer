@@ -156,7 +156,9 @@ receiver, and the configuration refuses both.
 
 The points wait in the storage root's `_metrics/` spool, one write-once file per landed file
 with points or per request received, and go out in order under the same budget and the same
-once-only rule as the files.
+once-only rule as the files. `export.otlp.logs` and `export.otlp.metrics` switch the two things a
+push sends, the files and rounds as logs and the spool as metrics, so a receiver that takes one
+and not the other is sent what it takes.
 On the way out the resource is normalised to asz's identity, the service, the layer, the sender,
 so the OAP holds one service for the runtime. A receiver that answers with a partial success is
 treated as having refused the request, as for logs.

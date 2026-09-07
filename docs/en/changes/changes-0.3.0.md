@@ -40,4 +40,9 @@
   metrics requests it receives in the same spool, bytes as received, for `asz push`; logs and
   traces are accepted and dropped, counted in the status. It runs beside the local adapter under
   `asz collect` and `asz view`. `metrics` may be on for one adapter, never both, and the
-  configuration refuses to load otherwise, so the same tokens are never counted twice.
+  configuration refuses to load otherwise, so the same tokens are never counted twice. A receiver
+  takes `listen` and `metrics` only; collector settings on it are refused, since it polls nothing.
+
+- `export.otlp.logs` and `export.otlp.metrics` switch the two things a push sends, the landed
+  files and rounds as logs and the metrics spool as metrics, each on its own, both on unless set
+  off. `asz push` says which it is sending, and a configuration with both off is refused.

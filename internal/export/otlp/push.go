@@ -80,6 +80,11 @@ type Pusher struct {
 	InstanceID string
 	// Layer is the receiver's layer for the service, sent as service.layer.
 	Layer string
+	// NoLogs and NoMetrics leave out one of the two things a pass sends,
+	// the landed files and rounds as logs, and the metrics spool, for a
+	// receiver that takes only the other.
+	NoLogs    bool
+	NoMetrics bool
 	// MetricsService is the service the metrics spool is attributed to: the
 	// requests the local adapter derived and the ones the runtime's exporter
 	// sent both concern the one runtime, and they leave under its name so a
@@ -237,6 +242,9 @@ func (p *Pusher) Pass() (*Stats, error) {
 		return nil, err
 	}
 	b := &batch{p: p, st: st, state: state, services: map[string]string{}}
+	if p.NoLogs {
+		sessions = nil
+	}
 	sent := map[string]bool{}
 	for _, s := range sessions {
 		if b.stop != nil {
@@ -263,9 +271,11 @@ func (p *Pusher) Pass() (*Stats, error) {
 	}
 	// A conversation that is not a session of this root, such as one
 	// assembled from several, goes after the sessions.
-	convs, err := conversationDirs(p.Zone.Root())
-	if err != nil {
-		st.Errors = append(st.Errors, err)
+	var convs []string
+	if !p.NoLogs {
+		if convs, err = conversationDirs(p.Zone.Root()); err != nil {
+			st.Errors = append(st.Errors, err)
+		}
 	}
 	for _, conv := range convs {
 		if b.stop != nil {
@@ -280,7 +290,7 @@ func (p *Pusher) Pass() (*Stats, error) {
 			st.Errors = append(st.Errors, err)
 		}
 	}
-	if b.stop == nil {
+	if b.stop == nil && !p.NoMetrics {
 		p.pushSpool(b)
 	}
 	if b.stop != nil {

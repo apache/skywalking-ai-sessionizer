@@ -18,6 +18,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -61,6 +62,13 @@ func TestRepoConfigSpellsOutEveryValue(t *testing.T) {
 		t.Fatalf("adapters: got %d, want the local adapter and the receiver", len(got.Adapters))
 	}
 	for _, a := range got.Adapters {
+		if a.Name == AdapterClaudeCodeOTLP {
+			// A receiver is a server and has no collector to spell out.
+			if a.Collector != (Collector{}) {
+				t.Fatalf("%s: a receiver carries collector settings: %+v", a.Name, a.Collector)
+			}
+			continue
+		}
 		if a.Collector.Mode == "" || a.Collector.Interval == 0 || a.Collector.MaxDeltaBytes == 0 {
 			t.Fatalf("%s: collector values not spelled out: %+v", a.Name, a.Collector)
 		}
@@ -81,6 +89,12 @@ func TestReceiverNeedsAnAddressAndMetricsComeFromOneSource(t *testing.T) {
 		t.Fatal("a receiver without listen was accepted")
 	}
 	cfg.Adapters[1].Listen = "127.0.0.1:4317"
+	cfg.Adapters[1].Collector.Mode = ModeWatch
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("a receiver with collector settings was accepted; it is a server")
+	}
+	cfg.Adapters[1].Collector = Collector{}
+	cfg.Adapters[1].Listen = "127.0.0.1:4317"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("a receiver with metrics beside a local adapter without metrics must be accepted: %v", err)
 	}
@@ -96,5 +110,28 @@ func TestReceiverNeedsAnAddressAndMetricsComeFromOneSource(t *testing.T) {
 	cfg.Adapters[1].Metrics = true
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("a disabled receiver must not count: %v", err)
+	}
+}
+
+// The two switches of a push are read as written, false included, and a
+// push with both off is refused.
+func TestPushSwitchesAreReadAsWritten(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "asz.yaml")
+	if err := os.WriteFile(path, []byte("export:\n  otlp:\n    logs: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Export.OTLP.SendLogs() || !cfg.Export.OTLP.SendMetrics() {
+		t.Fatalf("logs: false was not read: logs=%v metrics=%v", cfg.Export.OTLP.SendLogs(), cfg.Export.OTLP.SendMetrics())
+	}
+	if err := os.WriteFile(path, []byte("export:\n  otlp:\n    logs: false\n    metrics: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("both switches off was accepted")
 	}
 }

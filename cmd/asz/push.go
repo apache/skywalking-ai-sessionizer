@@ -20,6 +20,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -59,6 +60,8 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		BatchBytes:  o.BatchBytes,
 
 		MaxBytesPerMinute: o.MaxBytesPerMinute,
+		NoLogs:            !o.SendLogs(),
+		NoMetrics:         !o.SendMetrics(),
 		// The metrics spool concerns Claude Code whichever adapter filled it,
 		// the local derivation or the runtime's own exporter.
 		MetricsService: claudecode.RuntimeName,
@@ -81,8 +84,15 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 	if o.MaxBytesPerMinute > 0 {
 		rate = humanBytes(o.MaxBytesPerMinute) + " per minute"
 	}
-	fmt.Printf("storage root: %s\nendpoint    : %s\nservice     : %s\ninstance    : %s\nlayer       : %s\nrate        : %s\n",
-		zoneRoot, endpoint, service, p.InstanceID, o.Layer, rate)
+	var sending []string
+	if o.SendLogs() {
+		sending = append(sending, "landed files and rounds, as logs")
+	}
+	if o.SendMetrics() {
+		sending = append(sending, "the metrics spool")
+	}
+	fmt.Printf("storage root: %s\nendpoint    : %s\nservice     : %s\ninstance    : %s\nlayer       : %s\nrate        : %s\nsending     : %s\n",
+		zoneRoot, endpoint, service, p.InstanceID, o.Layer, rate, strings.Join(sending, "; "))
 	pass := func() (*otlp.Stats, error) {
 		start := time.Now()
 		st, err := p.Pass()
