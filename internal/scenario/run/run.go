@@ -340,7 +340,7 @@ func lose(out, session string, l expect.Lose, ctx *expect.Context) (string, erro
 // derive writes the runtime's metric family for what is landed and not yet
 // derived, with no look-back: a scenario is history by construction.
 func derive(out string) error {
-	d := &metrics.Deriver{Zone: storage.NewZone(out), Options: metrics.Options{Version: "check", Now: func() time.Time { return time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) }}}
+	d := &metrics.Deriver{Zone: storage.NewZone(out), Options: metrics.Options{Grace: -1, Version: "check", Now: func() time.Time { return time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) }}}
 	st, err := d.Pass(nil)
 	if err != nil {
 		return err

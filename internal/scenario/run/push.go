@@ -375,9 +375,22 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 // tokensOnTheWire checks the shape of every metrics request as the export
 // page states it: asz's identity on the resource, the runtime's metric with
 // its unit, monotonic delta sums, one-minute points that name the session.
-func tokensOnTheWire(rcv *otlptest.Receiver, session string) []string {
-	var out []string
+func tokensOnTheWire(rcv *otlptest.Receiver, session string) (out []string) {
 	bad := func(format string, a ...any) { out = append(out, "metrics: "+fmt.Sprintf(format, a...)) }
+	// The windows of one series, across every request, must not overlap:
+	// that is what the export page promises of the derivation.
+	type window struct{ start, end uint64 }
+	windows := map[string][]window{}
+	defer func() {
+		for key, ws := range windows {
+			sort.Slice(ws, func(i, j int) bool { return ws[i].start < ws[j].start })
+			for i := 1; i < len(ws); i++ {
+				if ws[i].start < ws[i-1].end {
+					bad("the windows of %s overlap: [%d, %d] and [%d, %d]", key, ws[i-1].start, ws[i-1].end, ws[i].start, ws[i].end)
+				}
+			}
+		}
+	}()
 	for i, req := range rcv.MetricsRequests() {
 		for _, rm := range req.GetResourceMetrics() {
 			res := otlptest.Attrs(rm.GetResource().GetAttributes())
@@ -407,9 +420,11 @@ func tokensOnTheWire(rcv *otlptest.Receiver, session string) []string {
 						if a["session.id"] != session || a["type"] == "" || (a["query_source"] != metrics.SourceMain && a["query_source"] != metrics.SourceSubagent) || a["model"] == "" {
 							bad("request %d: a point carries %v", i, a)
 						}
-						if dp.GetTimeUnixNano() != dp.GetStartTimeUnixNano()+uint64(time.Minute) || dp.GetAsInt() <= 0 {
-							bad("request %d: a point is not one minute of a positive count", i)
+						if dp.GetTimeUnixNano() <= dp.GetStartTimeUnixNano() || dp.GetAsInt() <= 0 {
+							bad("request %d: a point is not a positive window of a positive count", i)
 						}
+						key := a["query_source"] + "/" + a["type"] + "/" + a["model"]
+						windows[key] = append(windows[key], window{dp.GetStartTimeUnixNano(), dp.GetTimeUnixNano()})
 					}
 				}
 			}

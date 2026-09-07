@@ -51,6 +51,9 @@ type SpoolFile struct {
 	Path   string
 	Seq    uint64
 	Source string
+	// At is when a received request was put, read off its name; zero for
+	// a derived request, which is named after its landed file instead.
+	At time.Time
 }
 
 // spoolName builds a spool filename: sortable by the time it was put and
@@ -87,6 +90,27 @@ func (s *Spool) Put(source string, data []byte, now time.Time) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// PutNamed writes one request under a name the caller chose, and reports
+// whether it wrote it: a request that exists already is kept as it is.
+// The local derivation names its requests after the landed file they came
+// from, so deriving a file again after a crash writes the same file once.
+func (s *Spool) PutNamed(name string, data []byte) (string, bool, error) {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return "", false, err
+	}
+	path := filepath.Join(s.dir, name)
+	if _, err := os.Stat(path); err == nil {
+		return path, false, nil
+	}
+	if err := WriteAtomic(path, PermLanded, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	}); err != nil {
+		return "", false, err
+	}
+	return path, true, nil
 }
 
 func (s *Spool) statePath() string { return filepath.Join(s.dir, "spool.state") }
@@ -152,8 +176,19 @@ func (s *Spool) List() ([]SpoolFile, error) {
 		if err != nil {
 			continue
 		}
-		out = append(out, SpoolFile{Path: filepath.Join(s.dir, name), Seq: seq, Source: parts[len(parts)-1]})
+		sf := SpoolFile{Path: filepath.Join(s.dir, name), Seq: seq, Source: parts[len(parts)-1]}
+		if at, err := time.Parse("20060102T150405.000000000Z", parts[1]); err == nil {
+			sf.At = at
+		}
+		out = append(out, sf)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	// Received requests in the order they were put, derived ones by name;
+	// the order only has to be the same every time.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq < out[j].Seq
+		}
+		return out[i].Path < out[j].Path
+	})
 	return out, nil
 }

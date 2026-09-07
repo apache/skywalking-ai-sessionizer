@@ -321,15 +321,15 @@ content is truncated, and reasoning is always redacted.
 
 ### The same metrics from the transcripts
 
-With `metrics: true`, this adapter derives the runtime's own metric family from what it landed,
-name for name and attribute for attribute with the exporter, so a receiver holds one family
-whichever produced it. Phase one is the overlap, `claude_code.token.usage`: one count per call,
-taken from the usage the last fragment repeats, never per fragment; `query_source` is `main` for
-the session's own transcript and `subagent` for a child's; `model` is `message.model`;
-`session.id` is the session. Points are monotonic delta sums per minute, as the exporter's SDK
-aggregates over its interval, and a call is counted once however many landed files its records
-reach, since the runtime re-emits records before a context reset and the exporter counted one API
-call once.
+With `metrics: true`, this adapter derives a reconstructed subset of the runtime's own metric
+family from what it landed, under the exporter's metric name, so a receiver holds one name
+whichever produced the points. Phase one is `claude_code.token.usage`: the usage of a call is its
+last fragment's in line order, as the assembler reads it, and only a finished call counts;
+`query_source` is `main` for the session's own transcript and `subagent` for a child's; `model`
+is `message.model`; `session.id` is the session. The exporter's account, organisation, speed,
+effort and attribution labels are not on a transcript and are not added, and neither are its
+auxiliary calls. Points are monotonic delta sums per minute whose windows never overlap, and a
+call is counted once however many landed files its records reach.
 
 What the transcripts do not carry is not derived: cost, per-request latency, tool execution time,
 active time, lines of code, commits, pull requests, the session start type, and the tokens of the

@@ -66,14 +66,14 @@ const (
 
 // Client delivers logs requests to one receiver.
 type Client interface {
-	// Export sends one request and returns an error unless the receiver
-	// accepted every record in it. A partial success is an error too: the
-	// receiver does not say which records it rejected, so the request is
-	// sent again whole on the next pass, and a receiver keeps the first
-	// copy of a file it already holds.
-	Export(req *collogspb.ExportLogsServiceRequest) error
-	// ExportMetrics sends one metrics request, with the same rules.
-	ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) error
+	// Export sends one request and returns how many records the receiver
+	// rejected, or an error when it refused the request. A partial success
+	// is a success the protocol says not to retry: the request was taken,
+	// and the rejected count is reported, not resent.
+	Export(req *collogspb.ExportLogsServiceRequest) (int64, error)
+	// ExportMetrics sends one request, with the same rules, counting data
+	// points.
+	ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) (int64, error)
 	Close() error
 }
 
@@ -163,27 +163,24 @@ func (c *grpcClient) failure(err error) error {
 	return fmt.Errorf("otlp: %s: %w", c.conn.Target(), err)
 }
 
-func (c *grpcClient) Export(req *collogspb.ExportLogsServiceRequest) error {
+func (c *grpcClient) Export(req *collogspb.ExportLogsServiceRequest) (int64, error) {
 	ctx, cancel := c.context()
 	defer cancel()
 	resp, err := c.logs.Export(ctx, req)
 	if err != nil {
-		return c.failure(err)
+		return 0, c.failure(err)
 	}
-	return rejected(resp)
+	return resp.GetPartialSuccess().GetRejectedLogRecords(), nil
 }
 
-func (c *grpcClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) error {
+func (c *grpcClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) (int64, error) {
 	ctx, cancel := c.context()
 	defer cancel()
 	resp, err := c.metrics.Export(ctx, req)
 	if err != nil {
-		return c.failure(err)
+		return 0, c.failure(err)
 	}
-	if ps := resp.GetPartialSuccess(); ps.GetRejectedDataPoints() > 0 {
-		return fmt.Errorf("otlp: the receiver rejected %d data point(s): %s", ps.GetRejectedDataPoints(), ps.GetErrorMessage())
-	}
-	return nil
+	return resp.GetPartialSuccess().GetRejectedDataPoints(), nil
 }
 
 func (c *grpcClient) Close() error { return c.conn.Close() }
@@ -206,35 +203,32 @@ func newHTTP(o Options) (Client, error) {
 	}, nil
 }
 
-func (c *httpClient) Export(req *collogspb.ExportLogsServiceRequest) error {
+func (c *httpClient) Export(req *collogspb.ExportLogsServiceRequest) (int64, error) {
 	answer, err := c.post(c.base+"/v1/logs", req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var out collogspb.ExportLogsServiceResponse
 	if len(answer) > 0 {
 		if err := proto.Unmarshal(answer, &out); err != nil {
-			return fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.base, err)
+			return 0, fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.base, err)
 		}
 	}
-	return rejected(&out)
+	return out.GetPartialSuccess().GetRejectedLogRecords(), nil
 }
 
-func (c *httpClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) error {
+func (c *httpClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceRequest) (int64, error) {
 	answer, err := c.post(c.base+"/v1/metrics", req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var out collmetricspb.ExportMetricsServiceResponse
 	if len(answer) > 0 {
 		if err := proto.Unmarshal(answer, &out); err != nil {
-			return fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.base, err)
+			return 0, fmt.Errorf("otlp: %s answered with a body that is not an OTLP response: %w", c.base, err)
 		}
 	}
-	if ps := out.GetPartialSuccess(); ps.GetRejectedDataPoints() > 0 {
-		return fmt.Errorf("otlp: the receiver rejected %d data point(s): %s", ps.GetRejectedDataPoints(), ps.GetErrorMessage())
-	}
-	return nil
+	return out.GetPartialSuccess().GetRejectedDataPoints(), nil
 }
 
 // post sends one request as protobuf and returns the answer's body when it
@@ -283,13 +277,5 @@ func (c *httpClient) post(url string, req proto.Message) ([]byte, error) {
 
 func (c *httpClient) Close() error {
 	c.http.CloseIdleConnections()
-	return nil
-}
-
-// rejected turns a partial success into an error.
-func rejected(resp *collogspb.ExportLogsServiceResponse) error {
-	if ps := resp.GetPartialSuccess(); ps.GetRejectedLogRecords() > 0 {
-		return fmt.Errorf("otlp: the receiver rejected %d record(s): %s", ps.GetRejectedLogRecords(), ps.GetErrorMessage())
-	}
 	return nil
 }

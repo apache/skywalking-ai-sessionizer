@@ -26,14 +26,22 @@
 
 ## Metrics
 
-- `claude-code-local` with `metrics: true` derives the runtime's own metric family from the
-  landed files, `claude_code.token.usage` in phase one, name for name and attribute for attribute
-  with Claude Code's OpenTelemetry exporter: one count per call, never per fragment, per minute,
-  by type, model, query source and session. The points wait in the storage root's `_metrics/`
+- `claude-code-local` with `metrics: true` derives a reconstructed subset of the runtime's own
+  metric family from the landed files, `claude_code.token.usage` in phase one under the name
+  Claude Code's OpenTelemetry exporter uses: the usage of a call is its last fragment's in line
+  order and only a finished call counts, per minute, by type, model, query source and session;
+  the exporter's account, speed, effort and attribution labels and its auxiliary calls are not
+  reconstructed, and the export page states the difference. The points wait in the storage root's `_metrics/`
   spool and `asz push` sends them over the metrics service, under asz's identity, with the same
   budget and once-only rule as the files. `metrics_lookback`, 24 hours unless set, bounds the
-  first derivation over a root with history. Every scenario checks the points on the wire against
-  its plan, and the Collector job verifies the tokens that arrive.
+  first derivation over a root with history, and so does the newest request the receiver landed,
+  so a switch of source counts nothing twice. A pass is deterministic, names its requests after
+  their landed files and saves its state once, so a pass cut short is run again to the same bytes.
+  Every scenario checks the points on the wire against its plan, and the Collector job verifies
+  the tokens that arrive from both sources.
+
+- A receiver's partial success is a success the protocol says not to retry: the rejected records
+  or points are counted on the pass line as `rejected`, and the files are marked sent.
 
 - `claude-code-otlp` is a second adapter for the runtime: an OpenTelemetry receiver its own
   exporter is pointed at, gRPC and HTTP with protobuf on one `listen` port. Phase one lands the

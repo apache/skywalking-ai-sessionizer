@@ -48,9 +48,8 @@ logs receiver reads it.
 
 `headers` travel with every request on both transports, as gRPC metadata or as HTTP headers,
 which is where an authorization token goes. A receiver that answers with a partial success,
-saying it rejected some records, is treated as having refused the request: it does not say which
-records, so the request is sent again whole on the next pass, and a receiver keeps the first copy
-of a file it already holds.
+saying it rejected some records, has taken the request, and the protocol says not to send it
+again: the count is reported on the pass line as `rejected`, and the files are marked sent.
 
 ## What every record carries
 
@@ -130,24 +129,44 @@ new root gives a root that `asz verify` and `asz view` read like the original.
 
 ## Metrics
 
-`asz push` sends metrics as well, when an adapter produces them, and they are Claude Code's own
-metric family, name for name and attribute for attribute with the runtime's OpenTelemetry
-exporter, so a receiver holds one family whichever produced it. Phase one is the one measure both
-can supply exactly:
+`asz push` sends metrics as well, when an adapter produces them, under the name Claude Code's
+own OpenTelemetry exporter uses, so a receiver holds one metric name whichever produced the
+points. What the local adapter derives is a reconstructed subset of the exporter's family, not a
+copy of it, and this table says exactly which part:
 
-| Metric | Attributes | Unit |
+| | The runtime's exporter | Derived from the transcripts |
 | --- | --- | --- |
-| `claude_code.token.usage` | `type` (`input`, `output`, `cacheRead`, `cacheCreation`), `model`, `query_source` (`main`, `subagent`), `session.id` | `tokens`, a monotonic delta sum, one point per minute and attribute set |
+| metric | `claude_code.token.usage`, `Number of tokens used`, unit `tokens`, a monotonic delta sum | the same name, description, unit and kind |
+| `type` | `input`, `output`, `cacheRead`, `cacheCreation` | the same four |
+| `query_source` | `main`, `subagent`, `auxiliary` | `main` and `subagent`, from the stream the call was made on; the auxiliary calls never reach a transcript |
+| `model`, `session.id` | yes | yes |
+| account, organisation, user, `speed`, `effort`, agent, skill, plugin and MCP attribution | yes | no; a transcript does not carry them |
+| the other seven metrics: cost, active time, lines of code, commits, pull requests, sessions started, edit decisions | yes | no, and never estimated |
+| instrumentation scope | `com.anthropic.claude_code` | asz's own, so a receiver that keys on the scope sees two streams of one name; the OAP keys on the name and the labels |
+| a point's window | the exporter's export interval, wall clock | the minute the call's last fragment ended, see below |
+| value | as the exporter encodes it | an integer |
 
 With `metrics: true` on the `claude-code-local` adapter, the collector derives the points from
-the landed files: one count per call, never per fragment, since a main transcript repeats the
-usage on every fragment of a call, summed per minute the way the runtime's SDK sums over its
-export interval, with `query_source` from the stream the call was made on. It cannot derive what
-a transcript does not carry: cost, latency, active time, lines of code, commits, pull requests,
-the session start type, or the tokens of the runtime's auxiliary calls, which never reach a
-transcript. Those are the runtime's exporter's alone. The first derivation over a root with
-history is bounded by `metrics_lookback`, 24 hours unless set, so switching the flag on does not
-send a year of tokens; every later pass derives each new file whole.
+the landed files by the assembler's own rule: the usage of a call is its last fragment's in line
+order, never a sum, and only a call that finished counts. A main transcript repeats the final usage
+on every fragment; a child's carries streaming partials on all but the last, and a call with no
+terminal fragment, 7% of a real corpus's child calls, has no usage at all. A call cut at a landed
+file boundary is read on into the next file of its stream, and a file ending mid-call waits for
+that file for a short grace before it is derived with what it has, under a watching collector; a
+single pass, the backfill over history that already exists, derives with what is there and never
+waits. A call is counted once however
+many files its records reach, and a record the runtime re-emitted before a context reset is the
+same call again.
+
+Points are summed per minute and attribute set, and the windows of one series never overlap: a
+point takes its minute unless the series already has a point at or past it, as when two children
+ran in the same minute or a child's file landed later, in which case it follows the series' last
+point. No point of a series is ever thrown away for another. The first derivation over a root
+with history is bounded by `metrics_lookback`, 24 hours unless set, and by the newest request the
+receiver adapter landed, so switching the flag on sends neither a year of tokens nor what the
+runtime's exporter already sent. Every later pass derives each new file whole. A pass is
+deterministic and its requests are named after their landed files, so a pass cut short is run
+again to the same bytes and nothing is counted twice.
 
 The other source of the same family is the runtime's exporter itself: the `claude-code-otlp`
 adapter receives what Claude Code sends and lands each metrics request in the same spool, bytes as
@@ -160,8 +179,9 @@ once-only rule as the files. `export.otlp.logs` and `export.otlp.metrics` switch
 push sends, the files and rounds as logs and the spool as metrics, so a receiver that takes one
 and not the other is sent what it takes.
 On the way out the resource is normalised to asz's identity, the service, the layer, the sender,
-so the OAP holds one service for the runtime. A receiver that answers with a partial success is
-treated as having refused the request, as for logs.
+so the OAP holds one service for the runtime. A receiver that answers with a partial success has
+taken the request, and the protocol says not to send it again: the rejected records or points are
+counted on the pass line as `rejected` and the file is marked sent.
 
 ## Rate
 

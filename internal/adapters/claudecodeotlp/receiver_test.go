@@ -68,10 +68,10 @@ func TestReceiverLandsMetricsFromBothProtocols(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := c.ExportMetrics(request()); err != nil {
+		if _, err := c.ExportMetrics(request()); err != nil {
 			t.Fatalf("%s: %v", o.Protocol, err)
 		}
-		if err := c.Export(&collogspb.ExportLogsServiceRequest{}); err != nil {
+		if _, err := c.Export(&collogspb.ExportLogsServiceRequest{}); err != nil {
 			t.Fatalf("%s: a logs request must be accepted and dropped: %v", o.Protocol, err)
 		}
 		_ = c.Close()
@@ -125,7 +125,7 @@ func TestReceiverWithMetricsOffDropsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if err := c.ExportMetrics(request()); err != nil {
+	if _, err := c.ExportMetrics(request()); err != nil {
 		t.Fatal(err)
 	}
 	if files, _ := storage.NewSpool(z).List(); len(files) != 0 {
@@ -151,7 +151,7 @@ func TestReceivedMetricsReachTheReceiverOfThePush(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	if err := runtime.ExportMetrics(request()); err != nil {
+	if _, err := runtime.ExportMetrics(request()); err != nil {
 		t.Fatal(err)
 	}
 

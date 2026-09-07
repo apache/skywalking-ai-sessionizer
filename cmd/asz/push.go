@@ -99,9 +99,9 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("[%s] files=%d metrics=%d bytes=%s wire=%s requests=%d paused=%s errors=%d (%s)\n",
+		fmt.Printf("[%s] files=%d metrics=%d bytes=%s wire=%s requests=%d paused=%s rejected=%d errors=%d (%s)\n",
 			time.Now().Format("15:04:05"), st.Files, st.Metrics, humanBytes(st.Bytes), humanBytes(st.Wire), st.Requests,
-			st.Paused.Round(time.Second), len(st.Errors), time.Since(start).Round(time.Millisecond))
+			st.Paused.Round(time.Second), st.Rejected, len(st.Errors), time.Since(start).Round(time.Millisecond))
 		for _, e := range st.Errors {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
 		}

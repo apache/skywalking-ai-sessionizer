@@ -72,7 +72,7 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ad config.Adapter, maxRo
 	if once {
 		mode = config.ModeOnce
 	}
-	deriver, err := newDeriver(zone, ad)
+	deriver, err := newDeriver(zone, ad, mode == config.ModeOnce)
 	if err != nil {
 		return nil, err
 	}

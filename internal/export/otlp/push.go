@@ -115,7 +115,11 @@ type Stats struct {
 	Requests int
 	// Metrics is how many spooled metrics requests were sent.
 	Metrics int
-	Paused  time.Duration // how long the pass waited for budget
+	// Rejected is how many records and data points receivers said they
+	// rejected inside requests they took. The protocol says not to resend
+	// them, so they are counted and reported, and the files are marked.
+	Rejected int64
+	Paused   time.Duration // how long the pass waited for budget
 	// Throttled says the receiver asked the sender to slow down and the
 	// pass stopped there; RetryAfter is the wait it named, if any.
 	Throttled  bool
@@ -336,9 +340,10 @@ func (p *Pusher) pushSpool(b *batch) {
 		}
 		size := int64(proto.Size(&req))
 		st.Paused += p.limit.take(size)
-		err = p.Client.ExportMetrics(&req)
+		rejected, err := p.Client.ExportMetrics(&req)
 		st.Requests++
 		st.Wire += size
+		st.Rejected += rejected
 		if err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 			var t *Throttled
@@ -526,9 +531,10 @@ func (b *batch) flush() error {
 	req := &collogspb.ExportLogsServiceRequest{ResourceLogs: b.groups}
 	size := int64(proto.Size(req))
 	b.st.Paused += b.p.limit.take(size)
-	err := b.p.Client.Export(req)
+	rejected, err := b.p.Client.Export(req)
 	b.st.Requests++
 	b.st.Wire += size
+	b.st.Rejected += rejected
 	pending := b.pending
 	b.groups, b.byKey, b.bytes, b.pending = nil, nil, 0, nil
 	if err != nil {

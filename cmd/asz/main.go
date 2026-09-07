@@ -737,7 +737,7 @@ func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
 	}
 	col := claudecode.New(root, storage.NewZone(zoneRoot), ad.Collector.MaxDeltaBytes)
 	match := claudecode.NewMatcher(ad.Include, ad.Exclude).Match
-	deriver, err := newDeriver(storage.NewZone(zoneRoot), ad)
+	deriver, err := newDeriver(storage.NewZone(zoneRoot), ad, once || ad.Collector.Mode == config.ModeOnce)
 	if err != nil {
 		return err
 	}
@@ -797,8 +797,11 @@ func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
 	}
 }
 
-// newDeriver is the metrics derivation an adapter asked for, or nil.
-func newDeriver(zone *storage.Zone, ad config.Adapter) (*metrics.Deriver, error) {
+// newDeriver is the metrics derivation an adapter asked for, or nil. A
+// single pass is the backfill path over history that already exists, with
+// no later pass to derive what it left waiting, so it never waits for the
+// next file of a stream; only a watching collector does.
+func newDeriver(zone *storage.Zone, ad config.Adapter, once bool) (*metrics.Deriver, error) {
 	if !ad.Metrics {
 		return nil, nil
 	}
@@ -806,7 +809,11 @@ func newDeriver(zone *storage.Zone, ad config.Adapter) (*metrics.Deriver, error)
 	if err != nil {
 		return nil, err
 	}
-	return &metrics.Deriver{Zone: zone, Options: metrics.Options{Lookback: lookback, Version: version}}, nil
+	opts := metrics.Options{Lookback: lookback, Version: version}
+	if once {
+		opts.Grace = -1
+	}
+	return &metrics.Deriver{Zone: zone, Options: opts}, nil
 }
 
 func lookbackWord(d time.Duration) string {

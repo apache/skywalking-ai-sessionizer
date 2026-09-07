@@ -15,19 +15,26 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package metrics derives the runtime's own metric family from landed
-// Session Data, so a receiver sees the same metrics whether the runtime's
-// exporter or asz produced them: the same names, the same attributes, the
-// same delta temporality, aggregated per minute as the exporter aggregates
-// over its interval. Phase one is the overlap: token usage. What the
-// transcripts do not carry, cost, latency, active time and the rest, is the
-// exporter's alone and is never estimated here.
+// Package metrics derives the runtime's own token metric from landed
+// Session Data, so a receiver holds one metric name whichever produced the
+// points: the runtime's exporter or asz. It is a reconstructed subset of
+// the exporter's family, not a copy of it. The name, the unit, the delta
+// temporality and the token types are the exporter's; the labels are the
+// ones a transcript can supply, the session, the model and the query source;
+// the exporter's account, organisation, speed, effort and attribution labels
+// are not, and neither are its auxiliary calls, which never reach a
+// transcript. What the transcripts lack is never estimated.
+//
+// Usage follows the assembler's rule: the last fragment of a call in line
+// order, never a sum, and only a call that finished. A main transcript
+// repeats the final usage on every fragment; a child's carries streaming
+// partials on all but the last.
 package metrics
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -47,7 +54,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
-// The family, as the runtime's exporter names it.
+// The metric, as the runtime's exporter names it.
 const (
 	// TokenUsage counts tokens, by type and model, per session and per query
 	// source; the exporter's claude_code.token.usage.
@@ -60,11 +67,21 @@ const (
 	// both to asz's identity on the way out.
 	RuntimeService = "claude-code"
 
-	// ScopeName identifies what derived the points.
+	// ScopeName identifies what derived the points. It is asz's own, since
+	// the derivation is not the runtime's instrumentation; a receiver that
+	// keys on the scope sees two streams of one metric, as the export page
+	// says.
 	ScopeName = "github.com/apache/skywalking-ai-sessionizer/metrics"
 
 	// SourceLocal names the spool files this package writes.
 	SourceLocal = "local"
+
+	// DefaultGrace is how long a landed file whose last record may be a
+	// call continued in the next file waits for that file.
+	DefaultGrace = 2 * time.Minute
+
+	// StateFile holds what was derived and counted, under the spool.
+	StateFile = "metrics.state"
 )
 
 // The token types, spelled as the exporter spells them.
@@ -85,12 +102,16 @@ const (
 // Options settle a derivation.
 type Options struct {
 	// Lookback bounds the first derivation over a root: a minute that ended
-	// before now minus Lookback is not derived, so switching the flag on does
-	// not send a year of history. Zero means everything. Only the first pass
-	// is bounded; later passes derive every new file whole.
+	// before now minus Lookback is not derived, so switching the flag on
+	// does not send a year of history. Zero means everything. Only the
+	// first pass is bounded; later passes derive every new file whole.
 	Lookback time.Duration
-	Version  string
-	Now      func() time.Time
+	// Grace is how long a file whose last record is a fragment of a call
+	// waits for the next file of its stream, which may hold the call's end.
+	// Zero means DefaultGrace; negative means never wait.
+	Grace   time.Duration
+	Version string
+	Now     func() time.Time
 }
 
 // Stats reports what one pass did.
@@ -100,19 +121,23 @@ type Stats struct {
 	Files    int
 	Requests int
 	Points   int
-	// Skipped counts files older than the look-back on the first pass.
-	Skipped int
-	Errors  []error
+	// Skipped counts files older than the look-back on the first pass;
+	// Deferred counts files left for a later pass because their last call
+	// may continue in a file not yet landed.
+	Skipped  int
+	Deferred int
+	Errors   []error
 }
 
 // Deriver derives from the landed files of a root that no earlier pass
-// derived, and writes the requests to the root's spool. Which files were
-// derived is kept in the spool's derived.state, by path and digest, so a
-// file is derived once; which calls were counted is kept per session, so a
-// call is counted once however many files its records reach. The runtime
-// re-emits records before a context reset, and a landed file is cut at a
-// budget, so the same call can sit in two files, and the runtime's
-// exporter counted it once.
+// derived, and writes the requests to the root's spool.
+//
+// A pass is deterministic and idempotent: what it writes depends only on
+// the landed files and the state the pass before it saved, a derived
+// request is named after its landed file and never rewritten, and the
+// state is saved once, at the end. A pass cut short by a crash is run
+// again from the saved state and writes the same files, so nothing is
+// counted twice and nothing is lost.
 type Deriver struct {
 	Zone *storage.Zone
 	Options
@@ -124,15 +149,28 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
+	grace := d.Grace
+	if grace == 0 {
+		grace = DefaultGrace
+	}
 	st := &Stats{}
 	spool := storage.NewSpool(d.Zone)
-	state, first, err := loadState(filepath.Join(spool.Dir(), "derived.state"))
+	state, first, err := loadState(filepath.Join(spool.Dir(), StateFile))
 	if err != nil {
 		return nil, err
 	}
 	var since time.Time
-	if first && d.Lookback > 0 {
-		since = d.Now().Add(-d.Lookback)
+	if first {
+		if d.Lookback > 0 {
+			since = d.Now().Add(-d.Lookback)
+		}
+		// The runtime's exporter may have been the source until now: what
+		// it sent is in the spool with the time it was received, and the
+		// derivation starts after the last of it, so a switch of source
+		// counts nothing twice.
+		if received, err := latestReceived(spool); err == nil && received.After(since) {
+			since = received
+		}
 	}
 	if sessions == nil {
 		if sessions, err = sessionDirs(d.Zone.Root()); err != nil {
@@ -145,189 +183,306 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			st.Errors = append(st.Errors, err)
 			continue
 		}
-		callsPath := filepath.Join(spool.Dir(), "calls-"+session+".state")
-		seen, err := loadCalls(callsPath)
-		if err != nil {
-			st.Errors = append(st.Errors, err)
-			continue
-		}
-		counted := len(seen)
-		for _, lf := range files {
+		ss := state.session(session)
+		for i, lf := range files {
 			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
 			rel = filepath.ToSlash(rel)
-			if state.has(rel) {
+			if state.Derived[rel] != "" {
 				continue
 			}
-			req, points, latest, digest, err := DeriveFile(lf.Path, since, d.Version, seen)
+			next := nextOfStream(files, i)
+			res, err := deriveFile(lf, next, since, ss)
 			if err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 				continue
 			}
-			if !since.IsZero() && !latest.IsZero() && latest.Before(since) {
+			if res.openTail && next == nil && grace > 0 {
+				if fi, err := os.Stat(lf.Path); err == nil && d.Now().Sub(fi.ModTime()) < grace {
+					st.Deferred++
+					continue
+				}
+			}
+			if !since.IsZero() && !res.latest.IsZero() && res.latest.Before(since) {
 				st.Skipped++
 			}
-			if points > 0 {
-				data, err := proto.Marshal(req)
+			if len(res.points) > 0 {
+				data, err := proto.Marshal(request(res.points, d.Version))
 				if err != nil {
 					st.Errors = append(st.Errors, err)
 					continue
 				}
-				if _, err := spool.Put(SourceLocal, data, d.Now()); err != nil {
+				name := fmt.Sprintf("metrics-%s-%06d-%s.pb", session, lf.Seq, SourceLocal)
+				_, created, err := spool.PutNamed(name, data)
+				if err != nil {
 					st.Errors = append(st.Errors, err)
 					continue
 				}
-				st.Requests++
-				st.Points += points
+				// A request that was there already, from a pass cut short
+				// after writing it, is not a new one.
+				if created {
+					st.Requests++
+					st.Points += len(res.points)
+				}
 			}
+			// The file's effect on the state is applied only now, with its
+			// request on disk, so a failed write is derived again.
+			res.commit(ss)
+			state.Derived[rel] = res.digest
 			st.Files++
-			state.mark(rel, digest)
-		}
-		if len(seen) != counted {
-			if err := saveCalls(callsPath, seen, d.Now()); err != nil {
-				return nil, err
-			}
 		}
 	}
-	if err := state.save(filepath.Join(spool.Dir(), "derived.state"), d.Now()); err != nil {
+	if err := state.save(filepath.Join(spool.Dir(), StateFile), d.Now()); err != nil {
 		return nil, err
 	}
 	return st, nil
 }
 
-// loadCalls reads the calls counted so far for one session, one id per
-// line after the header.
-func loadCalls(path string) (map[string]bool, error) {
-	seen := map[string]bool{}
-	f, err := os.Open(path)
+// nextOfStream is the landed file after files[i] on the same stream, or nil.
+func nextOfStream(files []storage.LandedFile, i int) *storage.LandedFile {
+	for j := i + 1; j < len(files); j++ {
+		if files[j].Stream == files[i].Stream && files[i].Stream != "" {
+			return &files[j]
+		}
+	}
+	return nil
+}
+
+// latestReceived is when the newest request from the runtime's exporter was
+// put in the spool; zero when there is none.
+func latestReceived(spool *storage.Spool) (time.Time, error) {
+	files, err := spool.List()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return seen, nil
-		}
-		return nil, err
+		return time.Time{}, err
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		if id, ok := strings.CutPrefix(sc.Text(), "call "); ok {
-			seen[id] = true
+	var latest time.Time
+	for _, f := range files {
+		if f.Source != SourceLocal && f.At.After(latest) {
+			latest = f.At
 		}
 	}
-	return seen, sc.Err()
+	return latest, nil
 }
 
-func saveCalls(path string, seen map[string]bool, now time.Time) error {
-	ids := make([]string, 0, len(seen))
-	for id := range seen {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return storage.WriteAtomic(path, storage.PermState, func(w io.Writer) error {
-		bw := bufio.NewWriter(w)
-		fmt.Fprintf(bw, "schema 1\nupdated_at %s\n", now.UTC().Format(time.RFC3339Nano))
-		for _, id := range ids {
-			fmt.Fprintf(bw, "call %s\n", id)
-		}
-		return bw.Flush()
-	})
+// call is what one provider call's fragments said, as far as they were read:
+// the last fragment's usage and model, its time, and whether the call
+// finished.
+type call struct {
+	id       string
+	model    string
+	source   string
+	at       time.Time
+	usage    *sessiondata.Usage
+	finished bool
 }
 
-// point is one minute of one attribute set.
+// series names one time series of the metric: what a point's attributes
+// name, apart from the session, which is the state's own.
+type series struct{ model, source, typ string }
+
+func (s series) key() string { return s.model + "|" + s.source + "|" + s.typ }
+
+// point is one minute of one series, with the window it was given.
 type point struct {
-	minute  time.Time
+	series  series
 	session string
-	model   string
-	source  string
-	typ     string
+	minute  time.Time
+	start   time.Time
+	end     time.Time
 	value   int64
 }
 
-// DeriveFile derives the token usage of one landed file: one count per
-// call, never per fragment, since a main transcript repeats the usage on
-// every fragment of a call, and never for a call in seen, which the caller
-// keeps across the files of a session; summed per minute and attribute
-// set. Minutes that ended before since are left out. It returns the
-// request, how many points it holds, the latest record time in the file,
-// and the file's digest, and adds the calls it counted to seen.
-func DeriveFile(path string, since time.Time, version string, seen map[string]bool) (*collmetricspb.ExportMetricsServiceRequest, int, time.Time, string, error) {
-	f, err := os.Open(path)
+// result is what deriving one file found, held until its request is on
+// disk and then committed to the session's state.
+type result struct {
+	points   []point
+	counted  []string
+	lastEnd  map[string]time.Time
+	digest   string
+	latest   time.Time
+	openTail bool
+}
+
+func (r *result) commit(ss *sessionState) {
+	for _, id := range r.counted {
+		ss.Calls[id] = true
+	}
+	for k, t := range r.lastEnd {
+		ss.Series[k] = t.UnixNano()
+	}
+}
+
+// deriveFile reads one landed file's calls and turns the ones that finished
+// into points. A call whose last fragment is the file's last record may go
+// on in the next file of the stream; when that file exists its leading
+// fragments of the call are read too, and the call is counted here, once.
+// Points take the minute the call's last fragment falls in, and a window
+// that never overlaps the series' last: a minute already passed by an
+// earlier point follows that point instead.
+func deriveFile(lf storage.LandedFile, next *storage.LandedFile, since time.Time, ss *sessionState) (*result, error) {
+	f, err := os.Open(lf.Path)
 	if err != nil {
-		return nil, 0, time.Time{}, "", err
+		return nil, err
 	}
 	defer f.Close()
 	h := sha256.New()
 	rd, err := sessiondata.NewReader(io.TeeReader(f, h))
 	if err != nil {
-		return nil, 0, time.Time{}, "", err
+		return nil, err
 	}
 	hdr := rd.Header()
 	source := SourceSubagent
 	if hdr.Stream == "main" {
 		source = SourceMain
 	}
-	sums := map[point]int64{}
-	if seen == nil {
-		seen = map[string]bool{}
-	}
-	var latest time.Time
+	res := &result{lastEnd: map[string]time.Time{}}
+	calls := map[string]*call{}
+	var order []string
+	var last *call
+	var tail bool
 	for {
 		rec, err := rd.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return nil, 0, time.Time{}, "", err
+			return nil, err
 		}
 		t, ok := recordTime(rec)
-		if ok && t.After(latest) {
-			latest = t
+		if ok && t.After(res.latest) {
+			res.latest = t
 		}
-		if hdr.Kind != sessiondata.KindTranscript || rec.Call == "" || rec.Usage == nil || seen[rec.Call] || !ok {
+		tail = false
+		if hdr.Kind != sessiondata.KindTranscript || rec.Call == "" {
 			continue
 		}
-		seen[rec.Call] = true
-		minute := t.Truncate(time.Minute)
+		c := calls[rec.Call]
+		if c == nil {
+			c = &call{id: rec.Call, source: source}
+			calls[rec.Call] = c
+			order = append(order, rec.Call)
+		}
+		c.take(rec, t, ok)
+		last, tail = c, true
+	}
+	// Drain what the reader did not consume, so the digest is the file's.
+	if _, err := io.Copy(io.Discard, f); err != nil {
+		return nil, err
+	}
+	res.digest = hex.EncodeToString(h.Sum(nil))
+	if tail && last != nil && !ss.Calls[last.id] {
+		if next != nil {
+			if err := continueIn(next.Path, last); err != nil {
+				return nil, err
+			}
+		} else {
+			res.openTail = true
+		}
+	}
+	sums := map[point]int64{}
+	for _, id := range order {
+		c := calls[id]
+		if ss.Calls[id] {
+			continue
+		}
+		res.counted = append(res.counted, id)
+		if !c.finished || c.usage == nil || c.at.IsZero() {
+			continue
+		}
+		minute := c.at.Truncate(time.Minute)
 		if !since.IsZero() && minute.Add(time.Minute).Before(since) {
 			continue
 		}
 		for typ, n := range map[string]int{
-			TypeInput: rec.Usage.Input, TypeOutput: rec.Usage.Output,
-			TypeCacheRead: rec.Usage.CacheRead, TypeCacheCreation: rec.Usage.CacheWrite,
+			TypeInput: c.usage.Input, TypeOutput: c.usage.Output,
+			TypeCacheRead: c.usage.CacheRead, TypeCacheCreation: c.usage.CacheWrite,
 		} {
 			if n == 0 {
 				continue
 			}
-			k := point{minute: minute, session: hdr.Session, model: rec.Model, source: source, typ: typ}
+			k := point{series: series{model: c.model, source: c.source, typ: typ}, session: hdr.Session, minute: minute}
 			sums[k] += int64(n)
 		}
 	}
-	// Drain what the reader did not consume, so the digest is the file's.
-	if _, err := io.Copy(io.Discard, f); err != nil {
-		return nil, 0, time.Time{}, "", err
-	}
-	digest := hex.EncodeToString(h.Sum(nil))
 	points := make([]point, 0, len(sums))
 	for k, v := range sums {
 		k.value = v
 		points = append(points, k)
 	}
-	// The same file derives the same bytes: points in one order.
+	// The same file derives the same bytes: points in one order, and the
+	// windows follow from it.
 	sort.Slice(points, func(i, j int) bool {
 		a, b := points[i], points[j]
 		if !a.minute.Equal(b.minute) {
 			return a.minute.Before(b.minute)
 		}
-		if a.session != b.session {
-			return a.session < b.session
-		}
-		if a.model != b.model {
-			return a.model < b.model
-		}
-		if a.source != b.source {
-			return a.source < b.source
-		}
-		return a.typ < b.typ
+		return a.series.key() < b.series.key()
 	})
-	return request(points, version), len(points), latest, digest, nil
+	for i := range points {
+		p := &points[i]
+		prev := res.lastEnd[p.series.key()]
+		if prev.IsZero() {
+			if ns, ok := ss.Series[p.series.key()]; ok {
+				prev = time.Unix(0, ns).UTC()
+			}
+		}
+		p.start, p.end = p.minute, p.minute.Add(time.Minute)
+		if !prev.IsZero() && !prev.Before(p.start) {
+			// The series has a point at or past this minute already: this
+			// one follows it, so no two windows of the series overlap and
+			// none is thrown away for it.
+			p.start = prev
+			if !p.end.After(p.start) {
+				p.end = p.start.Add(time.Millisecond)
+			}
+		}
+		res.lastEnd[p.series.key()] = p.end
+	}
+	res.points = points
+	return res, nil
+}
+
+// take folds one fragment into the call: the last fragment's usage, model
+// and time win, and the call has finished once any fragment says so.
+func (c *call) take(rec *sessiondata.Record, t time.Time, ok bool) {
+	if rec.Usage != nil {
+		c.usage = rec.Usage
+	}
+	if rec.Model != "" {
+		c.model = rec.Model
+	}
+	if ok {
+		c.at = t
+	}
+	for _, f := range rec.Flags {
+		if f == "finished" {
+			c.finished = true
+		}
+	}
+}
+
+// continueIn reads the leading fragments of a call from the next file of
+// its stream: the file was cut at a budget, and the call's end is there.
+func continueIn(path string, c *call) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	rd, err := sessiondata.NewReader(f)
+	if err != nil {
+		return err
+	}
+	for {
+		rec, err := rd.Next()
+		if errors.Is(err, io.EOF) || (err == nil && rec.Call != c.id) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		t, ok := recordTime(rec)
+		c.take(rec, t, ok)
+	}
 }
 
 // request builds the exporter's request for the points: one resource, one
@@ -338,16 +493,16 @@ func request(points []point, version string) *collmetricspb.ExportMetricsService
 	for _, p := range points {
 		attrs := []*commonpb.KeyValue{
 			str("session.id", p.session),
-			str("type", p.typ),
-			str("query_source", p.source),
+			str("type", p.series.typ),
+			str("query_source", p.series.source),
 		}
-		if p.model != "" {
-			attrs = append(attrs, str("model", p.model))
+		if p.series.model != "" {
+			attrs = append(attrs, str("model", p.series.model))
 		}
 		dps = append(dps, &metricspb.NumberDataPoint{
 			Attributes:        attrs,
-			StartTimeUnixNano: uint64(p.minute.UnixNano()),
-			TimeUnixNano:      uint64(p.minute.Add(time.Minute).UnixNano()),
+			StartTimeUnixNano: uint64(p.start.UnixNano()),
+			TimeUnixNano:      uint64(p.end.UnixNano()),
 			Value:             &metricspb.NumberDataPoint_AsInt{AsInt: p.value},
 		})
 	}
@@ -379,7 +534,7 @@ func recordTime(rec *sessiondata.Record) (time.Time, bool) {
 	if err != nil {
 		return time.Time{}, false
 	}
-	return t, true
+	return t.UTC(), true
 }
 
 func sessionDirs(root string) ([]string, error) {
@@ -397,45 +552,67 @@ func sessionDirs(root string) ([]string, error) {
 	return out, nil
 }
 
-// derivedState is the set of landed files derived so far, with the digest
-// each had.
-type derivedState struct{ files map[string]string }
+// state is everything a pass depends on besides the landed files: which
+// files were derived, which calls were counted, and where each series'
+// last window ended. One file, written once per pass.
+type state struct {
+	Schema    int                      `json:"schema"`
+	UpdatedAt string                   `json:"updated_at"`
+	Derived   map[string]string        `json:"derived"`
+	Sessions  map[string]*sessionState `json:"sessions"`
+}
 
-func loadState(path string) (*derivedState, bool, error) {
-	s := &derivedState{files: map[string]string{}}
-	f, err := os.Open(path)
+type sessionState struct {
+	Calls  map[string]bool  `json:"calls"`
+	Series map[string]int64 `json:"series"`
+}
+
+func (s *state) session(id string) *sessionState {
+	ss := s.Sessions[id]
+	if ss == nil {
+		ss = &sessionState{Calls: map[string]bool{}, Series: map[string]int64{}}
+		s.Sessions[id] = ss
+	}
+	return ss
+}
+
+func loadState(path string) (*state, bool, error) {
+	s := &state{Schema: 1, Derived: map[string]string{}, Sessions: map[string]*sessionState{}}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return s, true, nil
 		}
 		return nil, false, err
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		if len(fields) == 3 && fields[0] == "derived" {
-			s.files[fields[1]] = fields[2]
+	if err := json.Unmarshal(data, s); err != nil {
+		return nil, false, fmt.Errorf("%s: %w", path, err)
+	}
+	if s.Derived == nil {
+		s.Derived = map[string]string{}
+	}
+	if s.Sessions == nil {
+		s.Sessions = map[string]*sessionState{}
+	}
+	for _, ss := range s.Sessions {
+		if ss.Calls == nil {
+			ss.Calls = map[string]bool{}
+		}
+		if ss.Series == nil {
+			ss.Series = map[string]int64{}
 		}
 	}
-	return s, false, sc.Err()
+	return s, false, nil
 }
 
-func (s *derivedState) has(rel string) bool     { _, ok := s.files[rel]; return ok }
-func (s *derivedState) mark(rel, digest string) { s.files[rel] = digest }
-
-func (s *derivedState) save(path string, now time.Time) error {
-	keys := make([]string, 0, len(s.files))
-	for k := range s.files {
-		keys = append(keys, k)
+func (s *state) save(path string, now time.Time) error {
+	s.Schema, s.UpdatedAt = 1, now.UTC().Format(time.RFC3339Nano)
+	data, err := json.MarshalIndent(s, "", " ")
+	if err != nil {
+		return err
 	}
-	sort.Strings(keys)
 	return storage.WriteAtomic(path, storage.PermState, func(w io.Writer) error {
-		bw := bufio.NewWriter(w)
-		fmt.Fprintf(bw, "schema 1\nupdated_at %s\n", now.UTC().Format(time.RFC3339Nano))
-		for _, k := range keys {
-			fmt.Fprintf(bw, "derived %s %s\n", k, s.files[k])
-		}
-		return bw.Flush()
+		_, err := w.Write(append(data, '\n'))
+		return err
 	})
 }
