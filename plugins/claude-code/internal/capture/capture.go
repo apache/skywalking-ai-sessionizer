@@ -210,7 +210,7 @@ func Build(r *scan.Root, reg *Registry, w *Window, ctx Context, sizeCap int64) (
 	sort.Strings(order)
 
 	rec := &changes.Record{
-		Schema: changes.Schema, ID: w.Capture, Session: ctx.Session, Stream: ctx.Stream,
+		Schema: changes.Schema, ID: w.Capture, CapturedBy: changes.CapturedByASZPlugin, Session: ctx.Session, Stream: ctx.Stream,
 		Tool: ctx.Tool, ToolName: ctx.ToolName, Time: w.ClosedAt, Basis: changes.BasisToolWindow,
 		Root:    &changes.Root{Path: r.Path, ID: r.ID},
 		Policy:  ctx.Policy,
@@ -271,7 +271,7 @@ func Build(r *scan.Root, reg *Registry, w *Window, ctx Context, sizeCap int64) (
 // tool window covered.
 func BuildGap(r *scan.Root, step *scan.Step, session, stream string, policy *changes.Policy, sizeCap int64) *changes.Record {
 	rec := &changes.Record{
-		Schema: changes.Schema, ID: fmt.Sprintf("plugin/gap-%s-%d", r.ID, step.N), Session: session, Stream: stream,
+		Schema: changes.Schema, ID: fmt.Sprintf("gap/%s/%d", r.ID, step.N), CapturedBy: changes.CapturedByASZPlugin, Session: session, Stream: stream,
 		Time: step.To, Basis: changes.BasisUnattributed,
 		Root: &changes.Root{Path: r.Path, ID: r.ID}, Policy: policy,
 		Window:   &changes.Window{Before: changes.Interval{From: step.From, To: step.From}, After: changes.Interval{From: step.From, To: step.To}},

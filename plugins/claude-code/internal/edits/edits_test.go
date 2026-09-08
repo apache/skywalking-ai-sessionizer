@@ -33,7 +33,7 @@ const editResponse = `{"filePath":"/work/project/poc.txt","oldString":"alpha","n
 const writeResponse = `{"type":"create","filePath":"/work/project/sub.txt","content":"from subagent","structuredPatch":[],"originalFile":null,"userModified":false}`
 
 func TestEditResponseBecomesARecord(t *testing.T) {
-	rec, ok := edits.Record(edits.Context{ID: "plugin/toolu_1", Session: "S", Stream: "a1", Tool: "toolu_1", ToolName: "Edit", Time: "2026-09-08T10:00:00Z", Root: "/work/project"}, json.RawMessage(editResponse))
+	rec, ok := edits.Record(edits.Context{ID: "toolu_1", Session: "S", Stream: "a1", Tool: "toolu_1", ToolName: "Edit", Time: "2026-09-08T10:00:00Z", Root: "/work/project"}, json.RawMessage(editResponse))
 	if !ok {
 		t.Fatal("no record")
 	}
@@ -56,7 +56,7 @@ func TestEditResponseBecomesARecord(t *testing.T) {
 }
 
 func TestWriteOfANewFileIsACreate(t *testing.T) {
-	rec, ok := edits.Record(edits.Context{ID: "plugin/toolu_2", Session: "S", Stream: "a1", Tool: "toolu_2", ToolName: "Write", Time: "t", Root: "/work/project"}, json.RawMessage(writeResponse))
+	rec, ok := edits.Record(edits.Context{ID: "toolu_2", Session: "S", Stream: "a1", Tool: "toolu_2", ToolName: "Write", Time: "t", Root: "/work/project"}, json.RawMessage(writeResponse))
 	if !ok {
 		t.Fatal("no record")
 	}
@@ -79,7 +79,7 @@ const writeOverResponse = `{"type":"update","filePath":"/work/project/poc.txt","
 const notebookResponse = `{"new_source":"print(2)","old_source":"print(1)\n","cell_type":"code","language":"python","edit_mode":"replace","cell_id":"c1","error":"","notebook_path":"/work/project/nb.ipynb","original_file":"{\"cells\":[{\"source\":[\"print(1)\\n\"]}]}\n","updated_file":"{\n \"cells\": [\n  {\n   \"source\": \"print(2)\"\n  }\n ]\n}"}`
 
 func TestWriteOverAnExistingFile(t *testing.T) {
-	rec, ok := edits.Record(edits.Context{ID: "plugin/t", Session: "S", Stream: "a1", Tool: "t", ToolName: "Write", Time: "t", Root: "/work/project"}, json.RawMessage(writeOverResponse))
+	rec, ok := edits.Record(edits.Context{ID: "t", Session: "S", Stream: "a1", Tool: "t", ToolName: "Write", Time: "t", Root: "/work/project"}, json.RawMessage(writeOverResponse))
 	if !ok {
 		t.Fatal("no record")
 	}
@@ -93,7 +93,7 @@ func TestWriteOverAnExistingFile(t *testing.T) {
 }
 
 func TestNotebookEditHasNoPatchAndIsDiffed(t *testing.T) {
-	rec, ok := edits.Record(edits.Context{ID: "plugin/t", Session: "S", Stream: "a1", Tool: "t", ToolName: "NotebookEdit", Time: "t", Root: "/work/project"}, json.RawMessage(notebookResponse))
+	rec, ok := edits.Record(edits.Context{ID: "t", Session: "S", Stream: "a1", Tool: "t", ToolName: "NotebookEdit", Time: "t", Root: "/work/project"}, json.RawMessage(notebookResponse))
 	if !ok {
 		t.Fatal("no record")
 	}

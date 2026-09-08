@@ -87,8 +87,9 @@ The chain still binds the file through the round's input digest, as it binds any
 result stays byte for byte. Files landed before this change stay as they are.
 
 **View.** `asz.view` gains `workspace_changes[]`, one entry per change record, joined to its step
-by `tool`. A step may have a native entry and a captured entry for the same tool id if a future
-runtime starts recording patches for subagents; the view prefers the native one. Records with no
+by `tool`. The record's `id` is the tool-use id and `captured_by` says who observed it, so a step
+may have a record captured by `claude-code` and one by `asz-plugin` for the same id if a future
+runtime starts recording patches for subagents; the view lists the runtime's first and prefers it. Records with no
 tool id are unattributed and are shown between the steps they fall between. A file whose change
 several windows could have made appears on each of their steps, marked shared and linking to the
 others, and is counted once in any total.
@@ -104,7 +105,8 @@ One JSON object per line. Field names are the model's, never the runtime's.
 
 ```yaml
 schema: changes/1
-id: <producer>/<capture>            # stable; the landed record id
+id: <tool-use id>                   # unique per call; gap/<root>/<step> for a change no window covers
+captured_by: claude-code | asz-plugin
 session: <session id>
 stream: main | <agent id>
 tool: <tool-use id>                 # absent on an unattributed record

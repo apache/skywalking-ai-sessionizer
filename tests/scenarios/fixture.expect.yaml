@@ -40,4 +40,4 @@ checkpoints:
       changes: 1
       changed_files: 1
       changes_joined: 1
-      changes_by_source: {plugin: 1}
+      captured_by: {asz-plugin: 1}

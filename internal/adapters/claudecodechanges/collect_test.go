@@ -41,7 +41,7 @@ const (
 
 func line(id, stream, tool, root string) string {
 	r := &changes.Record{
-		Schema: changes.Schema, ID: id, Session: session, Stream: stream, Tool: tool, ToolName: "Bash",
+		Schema: changes.Schema, ID: id, CapturedBy: changes.CapturedByASZPlugin, Session: session, Stream: stream, Tool: tool, ToolName: "Bash",
 		Time: "2026-09-08T02:00:04Z", Basis: changes.BasisToolWindow, Root: &changes.Root{Path: root},
 		ChangedFiles: changes.Int(1),
 		Changes: []changes.FileChange{{Path: "a.go", Operation: changes.OpModify,

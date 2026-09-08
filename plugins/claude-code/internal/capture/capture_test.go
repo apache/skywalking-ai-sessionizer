@@ -77,28 +77,28 @@ func TestTwoWindowsInterleaved(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, _, _ := r.Scan(o)
-	reg.Open(capture.Window{Capture: "plugin/t1", Session: "S", Stream: "main", Tool: "t1", ToolName: "Bash", Before: m.N, OpenedAt: m.To})
+	reg.Open(capture.Window{Capture: "t1", Session: "S", Stream: "main", Tool: "t1", ToolName: "Bash", Before: m.N, OpenedAt: m.To})
 	// Tool 1 writes f1, then B2.
 	write(t, filepath.Join(ws, "f1.txt"), "ONE\n")
 	m, _, _ = r.Scan(o)
-	reg.Open(capture.Window{Capture: "plugin/t2", Session: "S", Stream: "a1", Tool: "t2", ToolName: "Bash", Before: m.N, OpenedAt: m.To})
+	reg.Open(capture.Window{Capture: "t2", Session: "S", Stream: "a1", Tool: "t2", ToolName: "Bash", Before: m.N, OpenedAt: m.To})
 	// Somebody writes f2 while both are open, then A1.
 	write(t, filepath.Join(ws, "f2.txt"), "TWO\n")
 	m, _, _ = r.Scan(o)
-	reg.Close("plugin/t1", m.N, m.To, false)
+	reg.Close("t1", m.N, m.To, false)
 	// Tool 2 writes f3, then A2.
 	write(t, filepath.Join(ws, "f3.txt"), "THREE\n")
 	m, _, _ = r.Scan(o)
-	reg.Close("plugin/t2", m.N, m.To, false)
+	reg.Close("t2", m.N, m.To, false)
 
 	ctx := func(tool string) capture.Context {
 		return capture.Context{Session: "S", Stream: "main", Tool: tool, ToolName: "Bash", Outcome: &changes.Outcome{State: changes.OutcomeReturned}}
 	}
-	r1, err := capture.Build(r, reg, reg.Get("plugin/t1"), ctx("t1"), 1<<20)
+	r1, err := capture.Build(r, reg, reg.Get("t1"), ctx("t1"), 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2, err := capture.Build(r, reg, reg.Get("plugin/t2"), ctx("t2"), 1<<20)
+	r2, err := capture.Build(r, reg, reg.Get("t2"), ctx("t2"), 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,10 +125,10 @@ func TestTwoWindowsInterleaved(t *testing.T) {
 	if c2["f2.txt"].Attribution != changes.AttributionShared || c2["f3.txt"].Attribution != changes.AttributionOnlyThisWindow {
 		t.Errorf("window 2: f2 %+v, f3 %+v", c2["f2.txt"], c2["f3.txt"])
 	}
-	if len(r1.Overlaps) != 1 || r1.Overlaps[0].Capture != "plugin/t2" || r1.Overlaps[0].Stream != "a1" || r1.Overlaps[0].State != "closed" {
+	if len(r1.Overlaps) != 1 || r1.Overlaps[0].Capture != "t2" || r1.Overlaps[0].Stream != "a1" || r1.Overlaps[0].State != "closed" {
 		t.Errorf("window 1 overlaps: %+v", r1.Overlaps)
 	}
-	if len(r2.Overlaps) != 1 || r2.Overlaps[0].Capture != "plugin/t1" {
+	if len(r2.Overlaps) != 1 || r2.Overlaps[0].Capture != "t1" {
 		t.Errorf("window 2 overlaps: %+v", r2.Overlaps)
 	}
 	// The hunks come from the kept bytes.

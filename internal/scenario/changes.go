@@ -106,7 +106,7 @@ func fileChange(ch Change) changes.FileChange {
 func (p *Plan) nativeRecord(e *Event) *changes.Record {
 	fc := fileChange(e.Changes[0])
 	return &changes.Record{
-		Schema: changes.Schema, ID: "native/" + e.ID, Session: p.Session, Stream: e.Stream,
+		Schema: changes.Schema, ID: e.Of, CapturedBy: changes.CapturedByClaudeCode, Session: p.Session, Stream: e.Stream,
 		Tool: e.Of, Time: ccTime(e.At), Basis: changes.BasisRuntimeReported,
 		Root: &changes.Root{Path: p.Cwd()}, ChangedFiles: changes.Int(1),
 		Changes: []changes.FileChange{fc},
@@ -117,9 +117,9 @@ func (p *Plan) nativeRecord(e *Event) *changes.Record {
 // window around the call, the policy it ran under, and every changed file
 // attributed to this window alone.
 func (p *Plan) pluginRecord(e *Event) *changes.Record {
-	id := "plugin/" + e.ID
+	id := e.Of
 	r := &changes.Record{
-		Schema: changes.Schema, ID: id, Session: p.Session, Stream: e.Stream,
+		Schema: changes.Schema, ID: id, CapturedBy: changes.CapturedByASZPlugin, Session: p.Session, Stream: e.Stream,
 		Tool: e.Of, ToolName: e.ToolName, Time: ccTime(e.At), Basis: changes.BasisToolWindow,
 		Root:   &changes.Root{Path: p.Cwd()},
 		Policy: &changes.Policy{Exclusions: "standard-v1", ReadOnly: "readonly-v1"},

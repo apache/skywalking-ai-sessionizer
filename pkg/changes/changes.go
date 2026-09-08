@@ -97,12 +97,24 @@ const (
 	OutcomeUnfinished  = "unfinished"
 )
 
+// Who captures a change: the runtime itself, from the patch it records on
+// its own editing tools, or the asz plugin.
+const (
+	CapturedByClaudeCode = "claude-code"
+	CapturedByASZPlugin  = "asz-plugin"
+)
+
 // Record is one change set: what one observation found.
 type Record struct {
 	Schema string `json:"schema"`
-	// ID is stable across producers: a producer prefix and a capture id.
-	ID      string `json:"id"`
-	Session string `json:"session"`
+	// ID is the tool-use id the record belongs to, which the runtime makes
+	// unique per call. A change no tool window covers carries an id of its
+	// own, naming the root and the step it was found in.
+	ID string `json:"id"`
+	// CapturedBy says who observed the change, one of the values above.
+	// Two producers may record one call; this and the id tell them apart.
+	CapturedBy string `json:"captured_by"`
+	Session    string `json:"session"`
 	// Stream is main or the agent id the tool ran under.
 	Stream string `json:"stream"`
 	// Tool is the tool-use id the record joins to. Absent on an
@@ -255,6 +267,8 @@ func (r *Record) Validate() error {
 		return fmt.Errorf("changes: schema %q, want %q", r.Schema, Schema)
 	case r.ID == "":
 		return errors.New("changes: record has no id")
+	case r.CapturedBy == "":
+		return errors.New("changes: record does not say who captured it")
 	case r.Session == "":
 		return errors.New("changes: record has no session")
 	case r.Stream == "":

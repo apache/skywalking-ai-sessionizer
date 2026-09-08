@@ -163,7 +163,7 @@ func Record(ctx Context, raw json.RawMessage) (*changes.Record, bool) {
 		fc.Additions, fc.Deletions = changes.Int(add), changes.Int(del)
 	}
 	rec := &changes.Record{
-		Schema: changes.Schema, ID: ctx.ID, Session: ctx.Session, Stream: ctx.Stream,
+		Schema: changes.Schema, ID: ctx.ID, CapturedBy: changes.CapturedByASZPlugin, Session: ctx.Session, Stream: ctx.Stream,
 		Tool: ctx.Tool, ToolName: ctx.ToolName, Time: ctx.Time, Basis: changes.BasisRuntimeReported,
 		ChangedFiles: changes.Int(1), Changes: []changes.FileChange{fc},
 	}

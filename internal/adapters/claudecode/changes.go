@@ -139,7 +139,7 @@ func nativeChanges(d *indexRecord, tur *toolResult, src Source, rec *sessiondata
 	}
 
 	r := &changes.Record{
-		Schema: changes.Schema, ID: "native/" + d.UUID, Session: src.Session, Stream: src.Stream,
+		Schema: changes.Schema, ID: tool, CapturedBy: changes.CapturedByClaudeCode, Session: src.Session, Stream: src.Stream,
 		Tool: tool, Time: d.Timestamp, Basis: changes.BasisRuntimeReported,
 		ChangedFiles: changes.Int(1), Changes: []changes.FileChange{fc},
 	}

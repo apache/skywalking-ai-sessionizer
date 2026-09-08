@@ -193,7 +193,7 @@ func apply(old []string, hunks []changes.Hunk) []string {
 
 func TestRecordRoundTrip(t *testing.T) {
 	r := &changes.Record{
-		Schema: changes.Schema, ID: "p1/c42", Session: "S1", Stream: "main", Tool: "toolu_1", ToolName: "Bash",
+		Schema: changes.Schema, ID: "toolu_1", CapturedBy: changes.CapturedByASZPlugin, Session: "S1", Stream: "main", Tool: "toolu_1", ToolName: "Bash",
 		Time: "2026-09-08T02:00:04Z", Basis: changes.BasisToolWindow,
 		Root:         &changes.Root{Path: "/workspace/project"},
 		ChangedFiles: changes.Int(1),
@@ -213,7 +213,7 @@ func TestRecordRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Keys come out in the order the type lists them, schema first.
-	if !strings.HasPrefix(string(data), `{"schema":"changes/1","id":"p1/c42",`) {
+	if !strings.HasPrefix(string(data), `{"schema":"changes/1","id":"toolu_1","captured_by":"asz-plugin",`) {
 		t.Fatalf("key order: %s", data[:60])
 	}
 	if strings.Contains(string(data), "\n") {
@@ -232,7 +232,7 @@ func TestRecordRoundTrip(t *testing.T) {
 	if string(raw["changed_files"]) != "1" {
 		t.Fatalf("changed_files: %s", raw["changed_files"])
 	}
-	empty := &changes.Record{Schema: changes.Schema, ID: "x", Session: "S", Stream: "main", Time: "t", Basis: changes.BasisUnattributed}
+	empty := &changes.Record{Schema: changes.Schema, ID: "x", CapturedBy: changes.CapturedByASZPlugin, Session: "S", Stream: "main", Time: "t", Basis: changes.BasisUnattributed}
 	data, _ = empty.Marshal()
 	_ = json.Unmarshal(data, &raw)
 	if string(raw["changed_files"]) != "null" || string(raw["changes"]) != "[]" {
@@ -242,6 +242,10 @@ func TestRecordRoundTrip(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	r := &changes.Record{Schema: changes.Schema, ID: "x", Session: "S", Stream: "main", Time: "t", Basis: changes.BasisToolWindow}
+	if err := r.Validate(); err == nil {
+		t.Fatal("a record that does not say who captured it must not validate")
+	}
+	r.CapturedBy = changes.CapturedByASZPlugin
 	if err := r.Validate(); err == nil {
 		t.Fatal("an attributed record without a tool must not validate")
 	}

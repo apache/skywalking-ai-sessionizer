@@ -292,8 +292,9 @@ view shows one Changes tab whichever recorded it.
 `toolUseResult.structuredPatch`, `filePath` and `originalFile`, measured on 2,221 of 2,221 such
 results in a 52-session corpus. A `NotebookEdit` result carries `notebook_path`, `original_file`
 and `updated_file` and no patch, measured on a run of Claude Code 2.1.260. The adapter copies them
-into a `changes/1` record as a second `data` part beside the raw result, with
-`basis: runtime_reported`, the path relative to the record's `cwd`, the hunks as the runtime wrote
+into a `changes/1` record as a second `data` part beside the raw result, with the tool-use id as
+its id, `captured_by: claude-code`, `basis: runtime_reported`, the path relative to the record's
+`cwd`, the hunks as the runtime wrote
 them, or computed from the two versions when it wrote none, and the content before and after
 hashed. The raw result stays byte for byte. A subagent's transcript carries no such patch: 0 of
 453 in the same corpus.

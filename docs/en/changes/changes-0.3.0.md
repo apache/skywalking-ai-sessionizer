@@ -27,7 +27,8 @@
 ## Workspace changes
 
 - Which files a tool call changed is shown beside the step. Two producers write one shape,
-  `changes/1`, defined by `pkg/changes`: the Claude Code adapter copies the runtime's own patch
+  `changes/1`, defined by `pkg/changes`, whose id is the tool-use id and whose `captured_by` says
+  which producer observed it: the Claude Code adapter copies the runtime's own patch
   from every `Edit` and `Write` result on the main stream into a second `data` part beside the raw
   result, and the new asz Claude Code plugin, `plugins/claude-code/`, records shell commands, and
   edits inside subagents, into its own data directory. The plugin runs inside Claude Code's hooks,

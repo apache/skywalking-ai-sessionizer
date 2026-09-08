@@ -62,12 +62,16 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 
 	var out []sessionview.WorkspaceChange
 	seen := map[string]bool{}
-	add := func(r *changes.Record, source string, ref sessionflow.Ref) {
-		if seen[r.ID] {
-			return // a line landed twice by an interrupted pass
+	add := func(r *changes.Record, ref sessionflow.Ref) {
+		// The id is the tool-use id, so two producers observing one call
+		// share it; who captured the record tells them apart, and a line
+		// landed twice by an interrupted pass is the same on both counts.
+		key := r.CapturedBy + "|" + r.ID
+		if seen[key] {
+			return
 		}
-		seen[r.ID] = true
-		out = append(out, sessionview.WorkspaceChange{Step: stepOf[r.Tool], Source: source, Ref: ref, Record: *r})
+		seen[key] = true
+		out = append(out, sessionview.WorkspaceChange{Step: stepOf[r.Tool], Ref: ref, Record: *r})
 	}
 
 	// The runtime's own patches, on the result records the tool steps read.
@@ -87,7 +91,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 				}
 				if r, ok := changes.Decode(p.Data); ok {
 					block := b
-					add(r, sessionview.SourceRuntime, sessionflow.Ref{Seq: ref.Seq, Row: ref.Row, Block: &block})
+					add(r, sessionflow.Ref{Seq: ref.Seq, Row: ref.Row, Block: &block})
 				}
 			}
 		}
@@ -118,22 +122,23 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 				}
 				if r, ok := changes.Decode(p.Data); ok {
 					block := b
-					add(r, sessionview.SourcePlugin, sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block})
+					add(r, sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block})
 				}
 			}
 		}
 		f.Close()
 	}
 
-	// By time, then by id, so the same files give the same list. A
-	// runtime-reported record and a plugin record for one tool both stay:
-	// the runtime's is listed first, and a viewer showing one prefers it.
+	// By time, then by id, so the same files give the same list. A record
+	// the runtime captured and one the plugin captured for one call both
+	// stay: the runtime's is listed first, and a viewer showing one
+	// prefers it.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Time != out[j].Time {
 			return out[i].Time < out[j].Time
 		}
-		if out[i].Source != out[j].Source {
-			return out[i].Source == sessionview.SourceRuntime
+		if out[i].CapturedBy != out[j].CapturedBy {
+			return out[i].CapturedBy == changes.CapturedByClaudeCode
 		}
 		return out[i].ID < out[j].ID
 	})

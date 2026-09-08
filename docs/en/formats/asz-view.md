@@ -128,15 +128,15 @@ record's own fields as `changes/1` lists them:
 | Key | Value |
 | --- | --- |
 | `step` | the id of the tool step whose tool-use id the record names, or empty when no step carries it, which is also how an unattributed change appears |
-| `source` | `runtime` for a patch the runtime recorded on its own editing tool, read from the result record; `plugin` for one the asz Claude Code plugin observed, read from a `changes` file |
-| `ref` | the landed record and part the entry was read from: `seq`, `row`, `block` |
-| `schema`, `id`, `session`, `stream`, `tool`, `tool_name`, `time`, `basis` | the record's identity: `basis` is `runtime_reported`, `tool_window`, `unattributed` or `skipped_read_only` |
+| `ref` | the landed record and part the entry was read from: `seq`, `row`, `block`. A patch the runtime recorded sits on the result record; a record the plugin wrote sits in a `changes` file |
+| `schema`, `id`, `captured_by`, `session`, `stream`, `tool`, `tool_name`, `time`, `basis` | the record's identity. `id` is the tool-use id the record belongs to, unique per call, or `gap/<root>/<step>` for a change no tool window covers. `captured_by` is `claude-code` for a patch the runtime recorded on its own editing tool, `asz-plugin` for one the asz Claude Code plugin observed. `basis` is `runtime_reported`, `tool_window`, `unattributed` or `skipped_read_only` |
 | `root`, `policy`, `window`, `outcome`, `coverage`, `gaps`, `overlaps` | where it was observed, under which rules, between which scans, what the call reported, whether the whole scope was seen, and which other windows were open on the root at the same time |
 | `changed_files`, `changes` | the count, null when unknown, and one entry per file: `path`, `operation`, `before` and `after` as `present`, `bytes`, `sha256`, `no_newline_at_end`; `diff`, one of `available`, `binary`, `too_large`, `unavailable`; `attribution` and `windows`, which windows could have made the change; `additions`, `deletions` and `hunks`, each hunk `old_start`, `old_lines`, `new_start`, `new_lines` and `lines` prefixed with `-`, `+` or a space |
 
 A tool step lists the ids of its records under `changes`, in the order `workspace_changes` lists
-them, and `summary.changes` counts them. A step may have a `runtime` entry and a `plugin` entry
-for the same call; the runtime's is listed first, and a viewer showing one prefers it. A change
+them, and `summary.changes` counts them. A step may have an entry captured by `claude-code` and
+one captured by `asz-plugin` for the same call, with the same id; the runtime's is listed first,
+and a viewer showing one prefers it. A change
 several windows could have made appears in each of their records, marked `shared` and naming the
 others, and is counted once. A record with `basis: skipped_read_only` carries no changes and
 means the call was not observed, never that it changed nothing.

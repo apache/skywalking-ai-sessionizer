@@ -218,7 +218,7 @@ func (p *plugin) roots() []string {
 
 // captureID names the record of one call on one root.
 func (p *plugin) captureID(r *scan.Root) string {
-	id := "plugin/" + p.in.ToolUseID
+	id := p.in.ToolUseID
 	if len(p.roots()) > 1 {
 		id += "/" + r.ID
 	}
@@ -326,7 +326,7 @@ func (p *plugin) after(root string) error {
 	}
 	if pending.Skipped {
 		rec := &changes.Record{
-			Schema: changes.Schema, ID: pending.Capture, Session: pending.Session, Stream: pending.Stream,
+			Schema: changes.Schema, ID: pending.Capture, CapturedBy: changes.CapturedByASZPlugin, Session: pending.Session, Stream: pending.Stream,
 			Tool: pending.Tool, ToolName: pending.ToolName, Time: p.now.UTC().Format(time.RFC3339Nano),
 			Basis: changes.BasisSkippedReadOnly, Root: &changes.Root{Path: r.Path, ID: r.ID},
 			Policy: p.policy(), Outcome: outcome, Changes: []changes.FileChange{},
@@ -427,7 +427,7 @@ func (p *plugin) touch(root, file string) error {
 		return err
 	}
 	in := p.in
-	id := "plugin/" + in.ToolUseID
+	id := in.ToolUseID
 	reg.Open(capture.Window{
 		Capture: id, Session: in.SessionID, Stream: in.Stream(), Tool: in.ToolUseID, ToolName: in.ToolName,
 		Before: step.N - 1, OpenedAt: step.From,
@@ -464,7 +464,7 @@ func (p *plugin) edit() error {
 		root = roots[0]
 	}
 	rec, ok := edits.Record(edits.Context{
-		ID: "plugin/" + in.ToolUseID, Session: in.SessionID, Stream: in.Stream(), Tool: in.ToolUseID,
+		ID: in.ToolUseID, Session: in.SessionID, Stream: in.Stream(), Tool: in.ToolUseID,
 		ToolName: in.ToolName, Time: p.now.UTC().Format(time.RFC3339Nano), Root: root,
 	}, in.ToolResponse)
 	if !ok {

@@ -62,10 +62,10 @@ ${CLAUDE_PLUGIN_DATA}/output/<session-id>/main.jsonl
 ${CLAUDE_PLUGIN_DATA}/output/<session-id>/<agent-id>.jsonl
 ```
 
-Each line is a `changes/1` record: the session, the stream, the tool-use id it belongs to, the
-time, how it was observed, the root, the policy it ran under, and for each changed file its path,
-the operation, size and hash before and after, and the hunks as a unified diff with line
-numbers. `pkg/changes` in the repository defines the shape.
+Each line is a `changes/1` record: the tool-use id it belongs to as its id, `captured_by:
+asz-plugin`, the session, the stream, the time, how it was observed, the root, the policy it ran
+under, and for each changed file its path, the operation, size and hash before and after, and the
+hunks as a unified diff with line numbers. `pkg/changes` in the repository defines the shape.
 
 asz's `claude-code-changes` adapter, on by default, finds these files beside Claude Code's own,
 tails them, and lands each line as a record of kind `changes` under the stream the tool ran in.

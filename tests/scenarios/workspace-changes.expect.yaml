@@ -25,6 +25,6 @@ checkpoints:
       changes: 3
       changed_files: 4
       changes_joined: 3
-      changes_by_source: {runtime: 1, plugin: 2}
+      captured_by: {claude-code: 1, asz-plugin: 2}
 push:
   kinds: [transcript, agent_meta, changes, round]

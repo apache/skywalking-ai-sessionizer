@@ -84,24 +84,16 @@ type Conversation struct {
 	WorkspaceChanges []WorkspaceChange `json:"workspace_changes"`
 }
 
-// WorkspaceChange is one change record with where it was read from and the
-// step it joins to. The record's own fields follow, as changes/1 lists
-// them. Source says who produced it: "runtime" for a patch the runtime
-// recorded on its editing tool, "plugin" for one the asz plugin observed.
-// Step is empty when no step carries the tool-use id, which is also how
-// an unattributed change appears.
+// WorkspaceChange is one change record with the step it joins to and where
+// it was read from. The record's own fields follow, as changes/1 lists
+// them; its captured_by says who observed it. Step is empty when no step
+// carries the tool-use id, which is also how an unattributed change
+// appears.
 type WorkspaceChange struct {
-	Step   string          `json:"step"`
-	Source string          `json:"source"`
-	Ref    sessionflow.Ref `json:"ref"`
+	Step string          `json:"step"`
+	Ref  sessionflow.Ref `json:"ref"`
 	changes.Record
 }
-
-// Sources of a workspace change.
-const (
-	SourceRuntime = "runtime"
-	SourcePlugin  = "plugin"
-)
 
 // Head identifies the fold the document was built from.
 type Head struct {

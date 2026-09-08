@@ -236,12 +236,12 @@ type View struct {
 	Rounds    *int  `yaml:"rounds"`
 	FirstTalk *Talk `yaml:"first_talk"`
 	// Changes counts the workspace change records, ChangedFiles the files
-	// across them, ChangesBySource the records by who produced them, and
+	// across them, CapturedBy the records by who captured them, and
 	// ChangesJoined the records that found their step.
-	Changes         *int           `yaml:"changes"`
-	ChangedFiles    *int           `yaml:"changed_files"`
-	ChangesBySource map[string]int `yaml:"changes_by_source"`
-	ChangesJoined   *int           `yaml:"changes_joined"`
+	Changes       *int           `yaml:"changes"`
+	ChangedFiles  *int           `yaml:"changed_files"`
+	CapturedBy    map[string]int `yaml:"captured_by"`
+	ChangesJoined *int           `yaml:"changes_joined"`
 }
 
 // Talk is what a talk in the document must say.
@@ -508,12 +508,12 @@ func checkView(root, session string, want *View) ([]string, error) {
 	if doc.Summary.Changes != len(doc.WorkspaceChanges) {
 		bad("view.summary.changes is %d, the document lists %d", doc.Summary.Changes, len(doc.WorkspaceChanges))
 	}
-	if want.ChangedFiles != nil || want.ChangesBySource != nil || want.ChangesJoined != nil {
+	if want.ChangedFiles != nil || want.CapturedBy != nil || want.ChangesJoined != nil {
 		files, joined := 0, 0
 		bySource := map[string]int{}
 		for _, wc := range doc.WorkspaceChanges {
 			files += len(wc.Changes)
-			bySource[wc.Source]++
+			bySource[wc.CapturedBy]++
 			if wc.Step != "" {
 				joined++
 			}
@@ -524,9 +524,9 @@ func checkView(root, session string, want *View) ([]string, error) {
 		if want.ChangesJoined != nil && joined != *want.ChangesJoined {
 			bad("view.changes_joined is %d, want %d", joined, *want.ChangesJoined)
 		}
-		for source, n := range want.ChangesBySource {
-			if bySource[source] != n {
-				bad("view.changes_by_source[%s] is %d, want %d", source, bySource[source], n)
+		for who, n := range want.CapturedBy {
+			if bySource[who] != n {
+				bad("view.captured_by[%s] is %d, want %d", who, bySource[who], n)
 			}
 		}
 	}

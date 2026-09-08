@@ -58,7 +58,7 @@ func nativePart(t *testing.T, payload string) *changes.Record {
 
 func TestWriteOverAnExistingFileKeepsTheRuntimesPatch(t *testing.T) {
 	r := nativePart(t, writeOverRecord)
-	if r.Basis != changes.BasisRuntimeReported || r.Tool != "toolu_w" || r.Root.Path != "/work/project" || r.ID != "native/u-write" {
+	if r.Basis != changes.BasisRuntimeReported || r.Tool != "toolu_w" || r.Root.Path != "/work/project" || r.ID != "toolu_w" || r.CapturedBy != changes.CapturedByClaudeCode {
 		t.Fatalf("record: %+v", r)
 	}
 	c := r.Changes[0]

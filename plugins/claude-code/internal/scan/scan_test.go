@@ -150,10 +150,10 @@ func TestScanStopsAtItsTimeCap(t *testing.T) {
 
 func TestPendingNotes(t *testing.T) {
 	r, _ := scan.Open(t.TempDir(), t.TempDir())
-	if err := r.PutPending(&scan.Pending{Capture: "plugin/toolu_1", Tool: "toolu_1", Before: 3, At: "2026-09-08T10:00:00Z"}); err != nil {
+	if err := r.PutPending(&scan.Pending{Capture: "toolu_1", Tool: "toolu_1", Before: 3, At: "2026-09-08T10:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.PutPending(&scan.Pending{Capture: "plugin/toolu_2", Tool: "toolu_2", Before: 4, At: "2026-09-08T10:40:00Z"}); err != nil {
+	if err := r.PutPending(&scan.Pending{Capture: "toolu_2", Tool: "toolu_2", Before: 4, At: "2026-09-08T10:40:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 	stale, err := r.StalePending(30*time.Minute, time.Date(2026, 9, 8, 10, 45, 0, 0, time.UTC))

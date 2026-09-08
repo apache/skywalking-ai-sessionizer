@@ -28,7 +28,7 @@ import (
 )
 
 func rec(id, stream string) *changes.Record {
-	return &changes.Record{Schema: changes.Schema, ID: id, Session: "S", Stream: stream, Tool: "t", Time: "t", Basis: changes.BasisToolWindow}
+	return &changes.Record{Schema: changes.Schema, ID: id, CapturedBy: changes.CapturedByASZPlugin, Session: "S", Stream: stream, Tool: "t", Time: "t", Basis: changes.BasisToolWindow}
 }
 
 func TestAppendWritesOneLinePerRecordPerStream(t *testing.T) {
