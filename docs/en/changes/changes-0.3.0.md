@@ -39,8 +39,9 @@
   `asz view` refreshes both sources. Session Data and Session Flow are unchanged: `changes` is a
   new kind, assembly emits no node for it, and a session folds to the same nodes with and
   without the records.
-- `asz.view` is 1.1: `workspace_changes` lists every record joined to its step, a tool step names
-  its records under `changes`, and `summary.changes` counts them. A 1.0 reader ignores them.
+- `asz.view` gains `workspace_changes`, every record joined to its step; a tool step names its
+  records under `changes`, and `summary.changes` counts them. The version stays 1.0: no official
+  release carries the format yet, so the keys are added rather than a version raised.
 - The plugin ships in every binary package under `claude-code-plugin/`, and `make build` builds it
   beside `asz`.
 

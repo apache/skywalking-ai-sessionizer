@@ -68,7 +68,7 @@ producer of them.
 
 | Key | Value |
 | --- | --- |
-| `format`, `version` | `asz.view`, `1.1`. A reader that does not know the version stops here. 1.1 added `workspace_changes`, `summary.changes` and a step's `changes`; a 1.0 reader ignores them. |
+| `format`, `version` | `asz.view`, `1.0`. A reader that does not know the version stops here. |
 | `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
@@ -81,7 +81,7 @@ producer of them.
 | `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold, so the document covers the whole session |
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence` |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
-| `workspace_changes` | since 1.1, one per workspace change record the session's files carry, joined to its step. See below. |
+| `workspace_changes` | one per workspace change record the session's files carry, joined to its step. See below. |
 
 Verification is content, not an error. A gap in the chain or a failed digest is written into
 `summary.state` and `summary.problems`, each round says whether it verified, and the rest of the
@@ -167,7 +167,7 @@ Nothing in a document is inferred beyond what the fold and the records say. Wher
 
 `-yaml` is a rendering of the JSON, not a second format. It is produced from the JSON, so the keys
 are the same and in the same order; mappings are blocks; scalars are plain, and quoted only where
-YAML would otherwise misread them, so `version` is `"1.1"` and a title with a colon is quoted; an
+YAML would otherwise misread them, so `version` is `"1.0"` and a title with a colon is quoted; an
 empty map is `{}`; a text with line breaks is a block scalar. Reading the YAML back gives the same
 values as the JSON.
 

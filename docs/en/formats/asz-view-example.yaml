@@ -1,5 +1,5 @@
 format: asz.view
-version: "1.1"
+version: "1.0"
 conversation: 00000001-0000-4000-8000-000000000001
 sessions:
     - 00000001-0000-4000-8000-000000000001

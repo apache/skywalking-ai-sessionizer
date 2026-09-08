@@ -1,7 +1,7 @@
 # Design Plan 05 — Workspace Changes
 
 **Status:** implemented on 2026-09-08 as decided below: `pkg/changes`, the `changes` kind, the
-`claude-code-changes` adapter, the adapter's native part, `asz.view` 1.1, the scenario
+`claude-code-changes` adapter, the adapter's native part, `workspace_changes` in `asz.view`, the scenario
 `tests/scenarios/workspace-changes.yaml`, and the plugin under `plugins/claude-code/`. The
 documentation is `docs/en/setup/claude-code-plugin.md`. This note replaces the
 plan "Claude Code workspace capture: ASZ → OAP → Horizon" of 2026-09-07, which is kept outside the
@@ -64,7 +64,7 @@ Claude Code hooks ──► plugins/claude-code (Go, hook-only)
 asz claude-code-changes adapter tails it ─┘  ──► <root>/<session>/streams/<stream>/changes-<stamp>-<seq>.sd
 asz claude-code-local adapter               ──► <root>/<session>/streams/<stream>/transcript-…sd
                                                  (Edit/Write/NotebookEdit results gain a changes/1 data part)
-view joins changes records to steps by tool id ──► asz.view 1.1 workspace_changes
+view joins changes records to steps by tool id ──► asz.view workspace_changes
 ```
 
 **Plugin output.** One JSONL file per stream of a session, `main.jsonl` or `<agent id>.jsonl`,
@@ -86,7 +86,7 @@ The chain still binds the file through the round's input digest, as it binds any
 `data` part in the `changes/1` shape beside the raw result, with `basis: runtime_reported`. The raw
 result stays byte for byte. Files landed before this change stay as they are.
 
-**View.** `asz.view` 1.1 adds `workspace_changes[]`, one entry per change record, joined to its step
+**View.** `asz.view` gains `workspace_changes[]`, one entry per change record, joined to its step
 by `tool`. A step may have a native entry and a captured entry for the same tool id if a future
 runtime starts recording patches for subagents; the view prefers the native one. Records with no
 tool id are unattributed and are shown between the steps they fall between. A file whose change
