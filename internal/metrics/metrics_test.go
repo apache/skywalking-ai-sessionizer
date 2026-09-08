@@ -103,6 +103,14 @@ func land(t *testing.T, z *storage.Zone, session, stream string, seq uint64, cal
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The file's time is the tests' clock, not the machine's: the deriver
+	// waits a grace on a file whose last record may be a fragment of a call
+	// still being written, measured against its own clock, and a file
+	// written today under a clock fixed in the past would wait forever. An
+	// hour before the base is past the grace under every clock the tests
+	// use; the tests that exercise the grace set the time they need
+	// themselves, after landing.
+	aged(t, path, base.Add(-time.Hour))
 	return path
 }
 

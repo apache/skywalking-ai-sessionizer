@@ -105,8 +105,12 @@ type plugin struct {
 	st         *settings.Settings
 	rules      *scope.Rules
 	in         *hook.Input
-	now        time.Time
-	log        *os.File
+	// now is when the hook started, and clock is that moment plus what has
+	// elapsed since, so a scan's times and the retention rules read one
+	// clock: the real one under Claude Code, a fixed one under a test.
+	now   time.Time
+	clock func() time.Time
+	log   *os.File
 }
 
 func (p *plugin) logf(format string, a ...any) {
@@ -121,7 +125,9 @@ func (p *plugin) logf(format string, a ...any) {
 // the project directory Claude Code sets in the environment. It returns 0
 // whatever happened: a hook that fails must not stop the tool.
 func runHook(stdin io.Reader, dataDir, projectDir string, now time.Time) (code int) {
+	start := time.Now()
 	p := &plugin{now: now, dataDir: dataDir, projectDir: projectDir}
+	p.clock = func() time.Time { return now.Add(time.Since(start)) }
 	defer func() {
 		if r := recover(); r != nil {
 			p.logf("panic: %v", r)
@@ -228,7 +234,7 @@ func (p *plugin) policy() *changes.Policy {
 }
 
 func (p *plugin) scanOptions() scan.Options {
-	return scan.Options{Rules: p.rules, Timeout: p.st.ScanTimeout, SizeCap: p.st.SizeCap, Now: time.Now}
+	return scan.Options{Rules: p.rules, Timeout: p.st.ScanTimeout, SizeCap: p.st.SizeCap, Now: p.clock}
 }
 
 // before opens a window: a scan of the root, unless the command is
@@ -546,7 +552,7 @@ func pruneNow() error {
 	if err != nil {
 		return err
 	}
-	p := &plugin{dataDir: dataDir, st: st, now: time.Now()}
+	p := &plugin{dataDir: dataDir, st: st, now: time.Now(), clock: time.Now}
 	p.maintain()
 	return nil
 }
