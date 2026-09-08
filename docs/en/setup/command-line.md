@@ -33,6 +33,8 @@ asz version                          print the version
 Discovers sessions under the source root and counts their files without landing anything. One
 row per session: directories, execution streams, child-agent sidecars, workflow journals and
 manifests. Sessions removed by the include and exclude filters are counted on the `filtered` line.
+With the `claude-code-changes` adapter enabled, a second table lists the sessions the plugin has
+written change records for, with their streams and workspace.
 
 ## collect
 
@@ -59,6 +61,9 @@ pass:
 
 `pending` or `errors` above zero means the pass did not collect everything, and the command exits
 non-zero. A clean pass is `pending=0 errors=0`.
+
+With the `claude-code-changes` adapter enabled, a second line per pass, prefixed `changes:`,
+reports the plugin's files with the same fields.
 
 ## index
 
@@ -139,9 +144,9 @@ talk, the selected step and the stream being read, so a link lands on the same s
 Horizon can show, the Evidence tab opens the landed record behind a step, since only asz has the
 files.
 
-With the `claude-code-local` adapter, when its source directory exists on the machine, the same
-process also runs the collector and the parser: once with `-once`, or on the collector interval
-otherwise. `/api/status` reports the mode, the source, the last and the next refresh and the counts
+With the `claude-code-local` and `claude-code-changes` adapters, when a source directory exists
+on the machine, the same process also runs the collectors and the parser: once with `-once`, or
+on the collector interval otherwise. Either source may be absent, and the other still refreshes. `/api/status` reports the mode, the source, the last and the next refresh and the counts
 of the last pass, and the list page shows the same. On a storage root copied from another machine
 there is no source, so the page serves what is there and shows no refresh.
 

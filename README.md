@@ -60,7 +60,7 @@ adapter reports it as `unavailable` rather than approximating it.
 
 | Runtime | Status | Collection |
 | --- | --- | --- |
-| [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists |
+| [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists. The [plugin](docs/en/setup/claude-code-plugin.md) adds which files each shell command changed. |
 | Codex | planned | — |
 | LangChain / LangGraph | planned | — |
 

@@ -32,12 +32,13 @@ import (
 // cmdView serves the conversations in the storage root.
 //
 // The page only reads: the chain, the landed records and the index are opened
-// read-only. When the adapter is the local Claude Code one and its source is
-// on this machine, the same process also runs the collector and the parser -
-// once, or on the configured interval in watch mode - so one command is a
-// complete local setup, and the list page can say when its data was last
-// refreshed and when it will be next.
-func cmdView(cfg *config.Config, ad config.Adapter, once bool) error {
+// read-only. When a local adapter's source is on this machine, Claude Code's
+// own files or the change records the plugin writes beside them, the same
+// process also runs the collectors and the parser - once, or on the
+// configured interval in watch mode - so one command is a complete local
+// setup, and the list page can say when its data was last refreshed and
+// when it will be next.
+func cmdView(cfg *config.Config, ads []config.Adapter, once bool) error {
 	zoneRoot, err := cfg.ResolvedRoot()
 	if err != nil {
 		return err
@@ -50,11 +51,11 @@ func cmdView(cfg *config.Config, ad config.Adapter, once bool) error {
 	srv := view.New(zone, claudecode.Glossary())
 
 	var ref *refresher
-	if ad.Name == config.AdapterClaudeCodeLocal {
+	if len(ads) > 0 {
 		if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
 			return err
 		}
-		if ref, err = newRefresher(srv, zone, ad, cfg.Parse.MaxRoundBytes, once); err != nil {
+		if ref, err = newRefresher(srv, zone, ads, cfg.Parse.MaxRoundBytes, once); err != nil {
 			return err
 		}
 	}

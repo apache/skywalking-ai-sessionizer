@@ -1,0 +1,20 @@
+{
+  "description": "asz-changes: a scan around each shell command, the runtime's own patch for each edit inside a subagent, and the retention rules at the session's start and end.",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash|PowerShell|Monitor", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin\" hook", "timeout": 60}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Bash|PowerShell|Monitor|Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin\" hook", "timeout": 60}]}
+    ],
+    "PostToolUseFailure": [
+      {"matcher": "Bash|PowerShell|Monitor", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin\" hook", "timeout": 60}]}
+    ],
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin\" hook", "timeout": 30}]}
+    ],
+    "SessionEnd": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin\" hook", "timeout": 30}]}
+    ]
+  }
+}

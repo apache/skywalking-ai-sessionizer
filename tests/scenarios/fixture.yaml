@@ -32,8 +32,12 @@ steps:
       tool:
         id: tool-run-make-build
         name: Bash
-        input: {command: make build, description: build the project}
+        input: {command: go generate ./... && make build, description: generate and build}
         result: {text: build succeeded, after: 800ms}
+        changes:
+          - path: internal/version.go
+            before: "package internal\n\nconst Version = \"0.2.0\"\n"
+            after: "package internal\n\nconst Version = \"0.3.0\"\n"
       usage: {in: 2, out: 50, cache_read: 900, cache_write: 100}
     after: 900ms
   - call:

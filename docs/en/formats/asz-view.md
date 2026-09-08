@@ -31,7 +31,9 @@ another server compare equal as documents.
 the fixture session of the format pages, three talks across a main stream and a child agent, a
 tool, a synthetic error and a context reset, exactly as `asz conversation -yaml` prints it. It is
 generated from the scenario `tests/scenarios/fixture.yaml` by `make asz-view-example`, and a test
-fails when the committed file no longer matches what the code produces.
+fails when the committed file no longer matches what the code produces. Its `workspace_changes`
+holds the one file the build changed; `tests/scenarios/workspace-changes.yaml` covers every
+producer of them.
 
 ## Top level
 
@@ -70,7 +72,7 @@ fails when the committed file no longer matches what the code produces.
 | `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
-| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
+| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`; several means it did not choose, and neither does a view |
@@ -79,6 +81,7 @@ fails when the committed file no longer matches what the code produces.
 | `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold, so the document covers the whole session |
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence` |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
+| `workspace_changes` | one per workspace change record the session's files carry, joined to its step. See below. |
 
 Verification is content, not an error. A gap in the chain or a failed digest is written into
 `summary.state` and `summary.problems`, each round says whether it verified, and the rest of the
@@ -115,6 +118,28 @@ usable round at all is an error, because there is nothing to show.
 
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
 the fold and the records say. Where the fold says `unavailable`, the document says it too.
+
+## Workspace changes
+
+`workspace_changes` lists which files each tool call changed, one entry per change record, in
+time order. An entry carries where the record was read from and the step it joins to, then the
+record's own fields as `changes/1` lists them:
+
+| Key | Value |
+| --- | --- |
+| `step` | the target: the id of the tool step this change belongs to, the one whose tool-use id the record names. Empty when no step carries the id, which is also how an unattributed change appears |
+| `ref` | the source: the landed record the entry was built from, in the shape every node's `ref` has. `seq` names a file under `files`, `row` the record in it counting from 1, `block` the part. A patch the runtime recorded sits on the `Edit` or `Write` result record, beside the raw result; a record the plugin wrote sits in a `changes` file, one record per line |
+| `schema`, `id`, `captured_by`, `session`, `stream`, `tool`, `tool_name`, `time`, `basis` | the record's identity. `id` is the tool-use id the record belongs to, unique per call, or `gap/<root>/<step>` for a change no tool window covers. `captured_by` is `claude-code` for a patch the runtime recorded on its own editing tool, `asz-plugin` for one the asz Claude Code plugin observed. `basis` is `runtime_reported`, `tool_window`, `unattributed` or `skipped_read_only` |
+| `root`, `policy`, `window`, `outcome`, `coverage`, `gaps`, `overlaps` | where it was observed, under which rules, between which scans, what the call reported, whether the whole scope was seen, and which other windows were open on the root at the same time |
+| `changed_files`, `changes` | the count, null when unknown, and one entry per file: `path`, `operation`, `before` and `after` as `present`, `bytes`, `sha256`, `no_newline_at_end`; `diff`, one of `available`, `binary`, `too_large`, `unavailable`; `attribution` and `windows`, which windows could have made the change; `additions`, `deletions` and `hunks`, each hunk `old_start`, `old_lines`, `new_start`, `new_lines` and `lines` prefixed with `-`, `+` or a space |
+
+A tool step lists the ids of its records under `changes`, in the order `workspace_changes` lists
+them, and `summary.changes` counts them. A step may have an entry captured by `claude-code` and
+one captured by `asz-plugin` for the same call, with the same id; the runtime's is listed first,
+and a viewer showing one prefers it. A change
+several windows could have made appears in each of their records, marked `shared` and naming the
+others, and is counted once. A record with `basis: skipped_read_only` carries no changes and
+means the call was not observed, never that it changed nothing.
 
 ## Rendering the whole conversation
 

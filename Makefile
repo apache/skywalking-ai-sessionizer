@@ -29,6 +29,11 @@ LDFLAGS     := -X main.version=$(VERSION)
 
 RELEASE_NAME := apache-skywalking-ai-sessionizer-$(VERSION)-src
 
+# The Claude Code plugin: its manifest and hooks live in the tree, and its
+# binary is built beside them, where the hooks find it.
+PLUGIN_DIR    := plugins/claude-code
+PLUGIN_BINARY := asz-claude-plugin
+
 # The platforms a release ships binaries for. Every one is cross-compiled
 # from any host: the binary is pure Go and needs no C toolchain.
 PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
@@ -47,6 +52,7 @@ $(BIN_DIR):
 .PHONY: build
 build: $(BIN_DIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(PLUGIN_DIR)/bin/$(PLUGIN_BINARY) ./$(PLUGIN_DIR)
 
 ## test: run the whole suite, unit and end-to-end
 .PHONY: test
@@ -170,7 +176,7 @@ tidy:
 docker: ## Build the container image, as CI builds and publishes it
 	docker build --build-arg VERSION=$(VERSION) -t skywalking-ai-sessionizer:dev .
 
-## binaries: cross-compile every platform in PLATFORMS and package each with the LICENSE, the NOTICE and the dependency licenses into dist/
+## binaries: cross-compile every platform in PLATFORMS and package each, with the Claude Code plugin, the LICENSE, the NOTICE and the dependency licenses, into dist/
 .PHONY: binaries
 binaries:
 	@mkdir -p $(DIST)/build
@@ -180,10 +186,13 @@ binaries:
 	  mkdir -p $$out && cp dist-material/LICENSE dist-material/NOTICE $$out/ && rm -rf $$out/licenses && cp -R dist-material/licenses $$out/licenses && \
 	  echo "building $$os/$$arch" && \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
+	  rm -rf $$out/claude-code-plugin && mkdir -p $$out/claude-code-plugin/bin && \
+	  cp -R $(PLUGIN_DIR)/.claude-plugin $(PLUGIN_DIR)/hooks $$out/claude-code-plugin/ && \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/claude-code-plugin/bin/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
 	  if [ "$$os" = windows ]; then \
-	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && (cd $$out && zip -qr ../../$(PKG_BASE)-$$os-$$arch.zip $(BINARY)$$ext LICENSE NOTICE licenses); \
+	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && (cd $$out && zip -qr ../../$(PKG_BASE)-$$os-$$arch.zip $(BINARY)$$ext claude-code-plugin LICENSE NOTICE licenses); \
 	  else \
-	    tar -C $$out -czf $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz $(BINARY) LICENSE NOTICE licenses; \
+	    tar -C $$out -czf $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz $(BINARY) claude-code-plugin LICENSE NOTICE licenses; \
 	  fi; \
 	done
 	@ls -la $(DIST)/$(PKG_BASE)-*

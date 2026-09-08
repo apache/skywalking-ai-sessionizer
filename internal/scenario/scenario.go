@@ -140,6 +140,21 @@ type Tool struct {
 	Name   string         `yaml:"name"`
 	Input  map[string]any `yaml:"input"`
 	Result *Result        `yaml:"result"`
+	// Changes are the files the tool changed, each as its content before
+	// and after. For Edit, Write and NotebookEdit they are written the way
+	// the runtime records its own patch, on the result; for any other tool
+	// they are written the way the plugin records what it observed, as a
+	// change record beside the stream. Both land as changes/1 and both
+	// join the step, so the same scenario checks the two paths.
+	Changes []Change `yaml:"changes"`
+}
+
+// Change is one file a tool changed. A side that is absent, nil in YAML or
+// left out, means the file did not exist on that side.
+type Change struct {
+	Path   string  `yaml:"path"`
+	Before *string `yaml:"before"`
+	After  *string `yaml:"after"`
 }
 
 // Result is what a tool returned. In a Tool it may be written as a plain

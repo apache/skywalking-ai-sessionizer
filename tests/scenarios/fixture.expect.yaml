@@ -35,5 +35,9 @@ checkpoints:
       state: verified
       talks: 3
       rounds: 2
-      files: 6                                # four landed files and two rounds
+      files: 7                                # five landed files, one of them the build's change, and two rounds
       first_talk: {label: run the build, reply: Build passed and tests are green., runs: 2}
+      changes: 1
+      changed_files: 1
+      changes_joined: 1
+      captured_by: {asz-plugin: 1}

@@ -27,7 +27,7 @@ The schema is `sd/1`.
 | `schema` | `sd/1` |
 | `seq` | the landed sequence number, monotonic per session |
 | `at` | when the file was collected |
-| `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport. |
+| `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport. |
 | `adapter` | how the records were acquired, with its contract version |
 | `dialect` | whose schema they were read as. A push receiver and a local reader for one runtime share a dialect and nothing else. |
 | `src` | the source, relative to the adapter's root |
@@ -45,6 +45,7 @@ each kind carry a characteristic set of fields.
 | `journal` | a workflow run's journal | one record per event, `from: runtime`, with `child` and `batch`; a `child_result` flag on the record that returns a child's value | `agent.output` nodes and `ends_with` relations |
 | `workflow_manifest` | a workflow run's manifest | one record with `batch` and `label`, and a `data` part | the run's name |
 | `workflow_script` | the program a workflow ran | one record whose part is `unknown`: the source is a program, not data | nothing; kept because it is part of the session |
+| `changes` | the files the asz Claude Code plugin saw a tool call change, one line per call | one record per observed call, with `id`, `tool` and `time` lifted from it and the line whole as one `data` part, a `changes/1` record; no `from` and no flags, so assembly emits no node for it | nothing in a round; the view joins each to its step by `tool`. A transcript's `Edit` and `Write` results carry the same record as a second `data` part, from the runtime's own patch. See the [Claude Code plugin](../setup/claude-code-plugin.md). |
 
 Files of every kind are bound by the rounds' `input_digest`, so a session travels or archives as
 all of them. A session's `agent_meta`, `workflow_manifest` and `workflow_script` records carry

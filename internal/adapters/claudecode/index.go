@@ -37,6 +37,9 @@ type indexRecord struct {
 	PromptID   string `json:"promptId"`
 	AgentID    string `json:"agentId"`
 	Subtype    string `json:"subtype"`
+	// Cwd is the working directory the record was written under. It is
+	// the root a file edit's path is made relative to.
+	Cwd string `json:"cwd"`
 
 	// LogicalParentUUID appears on context-reset boundaries and on no other
 	// record type. It is the explicit pointer to the last message before the
@@ -109,6 +112,24 @@ type toolResult struct {
 	RunID         string `json:"runId"`
 	TranscriptDir string `json:"transcriptDir"`
 	TaskID        string `json:"taskId"`
+
+	// What an editing tool's result says about the file it changed. The
+	// runtime writes these on Edit and Write results of the main stream,
+	// measured on every successful one in a 52-session corpus. Pointers
+	// tell a file that was absent from one that was empty.
+	FilePath        string      `json:"filePath"`
+	OriginalFile    *string     `json:"originalFile"`
+	Content         *string     `json:"content"`
+	OldString       string      `json:"oldString"`
+	NewString       string      `json:"newString"`
+	ReplaceAll      bool        `json:"replaceAll"`
+	StructuredPatch []patchHunk `json:"structuredPatch"`
+	// A NotebookEdit result names its file and its content before and
+	// after under other keys, and carries no patch. Measured on a run of
+	// Claude Code 2.1.260.
+	NotebookPath   string  `json:"notebook_path"`
+	NotebookBefore *string `json:"original_file"`
+	NotebookAfter  *string `json:"updated_file"`
 }
 
 // decodeToolResult reads the enrichment only when it is an object.

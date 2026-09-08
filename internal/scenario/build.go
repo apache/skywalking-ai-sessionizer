@@ -110,12 +110,17 @@ adapters:
     metrics_lookback: none
     collector:
       mode: once
+  - name: claude-code-changes
+    enabled: true
+    source_root: %s/plugins/data
+    collector:
+      mode: once
 # To export the session with asz push, name the receiver:
 # export:
 #   otlp:
 #     protocol: grpc
 #     endpoint: 127.0.0.1:11800
-`, out, source)
+`, out, source, source)
 	// A file that starts with what the build writes is the build's, with
 	// whatever a person appended, such as the export block for a push.
 	if old, err := os.ReadFile(path); err == nil && strings.HasPrefix(string(old), text) {

@@ -33,12 +33,15 @@ transcripts.
 
 ## adapters
 
-A list. Version 0.1.0 has one adapter, `claude-code-local`, which reads Claude Code's files from
-this machine. Every command runs once per enabled adapter.
+A list. `claude-code-local` reads Claude Code's files from this machine. `claude-code-changes`
+reads the change records the asz Claude Code plugin writes beside them; see
+[the changes adapter](#the-changes-adapter). `claude-code-otlp` receives the runtime's own
+exporter; see [the receiver adapter](#the-receiver-adapter). Every command runs once per enabled
+adapter.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `name` | | `claude-code-local` |
+| `name` | | `claude-code-local`, `claude-code-changes` or `claude-code-otlp` |
 | `enabled` | `true` | A disabled adapter is skipped by every command. |
 | `source_root` | empty | Where Claude Code keeps its files. Empty resolves it the way Claude Code does: `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME/claude`, then `~/.claude`, each followed by `projects`. Set it only to collect from a copy or a mounted directory. |
 | `include` | empty | Session filters, see below. Empty means every session is a candidate. |
@@ -116,6 +119,30 @@ export:
 | `metrics` | `true` | Send the metrics spool, as OTLP metrics. One of the two must be on. |
 
 See [Export over OpenTelemetry](export-otlp.md) for what is sent.
+
+## The changes adapter
+
+```yaml
+adapters:
+  - name: claude-code-changes
+    enabled: true
+    source_root: ""
+    include: []
+    exclude:
+      - /private/tmp/**
+    collector:
+      mode: watch
+      interval: 5s
+      max_delta_bytes: 2097152
+```
+
+`claude-code-changes` lands the records the [asz Claude Code plugin](claude-code-plugin.md)
+writes: which files each shell command changed, and each edit made inside a subagent, as
+git-style hunks. Empty `source_root` resolves `plugins/data` under the same directory
+`claude-code-local` resolves, and reads every plugin directory named `asz-changes-*` under it;
+set it to collect from a copy. The session filters are the ones above, judged by the workspace
+each session's records name. It is on by default because it costs nothing when the plugin is not
+installed: there is nothing to discover. It takes no `metrics`.
 
 ## The receiver adapter
 

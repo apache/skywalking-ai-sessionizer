@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
@@ -54,7 +55,7 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		Client:      client,
 		Version:     version,
 		ServiceName: o.ServiceName,
-		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, mock.Name: mock.RuntimeName},
+		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, mock.Name: mock.RuntimeName},
 		InstanceID:  o.InstanceID,
 		Layer:       o.Layer,
 		BatchBytes:  o.BatchBytes,

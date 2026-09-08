@@ -39,20 +39,28 @@ import (
 // measurable share of tool joins look ambiguous when they are not.
 func (b *builder) stage1Canonical() {
 	all := b.ix.Canonical()
-	b.canonical = all
-	if b.opt.ThroughSeq > 0 {
-		// Everything above the watermark is set aside, not read. The index may
-		// already hold records a concurrent collector landed after this round's
-		// range was fixed, and a round must describe only the evidence its own
-		// header and input digest cover.
-		bounded := make([]int32, 0, len(all))
-		for _, i := range all {
-			if uint64(b.ix.Entries[i].Seq) <= b.opt.ThroughSeq {
-				bounded = append(bounded, i)
-			}
+	// Everything above the watermark is set aside, not read. The index may
+	// already hold records a concurrent collector landed after this round's
+	// range was fixed, and a round must describe only the evidence its own
+	// header and input digest cover.
+	//
+	// A workspace change record is set aside too. It is evidence beside a
+	// stream, not a step of it: it names the tool it belongs to and a view
+	// joins the two. Letting it into a stream would change that stream's
+	// record count and time range, so a session with such records would
+	// fold differently from the same session without them.
+	bounded := make([]int32, 0, len(all))
+	for _, i := range all {
+		e := &b.ix.Entries[i]
+		if b.opt.ThroughSeq > 0 && uint64(e.Seq) > b.opt.ThroughSeq {
+			continue
 		}
-		b.canonical = bounded
+		if e.Kind == index.KindChanges {
+			continue
+		}
+		bounded = append(bounded, i)
 	}
+	b.canonical = bounded
 	b.stats.Entries = len(b.canonical)
 	b.stats.Duplicates = len(b.ix.Entries) - len(all)
 	b.stats.Beyond = len(all) - len(b.canonical)

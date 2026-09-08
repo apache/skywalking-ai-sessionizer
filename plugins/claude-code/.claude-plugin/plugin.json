@@ -1,0 +1,10 @@
+{
+  "name": "asz-changes",
+  "description": "Records which files each tool call changed, for Apache SkyWalking AI Sessionizer. Runs standalone; asz collects its output.",
+  "version": "0.1.0",
+  "author": {"name": "Apache SkyWalking"},
+  "homepage": "https://github.com/apache/skywalking-ai-sessionizer",
+  "repository": "https://github.com/apache/skywalking-ai-sessionizer",
+  "license": "Apache-2.0",
+  "keywords": ["skywalking", "observability", "changes"]
+}

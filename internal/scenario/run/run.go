@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/repack"
@@ -245,6 +246,12 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 			return pushFollowsTheWire(out, session, f, ex.Push, expectedTokens(built.Plan), expect.On(ex.Properties.MetricsMatchThePlan))
 		}},
 		{"view_covers_the_session", ex.Properties.ViewCoversTheSession, func() ([]string, error) { return expect.ViewCoversTheSession(out, session) }},
+		{"changes_leave_the_fold", ex.Properties.ChangesLeaveTheFold, func() ([]string, error) {
+			if !scenario.HasChanges(sc.Steps) {
+				return nil, nil
+			}
+			return changesLeaveTheFold(sc, f, out, session, opts, ex.Parse.MaxRoundBytes)
+		}},
 		{"reproducible", ex.Properties.Reproducible, func() ([]string, error) {
 			// Two parses of identical landed evidence must produce identical
 			// rounds. The chain in out was cut at checkpoints, so it is not
@@ -284,6 +291,13 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 				}
 				if st.Records != 0 || st.SourcesLanded != 0 {
 					return []string{fmt.Sprintf("recollect_idempotent: a second collect landed %d records from %d sources", st.Records, st.SourcesLanded)}, nil
+				}
+				cs, err := claudecodechanges.New(filepath.Join(out, "_source", "plugins", "data"), zone, 0).CollectAll(nil)
+				if err != nil {
+					return nil, err
+				}
+				if cs.Records != 0 || cs.SourcesLanded != 0 {
+					return []string{fmt.Sprintf("recollect_idempotent: a second collect of the changes landed %d records from %d sources", cs.Records, cs.SourcesLanded)}, nil
 				}
 				return nil, nil
 			}},
@@ -364,7 +378,47 @@ func collect(f scenario.Format, out string) error {
 	if len(st.Errors) != 0 {
 		return fmt.Errorf("collect: %v", st.Errors)
 	}
+	// The plugin's lines, through their own adapter, as asz view runs both.
+	cs, err := claudecodechanges.New(filepath.Join(out, "_source", "plugins", "data"), storage.NewZone(out), 0).CollectAll(nil)
+	if err != nil {
+		return err
+	}
+	if len(cs.Errors) != 0 {
+		return fmt.Errorf("collect changes: %v", cs.Errors)
+	}
 	return nil
+}
+
+// changesLeaveTheFold builds the scenario again without its changes and
+// compares the folds: the nodes, the relations and the talks must be the
+// same, because a change record is evidence beside a step and never a
+// step. The chain's bytes differ, since a round binds the files it read.
+func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
+	plain := out + "-plain"
+	defer os.RemoveAll(plain)
+	built, err := scenario.Build(sc.WithoutChanges(), f, plain, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval})
+	if err != nil {
+		return nil, err
+	}
+	if err := collect(f, plain); err != nil {
+		return nil, err
+	}
+	if _, err := parseAll(plain, built.Session, maxRound); err != nil {
+		return nil, err
+	}
+	with, err := expect.Summarize(out, session)
+	if err != nil {
+		return nil, err
+	}
+	without, err := expect.Summarize(plain, built.Session)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, d := range expect.Compare(with, without) {
+		lines = append(lines, "changes_leave_the_fold: the fold differs with and without the changes: "+d)
+	}
+	return lines, nil
 }
 
 // parseAll writes rounds until the chain reaches the index, and returns the
@@ -438,6 +492,9 @@ func everyLineARecord(out, session string) ([]string, error) {
 		}
 		rel, _ := filepath.Rel(source, path)
 		rel = filepath.ToSlash(rel)
+		// The plugin's lines land through their own adapter, whose root is
+		// plugins/data, so their landed source is relative to that.
+		rel = strings.TrimPrefix(rel, "plugins/data/")
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err

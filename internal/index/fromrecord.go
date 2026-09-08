@@ -92,6 +92,8 @@ func kindOf(hdr *sessiondata.Header, rec *sessiondata.Record) Kind {
 		return KindManifest
 	case sessiondata.KindWorkflowScript:
 		return KindScript
+	case sessiondata.KindChanges:
+		return KindChanges
 	}
 	switch rec.From {
 	case sessiondata.FromAgent:

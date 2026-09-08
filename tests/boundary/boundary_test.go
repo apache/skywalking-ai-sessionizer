@@ -79,6 +79,27 @@ func TestSidesMeetOnlyAtTheStorageRoot(t *testing.T) {
 	}
 }
 
+// The Claude Code plugin runs standalone, inside Claude Code and with no
+// asz beside it. It may import the public packages under pkg/, which hold
+// the record it writes, and nothing that collects, assembles or serves:
+// those are asz's, and the plugin's only contact with asz is the files it
+// leaves behind.
+func TestThePluginImportsOnlyThePublicPackages(t *testing.T) {
+	root := filepath.Join("..", "..")
+	for pkg, imports := range importsUnder(t, filepath.Join(root, "plugins/")) {
+		for _, imp := range imports {
+			if !strings.HasPrefix(imp, module) {
+				continue
+			}
+			rel := strings.TrimPrefix(imp, module)
+			if strings.HasPrefix(rel, "pkg/") || strings.HasPrefix(rel, "plugins/") {
+				continue
+			}
+			t.Errorf("%s imports %s; the plugin may import pkg/ and itself only", pkg, imp)
+		}
+	}
+}
+
 // The page reads Session Data and Session Flow and nothing else. The index is
 // assembly's accelerator, derived and disposable; a root that arrives with
 // only its landed files and its rounds must render in full.

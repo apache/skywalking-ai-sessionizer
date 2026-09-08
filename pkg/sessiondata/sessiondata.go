@@ -53,6 +53,13 @@ const (
 	KindOTLPLog          Kind = "otlp_log"  // reserved, a push transport
 	KindOTLPSpan         Kind = "otlp_span" // reserved, a push transport
 	KindProviderBody     Kind = "provider_body"
+	// KindChanges holds workspace change records, changes/1, one per
+	// observed tool call: which files it changed and how. They are
+	// evidence beside a stream's transcript, never steps of it, so
+	// assembly emits no node for them and a view joins them to steps by
+	// tool-use id. The kind is one word because a landed file's name
+	// prefix is the kind.
+	KindChanges Kind = "changes"
 )
 
 // PartKind names what a piece of content IS.

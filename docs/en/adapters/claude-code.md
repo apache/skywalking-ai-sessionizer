@@ -283,6 +283,34 @@ Every fork has exactly two children. Treat a fork as a topological hint, not a b
 several, mostly on `user` records — including `[image, text]`, where reading `content[0]` renders a
 base64 image as the user's prompt.
 
+## Workspace changes
+
+Which files a tool call changed comes from two places, and lands in one shape, `changes/1`, so a
+view shows one Changes tab whichever recorded it.
+
+**The runtime's own patch.** Every successful `Edit` and `Write` result on the main stream carries
+`toolUseResult.structuredPatch`, `filePath` and `originalFile`, measured on 2,221 of 2,221 such
+results in a 52-session corpus. A `NotebookEdit` result carries `notebook_path`, `original_file`
+and `updated_file` and no patch, measured on a run of Claude Code 2.1.260. The adapter copies them
+into a `changes/1` record as a second `data` part beside the raw result, with the tool-use id as
+its id, `captured_by: claude-code`, `basis: runtime_reported`, the path relative to the record's
+`cwd`, the hunks as the runtime wrote
+them, or computed from the two versions when it wrote none, and the content before and after
+hashed. The raw result stays byte for byte. A subagent's transcript carries no such patch: 0 of
+453 in the same corpus.
+
+**The plugin's observations.** The [asz Claude Code plugin](../setup/claude-code-plugin.md)
+records shell commands, and edits inside subagents, into its own data directory beside Claude
+Code's files. The `claude-code-changes` adapter, on by default, finds them the way this adapter
+finds transcripts, resolves `plugins/data` under the same Claude Code directory, and lands each
+line as a record of kind `changes` under the stream the tool ran in, with the session's own lock
+and sequence. Session filters apply to the workspace the records name.
+
+Neither is a step. Assembly leaves a `changes` record out of its stream, so a session folds to
+the same nodes with and without them, and the view joins each record to its step by the
+tool-use id. The scenario `tests/scenarios/workspace-changes.yaml` checks both paths in both
+formats, and that the fold is unchanged.
+
 ## What this adapter cannot supply
 
 | | Why |
@@ -293,6 +321,7 @@ base64 image as the user's prompt.
 | **Per-call duration and cost** | not written to transcripts. Available via OTLP. |
 | **`tool.execution`** | no local record; the call and result are observable, the execution is not. |
 | **Retry attempt identity** | derivable only for failures that received an HTTP response; transport failures carry no request id. |
+| **What a shell command changed** | not in the transcript, which holds the command and its output only. Available from the [plugin](../setup/claude-code-plugin.md). The same for an edit inside a subagent, whose transcript carries no patch. |
 
 The injected preamble is a **fixed** cost — roughly 8 KB without a project instruction file, up to
 ~40 KB with one — so its share of a conversation falls as the conversation grows. It is not a
