@@ -242,6 +242,61 @@ func TestAnEditIsNeverFoundAsNobodysChange(t *testing.T) {
 	}
 }
 
+// TestIdleRootsDropTheirBytesAndKeepTheirManifest: the retention rule for
+// snapshot state, run at a session's end, and the one for output files.
+func TestIdleRootsDropTheirBytesAndKeepTheirManifest(t *testing.T) {
+	data := t.TempDir()
+	ws := t.TempDir()
+	const session = "11111111-2222-4333-8444-555555555555"
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)
+	cmd := `{"command":"make build"}`
+	runHook(strings.NewReader(hookInput("PreToolUse", session, "", "Bash", "toolu_1", cmd, "", "")), data, ws, now)
+	runHook(strings.NewReader(hookInput("PostToolUse", session, "", "Bash", "toolu_1", cmd, `{"stdout":"","stderr":""}`, "")), data, ws, now.Add(time.Second))
+	roots, err := os.ReadDir(filepath.Join(data, "roots"))
+	if err != nil || len(roots) != 1 {
+		t.Fatalf("roots: %v err=%v", roots, err)
+	}
+	root := filepath.Join(data, "roots", roots[0].Name())
+	content := func() int {
+		items, _ := os.ReadDir(filepath.Join(root, "content"))
+		return len(items)
+	}
+	if content() == 0 {
+		t.Fatal("the scans kept no bytes")
+	}
+	// Ten minutes later the root is not idle yet.
+	runHook(strings.NewReader(`{"hook_event_name":"SessionEnd","session_id":"`+session+`"}`), data, ws, now.Add(10*time.Minute))
+	if content() == 0 {
+		t.Fatal("bytes dropped before the idle time")
+	}
+	// An hour later it is: the bytes and the steps go, the manifest stays.
+	runHook(strings.NewReader(`{"hook_event_name":"SessionEnd","session_id":"`+session+`"}`), data, ws, now.Add(time.Hour))
+	if content() != 0 {
+		t.Fatal("bytes kept past the idle time")
+	}
+	if steps, _ := os.ReadDir(filepath.Join(root, "steps")); len(steps) != 0 {
+		t.Fatal("steps kept past the idle time")
+	}
+	if _, err := os.Stat(filepath.Join(root, "manifest.json")); err != nil {
+		t.Fatal("the manifest went with the bytes")
+	}
+	// The output file outlives the idle time and goes at its TTL.
+	if _, err := os.Stat(output.Path(data, session, "main")); err != nil {
+		t.Fatal("the output went with the bytes")
+	}
+	old := now.Add(-40 * 24 * time.Hour)
+	if err := os.Chtimes(output.Path(data, session, "main"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	runHook(strings.NewReader(`{"hook_event_name":"SessionStart","session_id":"`+session+`"}`), data, ws, now.Add(2*time.Hour))
+	if _, err := os.Stat(output.Path(data, session, "main")); !os.IsNotExist(err) {
+		t.Fatal("an output file past its TTL is still there")
+	}
+}
+
 func TestNothingBlocksTheTool(t *testing.T) {
 	if code := runHook(strings.NewReader("not json"), t.TempDir(), "", time.Now()); code != 0 {
 		t.Fatal("bad input changed the exit status")

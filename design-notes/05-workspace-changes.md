@@ -49,7 +49,9 @@ point the format already has. Existing readers, chains and rounds do not change.
 9. **Subagents are covered by the plugin.** The runtime records no patch inside a subagent
    transcript, so there the plugin hooks the three editing tools as well, on `PostToolUse` only:
    the hook's own response carries the patch and the original content, proven in section 11.
-   Shell tools are hooked everywhere.
+   On the main stream the same hook writes no record and only brings the plugin's manifest up
+   to date with the file, so the runtime's own edit is never found as nobody's. Shell tools are
+   hooked everywhere.
 10. **Retention is two rules, neither waiting for a collector.** Snapshot state for a root is dropped
     after 30 minutes idle. Output files are dropped by a TTL, 30 days by default.
 
@@ -57,7 +59,7 @@ point the format already has. Existing readers, chains and rounds do not change.
 
 ```text
 Claude Code hooks ──► plugins/claude-code (Go, hook-only)
-                        └─ ${CLAUDE_PLUGIN_DATA}/output/<session>/changes.jsonl   append-only
+                        └─ ${CLAUDE_PLUGIN_DATA}/output/<session>/<stream>.jsonl   append-only
                                           │
 asz claude-code-changes adapter tails it ─┘  ──► <root>/<session>/streams/<stream>/changes-<stamp>-<seq>.sd
 asz claude-code-local adapter               ──► <root>/<session>/streams/<stream>/transcript-…sd
@@ -65,8 +67,9 @@ asz claude-code-local adapter               ──► <root>/<session>/streams/<
 view joins changes records to steps by tool id ──► asz.view 1.1 workspace_changes
 ```
 
-**Plugin output.** One JSONL file per session, one line per capture, each line written whole and
-synced. The plugin never rewrites a line. The file is a source in the sense of Plan 01: the adapter
+**Plugin output.** One JSONL file per stream of a session, `main.jsonl` or `<agent id>.jsonl`,
+one line per capture, each line written whole and synced, so a landed file has one stream as a
+transcript's does. The plugin never rewrites a line. The file is a source in the sense of Plan 01: the adapter
 tails it, stops at the last complete newline, and records `src`, `ord`, `off` and `sha` as for a
 transcript.
 
@@ -122,7 +125,7 @@ changes:
   - path: internal/x.go
     operation: create | modify | delete | type_change
     before: {present: true, bytes: 1234, sha256: ...}
-    after:  {present: true, bytes: 1240, sha256: ...}
+    after:  {present: true, bytes: 1240, sha256: ..., no_newline_at_end: true}
     diff: available | binary | too_large | unavailable
     attribution: only_this_window | shared | outside_any_window
     windows: [<capture ids>]        # every window spanning a step in which this file changed
@@ -182,9 +185,11 @@ a window that contains the children's work twice.
 - **A scan has a time cap.** Past it the capture records a gap and the hook returns; the tool runs.
   The cap is 30 seconds, picked, not measured; the plugin's own cost is out of scope for now.
 - **Failure and cancellation.** `PostToolUseFailure` closes a window as a success does, because a
-  failed command may have written. A denied or cancelled call gets no post hook. A one-file BEFORE
-  with no AFTER is dropped. A scope BEFORE with no AFTER is resolved by the next BEFORE as an
-  unattributed gap.
+  failed command may have written. A denied or cancelled call gets no post hook, and nothing says
+  whether its command still runs, so its window stays open until the idle time has passed, when
+  it is closed as unfinished; until then a change in its span counts as shared with it rather
+  than as nobody's. The editing tools have no BEFORE hook at all: their record comes from the
+  AFTER hook's response.
 
 ## 6. Exclusions, `standard-v1`
 

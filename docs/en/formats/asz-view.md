@@ -29,10 +29,11 @@ another server compare equal as documents.
 
 **A complete example.** [asz-view-example.yaml](asz-view-example.yaml) is the whole document for
 the fixture session of the format pages, three talks across a main stream and a child agent, a
-tool, a synthetic error and a context reset, exactly as `asz conversation -yaml` prints it. Its
-`workspace_changes` is empty; `tests/scenarios/workspace-changes.yaml` is the scenario with them. It is
+tool, a synthetic error and a context reset, exactly as `asz conversation -yaml` prints it. It is
 generated from the scenario `tests/scenarios/fixture.yaml` by `make asz-view-example`, and a test
-fails when the committed file no longer matches what the code produces.
+fails when the committed file no longer matches what the code produces. Its `workspace_changes`
+holds the one file the build changed; `tests/scenarios/workspace-changes.yaml` covers every
+producer of them.
 
 ## Top level
 

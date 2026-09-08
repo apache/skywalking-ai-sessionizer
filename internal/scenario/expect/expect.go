@@ -1065,6 +1065,43 @@ func ViewCoversTheSession(root, session string) ([]string, error) {
 			bad("%s (%s) is in the fold but in no tree of the document", id, n.Kind)
 		}
 	}
+	// Every change record joined to a step is listed on that step, and a
+	// step lists nothing the document does not hold.
+	onStep := map[string][]string{}
+	var collect func(n *sessionview.Node)
+	collect = func(n *sessionview.Node) {
+		if len(n.Changes) > 0 {
+			onStep[n.ID] = n.Changes
+		}
+		for i := range n.Children {
+			collect(&n.Children[i])
+		}
+	}
+	for i := range doc.Talks {
+		collect(&doc.Talks[i])
+	}
+	for i := range doc.Loose {
+		collect(&doc.Loose[i])
+	}
+	listed := map[string][]string{}
+	for _, wc := range doc.WorkspaceChanges {
+		if wc.Step != "" {
+			listed[wc.Step] = append(listed[wc.Step], wc.ID)
+		}
+	}
+	for step, ids := range listed {
+		if strings.Join(onStep[step], ",") != strings.Join(ids, ",") {
+			bad("step %s carries changes %v, the document joins %v to it", step, onStep[step], ids)
+		}
+	}
+	for step := range onStep {
+		if _, ok := listed[step]; !ok {
+			bad("step %s carries changes the document does not join to it", step)
+		}
+	}
+	if doc.Summary.Changes != len(doc.WorkspaceChanges) {
+		bad("summary.changes is %d, the document lists %d", doc.Summary.Changes, len(doc.WorkspaceChanges))
+	}
 	if len(doc.Talks) != len(v.NodesByKind(model.KindTalk)) || doc.Summary.Talks != len(doc.Talks) {
 		bad("%d talks in the document, %d in the fold, summary says %d", len(doc.Talks), len(v.NodesByKind(model.KindTalk)), doc.Summary.Talks)
 	}
