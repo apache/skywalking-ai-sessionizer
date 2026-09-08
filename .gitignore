@@ -1,6 +1,7 @@
 # Build output
 /bin/
 /dist/
+/plugins/claude-code/bin/
 *.exe
 *.test
 *.out

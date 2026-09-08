@@ -86,7 +86,9 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Build
-        run: go build -o bin/ ./cmd/asz
+        run: |
+          go build -o bin/ ./cmd/asz
+          go build -o plugins/claude-code/bin/ ./plugins/claude-code
       # The suite is split so a failure names which layer broke. The race
       # detector needs a C toolchain, which the Windows runner does not put on
       # its path, so Windows runs without it.
@@ -177,7 +179,9 @@ jobs:
       - name: Build every platform
         run: make binaries checksums VERSION=${{ steps.v.outputs.version }}
       - name: Smoke test
-        run: dist/build/linux-amd64/asz version
+        run: |
+          dist/build/linux-amd64/asz version
+          dist/build/linux-amd64/claude-code-plugin/bin/asz-claude-plugin version
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ steps.v.outputs.version }}

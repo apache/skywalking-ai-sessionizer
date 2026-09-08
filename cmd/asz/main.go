@@ -154,7 +154,8 @@ func main() {
 	case "glossary":
 		run = cmdGlossary
 	case "view":
-		run = cmdView
+		// view takes every local adapter; it is dispatched below.
+		run = func(*config.Config, config.Adapter, bool) error { return nil }
 	case "push":
 		run = cmdPush
 	case "verify":
@@ -174,7 +175,7 @@ func main() {
 			continue
 		}
 		switch ad.Name {
-		case config.AdapterClaudeCodeLocal:
+		case config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges:
 			local = append(local, ad)
 		case config.AdapterClaudeCodeOTLP:
 			if cmd != "collect" && cmd != "view" {
@@ -200,7 +201,7 @@ func main() {
 	switch cmd {
 	case "sources":
 		if len(local) == 0 {
-			fatal(fmt.Errorf("%s: no enabled %s adapter", cmd, config.AdapterClaudeCodeLocal))
+			fatal(fmt.Errorf("%s: no enabled %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges))
 		}
 		for _, ad := range local {
 			if err := run(cfg, ad, *once); err != nil {
@@ -221,17 +222,16 @@ func main() {
 			select {}
 		}
 	case "view":
-		var ad config.Adapter
-		if len(local) > 0 {
-			ad = local[0]
-		}
-		if err := run(cfg, ad, *once); err != nil {
+		if err := cmdView(cfg, local, *once); err != nil {
 			fatal(err)
 		}
 	default:
 		ad := config.Default().Adapters[0]
-		if len(local) > 0 {
-			ad = local[0]
+		for _, l := range local {
+			if l.Name == config.AdapterClaudeCodeLocal {
+				ad = l
+				break
+			}
 		}
 		if err := run(cfg, ad, *once); err != nil {
 			fatal(err)
@@ -265,7 +265,10 @@ func startReceiver(cfg *config.Config, ad config.Adapter) error {
 	return nil
 }
 
-func cmdSources(_ *config.Config, ad config.Adapter, _ bool) error {
+func cmdSources(cfg *config.Config, ad config.Adapter, once bool) error {
+	if ad.Name == config.AdapterClaudeCodeChanges {
+		return cmdSourcesChanges(cfg, ad, once)
+	}
 	root, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err
@@ -390,7 +393,7 @@ func printIndexDetail(ix *index.Index, id string) {
 		index.KindAttachment: "attachment", index.KindSystem: "system",
 		index.KindMeta: "agent_meta", index.KindJournal: "journal",
 		index.KindManifest: "manifest", index.KindScript: "script",
-		index.KindOther: "other", index.KindUnknown: "unknown",
+		index.KindOther: "other", index.KindUnknown: "unknown", index.KindChanges: "changes",
 	}
 	byKind := map[index.Kind]int{}
 	msgs := map[uint32]int{}
@@ -724,6 +727,9 @@ func landedPathForSeq(dir string, seq uint32) (string, error) {
 }
 
 func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
+	if ad.Name == config.AdapterClaudeCodeChanges {
+		return cmdCollectChanges(cfg, ad, once)
+	}
 	root, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err

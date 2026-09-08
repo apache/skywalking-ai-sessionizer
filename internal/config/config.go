@@ -202,6 +202,11 @@ const (
 	// AdapterClaudeCodeOTLP receives what Claude Code's own OpenTelemetry
 	// exporter sends. Push posture, the runtime's side.
 	AdapterClaudeCodeOTLP = "claude-code-otlp"
+	// AdapterClaudeCodeChanges reads the workspace change records the asz
+	// Claude Code plugin writes beside Claude Code's own files. Pull
+	// posture, like the local adapter, and the plugin needs nothing from
+	// it: it discovers and tails what the plugin has already written.
+	AdapterClaudeCodeChanges = "claude-code-changes"
 )
 
 // Default returns the configuration used when none is supplied.
@@ -228,6 +233,18 @@ func Default() *Config {
 			Enabled: false,
 			Listen:  "127.0.0.1:4317",
 			Metrics: true,
+		}, {
+			// The plugin's output, beside the runtime's own files. On by
+			// default because it costs nothing when the plugin is not
+			// installed: there is nothing to discover.
+			Name:    AdapterClaudeCodeChanges,
+			Enabled: true,
+			Exclude: []string{"/private/tmp/**"},
+			Collector: Collector{
+				Mode:          ModeWatch,
+				Interval:      5 * time.Second,
+				MaxDeltaBytes: 2 << 20,
+			},
 		}},
 		Parse: Parse{MaxRoundBytes: 2 << 20},
 		Export: Export{OTLP: OTLP{
@@ -355,6 +372,9 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("config: adapter %q is a receiver: it takes listen and metrics, not collector, source_root, include, exclude or metrics_lookback", a.Name)
 			}
 			continue
+		}
+		if a.Name == AdapterClaudeCodeChanges && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
+			return fmt.Errorf("config: adapter %q reads change records only: it takes source_root, include, exclude and collector, not metrics, metrics_lookback or listen", a.Name)
 		}
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)

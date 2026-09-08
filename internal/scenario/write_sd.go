@@ -30,6 +30,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -211,8 +212,40 @@ func (w *sdWriter) stream(stream string, events []*Event) error {
 	}
 	dir := w.z.StreamDir(w.p.Session, stream)
 	hdr := sessiondata.Header{Kind: sessiondata.KindTranscript, Src: w.source("streams", stream), Stream: stream}
-	_, err := w.land(dir, "transcript", "transcript.cursor", hdr, recs)
+	if _, err := w.land(dir, "transcript", "transcript.cursor", hdr, recs); err != nil {
+		return err
+	}
+	return w.changes(stream, events)
+}
+
+// changes lands what the plugin would have observed on the stream: one
+// record per result of a tool the runtime records no patch for, as the
+// changes adapter lands the plugin's lines.
+func (w *sdWriter) changes(stream string, events []*Event) error {
+	var recs []*sessiondata.Record
+	var off uint64
+	for _, e := range events {
+		if e.Kind != EvResult || len(e.Changes) == 0 || isEditingTool(e.ToolName) || e.Replayed {
+			continue
+		}
+		cr := w.p.pluginRecord(e)
+		r := &sessiondata.Record{ID: cr.ID, Tool: cr.Tool, Time: cr.Time, Parts: []sessiondata.Part{changesPart(cr)}}
+		finish(r, uint64(len(recs)+1), &off)
+		recs = append(recs, r)
+	}
+	if len(recs) == 0 {
+		return nil
+	}
+	dir := w.z.StreamDir(w.p.Session, stream)
+	hdr := sessiondata.Header{Kind: sessiondata.KindChanges, Src: w.source("streams", stream+".changes"), Stream: stream}
+	_, err := w.land(dir, "changes", "changes.cursor", hdr, recs)
 	return err
+}
+
+// changesPart carries a change record as one data part, byte for byte.
+func changesPart(r *changes.Record) sessiondata.Part {
+	data, _ := r.Marshal()
+	return sessiondata.Part{Kind: sessiondata.PartData, Data: data, State: "available", Bytes: len(data)}
 }
 
 func (w *sdWriter) meta(s Stream) error {
@@ -337,6 +370,11 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 			part.Data, _ = json.Marshal(data)
 		}
 		r.Parts = []sessiondata.Part{part}
+		// An editing tool's patch travels beside the raw result, as the
+		// adapter derives it from the runtime's own record.
+		if len(e.Changes) > 0 && isEditingTool(e.ToolName) && !e.Replayed {
+			r.Parts = append(r.Parts, changesPart(w.p.nativeRecord(e)))
+		}
 	case EvNotice:
 		r.From, r.Trigger, r.Tool, r.Child = sessiondata.FromExternal, model.TriggerNotification, e.NoticeTool, e.NoticeChild
 		r.Parts = []sessiondata.Part{textPart(e.Text)}

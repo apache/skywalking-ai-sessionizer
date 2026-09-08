@@ -64,7 +64,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 		sub   string
 		kinds []string
 	}{
-		{"streams", []string{"transcript", "meta"}},
+		{"streams", []string{"transcript", "meta", "changes"}},
 		{"runs", []string{"journal", "manifest", "script"}},
 	} {
 		base := filepath.Join(z.SessionDir(session), group.sub)

@@ -89,6 +89,33 @@ adapters:
     listen: 127.0.0.1:4317
     metrics: true
 
+  # The workspace change records the asz Claude Code plugin writes: which
+  # files each shell command changed, and each edit made inside a
+  # subagent, as git-style hunks. The plugin writes them beside Claude
+  # Code's own files and needs nothing from asz; this adapter discovers
+  # and tails them, and the view joins each record to its step. On by
+  # default because it costs nothing when the plugin is not installed.
+  - name: claude-code-changes
+    enabled: true
+
+    # Where the plugin's output is. Leave empty to resolve it the way the
+    # plugin does: the plugins/data directory beside projects under
+    # CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME, or ~/.claude. Set it to collect
+    # from a copy.
+    source_root: ""
+
+    # The same session filter as claude-code-local, judged by the root
+    # each record names. Claude Code's own helper sessions run under
+    # /private/tmp and are left out.
+    include: []
+    exclude:
+      - /private/tmp/**
+
+    collector:
+      mode: watch
+      interval: 5s
+      max_delta_bytes: 2097152
+
 parse:
   # The largest round file the parser writes, in bytes. A round travels
   # whole as one log record, so it is cut at the same budget as a landed

@@ -35,7 +35,7 @@ import (
 // what the collector's cursor expects of a live session.
 func writeClaudeCode(p *Plan, root string) ([]string, error) {
 	proj := filepath.Join(root, p.Project)
-	w := &ccWriter{p: p, files: map[string][]string{}}
+	w := &ccWriter{p: p, files: map[string][]string{}, plugin: map[string][]string{}}
 	lost := p.lostStreams()
 	for i := range p.Events {
 		e := &p.Events[i]
@@ -125,13 +125,27 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 			return nil, err
 		}
 	}
+	// The plugin's output, where it keeps it: its own data directory beside
+	// projects, one file per stream of the session.
+	for stream, lines := range w.plugin {
+		if err := putUnder(root, PluginOutputDir+"/"+p.Session+"/"+stream+".jsonl", lines); err != nil {
+			return nil, err
+		}
+	}
 	sort.Strings(written)
 	return written, nil
 }
 
+// PluginOutputDir is where, under the source root, a Claude Code build
+// writes the plugin's lines: the changes adapter's root is plugins/data,
+// and the plugin's own directory under it is named after the plugin.
+const PluginOutputDir = "plugins/data/asz-changes-inline/output"
+
 type ccWriter struct {
 	p     *Plan
 	files map[string][]string
+	// plugin holds the lines the asz plugin would have written, by stream.
+	plugin map[string][]string
 }
 
 func ccTime(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z") }
@@ -253,8 +267,17 @@ func (w *ccWriter) event(e *Event) error {
 					"transcriptDir": "subagents/workflows/" + e.Launch.Run, "workflowName": e.Launch.Name}
 			case e.StringEnrichment:
 				m["toolUseResult"] = "a bare string, not an object"
+			case len(e.Changes) > 0 && isEditingTool(e.ToolName):
+				// The runtime records its own patch on an editing tool's
+				// result: the file, its content before, and the hunks.
+				m["toolUseResult"] = w.p.runtimeResult(e)
 			default:
 				m["toolUseResult"] = map[string]any{"stdout": e.Text, "stderr": ""}
+			}
+			if len(e.Changes) > 0 && !isEditingTool(e.ToolName) {
+				// The plugin observed the tool and wrote what it found.
+				line, _ := w.p.pluginRecord(e).Marshal()
+				w.plugin[s] = append(w.plugin[s], string(line))
 			}
 		}
 		w.add(s, w.rec(m, s))

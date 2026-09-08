@@ -29,7 +29,8 @@ another server compare equal as documents.
 
 **A complete example.** [asz-view-example.yaml](asz-view-example.yaml) is the whole document for
 the fixture session of the format pages, three talks across a main stream and a child agent, a
-tool, a synthetic error and a context reset, exactly as `asz conversation -yaml` prints it. It is
+tool, a synthetic error and a context reset, exactly as `asz conversation -yaml` prints it. Its
+`workspace_changes` is empty; `tests/scenarios/workspace-changes.yaml` is the scenario with them. It is
 generated from the scenario `tests/scenarios/fixture.yaml` by `make asz-view-example`, and a test
 fails when the committed file no longer matches what the code produces.
 
@@ -66,11 +67,11 @@ fails when the committed file no longer matches what the code produces.
 
 | Key | Value |
 | --- | --- |
-| `format`, `version` | `asz.view`, `1.0`. A reader that does not know the version stops here. |
+| `format`, `version` | `asz.view`, `1.1`. A reader that does not know the version stops here. 1.1 added `workspace_changes`, `summary.changes` and a step's `changes`; a 1.0 reader ignores them. |
 | `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
-| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
+| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`; several means it did not choose, and neither does a view |
@@ -79,6 +80,7 @@ fails when the committed file no longer matches what the code produces.
 | `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold, so the document covers the whole session |
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence` |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
+| `workspace_changes` | since 1.1, one per workspace change record the session's files carry, joined to its step. See below. |
 
 Verification is content, not an error. A gap in the chain or a failed digest is written into
 `summary.state` and `summary.problems`, each round says whether it verified, and the rest of the
@@ -116,6 +118,28 @@ usable round at all is an error, because there is nothing to show.
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
 the fold and the records say. Where the fold says `unavailable`, the document says it too.
 
+## Workspace changes
+
+`workspace_changes` lists which files each tool call changed, one entry per change record, in
+time order. An entry carries where the record was read from and the step it joins to, then the
+record's own fields as `changes/1` lists them:
+
+| Key | Value |
+| --- | --- |
+| `step` | the id of the tool step whose tool-use id the record names, or empty when no step carries it, which is also how an unattributed change appears |
+| `source` | `runtime` for a patch the runtime recorded on its own editing tool, read from the result record; `plugin` for one the asz Claude Code plugin observed, read from a `changes` file |
+| `ref` | the landed record and part the entry was read from: `seq`, `row`, `block` |
+| `schema`, `id`, `session`, `stream`, `tool`, `tool_name`, `time`, `basis` | the record's identity: `basis` is `runtime_reported`, `tool_window`, `unattributed` or `skipped_read_only` |
+| `root`, `policy`, `window`, `outcome`, `coverage`, `gaps`, `overlaps` | where it was observed, under which rules, between which scans, what the call reported, whether the whole scope was seen, and which other windows were open on the root at the same time |
+| `changed_files`, `changes` | the count, null when unknown, and one entry per file: `path`, `operation`, `before` and `after` as `present`, `bytes`, `sha256`, `no_newline_at_end`; `diff`, one of `available`, `binary`, `too_large`, `unavailable`; `attribution` and `windows`, which windows could have made the change; `additions`, `deletions` and `hunks`, each hunk `old_start`, `old_lines`, `new_start`, `new_lines` and `lines` prefixed with `-`, `+` or a space |
+
+A tool step lists the ids of its records under `changes`, in the order `workspace_changes` lists
+them, and `summary.changes` counts them. A step may have a `runtime` entry and a `plugin` entry
+for the same call; the runtime's is listed first, and a viewer showing one prefers it. A change
+several windows could have made appears in each of their records, marked `shared` and naming the
+others, and is counted once. A record with `basis: skipped_read_only` carries no changes and
+means the call was not observed, never that it changed nothing.
+
 ## Rendering the whole conversation
 
 The document is complete: a viewer draws every view of a conversation from it and fetches
@@ -142,7 +166,7 @@ Nothing in a document is inferred beyond what the fold and the records say. Wher
 
 `-yaml` is a rendering of the JSON, not a second format. It is produced from the JSON, so the keys
 are the same and in the same order; mappings are blocks; scalars are plain, and quoted only where
-YAML would otherwise misread them, so `version` is `"1.0"` and a title with a colon is quoted; an
+YAML would otherwise misread them, so `version` is `"1.1"` and a title with a colon is quoted; an
 empty map is `{}`; a text with line breaks is a block scalar. Reading the YAML back gives the same
 values as the JSON.
 

@@ -47,7 +47,7 @@ func TestYAMLIsTheSameDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(out)
-	if !strings.HasPrefix(text, "format: asz.view\nversion: \"1.0\"\nconversation: c1\n") {
+	if !strings.HasPrefix(text, "format: asz.view\nversion: \""+sessionview.Version+"\"\nconversation: c1\n") {
 		t.Fatalf("the document does not start with its format and version:\n%s", text[:120])
 	}
 	// Block mappings, plain scalars: an empty map is still {} and a string

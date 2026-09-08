@@ -12,6 +12,8 @@ collected, one directory per session, and what was assembled, one directory per 
       main/
         transcript.cursor                how far the source has been read
         transcript-<collected-at>-<seq>.sd
+        changes.cursor                   the plugin's change records for the stream, when
+        changes-<collected-at>-<seq>.sd  the asz Claude Code plugin is installed
       <agent-id>/                        one directory per child agent
         transcript.cursor
         transcript-<collected-at>-<seq>.sd

@@ -52,6 +52,8 @@ header:
     - 'go.mod'
     - 'go.sum'
     - '**/*.md'
+    # Claude Code reads the plugin's manifest and hooks as plain JSON, which has no comment to carry a header in.
+    - 'plugins/claude-code/**/*.json'
     - '**/testdata/**'
     # The complete example document on the asz.view format page is what
     # the command prints, byte for byte, and a test holds it to that.

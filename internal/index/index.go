@@ -32,7 +32,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry or Block changes;
 // a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 8
+const Schema = 9
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -48,6 +48,7 @@ const (
 	KindManifest // workflow manifest
 	KindScript   // workflow script
 	KindOther    // an out-of-band record type carrying no uuid
+	KindChanges  // a workspace change record; evidence, never a step
 )
 
 // Trigger says what caused a prompt cycle.

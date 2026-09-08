@@ -88,6 +88,7 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 		Streams: o.streams, Segments: o.segments,
 		Rounds: []sessionview.Round{}, Files: []sessionview.File{}, Talks: []sessionview.Node{}, Loose: []sessionview.Node{},
 		Relations: []sessionview.Relation{}, Unresolved: []sessionview.Unresolved{},
+		WorkspaceChanges: []sessionview.WorkspaceChange{},
 	}
 	if sn := c.View.Nodes[sessionflow.NodeID("session", c.Session)]; sn != nil {
 		v.Summary.From, v.Summary.To = millisOf(attrString(sn, "from_time")), millisOf(attrString(sn, "through_time"))
@@ -160,6 +161,19 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	v.Summary.Talks, v.Summary.Steps = len(v.Talks), steps
 	v.Summary.Streams, v.Summary.Segments = len(v.Streams), len(v.Segments)
 	v.Summary.Rounds, v.Summary.Unresolved = len(v.Rounds), len(o.open)
+
+	// The workspace changes, joined to their steps by tool-use id, and
+	// each step told which records are its own.
+	v.WorkspaceChanges = c.workspaceChanges(landed, recs)
+	byStep := map[string][]string{}
+	for _, wc := range v.WorkspaceChanges {
+		if wc.Step != "" {
+			byStep[wc.Step] = append(byStep[wc.Step], wc.ID)
+		}
+	}
+	annotateChanges(v.Talks, byStep)
+	annotateChanges(v.Loose, byStep)
+	v.Summary.Changes = len(v.WorkspaceChanges)
 	c.built = v
 	return v, nil
 }

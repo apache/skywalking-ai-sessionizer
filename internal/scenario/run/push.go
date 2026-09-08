@@ -33,6 +33,7 @@ import (
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
@@ -47,6 +48,7 @@ import (
 
 // The file kinds the export page names.
 var wireKinds = map[string]bool{
+	"changes":    true,
 	"transcript": true, "agent_meta": true, "journal": true, "workflow_manifest": true, "workflow_script": true, "round": true,
 }
 
@@ -103,7 +105,7 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 	// for a runtime format, the mock's for sd.
 	named := newPusher()
 	named.ServiceName = ""
-	named.Runtimes = map[string]string{claudecode.Name: claudecode.RuntimeName, mock.Name: mock.RuntimeName}
+	named.Runtimes = map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, mock.Name: mock.RuntimeName}
 	if _, err := named.Pass(); err != nil {
 		return nil, err
 	}

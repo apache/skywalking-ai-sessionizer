@@ -82,7 +82,11 @@ type Properties struct {
 	RepackKeepsStructure  *bool `yaml:"repack_keeps_structure"`
 	PushFollowsTheWire    *bool `yaml:"push_follows_the_wire"`
 	ViewCoversTheSession  *bool `yaml:"view_covers_the_session"`
-	MetricsMatchThePlan   *bool `yaml:"metrics_match_the_plan"`
+	// ChangesLeaveTheFold says the same scenario without its changes folds
+	// to the same nodes and relations: a change record is evidence beside a
+	// step, never a step. Checked when a scenario has changes.
+	ChangesLeaveTheFold *bool `yaml:"changes_leave_the_fold"`
+	MetricsMatchThePlan *bool `yaml:"metrics_match_the_plan"`
 }
 
 // On reports whether a property is enabled.
@@ -144,7 +148,7 @@ type Verify struct {
 // landedPrefix is the file name prefix a landed file of each kind carries.
 var landedPrefix = map[string]string{
 	"transcript": "transcript", "agent_meta": "meta", "journal": "journal",
-	"workflow_manifest": "manifest", "workflow_script": "script",
+	"workflow_manifest": "manifest", "workflow_script": "script", "changes": "changes",
 }
 
 // Resolve finds the landed file a Lose names among a session's files. The
@@ -157,7 +161,7 @@ func (l Lose) Resolve(files []storage.LandedFile, stream string) (*storage.Lande
 	}
 	prefix, known := landedPrefix[l.Kind]
 	if l.Kind != "" && !known {
-		return nil, fmt.Errorf("lose: unknown kind %q; the kinds are transcript, agent_meta, journal, workflow_manifest, workflow_script", l.Kind)
+		return nil, fmt.Errorf("lose: unknown kind %q; the kinds are transcript, agent_meta, journal, workflow_manifest, workflow_script, changes", l.Kind)
 	}
 	seen := 0
 	for i := range files {
@@ -231,6 +235,13 @@ type View struct {
 	Files     *int  `yaml:"files"`
 	Rounds    *int  `yaml:"rounds"`
 	FirstTalk *Talk `yaml:"first_talk"`
+	// Changes counts the workspace change records, ChangedFiles the files
+	// across them, ChangesBySource the records by who produced them, and
+	// ChangesJoined the records that found their step.
+	Changes         *int           `yaml:"changes"`
+	ChangedFiles    *int           `yaml:"changed_files"`
+	ChangesBySource map[string]int `yaml:"changes_by_source"`
+	ChangesJoined   *int           `yaml:"changes_joined"`
 }
 
 // Talk is what a talk in the document must say.
@@ -490,6 +501,34 @@ func checkView(root, session string, want *View) ([]string, error) {
 	}
 	if want.Rounds != nil && doc.Summary.Rounds != *want.Rounds {
 		bad("view.rounds is %d, want %d", doc.Summary.Rounds, *want.Rounds)
+	}
+	if want.Changes != nil && len(doc.WorkspaceChanges) != *want.Changes {
+		bad("view.changes is %d, want %d", len(doc.WorkspaceChanges), *want.Changes)
+	}
+	if doc.Summary.Changes != len(doc.WorkspaceChanges) {
+		bad("view.summary.changes is %d, the document lists %d", doc.Summary.Changes, len(doc.WorkspaceChanges))
+	}
+	if want.ChangedFiles != nil || want.ChangesBySource != nil || want.ChangesJoined != nil {
+		files, joined := 0, 0
+		bySource := map[string]int{}
+		for _, wc := range doc.WorkspaceChanges {
+			files += len(wc.Changes)
+			bySource[wc.Source]++
+			if wc.Step != "" {
+				joined++
+			}
+		}
+		if want.ChangedFiles != nil && files != *want.ChangedFiles {
+			bad("view.changed_files is %d, want %d", files, *want.ChangedFiles)
+		}
+		if want.ChangesJoined != nil && joined != *want.ChangesJoined {
+			bad("view.changes_joined is %d, want %d", joined, *want.ChangesJoined)
+		}
+		for source, n := range want.ChangesBySource {
+			if bySource[source] != n {
+				bad("view.changes_by_source[%s] is %d, want %d", source, bySource[source], n)
+			}
+		}
 	}
 	if want.FirstTalk != nil {
 		if len(doc.Talks) == 0 {

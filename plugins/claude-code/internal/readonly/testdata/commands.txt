@@ -1,0 +1,141 @@
+# Shell commands with the outcome readonly-v1 must give them.
+#
+# One case per non-comment line: the outcome, a tab, the command. "read" means
+# the plugin may skip the scan; "scan" means it must scan, whether the command
+# writes or the classifier cannot tell. A comment line above a case says why.
+#
+# Every command was picked on 2026-09-08 from real Bash calls in one machine's
+# landed corpus of 52 Claude Code sessions, then shortened and stripped of
+# home paths and private names. The shapes are what matter: which words start
+# each segment, and what sits inside quotes.
+
+# --- read-only: one or more read-only programs joined by pipes and && ---
+read	grep -rn "likePrefix" apps --include="*.ts" | head -20
+read	ls test/e2e/playwright/ && git diff 13c1796 --stat -- test/e2e/playwright/specs/admin/pages.spec.ts
+read	git log --oneline -3 && echo "---" && ls apps/ui/src/layer/
+read	git branch --show-current && ls -la apps/bff/src/store/audit/
+read	ls test/e2e/playwright; cat test/e2e/playwright/package.json 2>/dev/null; ls test/e2e/playwright/node_modules/.bin 2>/dev/null | head
+read	grep -rn "argon2" --include=*.ts -l . | grep -v node_modules | head -50
+read	sed -n '305,364p' README.md | cut -c1-500
+read	wc -l README.md && sed -n '80,160p' README.md
+read	git status --porcelain | grep "^??" | head -20
+read	git log --oneline main..HEAD | head -30 && echo "---" && git diff main...HEAD --stat | tail -40
+read	git show --stat --format='%s' d55f162 | head -20
+read	cat -A oap-server/server-core/src/main/java/Foo.java | tail -20 | cat -n
+read	git check-ignore -v packages/api-client/dist/types.d.ts; echo "tracked?"; git ls-files packages/api-client/dist | head -3
+read	du -sh ~/.claude/projects 2>/dev/null; find ~/.claude/projects -maxdepth 2 -name '*.jsonl' -size +0 | wc -l
+read	echo "=== audit mentions on main ===" && git grep -niE '\baudit' main -- apps packages docs 2>/dev/null | head -60
+read	find . -path ./target -prune -o -name "MALDebug*.java" -print 2>/dev/null | grep -v "/target/"
+read	git show HEAD:apps/ui/src/render/LayerDashboardsView.vue | grep -n "dataIsFresh" -B2 -A4
+read	git log --oneline origin/main..HEAD | cat
+read	git show HEAD -- README.md
+read	cat -n apps/bff/src/user/oidc/identity.ts; echo ===; sed -n '280,400p' apps/bff/src/user/oidc/route.ts | cat -n
+read	grep -c "" internal/*.go | sort -t: -k2 -n | tail
+read	env | grep -i claude
+read	ps -eo pid,etime,command | grep -iE "vite|tsx|pnpm" | grep -v grep | head -20
+read	test -f asz.yaml && echo present || echo absent
+read	GOFLAGS=-mod=mod go list ./... | head
+
+# a pipe inside double quotes is part of the grep pattern, not a segment boundary
+read	grep -rn "Dashboard header\|Layer header" --exclude-dir=node_modules . 2>/dev/null | head -60
+read	grep -n "repository\|tag:\|image:" chart/values.yaml | head -60; echo "-----"; sed -n '40,90p' chart/values.yaml
+read	find apps packages -name "*.test.ts" -not -path "*/node_modules/*" | xargs grep -ln "layer\|sidebar" -i | head -40
+
+# a redirection sign inside single quotes is text
+read	grep -o '<link rel="canonical"[^>]*>' page.html | sort -u | head -20
+
+# the word eval inside a pattern is not the eval builtin
+read	grep -rnE "new Function|eval\b" apps/ui/src 2>/dev/null | grep -v "\.test\." | head -20
+
+# a backtick inside single quotes does not run anything
+read	sed -n '/```yaml/,/```/p' report.md | grep -aA30 "dialog" | head -40
+
+# >= inside an awk program is a comparison, and the program calls nothing
+read	awk 'NR>=100 && NR<=135 {printf "%d: %s\n", NR, $0}' docs/design.md
+
+# a redirection to /dev/null or of stderr writes no file
+read	go version >/dev/null 2>&1 && echo has-go || echo no-go
+read	echo done >&2
+read	git log --oneline -5 2>&1 | head -3
+
+# xargs handing arguments to a read-only program
+read	find test/e2e/script -name "playwright.sh" | head -1 | xargs cat
+read	grep -rln "auth/login" apps/bff/src | head; find apps/bff/src -name "*.test.ts" | xargs grep -ln "login" | head
+
+# shell keywords around read-only commands
+read	for f in ja ko de fr es pt; do echo "=== $f ==="; git diff -- apps/ui/src/i18n/locales/$f.json | grep "^+  \"Dashboard templates"; done
+read	if grep -q "changes" docs/menu.yml; then echo listed; else echo missing; fi
+
+# git subcommands that read, or that touch only .git/, which is excluded scope
+read	git status --porcelain | head -50 && echo "---" && git stash list
+read	git diff master...pr-144 --stat && echo "=== MERGE BASE ===" && git merge-base master pr-144
+read	echo "=== LOCAL BRANCHES ===" && git branch -vv && echo && echo "=== WORKTREES ===" && git worktree list
+read	git add -A && git --no-pager diff --cached --stat | tail -5
+read	git log -2 --format='%B' | grep -iE "co-authored|generated with" || echo "clean"
+read	git worktree list && git worktree prune && git worktree list
+
+# --- scan: the working tree may change ---
+scan	sed -i '' 's/r\.Refs/r.Evidence/g' tools/main.go && go run ./tools ./data
+scan	printf 'a\n' > notes.txt
+scan	echo "hello" >> CHANGES.md
+scan	git checkout apps/bff/src/store.ts && git status --short
+scan	git checkout -b fix/card-title origin/master 2>&1 && git status --short
+scan	git branch --show-current && git pull --ff-only 2>&1 | tail -3
+scan	git checkout -- data/stars.yml; git clean -fq static/images/; git status --short
+scan	git stash && git checkout main
+scan	git reset --hard HEAD~1
+scan	rm -f test/e2e/playwright/_scratch.mjs && git status --porcelain | head
+scan	mkdir -p internal/adapters/changes && ls internal/adapters
+scan	cp asz.yaml asz.yaml.bak
+scan	mv docs/en/old.md docs/en/new.md
+scan	touch internal/x.go
+scan	chmod +x tools/release.sh
+scan	gofmt -w internal/ && go vet ./...
+scan	go mod tidy && git diff --stat go.mod go.sum
+scan	find . -name "*.orig" -delete
+scan	find . -name "*.go" -exec gofmt -l {} +
+
+# a redirection to a file, whatever descriptor it comes from, and wherever the file is
+scan	grep -n x file 2>errors.log
+scan	git show HEAD:docs/How-to-release.md > /tmp/old.md; diff -u /tmp/old.md docs/release.md; echo "EXIT=$?"
+scan	pnpm lint > /tmp/gate-lint.log 2>&1; echo "lint=$?"; tail -12 /tmp/gate-lint.log
+
+# a pre-commit hook can rewrite files, so a commit is not read-only
+scan	git commit -m "Describe the change" && git log -1 --oneline
+
+# command substitution runs whatever is inside it
+scan	for f in $(git ls-tree -r --name-only HEAD chart); do echo "== $f"; git show HEAD:$f; done
+scan	f=$(grep -rln "resolveLayerMenuRows" packages/api-client/src); echo "== $f"; cat "$f"
+scan	find operator/tmpcheck -type f | head -20; echo "---"; head -40 $(find operator/tmpcheck -type f | head -1) 2>/dev/null
+
+# a backtick inside double quotes does run a command
+scan	grep -rln "'/layer/\|`/layer/" apps/ui/src | head -20
+
+# interpreters, build tools and other programs the list does not know
+scan	python3 -c "import yaml; yaml.safe_load(open('data/releases.yml'))" && echo "YAML OK"
+scan	node -e "console.log(Date.parse('2026-11-31'))"
+scan	bash tools/e2e-collector.sh 2>&1 | tail -6
+scan	make build && ./bin/asz version
+scan	go build -o bin/asz ./cmd/asz
+scan	go test ./internal/... -run TestX
+scan	cd ~/github/skywalking-ai-sessionizer && gofmt -l tools; go vet ./tools/... && make -s build
+scan	pnpm install --frozen-lockfile 2>&1 | tail -3 && git status --porcelain | head -3
+scan	pnpm exec tsc --noEmit 2>&1 | head -20; echo "EXIT:${PIPESTATUS[0]}"
+scan	pnpm type-check >/dev/null 2>&1; echo "TYPECHECK_EXIT=$?"
+scan	docker exec app-m82 grep -rn "GRPC_POLL_STRATEGY" /agent/ --include='*.py'
+scan	license-eye -c .licenserc.yaml header fix 2>&1 | tail -1
+scan	license-eye header check 2>&1 | grep -iE "invalid|Totally"
+scan	tar -xzOf chart/eck-operator.tgz eck-operator/values.yaml | grep -n installCRDs
+scan	gh pr diff 13970 --repo apache/skywalking --patch 2>&1 | sed -n '1,200p'
+scan	nc -z 127.0.0.1 55432 && echo OPEN || echo CLOSED
+
+# awk calling out to the shell
+scan	awk '{ system("touch " $1) }' list.txt
+
+# xargs handing arguments to something that is not read-only
+scan	xargs -I{} sh -c 'cat {}' < list.txt
+
+# privilege, evaluation and sourcing
+scan	sudo lsof -i :8787
+scan	source ~/.zshrc && which asz
+scan	eval "$CMD"

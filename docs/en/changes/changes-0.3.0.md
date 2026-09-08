@@ -24,6 +24,26 @@
   `0.2.0`, is no longer published: a reader who pulled it could not tell which release answered.
   The `0.2` tag that 0.2.0 published stays on the registry and points at the same image as `0.2.0`.
 
+## Workspace changes
+
+- Which files a tool call changed is shown beside the step. Two producers write one shape,
+  `changes/1`, defined by `pkg/changes`: the Claude Code adapter copies the runtime's own patch
+  from every `Edit` and `Write` result on the main stream into a second `data` part beside the raw
+  result, and the new asz Claude Code plugin, `plugins/claude-code/`, records shell commands, and
+  edits inside subagents, into its own data directory. The plugin runs inside Claude Code's hooks,
+  one short process per event, needs nothing from asz, classifies read-only commands to skip their
+  scans, excludes every known language's build output by a frozen rule set, names overlapping
+  windows on the same root, and keeps its output for 30 days. The new `claude-code-changes`
+  adapter, on by default, tails the plugin's files and lands each line as a record of kind
+  `changes` under the stream the tool ran in, with the session's own lock and sequence, and
+  `asz view` refreshes both sources. Session Data and Session Flow are unchanged: `changes` is a
+  new kind, assembly emits no node for it, and a session folds to the same nodes with and
+  without the records.
+- `asz.view` is 1.1: `workspace_changes` lists every record joined to its step, a tool step names
+  its records under `changes`, and `summary.changes` counts them. A 1.0 reader ignores them.
+- The plugin ships in every binary package under `claude-code-plugin/`, and `make build` builds it
+  beside `asz`.
+
 ## Metrics
 
 - `claude-code-local` with `metrics: true` derives a reconstructed subset of the runtime's own

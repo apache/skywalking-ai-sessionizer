@@ -34,6 +34,7 @@ package sessionview
 import (
 	"encoding/json"
 
+	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
@@ -42,7 +43,7 @@ import (
 // that does not know the version stops there.
 const (
 	Format  = "asz.view"
-	Version = "1.0"
+	Version = "1.1"
 )
 
 // Conversation is the whole document.
@@ -75,7 +76,32 @@ type Conversation struct {
 	Loose      []Node       `json:"loose"`
 	Relations  []Relation   `json:"relations"`
 	Unresolved []Unresolved `json:"unresolved"`
+	// WorkspaceChanges, since 1.1, holds every workspace change record the
+	// session's landed files carry, joined to the step it belongs to: the
+	// runtime's own patches on its editing tools, and the plugin's
+	// observations of shell commands and of edits inside subagents. A
+	// step lists its records under Changes.
+	WorkspaceChanges []WorkspaceChange `json:"workspace_changes"`
 }
+
+// WorkspaceChange is one change record with where it was read from and the
+// step it joins to. The record's own fields follow, as changes/1 lists
+// them. Source says who produced it: "runtime" for a patch the runtime
+// recorded on its editing tool, "plugin" for one the asz plugin observed.
+// Step is empty when no step carries the tool-use id, which is also how
+// an unattributed change appears.
+type WorkspaceChange struct {
+	Step   string          `json:"step"`
+	Source string          `json:"source"`
+	Ref    sessionflow.Ref `json:"ref"`
+	changes.Record
+}
+
+// Sources of a workspace change.
+const (
+	SourceRuntime = "runtime"
+	SourcePlugin  = "plugin"
+)
 
 // Head identifies the fold the document was built from.
 type Head struct {
@@ -99,6 +125,8 @@ type Summary struct {
 	Segments   int `json:"segments"`
 	Rounds     int `json:"rounds"`
 	Unresolved int `json:"unresolved"`
+	// Changes, since 1.1, counts the workspace change records.
+	Changes int `json:"changes"`
 
 	// From and To are when the session began and its last activity, from
 	// the session node.
@@ -242,6 +270,10 @@ type Node struct {
 	// A turn.duration step adds these.
 	DurationMS  int64  `json:"duration_ms,omitempty"`
 	DurationHow string `json:"duration_measured_by,omitempty"`
+
+	// Changes, since 1.1, names the workspace change records joined to
+	// this step, by id, in the order WorkspaceChanges lists them.
+	Changes []string `json:"changes,omitempty"`
 
 	Children []Node `json:"children,omitempty"`
 	Edges    []Edge `json:"edges,omitempty"`

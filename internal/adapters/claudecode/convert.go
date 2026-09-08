@@ -108,6 +108,14 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 	}
 
 	rec.Parts, rec.Dropped = partsOf(&d, &tur, hasTUR, payload)
+	// An editing tool's result carries the runtime's own patch. It is copied
+	// into the model's shape beside the raw result, so a view joins it to the
+	// step the way it joins the plugin's records.
+	if hasTUR {
+		if p, ok := nativeChanges(&d, &tur, src, rec); ok {
+			rec.Parts = append(rec.Parts, p)
+		}
+	}
 	if len(rec.Parts) == 0 {
 		// A record with no message and no attachment still said something - a
 		// journal announcing a child, a manifest, an artefact the host keeps for
