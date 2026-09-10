@@ -13,8 +13,8 @@ export:
 ```
 
 ```sh
-./bin/asz push -once      # send everything not yet sent, then exit
-./bin/asz push            # keep sending new files every export.otlp.interval
+./bin/asz push            # send everything not yet sent, then exit
+./bin/asz collect         # land, parse and send, once every collector interval
 ```
 
 ## One log record per file
@@ -120,7 +120,7 @@ service:
 ```
 
 Point `export.otlp.endpoint` at `127.0.0.1:4317`, or with `protocol: http` at
-`http://127.0.0.1:4318`, run `asz push -once`, and read `logs.json`: one JSON line per request,
+`http://127.0.0.1:4318`, run `asz push`, and read `logs.json`: one JSON line per request,
 with the resource, the scope and the records as the Collector understood them.
 `make e2e-collector` does exactly this with a generated session and a Collector container, once
 over each transport, then checks every record against the root and rebuilds the root from what
@@ -196,7 +196,7 @@ fast as the receiver takes it. `export.otlp.max_bytes_per_minute` caps what goes
 pass waits before a request until a minute's budget, refilled continuously and never holding more
 than a minute's worth, covers the request's encoded size. The budget starts full, so a pass that
 sends a few new files never waits, and a request larger than a minute's budget waits for a full
-one and leaves it empty. Zero, the default, is no limit. `asz push -once` still sends everything
+one and leaves it empty. Zero, the default, is no limit. `asz push` still sends everything
 before it exits, and the pass line's `paused=` field says how long it waited.
 
 A pass goes session by session, the session landed first going first: its files, then its

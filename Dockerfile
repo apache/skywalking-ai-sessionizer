@@ -50,4 +50,8 @@ VOLUME ["/asz/data"]
 EXPOSE 8787
 ENTRYPOINT ["/usr/local/bin/asz"]
 # Inside a container the page must listen on every interface, not loopback.
-CMD ["view", "0.0.0.0:8787"]
+# server rather than view: with Claude Code's directory mounted it collects
+# and serves, and with nothing mounted it serves what the volume already
+# holds. view refuses a root with no conversations in it, which is what a
+# first run against an empty volume has.
+CMD ["server", "0.0.0.0:8787"]

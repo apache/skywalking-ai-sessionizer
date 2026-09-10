@@ -9,11 +9,44 @@
   produced from the landed data alone. Records landed before this carry none, and the glossary
   says where the runtime writes it.
 
+## Commands
+
+- `asz collect` is the whole pipeline. One pass lands what is new, parses every session that
+  moved, and sends what `export.otlp` asks for, in that order, so a pass ships the rounds it has
+  just written. It reads every enabled local adapter in the same pass, where before it ran them
+  one after another and a watching source kept the others from ever running.
+- `asz server` is new: the pipeline and the page in one process, which is what a person runs to
+  watch their own conversations locally.
+- `asz view` only reads now. It serves a storage root that already holds conversations and never
+  collects, parses or sends, which is what a root copied from another machine, or filled by the
+  receiver, needs. Use `asz server` to collect and serve together.
+- `asz push` makes one pass and exits. A root that keeps growing is sent by `asz collect`; this
+  command is for a root that is already there. `export.otlp.interval` is gone with the loop it
+  drove, and the collector's `interval` is the one period.
+- The `claude-code-otlp` receiver listens under `asz collect` and `asz server`, the two commands
+  that write for as long as they run. It no longer listens under `asz view`.
+- `asz scenario build` keeps building with `--every D`: one whole session, then that long on the
+  wall clock, then the next. It takes more than one scenario file, and a directory contributes
+  every `.yaml` in it, with `--pick cycle` or `--pick random` and `--seed` to repeat an order.
+  Each session is stamped so its last record lands when it was written, and carries an id no
+  earlier session has. It is a mock client to run beside `asz server` or `asz collect`.
+
 ## Read
+
+- The conversation list shows what a conversation did, not how it is built: talks, model calls,
+  subagents, Bash runs, and changes with the lines those records added and removed. Steps, streams
+  and segments leave the table. Every count is read off the head round's header, so a row costs no
+  fold, and a count the head round does not carry shows a dash: a round cut before that count
+  existed does not know the answer, and a zero would be a claim it never made. This follows
+  Horizon's own conversation list, so the two read the same.
 - The conversation page is drawn by Horizon's conversation renderer,
   `@skywalking-horizon-ui/conversation-view`, embedded from a pinned Horizon commit with Horizon's
   themes and fonts, so `asz view` and the SkyWalking UI draw a conversation identically and the
-  page needs nothing from the network. The hand-written viewer is gone with the API routes only it
+  page needs nothing from the network. The pin now names Horizon `22e2f869`, which draws a tool
+  call's input and result as fields rather than one escaped string, reads an edit as a line diff,
+  puts a changes mark on a step that changed files with the files and their diffs behind it, adds a
+  Changes tab to the inspector carrying where each record came from, and pops the inspector out
+  over the page. The hand-written viewer is gone with the API routes only it
   read; the page reads the `asz.view` document, the glossary, and the landed record behind a step.
   `tools/conversation-view.sh` rebuilds the copy from the pin, and CI fails when it differs.
 
@@ -37,7 +70,7 @@
   windows on the same root, and keeps its output for 30 days. The new `claude-code-changes`
   adapter, on by default, tails the plugin's files and lands each line as a record of kind
   `changes` under the stream the tool ran in, with the session's own lock and sequence, and
-  `asz view` refreshes both sources. Session Data and Session Flow are unchanged: `changes` is a
+  the pipeline refreshes both sources in one pass. Session Data and Session Flow are unchanged: `changes` is a
   new kind, assembly emits no node for it, and a session folds to the same nodes with and
   without the records.
 - `asz.view` gains `workspace_changes`, every record joined to its step; a tool step names its
@@ -76,7 +109,7 @@
   exporter is pointed at, gRPC and HTTP with protobuf on one `listen` port. Phase one lands the
   metrics requests it receives in the same spool, bytes as received, for `asz push`; logs and
   traces are accepted and dropped, counted in the status. It runs beside the local adapter under
-  `asz collect` and `asz view`. `metrics` may be on for one adapter, never both, and the
+  `asz collect` and `asz server`. `metrics` may be on for one adapter, never both, and the
   configuration refuses to load otherwise, so the same tokens are never counted twice. A receiver
   takes `listen` and `metrics` only; collector settings on it are refused, since it polls nothing.
 

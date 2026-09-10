@@ -72,18 +72,19 @@ Each release carries a binary package for macOS, Linux and Windows; see the
 ```sh
 make build                 # builds ./bin/asz
 ./bin/asz sources          # list discovered sessions and their sources
-./bin/asz collect -once    # land everything currently on disk
-./bin/asz view             # serve the conversations at http://127.0.0.1:8787
+./bin/asz collect -once    # land, parse and send everything currently on disk
+./bin/asz server           # keep doing that, and serve at http://127.0.0.1:8787
 ```
 
 Every command reads [`asz.yaml`](asz.yaml) from the working directory when no `-config` flag is
 given. The file at the repository root is the default configuration with every value written out,
 so it can be read and edited without reading Go.
 
-`asz view` serves what has been assembled. With the local Claude Code adapter it also runs the
-collector and the parser in the same process, once with `-once` or on the collector interval
-otherwise, and the list page shows when the data was last refreshed and when it will be next. On a
-storage root copied from another machine there is no local source, so it serves what is there.
+`asz collect` is the pipeline: every period it lands what is new, parses what moved, and sends
+what `export.otlp` asks for. `asz server` runs that pipeline and serves the page in one process,
+and its list page shows when the data was last refreshed and when it will be next. `asz view`
+serves an existing storage root and only reads, which is what a root copied from another machine
+or filled by the receiver needs.
 
 ## Documentation
 
@@ -113,11 +114,12 @@ Apache SkyWalking, SkyWalking, and the Apache feather logo are trademarks of The
 CI publishes a Linux image for amd64 and arm64 to GHCR. It carries the `asz`
 binary only. Docker Desktop on Windows runs it as a Linux container; the
 Windows binary package is the path without Docker. Mount a storage root at
-`/asz/data`; by default the container serves the page on port 8787.
+`/asz/data`. The default command is `server`, which collects and serves; with
+no source mounted, ask for `view`, which only reads:
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
-  ghcr.io/apache/skywalking-ai-sessionizer:latest
+  ghcr.io/apache/skywalking-ai-sessionizer:latest view 0.0.0.0:8787
 ```
 
 | Tag | Points at |

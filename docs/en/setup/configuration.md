@@ -71,7 +71,7 @@ are the tool's, not yours, which is why they are excluded by default.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass and exits, which is the backfill path over history that already exists. `-once` on the command line overrides the file. |
-| `interval` | `5s` | How long the collector sleeps between passes in watch mode. `asz view` refreshes on the same interval. |
+| `interval` | `5s` | How long the pipeline sleeps between passes in watch mode. It is the whole period: `asz collect` and `asz server` land, parse and send once per interval. |
 | `max_delta_bytes` | `2097152` | The largest `.sd` file the collector writes, 2 MiB. A large catch-up is split into several files, and a single record larger than this is landed whole. A file travels whole as one log record, so this is also the largest record a receiver has to accept. A change applies to new files only; `asz repack` brings an existing root under a new budget. |
 
 ## parse
@@ -98,7 +98,6 @@ export:
     layer: AI_AGENT
     batch_bytes: 8388608
     max_bytes_per_minute: 0
-    interval: 5s
     logs: true
     metrics: true
 ```
@@ -114,7 +113,6 @@ export:
 | `headers` | none | Sent with every request, as gRPC metadata or as HTTP headers, for example `Authorization`. |
 | `batch_bytes` | `8388608` | How many file bytes one request carries at most, 8 MiB, which keeps a request under the 10 MiB the OAP's HTTP server accepts and well under the 50 MB its gRPC server accepts. A file larger than this is sent alone, in a request of its own. |
 | `max_bytes_per_minute` | `0` | At most this many bytes on the wire per minute: a pass waits before a request until a minute's budget covers it. Zero is no limit. See [Rate](export-otlp.md#rate). |
-| `interval` | `5s` | How long `asz push` sleeps between passes in watch mode. |
 | `logs` | `true` | Send the landed files and rounds, as OTLP logs. |
 | `metrics` | `true` | Send the metrics spool, as OTLP metrics. One of the two must be on. |
 
@@ -158,7 +156,7 @@ adapters:
 runtime configured as its documentation says: `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
 `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` at `listen`, over gRPC or
 `http/protobuf`. Phase one lands its metrics in the storage root's spool for `asz push`; logs and
-traces are accepted and dropped. It runs while `asz collect` or `asz view` runs, beside the
+traces are accepted and dropped. It runs while `asz collect` or `asz server` runs, beside the
 local adapter, and not with `-once`. `metrics` may be on here or on `claude-code-local`, never
 on both: the configuration refuses to load, since the two would count the same tokens twice.
 

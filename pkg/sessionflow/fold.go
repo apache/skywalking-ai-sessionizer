@@ -59,6 +59,17 @@ type View struct {
 	SessionFromTime    string
 	SessionThroughTime string
 
+	// Counts are the head round's own header counts, carried through so a
+	// list of conversations can show them without folding a second time.
+	// Each is nil when the head round was written before that count
+	// existed: absent means unknown, and a reader must not read it as zero.
+	Changes      *int
+	LinesAdded   *int
+	LinesRemoved *int
+	LLMCalls     *int
+	Subagents    *int
+	BashRuns     *int
+
 	Nodes      map[string]*Node
 	Relations  map[string]*Relation
 	Unresolved map[string]*Unresolved
@@ -187,6 +198,8 @@ func (v *View) Apply(r *Round) error {
 	v.InputDigest = r.Header.InputDigest
 	v.FromTime, v.ThroughTime = r.Header.FromTime, r.Header.ThroughTime
 	v.SessionFromTime, v.SessionThroughTime = r.Header.SessionFromTime, r.Header.SessionThroughTime
+	v.Changes, v.LinesAdded, v.LinesRemoved = r.Header.Changes, r.Header.LinesAdded, r.Header.LinesRemoved
+	v.LLMCalls, v.Subagents, v.BashRuns = r.Header.LLMCalls, r.Header.Subagents, r.Header.BashRuns
 	return nil
 }
 

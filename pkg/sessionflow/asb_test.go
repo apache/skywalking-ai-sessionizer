@@ -517,3 +517,58 @@ func TestPublishedRoundPermIsLanded(t *testing.T) {
 		t.Fatalf("PermLanded is writable: %v", storage.PermLanded)
 	}
 }
+
+// TestFoldCarriesTheHeadRoundsCounts. A list of conversations shows what the
+// header counted, and it must not fold a second time to get it, so the fold
+// carries the counts through. They come from the HEAD round, because each
+// round states the counts as of itself.
+//
+// A count the head round does not carry stays nil. A round cut before that
+// count existed does not know the answer, and a zero would be a claim it
+// never made.
+func TestFoldCarriesTheHeadRoundsCounts(t *testing.T) {
+	n := func(i int) *int { return &i }
+
+	// Round one predates the counts entirely.
+	h1 := header(1, "", 1, 1)
+	d1, dig1 := build(t, h1, nil)
+
+	// Round two carries some of them, and still not bash_runs.
+	h2 := header(2, dig1, 2, 2)
+	h2.Changes, h2.LinesAdded, h2.LinesRemoved = n(3), n(12), n(4)
+	h2.LLMCalls, h2.Subagents = n(6), n(1)
+	d2, _ := build(t, h2, nil)
+
+	v := &sessionflow.View{}
+	for _, data := range [][]byte{d1, d2} {
+		r, err := sessionflow.Read(bytes.NewReader(data))
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if err := v.Apply(r); err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+	}
+
+	for _, c := range []struct {
+		name string
+		got  *int
+		want int
+	}{
+		{"changes", v.Changes, 3},
+		{"lines_added", v.LinesAdded, 12},
+		{"lines_removed", v.LinesRemoved, 4},
+		{"llm_calls", v.LLMCalls, 6},
+		{"subagents", v.Subagents, 1},
+	} {
+		if c.got == nil {
+			t.Fatalf("%s did not reach the fold from the head round's header", c.name)
+		}
+		if *c.got != c.want {
+			t.Fatalf("%s is %d, the head round's header says %d", c.name, *c.got, c.want)
+		}
+	}
+	if v.BashRuns != nil {
+		t.Fatalf("bash_runs is %d; a count the head round does not carry must stay unknown, not become zero", *v.BashRuns)
+	}
+}

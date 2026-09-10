@@ -83,6 +83,16 @@ type summary struct {
 	From     int64  `json:"from"`
 	To       int64  `json:"to"`
 	Open     int    `json:"unresolved"`
+
+	// What the head round's header counted, carried straight through. A
+	// null is a round written before that count existed, and the page draws
+	// a dash for it: absent is unknown, never zero.
+	Changes      *int `json:"changes"`
+	LinesAdded   *int `json:"lines_added"`
+	LinesRemoved *int `json:"lines_removed"`
+	LLMCalls     *int `json:"llm_calls"`
+	Subagents    *int `json:"subagents"`
+	BashRuns     *int `json:"bash_runs"`
 }
 
 func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
@@ -97,7 +107,9 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 		if err != nil {
 			continue
 		}
-		row := summary{ID: id, Rounds: c.View.Round, Open: len(c.View.OpenUnresolved())}
+		row := summary{ID: id, Rounds: c.View.Round, Open: len(c.View.OpenUnresolved()),
+			Changes: c.View.Changes, LinesAdded: c.View.LinesAdded, LinesRemoved: c.View.LinesRemoved,
+			LLMCalls: c.View.LLMCalls, Subagents: c.View.Subagents, BashRuns: c.View.BashRuns}
 		for _, n := range c.View.Nodes {
 			switch n.Kind {
 			case model.KindTalk:

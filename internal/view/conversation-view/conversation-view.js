@@ -124,6 +124,78 @@ function injectionSays(text) {
 }
 const QUIET_MS = 120 * 1e3;
 const LANE_H = 36;
+function observationOf(r) {
+  if (r.basis === "skipped_read_only") return "skipped";
+  if (r.changes && r.changes.length > 0) return "files";
+  if (r.changed_files === null || r.coverage === "partial") return "unknown";
+  return "none";
+}
+function incompleteObservation(r) {
+  return r.basis !== "skipped_read_only" && (r.coverage === "partial" || r.changed_files === null && !(r.changes && r.changes.length > 0 && r.captured_by === CAPTURED_BY_RUNTIME));
+}
+const CAPTURED_BY_RUNTIME = "claude-code";
+function groupChanges(records) {
+  var _a;
+  const groups = /* @__PURE__ */ new Map();
+  for (const r of records) push(groups, ((_a = r.root) == null ? void 0 : _a.path) ?? "", r);
+  return [...groups.entries()].map(([root, list]) => ({
+    root,
+    records: list,
+    preferred: list.find((r) => r.captured_by === CAPTURED_BY_RUNTIME) ?? list[0]
+  }));
+}
+function tallyChanges(records) {
+  var _a;
+  const seen = /* @__PURE__ */ new Set();
+  let observation = "skipped";
+  let incomplete = false;
+  const rank = { skipped: 0, none: 1, unknown: 2, files: 3 };
+  for (const r of records) {
+    const o = observationOf(r);
+    if (rank[o] > rank[observation]) observation = o;
+    if (incompleteObservation(r)) incomplete = true;
+    for (const c of r.changes ?? []) seen.add(`${((_a = r.root) == null ? void 0 : _a.path) ?? ""}|${c.path}`);
+  }
+  const withFiles = records.filter((r) => {
+    var _a2;
+    return (((_a2 = r.changes) == null ? void 0 : _a2.length) ?? 0) > 0;
+  });
+  let additions = null;
+  let deletions = null;
+  if (withFiles.length === 1) {
+    for (const c of withFiles[0].changes ?? []) {
+      if (c.additions === null || c.deletions === null) {
+        additions = null;
+        deletions = null;
+        break;
+      }
+      additions = (additions ?? 0) + c.additions;
+      deletions = (deletions ?? 0) + c.deletions;
+    }
+  }
+  return { files: seen.size, incomplete, additions, deletions, observation };
+}
+function changeRoots(records) {
+  var _a;
+  const roots = /* @__PURE__ */ new Map();
+  for (const r of records) {
+    const root = ((_a = r.root) == null ? void 0 : _a.path) ?? "";
+    let files = roots.get(root);
+    if (!files) {
+      files = /* @__PURE__ */ new Map();
+      roots.set(root, files);
+    }
+    for (const c of r.changes ?? []) {
+      let f = files.get(c.path);
+      if (!f) {
+        f = { path: c.path, entries: [] };
+        files.set(c.path, f);
+      }
+      f.entries.push({ record: r, change: c });
+    }
+  }
+  return [...roots.entries()].map(([root, files]) => ({ root, files: [...files.values()] }));
+}
 function readOrder(a, b) {
   if (a.ref && b.ref) return a.ref.seq - b.ref.seq || a.ref.row - b.ref.row;
   return (a.at || 0) - (b.at || 0) || a.order - b.order;
@@ -150,12 +222,18 @@ class ConversationModel {
     __publicField(this, "folderCache", /* @__PURE__ */ new Map());
     /** Steps that start or report a stream, keyed by the stream id. */
     __publicField(this, "openersByStreamId", /* @__PURE__ */ new Map());
+    /** Change records by the step they join to; the join is the record's
+     *  `step`, never its id, which two producers share. */
+    __publicField(this, "changesByStep", /* @__PURE__ */ new Map());
+    __publicField(this, "workspaceChanges");
     this.doc = doc;
     for (const s of doc.streams) {
       this.streamByName.set(s.name, s);
       this.streamById.set(s.id, s);
     }
     for (const seg of doc.segments) this.segmentById.set(seg.id, seg);
+    this.workspaceChanges = doc.workspace_changes ?? [];
+    for (const wc of this.workspaceChanges) if (wc.step) push(this.changesByStep, wc.step, wc);
     let order = 0;
     const flatten = (root, talkId, streamFallback) => {
       const walk = (n, run, depth) => {
@@ -191,6 +269,7 @@ class ConversationModel {
             flags: n.flags,
             dropped: n.dropped,
             edges: n.edges ?? [],
+            hasChanges: this.changesByStep.has(n.id),
             order: order++,
             depth
           };
@@ -259,6 +338,10 @@ class ConversationModel {
   }
   step(id) {
     return id ? this.stepById.get(id) ?? null : null;
+  }
+  /** The change records joined to a step, in document order. */
+  changesOf(stepId) {
+    return this.changesByStep.get(stepId) ?? [];
   }
   /** The streams the assembler could tie to the start or the end of a stream
    *  from THIS stream's steps. Several candidates for one call are all kept:
@@ -528,12 +611,359 @@ const ENGLISH = {
   notApplicable: "not applicable — this describes the landed record, not the source",
   close: "Close",
   whatDoesMean: "What does {key} mean?",
+  changes: "Changes",
+  changesBadge: "{n} changes",
+  oneFileChanged: "1 file",
+  filesChanged: "{n} files",
+  filesUnknown: "files unknown",
+  noFilesChanged: "no files changed",
+  readOnlyCall: "read-only",
+  readOnlyCallTitle: 'Classed read-only by the asz plugin: no scan ran, so nothing is known about files. This is not "no changes".',
+  showChanges: "Show the changes",
+  hideChanges: "Hide the changes",
+  capturedByRuntime: "the runtime’s own patch",
+  capturedByPlugin: "observed by the asz plugin",
+  basisToolWindow: "the workspace was scanned before and after the call",
+  basisRuntimeReported: "the patch the tool itself reported",
+  basisSkipped: "not observed: the command was classed read-only, so no scan ran. This says nothing about whether files changed.",
+  basisUnattributed: "found by a later scan; no observed tool window covers it",
+  changedFilesUnknown: "how many files changed is unknown",
+  changedFilesNone: "a complete observation found no changed file",
+  coveragePartial: "Partial coverage: a scan stopped early, so changes may be missing. Gaps:",
+  overlapsNote: "Other windows were open on this root at the same time:",
+  sharedWith: "shared with {windows}",
+  sharedShort: "shared",
+  outsideWindow: "outside any observed window",
+  diffBinary: "binary — path and hashes only, no diff",
+  diffTooLarge: "too large to diff — path and hashes only",
+  diffUnavailable: "no diff available",
+  noNewlineBefore: "before: no newline at end of file",
+  noNewlineAfter: "after: no newline at end of file",
+  moreLines: "{n} more lines",
+  showAllLines: "show all",
+  moreInChangesTab: "more in the Changes tab →",
+  changeRecordsForStep: "{n} change records — open the Changes tab →",
+  workspaceRoot: "workspace root",
+  changeRecordRef: "change record",
+  basisWord: "Basis",
+  outcomeWord: "Outcome",
+  exitCode: "exit {code}",
+  scannedBefore: "Scanned before",
+  scannedAfter: "Scanned after",
+  policyWord: "Policy",
+  readFrom: "Read from",
+  onResultRecord: "the tool’s own result record",
+  inChangesFile: "a changes file",
+  openEvidence: "open Evidence →",
+  changesPanelTitle: "Workspace changes",
+  recordsAndFiles: "{records} records · {files} files",
+  outsideWindowsHeading: "Changes outside observed tool windows",
+  outsideWindowsNote: "A person, an editor or a tool no hook covered changed these between two observed calls; no step made them.",
+  goToStep: "go to the step",
+  changesPanelHint: "Click a record to open the step that made it, on its Changes tab.",
+  noStepForRecord: "no step",
   selected: "Selected {what}",
   selectedNestedStream: "Selected nested stream {name}, opened by {kind}. Press Enter to dive in, Escape to clear.",
-  selectionCleared: "Selection cleared."
+  selectionCleared: "Selection cleared.",
+  copy: "copy",
+  copied: "copied",
+  popOutInspector: "Pop out",
+  dockInspector: "Dock"
 };
 function fill(template, vars) {
   return template.replace(/\{(\w+)\}/g, (_, k) => k in vars ? String(vars[k]) : `{${k}}`);
+}
+const ICON_CHANGES = "acv-i-changes";
+const ICON_READONLY = "acv-i-readonly";
+function symbolDefs() {
+  return `<svg class="acv-defs" aria-hidden="true" focusable="false">
+    <symbol id="${ICON_CHANGES}" viewBox="0 0 16 16"><path d="M3 4.5h10M8 1.5v6M3 12h10" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="${ICON_READONLY}" viewBox="0 0 16 16"><path d="M1.5 8s2.6-4.5 6.5-4.5S14.5 8 14.5 8s-2.6 4.5-6.5 4.5S1.5 8 1.5 8z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2.1" fill="currentColor"/></symbol>
+  </svg>`;
+}
+function icon(id, cls = "") {
+  return `<svg class="acv-ico${cls ? ` ${cls}` : ""}" aria-hidden="true" focusable="false"><use href="#${id}"></use></svg>`;
+}
+const PREVIEW_LINES = 200;
+function fileKey(stepId, r, c) {
+  return `${stepId}|${r.captured_by}|${r.id}|${c.path}`;
+}
+function producer(s, r) {
+  const runtime = r.captured_by === CAPTURED_BY_RUNTIME;
+  return `<span class="acv-producer${runtime ? " runtime" : ""}">${esc(r.captured_by)}</span> <span class="acv-faint">${esc(
+    runtime ? s.capturedByRuntime : s.capturedByPlugin
+  )}</span>`;
+}
+function basisPhrase(s, r) {
+  switch (r.basis) {
+    case "tool_window":
+      return s.basisToolWindow;
+    case "runtime_reported":
+      return s.basisRuntimeReported;
+    case "skipped_read_only":
+      return s.basisSkipped;
+    case "unattributed":
+      return s.basisUnattributed;
+    default:
+      return r.basis;
+  }
+}
+function counts(ctx, add, del) {
+  if (add === null || del === null) return "";
+  return `<span class="acv-file-counts"><span class="acv-add">+${ctx.f.number(add)}</span> <span class="acv-del">−${ctx.f.number(del)}</span></span>`;
+}
+function marks(s, c) {
+  let html = "";
+  if (c.attribution === "shared") {
+    html += `<span class="acv-mini acv-warn" title="${esc(fill(s.sharedWith, { windows: (c.windows ?? []).join(", ") }))}">${esc(s.sharedShort)}</span>`;
+  }
+  if (c.attribution === "outside_any_window") html += `<span class="acv-mini acv-warn">${esc(s.outsideWindow)}</span>`;
+  return html;
+}
+function sizes(ctx, c) {
+  const side = (present2, bytes) => !present2 ? "∅" : bytes === null ? "?" : `${ctx.f.number(bytes)} B`;
+  return `<span class="acv-mini">${side(c.before.present, c.before.bytes)} → ${side(c.after.present, c.after.bytes)}</span>`;
+}
+function diffHtml(ctx, key, c) {
+  const { s, f, state } = ctx;
+  if (c.diff !== "available") {
+    const why = c.diff === "binary" ? s.diffBinary : c.diff === "too_large" ? s.diffTooLarge : s.diffUnavailable;
+    const sha = (side) => side.sha256 ? `<span title="${esc(side.sha256)}">${esc(side.sha256.slice(0, 12))}…</span>` : "∅";
+    return `<div class="acv-diff-note">${esc(why)}<span class="acv-hashes">sha256 ${sha(c.before)} → ${sha(c.after)}</span></div>`;
+  }
+  const rows = [];
+  for (const h of c.hunks ?? []) {
+    rows.push(`<div class="acv-diff-hunk">@@ -${h.old_start},${h.old_lines} +${h.new_start},${h.new_lines} @@</div>`);
+    for (const line of h.lines) {
+      const cls = line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : line.startsWith("\\") ? "marker" : "ctx";
+      rows.push(`<div class="acv-diff-line ${cls}">${esc(line)}</div>`);
+    }
+  }
+  const all = state.fullDiffs.has(key) || rows.length <= PREVIEW_LINES;
+  const shown = all ? rows : rows.slice(0, PREVIEW_LINES);
+  let html = `<pre class="acv-diff">${shown.join("")}</pre>`;
+  if (!all) {
+    html += `<button type="button" class="acv-linkish acv-diff-more" data-diff-all="${esc(key)}">${esc(fill(s.moreLines, { n: f.number(rows.length - PREVIEW_LINES) }))} · ${esc(s.showAllLines)}</button>`;
+  }
+  const notes = [];
+  if (c.before.no_newline_at_end) notes.push(s.noNewlineBefore);
+  if (c.after.no_newline_at_end) notes.push(s.noNewlineAfter);
+  if (notes.length) html += `<div class="acv-diff-note">${notes.map(esc).join(" · ")}</div>`;
+  return html;
+}
+function fileRow(ctx, stepId, r, c) {
+  const { s, state } = ctx;
+  const key = fileKey(stepId, r, c);
+  const open = state.openChangeFiles.has(key);
+  return `<div class="acv-change-file${open ? " open" : ""}">
+    <button type="button" class="acv-change-file-row" data-change-file="${esc(key)}" aria-expanded="${open}">
+      <span class="acv-fold-mark">${open ? "▾" : "▸"}</span>
+      <span class="acv-op ${esc(c.operation)}">${esc(c.operation)}</span>
+      <span class="acv-file-path">${esc(c.path)}</span>
+      ${counts(ctx, c.additions, c.deletions)}${marks(s, c)}${sizes(ctx, c)}
+    </button>
+    ${open ? diffHtml(ctx, key, c) : ""}
+  </div>`;
+}
+function observationNote(s, r) {
+  switch (observationOf(r)) {
+    case "skipped":
+      return `<div class="acv-change-note">${icon(ICON_READONLY)} ${esc(s.basisSkipped)}</div>`;
+    case "unknown":
+      return `<div class="acv-change-note">${esc(s.changedFilesUnknown)}</div>`;
+    case "none":
+      return `<div class="acv-change-note">${esc(s.changedFilesNone)}</div>`;
+    default:
+      return "";
+  }
+}
+function coverageWarning(s, r) {
+  if (r.coverage !== "partial") return "";
+  return `<div class="acv-warning"><strong>${esc(s.coveragePartial)}</strong><br>${(r.gaps ?? []).map(esc).join("<br>") || "—"}</div>`;
+}
+function recordBlock(ctx, stepId, r, meta) {
+  const { s } = ctx;
+  let html = `<div class="acv-change-record">
+    <div class="acv-change-record-head">${producer(s, r)}${r.tool_name ? ` <span class="acv-mini">· ${esc(r.tool_name)}</span>` : ""}</div>`;
+  if (meta) html += recordMeta(ctx, r);
+  html += coverageWarning(s, r);
+  html += observationNote(s, r);
+  for (const c of r.changes ?? []) html += fileRow(ctx, stepId, r, c);
+  html += `</div>`;
+  return html;
+}
+function recordMeta(ctx, r) {
+  var _a;
+  const { s, f } = ctx;
+  const row = (dt, dd, mono = false) => `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`;
+  const at = (iso) => {
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? esc(f.dateTime(ms)) : esc(iso);
+  };
+  let html = `<dl class="acv-definition acv-change-meta">`;
+  html += row(s.basisWord, `<span class="mono">${esc(r.basis)}</span> <span class="acv-faint">· ${esc(basisPhrase(s, r))}</span>`);
+  html += row(s.observedAt, at(r.time));
+  if (r.outcome) {
+    html += row(
+      s.outcomeWord,
+      `${esc(r.outcome.state)}${r.outcome.exit_code !== null ? ` <span class="acv-faint">· ${esc(fill(s.exitCode, { code: r.outcome.exit_code }))}</span>` : ""}`
+    );
+  }
+  if (r.window) {
+    html += row(s.scannedBefore, `${at(r.window.before.from)} – ${at(r.window.before.to)}`);
+    html += row(s.scannedAfter, `${at(r.window.after.from)} – ${at(r.window.after.to)}`);
+  }
+  if (r.policy) {
+    html += row(s.policyWord, [r.policy.exclusions, r.policy.read_only].filter(Boolean).map(esc).join(" · ") || "—", true);
+  }
+  const runtime = r.captured_by === CAPTURED_BY_RUNTIME;
+  html += row(
+    s.readFrom,
+    `seq ${r.ref.seq} · row ${r.ref.row}${r.ref.block != null ? ` · block ${r.ref.block}` : ""} <span class="acv-faint">· ${esc(
+      runtime ? s.onResultRecord : s.inChangesFile
+    )}</span> <button type="button" class="acv-linkish" data-to-evidence data-ref-seq="${r.ref.seq}" data-ref-row="${r.ref.row}" data-ref-block="${r.ref.block ?? ""}">${esc(s.openEvidence)}</button>`,
+    true
+  );
+  html += `</dl>`;
+  if ((_a = r.overlaps) == null ? void 0 : _a.length) {
+    html += `<div class="acv-change-note">${esc(s.overlapsNote)} ${r.overlaps.map((o) => esc(`${o.tool_name ?? o.tool ?? o.capture} · ${o.stream} · ${o.state}`)).join("; ")}</div>`;
+  }
+  return html;
+}
+function changePill(ctx, step) {
+  const { s, f, model: m, state } = ctx;
+  const records = m.changesOf(step.id);
+  if (!records.length) return "";
+  const t = tallyChanges(records);
+  const open = state.openChanges.has(step.id);
+  const skipped = t.observation === "skipped";
+  const title = skipped ? s.readOnlyCallTitle : open ? s.hideChanges : s.showChanges;
+  const common = `type="button" data-changes-toggle="${esc(step.id)}" aria-expanded="${open}" title="${esc(title)}"`;
+  if (skipped) {
+    return `<button ${common} class="acv-change-pill readonly">${icon(ICON_READONLY)} ${esc(s.readOnlyCall)}</button>`;
+  }
+  let text;
+  let cls = "";
+  if (t.observation === "unknown") {
+    text = s.filesUnknown;
+    cls = " unknown";
+  } else if (t.observation === "none") {
+    text = s.noFilesChanged;
+    cls = " none";
+  } else {
+    text = t.files === 1 && !t.incomplete ? s.oneFileChanged : fill(s.filesChanged, { n: `${f.number(t.files)}${t.incomplete ? "+" : ""}` });
+  }
+  return `<button ${common} class="acv-change-pill${cls}">${icon(ICON_CHANGES)} ${esc(text)}${t.observation === "files" ? counts(ctx, t.additions, t.deletions) : ""}</button>`;
+}
+function inlineChanges(ctx, step) {
+  const { s, model: m, state } = ctx;
+  if (!state.openChanges.has(step.id)) return "";
+  const records = m.changesOf(step.id);
+  if (!records.length) return "";
+  const groups = groupChanges(records);
+  let html = `<div class="acv-changes-inline">`;
+  for (const g of groups) {
+    if (groups.length > 1) html += `<div class="acv-change-root">${esc(s.workspaceRoot)} <span class="mono">${esc(g.root || "—")}</span></div>`;
+    const ordered = [g.preferred, ...g.records.filter((r) => r !== g.preferred)];
+    for (const r of ordered) html += recordBlock(ctx, step.id, r, false);
+  }
+  html += `<button type="button" class="acv-linkish acv-changes-more" data-to-changes="${esc(step.id)}">${esc(s.moreInChangesTab)}</button></div>`;
+  return html;
+}
+function drawChangesTab(ctx, body, step) {
+  const { s, model: m } = ctx;
+  const records = m.changesOf(step.id);
+  const groups = groupChanges(records);
+  let html = "";
+  for (const g of groups) {
+    html += `<div class="acv-change-root">${esc(s.workspaceRoot)} <span class="mono">${esc(g.root || "—")}</span></div>`;
+    const ordered = [g.preferred, ...g.records.filter((r) => r !== g.preferred)];
+    for (const r of ordered) html += recordBlock(ctx, step.id, r, true);
+  }
+  body.innerHTML = html;
+  bindChangeControls(ctx, body, redrawBoth(ctx));
+  body.querySelectorAll("[data-to-evidence]").forEach(
+    (b) => b.onclick = () => {
+      const block = b.dataset.refBlock;
+      ctx.state.rawRef = { seq: Number(b.dataset.refSeq), row: Number(b.dataset.refRow), ...block ? { block: Number(block) } : {} };
+      ctx.showTab("evidence");
+    }
+  );
+}
+function redrawBoth(ctx) {
+  return (focusSelector) => {
+    var _a;
+    ctx.drawTranscript();
+    ctx.drawInspector();
+    if (focusSelector) (_a = ctx.root.querySelector(focusSelector)) == null ? void 0 : _a.focus();
+  };
+}
+function drawChangesPanel(ctx) {
+  var _a, _b;
+  const { s, f, model: m } = ctx;
+  const body = ctx.q(".acv-changes-body");
+  const all = m.workspaceChanges;
+  const files = /* @__PURE__ */ new Set();
+  for (const r of all) for (const c of r.changes ?? []) files.add(`${((_a = r.root) == null ? void 0 : _a.path) ?? ""}|${c.path}`);
+  const floor = all.some(incompleteObservation) ? "+" : "";
+  ctx.q(".acv-changes-title").textContent = `${s.changesPanelTitle} · ${fill(s.recordsAndFiles, { records: f.number(all.length), files: `${f.number(files.size)}${floor}` })}`;
+  const attributed = all.filter((r) => r.basis !== "unattributed").map((r) => ({ ...r, changes: (r.changes ?? []).filter((c) => c.attribution !== "outside_any_window") }));
+  const entry = (r, c) => {
+    const step = m.step(r.step);
+    const when = Number.isFinite(Date.parse(r.time)) ? f.time(Date.parse(r.time)) : r.time;
+    const who = step ? step.name ?? step.kind : [r.tool_name, s.noStepForRecord].filter(Boolean).join(" · ");
+    const label = `${who} · ${r.captured_by} · ${when}`;
+    const target = step ? `<button type="button" class="acv-linkish" data-goto="${esc(step.id)}" title="${esc(s.goToStep)}">${esc(label)} →</button>` : `<span class="acv-faint">${esc(label)}</span>`;
+    return `<div class="acv-panel-entry">${target} ${counts(ctx, c.additions, c.deletions)}${marks(s, c)}</div>`;
+  };
+  let html = attributed.some((r) => m.step(r.step)) ? `<div class="acv-panel-hint">${esc(s.changesPanelHint)}</div>` : "";
+  for (const root of changeRoots(attributed)) {
+    html += `<div class="acv-change-root">${esc(s.workspaceRoot)} <span class="mono">${esc(root.root || "—")}</span></div>`;
+    for (const fl of root.files) {
+      const op = fl.entries[fl.entries.length - 1].change.operation;
+      html += `<div class="acv-panel-file"><div class="acv-panel-file-head"><span class="acv-op ${esc(op)}">${esc(op)}</span><span class="acv-file-path">${esc(fl.path)}</span></div>${fl.entries.map((e) => entry(e.record, e.change)).join("")}</div>`;
+    }
+  }
+  const outside = [];
+  for (const r of all) {
+    for (const c of r.changes ?? []) {
+      if (r.basis === "unattributed" || c.attribution === "outside_any_window") outside.push({ record: r, change: c });
+    }
+  }
+  if (outside.length) {
+    html += `<div class="acv-change-root acv-warn">${esc(s.outsideWindowsHeading)}</div><div class="acv-loose-note">${esc(s.outsideWindowsNote)}</div>`;
+    for (const e of outside) {
+      html += `<div class="acv-panel-file"><div class="acv-panel-file-head"><span class="acv-op ${esc(e.change.operation)}">${esc(e.change.operation)}</span><span class="acv-file-path">${esc(
+        ((_b = e.record.root) == null ? void 0 : _b.path) ? `${e.record.root.path}/` : ""
+      )}${esc(e.change.path)}</span></div>${entry(e.record, e.change)}</div>`;
+    }
+  }
+  body.innerHTML = html || `<div class="acv-empty">—</div>`;
+  body.querySelectorAll("[data-goto]").forEach(
+    (b) => b.onclick = () => {
+      ctx.select(b.dataset.goto, true);
+      ctx.showTab("changes");
+      ctx.q(".acv-changes-close").dispatchEvent(new Event("click"));
+    }
+  );
+}
+function bindChangeControls(ctx, root, redraw) {
+  root.querySelectorAll("[data-change-file]").forEach(
+    (b) => b.onclick = (ev) => {
+      ev.stopPropagation();
+      const key = b.dataset.changeFile;
+      if (ctx.state.openChangeFiles.has(key)) ctx.state.openChangeFiles.delete(key);
+      else ctx.state.openChangeFiles.add(key);
+      redraw(`.acv-inspector-body [data-change-file="${cssEscape(key)}"]`);
+    }
+  );
+  root.querySelectorAll("[data-diff-all]").forEach(
+    (b) => b.onclick = (ev) => {
+      ev.stopPropagation();
+      ctx.state.fullDiffs.add(b.dataset.diffAll);
+      redraw(`.acv-inspector-body [data-change-file="${cssEscape(b.dataset.diffAll)}"]`);
+    }
+  );
 }
 function streamName(ctx, name) {
   const st = ctx.model.streamByName.get(name);
@@ -542,13 +972,18 @@ function streamName(ctx, name) {
   return st.label || `${ctx.s.childStreamSingular} ${st.name.slice(0, 6)}`;
 }
 function drawStatus(ctx) {
+  var _a;
   const { model: m, s, f, state } = ctx;
   const sum = m.doc.summary;
   const span = sum.to && sum.from ? f.duration(sum.to - sum.from) : "—";
   const verified = m.doc.rounds.filter((r) => r.verified).length;
   const integrity = sum.state === "verified" ? s.integrityVerified : sum.state === "mismatch" ? s.integrityMismatch : s.integrityIncomplete;
-  ctx.q(".acv-status").innerHTML = `<span class="acv-badge acv-integrity is-${esc(sum.state)}" title="${esc(`${verified}/${m.doc.rounds.length} ${s.roundsVerified} · ${m.doc.files.length} ${s.filesListed}`)}"><span class="acv-dot"></span>${esc(integrity)}${sum.problems.length ? ` · ${sum.problems.length} ${esc(s.problems)}` : ""}</span><span class="acv-badge"><span class="acv-dot"></span>${esc(s.round)} ${f.number(m.doc.head.round)}</span><span><strong>${f.number(m.doc.segments.length)}</strong> ${esc(s.segments)}</span><span><strong>${f.number(m.doc.streams.length)}</strong> ${esc(s.streams)}</span><span><strong>${f.number(m.talks.length)}</strong> ${esc(s.talks)}</span><span>${esc(span)} ${esc(s.span)}</span>` + (sum.unresolved ? `<span class="acv-warn">${f.number(sum.unresolved)} ${esc(s.unresolved)}</span>` : "") + `<button type="button" class="acv-overview-toggle" aria-expanded="${state.overviewOpen}" aria-controls="acv-overview">${esc(s.overview)} <span class="acv-chevron" aria-hidden="true">⌄</span></button>`;
+  ctx.q(".acv-status").innerHTML = `<span class="acv-badge acv-integrity is-${esc(sum.state)}" title="${esc(`${verified}/${m.doc.rounds.length} ${s.roundsVerified} · ${m.doc.files.length} ${s.filesListed}`)}"><span class="acv-dot"></span>${esc(integrity)}${sum.problems.length ? ` · ${sum.problems.length} ${esc(s.problems)}` : ""}</span><span class="acv-badge"><span class="acv-dot"></span>${esc(s.round)} ${f.number(m.doc.head.round)}</span><span><strong>${f.number(m.doc.segments.length)}</strong> ${esc(s.segments)}</span><span><strong>${f.number(m.doc.streams.length)}</strong> ${esc(s.streams)}</span><span><strong>${f.number(m.talks.length)}</strong> ${esc(s.talks)}</span><span>${esc(span)} ${esc(s.span)}</span>` + (sum.unresolved ? `<span class="acv-warn">${f.number(sum.unresolved)} ${esc(s.unresolved)}</span>` : "") + (m.workspaceChanges.length ? `<button type="button" class="acv-badge acv-changes-toggle" aria-expanded="${state.changesOpen}" aria-controls="acv-changes">${icon(ICON_CHANGES)} ${esc(
+    fill(s.changesBadge, { n: f.number(m.workspaceChanges.length) })
+  )}</button>` : "") + `<button type="button" class="acv-overview-toggle" aria-expanded="${state.overviewOpen}" aria-controls="acv-overview">${esc(s.overview)} <span class="acv-chevron" aria-hidden="true">⌄</span></button>`;
   ctx.q(".acv-overview-toggle").addEventListener("click", () => setOverviewOpen(ctx, !state.overviewOpen));
+  (_a = ctx.root.querySelector(".acv-changes-toggle")) == null ? void 0 : _a.addEventListener("click", () => setChangesOpen(ctx, !state.changesOpen));
+  ctx.q(".acv-changes-close").addEventListener("click", () => setChangesOpen(ctx, false));
   if (sum.problems.length) {
     ctx.q(".acv-integrity").addEventListener("click", () => setProblemsOpen(ctx, ctx.q(".acv-problems").hidden));
     ctx.q(".acv-problems-close").addEventListener("click", () => setProblemsOpen(ctx, false));
@@ -561,13 +996,45 @@ function setProblemsOpen(ctx, open) {
   const box = ctx.q(".acv-problems");
   box.hidden = !open;
   if (open && ctx.state.overviewOpen) setOverviewOpen(ctx, false);
+  if (open && ctx.state.changesOpen) setChangesOpen(ctx, false);
 }
 function setOverviewOpen(ctx, open) {
   ctx.state.overviewOpen = open;
   ctx.q(".acv-overview").hidden = !open;
   if (open) ctx.q(".acv-problems").hidden = true;
+  if (open && ctx.state.changesOpen) setChangesOpen(ctx, false);
   ctx.q(".acv-overview-toggle").setAttribute("aria-expanded", String(open));
   if (open) ctx.q(".acv-talk-filter").focus();
+}
+function setChangesOpen(ctx, open) {
+  var _a;
+  ctx.state.changesOpen = open;
+  ctx.q(".acv-changes").hidden = !open;
+  (_a = ctx.root.querySelector(".acv-changes-toggle")) == null ? void 0 : _a.setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  if (ctx.state.overviewOpen) setOverviewOpen(ctx, false);
+  ctx.q(".acv-problems").hidden = true;
+  ctx.drawChangesPanel();
+}
+function setInspectorPopped(ctx, on) {
+  ctx.state.inspectorPopped = on;
+  ctx.q(".acv-workbench").classList.toggle("acv-popped", on);
+  ctx.q(".acv-scrim").hidden = !on;
+  const inspector = ctx.q(".acv-inspector");
+  if (on) {
+    inspector.setAttribute("role", "dialog");
+    inspector.setAttribute("aria-modal", "true");
+    inspector.setAttribute("aria-label", `${ctx.s.inspector} · ${ctx.q(".acv-inspector-title").textContent ?? ""}`);
+  } else {
+    for (const a of ["role", "aria-modal", "aria-label"]) inspector.removeAttribute(a);
+  }
+  for (const el of ctx.root.querySelectorAll(".acv-main > :not(.acv-inspector):not(.acv-scrim), .acv-workbench > :not(.acv-main), .acv > :not(.acv-workbench)")) {
+    el.toggleAttribute("inert", on);
+  }
+  const btn = ctx.q(".acv-pop-btn");
+  btn.setAttribute("aria-pressed", String(on));
+  btn.title = on ? ctx.s.dockInspector : ctx.s.popOutInspector;
+  btn.textContent = on ? "⤡" : "⤢";
 }
 function drawOverview(ctx) {
   var _a, _b;
@@ -580,7 +1047,7 @@ function drawOverview(ctx) {
   ctx.q(".acv-summary").innerHTML = `
     <div class="acv-cell acv-cell-primary"><div class="acv-kicker">${esc(s.session)}</div><strong>${esc(m.doc.sessions.join(", ") || m.doc.conversation)}</strong></div>
     <div class="acv-cell"><div class="acv-kicker">${esc(s.steps)}</div><strong>${f.number(sum.steps)}</strong>
-      <div class="acv-cell-sub">${f.number(m.talks.length)} ${esc(s.talks)} · ${f.number(runs)} ${esc(s.runs)}</div></div>
+      <div class="acv-cell-sub">${f.number(m.talks.length)} ${esc(s.talks)} · ${f.number(runs)} ${esc(s.runs)}${m.workspaceChanges.length ? ` · ${esc(fill(s.changesBadge, { n: f.number(m.workspaceChanges.length) }))}` : ""}</div></div>
     <div class="acv-cell"><div class="acv-kicker">${esc(s.childStreams)}</div><strong>${f.number(child)}</strong>
       <div class="acv-cell-sub">${esc(s.childStreamsNote)}</div></div>
     <div class="acv-cell"><div class="acv-kicker">${esc(s.relations)}</div><strong>${f.number(m.doc.relations.length)}</strong>
@@ -657,6 +1124,278 @@ function drawStreamTabs(ctx) {
   caption.textContent = bits.join(" · ");
   caption.title = t ? t.id : "";
 }
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+function trapFocus(ctx, e) {
+  if (e.key !== "Tab" || !ctx.state.inspectorPopped) return;
+  const inspector = ctx.q(".acv-inspector");
+  const items = Array.from(inspector.querySelectorAll(FOCUSABLE)).filter((el) => !el.closest("[hidden]"));
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+  const inside = active ? inspector.contains(active) : false;
+  if (e.shiftKey ? !inside || active === first : !inside || active === last) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  }
+}
+const LINE_DIFF_CAP = 400;
+function lineDiff(before, after) {
+  const a = before.split("\n");
+  const b = after.split("\n");
+  const del = (text) => ({ kind: "del", text });
+  const add = (text) => ({ kind: "add", text });
+  if (a.length > LINE_DIFF_CAP || b.length > LINE_DIFF_CAP) return [...a.map(del), ...b.map(add)];
+  const n = a.length;
+  const m = b.length;
+  const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i2 = n - 1; i2 >= 0; i2--) {
+    for (let j2 = m - 1; j2 >= 0; j2--) {
+      lcs[i2][j2] = a[i2] === b[j2] ? lcs[i2 + 1][j2 + 1] + 1 : Math.max(lcs[i2 + 1][j2], lcs[i2][j2 + 1]);
+    }
+  }
+  const rows = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      rows.push({ kind: "ctx", text: a[i] });
+      i++;
+      j++;
+    } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      rows.push(del(a[i]));
+      i++;
+    } else {
+      rows.push(add(b[j]));
+      j++;
+    }
+  }
+  while (i < n) rows.push(del(a[i++]));
+  while (j < m) rows.push(add(b[j++]));
+  return rows;
+}
+const INLINE_MAX = 80;
+const ESCAPES = { n: "\n", t: "	", r: "\r", b: "\b", f: "\f", "/": "/", "\\": "\\", '"': '"' };
+class Malformed extends Error {
+}
+class Reader {
+  constructor(t) {
+    __publicField(this, "pos", 0);
+    this.t = t;
+  }
+  get done() {
+    return this.pos >= this.t.length;
+  }
+  peek() {
+    return this.t[this.pos] ?? "";
+  }
+  ws() {
+    while (!this.done && /\s/.test(this.t[this.pos])) this.pos++;
+  }
+  /** From the opening quote to the closing one, decoding the escapes. */
+  string() {
+    const t = this.t;
+    let out = "";
+    let j = this.pos + 1;
+    while (j < t.length) {
+      const c = t[j];
+      if (c === '"') {
+        this.pos = j + 1;
+        return { value: out, closed: true };
+      }
+      if (c !== "\\") {
+        out += c;
+        j++;
+        continue;
+      }
+      const e = t[j + 1];
+      if (e === void 0) break;
+      if (e === "u") {
+        const hex = t.slice(j + 2, j + 6);
+        if (!/^[0-9a-fA-F]*$/.test(hex)) throw new Malformed();
+        if (hex.length < 4) break;
+        out += String.fromCharCode(parseInt(hex, 16));
+        j += 6;
+        continue;
+      }
+      const plain = ESCAPES[e];
+      if (plain === void 0) throw new Malformed();
+      out += plain;
+      j += 2;
+    }
+    this.pos = t.length;
+    return { value: out, closed: false };
+  }
+  /** An object or array as its own text, balanced over the strings inside. */
+  nested() {
+    const t = this.t;
+    const start = this.pos;
+    let depth = 0;
+    let j = start;
+    while (j < t.length) {
+      const c = t[j];
+      if (c === '"') {
+        this.pos = j;
+        if (!this.string().closed) return { value: t.slice(start), closed: false };
+        j = this.pos;
+        continue;
+      }
+      if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        depth--;
+        if (depth === 0) {
+          this.pos = j + 1;
+          const value = t.slice(start, j + 1);
+          try {
+            JSON.parse(value);
+          } catch {
+            throw new Malformed();
+          }
+          return { value, closed: true };
+        }
+      }
+      j++;
+    }
+    this.pos = t.length;
+    return { value: t.slice(start), closed: false };
+  }
+  /** A number, `true`, `false` or `null`. */
+  token() {
+    const t = this.t;
+    const start = this.pos;
+    while (this.pos < t.length && /[-+0-9.eEa-z]/.test(t[this.pos])) this.pos++;
+    const value = t.slice(start, this.pos);
+    if (this.done) return { value, closed: false };
+    if (!/^(?:-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|true|false|null)$/.test(value)) throw new Malformed();
+    return { value, closed: true };
+  }
+}
+function structure(text) {
+  try {
+    return readObject(new Reader(text));
+  } catch (e) {
+    if (e instanceof Malformed) return null;
+    throw e;
+  }
+}
+function readObject(r) {
+  r.ws();
+  if (r.peek() !== "{") return null;
+  r.pos++;
+  const fields = [];
+  let cut = false;
+  let afterComma = false;
+  for (; ; ) {
+    r.ws();
+    if (r.done) {
+      cut = true;
+      break;
+    }
+    if (r.peek() === "}") {
+      if (afterComma) throw new Malformed();
+      r.pos++;
+      break;
+    }
+    if (r.peek() !== '"') throw new Malformed();
+    const key = r.string();
+    if (!key.closed) {
+      cut = true;
+      break;
+    }
+    r.ws();
+    if (r.done) {
+      cut = true;
+      break;
+    }
+    if (r.peek() !== ":") throw new Malformed();
+    r.pos++;
+    r.ws();
+    if (r.done) {
+      cut = true;
+      break;
+    }
+    const c = r.peek();
+    const v = c === '"' ? r.string() : c === "{" || c === "[" ? r.nested() : r.token();
+    fields.push({ key: key.value, value: v.value, block: v.value.includes("\n") || v.value.length > INLINE_MAX, cut: !v.closed });
+    if (!v.closed) {
+      cut = true;
+      break;
+    }
+    r.ws();
+    if (r.done) {
+      cut = true;
+      break;
+    }
+    if (r.peek() === ",") {
+      r.pos++;
+      afterComma = true;
+      continue;
+    }
+    if (r.peek() === "}") {
+      r.pos++;
+      break;
+    }
+    throw new Malformed();
+  }
+  if (!cut) {
+    r.ws();
+    if (!r.done) return null;
+  }
+  return fields.length ? { fields, cut } : null;
+}
+const EDIT_PAIR = ["old_string", "new_string"];
+function drawStructured(st, s) {
+  const copy = copyButton(s);
+  const one = (f) => {
+    const tail = f.cut ? '<span class="acv-field-cut">…</span>' : "";
+    if (f.block) {
+      return `<span class="acv-field block"><span class="acv-field-key">${esc(f.key)}</span>${copy}<span class="acv-field-text">${esc(f.value)}${tail}</span></span>`;
+    }
+    const value = f.value === "" ? '<span class="acv-faint">""</span>' : esc(f.value);
+    return `<span class="acv-field"><span class="acv-field-key">${esc(f.key)}</span><span class="acv-field-value">${value}${tail}</span>${copy}</span>`;
+  };
+  const pair = editPair(st);
+  const rest = pair ? st.fields.filter((f) => !EDIT_PAIR.includes(f.key)) : st.fields;
+  const inline = rest.filter((f) => !f.block);
+  const blocks = rest.filter((f) => f.block);
+  const side = (f) => `<span class="acv-copy-src" hidden>${esc(f.value)}</span>${copyButton(s, `${s.copy} ${f.key}`)}`;
+  const diff = pair ? `<span class="acv-field block"><span class="acv-field-key">${EDIT_PAIR.join(" → ")}</span>${pair.map((f) => `<span class="acv-field acv-copy-side">${side(f)}</span>`).join("")}<pre class="acv-diff acv-edit-diff">${lineDiff(pair[0].value, pair[1].value).map((r) => `<div class="acv-diff-line ${r.kind}">${esc((r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ") + r.text)}</div>`).join("")}</pre></span>` : "";
+  return `<span class="acv-fields">${[...inline, ...blocks].map(one).join("")}${diff}</span>`;
+}
+function editPair(st) {
+  const before = st.fields.find((f) => f.key === EDIT_PAIR[0]);
+  const after = st.fields.find((f) => f.key === EDIT_PAIR[1]);
+  return before && after && !before.cut && !after.cut ? [before, after] : null;
+}
+function copyButton(s, title = s.copy) {
+  return `<button type="button" class="acv-copy" data-copy title="${esc(title)}">${esc(s.copy)}</button>`;
+}
+function copyField(btn, copied) {
+  var _a;
+  const text = (_a = btn.closest(".acv-field, [data-copy-scope]")) == null ? void 0 : _a.querySelector(".acv-copy-src, .acv-field-text, .acv-field-value, .acv-copy-text");
+  if (!text || typeof navigator === "undefined" || !navigator.clipboard) return;
+  const value = text.querySelector(".acv-faint") ? "" : Array.from(text.childNodes).filter((node) => !(node instanceof HTMLElement && node.classList.contains("acv-field-cut"))).map((node) => node.textContent ?? "").join("");
+  void navigator.clipboard.writeText(value).then(() => {
+    const was = btn.textContent;
+    btn.textContent = copied;
+    btn.classList.add("done");
+    setTimeout(() => {
+      btn.textContent = was;
+      btn.classList.remove("done");
+    }, 1400);
+  });
+}
+function textBody(text, kind, s) {
+  const st = kind === "tool" || kind === "agent.call" ? structure(text) : null;
+  if (!st) return { html: `<span class="acv-copy-text">${esc(text)}</span>`, lines: text.split("\n").length, cut: false, fields: false };
+  const lines = st.fields.reduce((n, f) => n + (f.block ? f.value.split("\n").length + 1 : 1), 1);
+  return { html: drawStructured(st, s), lines, cut: st.cut, fields: true };
+}
+function clipNote(ctx, text, bytes) {
+  if (!bytes) return "";
+  const shown = new TextEncoder().encode(text).length;
+  return bytes > shown ? esc(fill(ctx.s.fullTextNote, { shown: ctx.f.number(shown), total: ctx.f.number(bytes) })) : "";
+}
 function field(dt, dd, mono = false) {
   return `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`;
 }
@@ -674,6 +1413,13 @@ function drawInspector(ctx) {
     ctx.showTab("details");
     return;
   }
+  const changesTab = ctx.q('[data-tab="changes"]');
+  const hasChanges = !!(e && m.changesOf(e.id).length);
+  changesTab.hidden = !hasChanges;
+  if (!hasChanges && state.tab === "changes") {
+    ctx.showTab("details");
+    return;
+  }
   const title = ctx.q(".acv-inspector-title");
   const meta = ctx.q(".acv-inspector-meta");
   const body = ctx.q(".acv-inspector-body");
@@ -687,6 +1433,7 @@ function drawInspector(ctx) {
   meta.textContent = `${e.stream.slice(0, 12)} · ${f.time(e.at)}${e.bytes ? ` · ${f.number(e.bytes)} B` : ""}`;
   if (state.tab === "details") drawDetails(ctx, body, e);
   else if (state.tab === "relations") drawRelations(ctx, body, e);
+  else if (state.tab === "changes") drawChangesTab(ctx, body, e);
   else void drawEvidence(ctx, body, e);
 }
 function drawFolderPanel(ctx) {
@@ -733,18 +1480,44 @@ function drawFolderPanel(ctx) {
   body.querySelectorAll("[data-dive]").forEach((b) => b.onclick = () => ctx.diveIn());
   (_a = body.querySelector("[data-goto]")) == null ? void 0 : _a.addEventListener("click", (ev) => ctx.select(ev.currentTarget.dataset.goto, true));
 }
+function containment(ctx, e) {
+  var _a;
+  const { s, model: m, state } = ctx;
+  const crumbs = [];
+  const ids = [m.doc.conversation];
+  const seg = state.talk ? m.segmentById.get(state.talk.segment) : void 0;
+  if (seg) {
+    const i = m.doc.segments.findIndex((x) => x.id === seg.id);
+    crumbs.push(`${s.segment} ${i + 1}/${m.doc.segments.length}`);
+    ids.push(seg.id);
+  }
+  const st = m.streamByName.get(e.stream);
+  crumbs.push(!st || st.role === "main" ? s.mainAgent : st.label || `${s.childAgent} ${st.name.slice(0, 6)}`);
+  ids.push(e.stream);
+  if (e.talk) {
+    const talks = m.talks.filter((t) => t.stream === e.stream);
+    const i = talks.findIndex((t) => t.id === e.talk);
+    const label = ((_a = m.talkById.get(e.talk)) == null ? void 0 : _a.label) ?? "";
+    crumbs.push(`${s.talk} ${i + 1}/${talks.length} · ${label ? label.length > 48 ? `${label.slice(0, 47)}…` : label : s.untitled}`);
+    ids.push(e.talk);
+    if (e.run) {
+      const runs = [];
+      for (const x of m.steps(e.stream)) if (x.talk === e.talk && x.run && !runs.includes(x.run)) runs.push(x.run);
+      crumbs.push(`${s.run} ${runs.indexOf(e.run) + 1}/${runs.length}`);
+      ids.push(e.run);
+    }
+  }
+  crumbs.push(e.name ? `${kindTitle(e.kind, s)} · ${e.name}` : kindTitle(e.kind, s));
+  ids.push(e.id);
+  return { text: crumbs.join(" › "), ids: ids.join(" › ") };
+}
 function drawDetails(ctx, body, e) {
-  var _a, _b;
+  var _a, _b, _c;
   const { s, f, model: m, state } = ctx;
   const st = m.streamByName.get(e.stream);
   const seg = state.talk ? m.segmentById.get(state.talk.segment) : void 0;
-  const path = [`${m.doc.conversation.slice(0, 8)}`];
-  if (seg) path.push(`${s.segment.toLowerCase()} ${seg.id.replace(/^segment\//, "")}`);
-  path.push(`${s.stream.toLowerCase()} ${e.stream.slice(0, 10)}`);
-  if (e.talk) path.push(`${s.talk.toLowerCase()} ${e.talk.replace(/^talk\//, "").slice(0, 14)}`);
-  if (e.run) path.push(`${s.run.toLowerCase()} ${e.run.replace(/^run\//, "").slice(0, 14)}`);
-  path.push(`${e.kind} ${e.id.slice(0, 20)}`);
-  let html = `<div class="acv-path">${path.map(esc).join(" › ")}</div><dl class="acv-definition">`;
+  const where = containment(ctx, e);
+  let html = `<div class="acv-path" title="${esc(where.ids)}">${esc(where.text)}</div><dl class="acv-definition">`;
   html += field(s.nodeKind, esc(e.kind));
   html += field(s.lane, esc(e.track));
   html += field(s.stream, `${esc(e.stream)}${st ? ` · ${esc(st.role)}` : ""}`, true);
@@ -781,9 +1554,10 @@ function drawDetails(ctx, body, e) {
     );
   }
   html += `</dl>`;
-  if (e.text) html += `<div class="acv-block">${esc(e.text)}</div>`;
+  if (e.text) html += detailBlock(ctx, e, e.text, e.bytes).html;
   if (e.result) {
-    html += `<div class="acv-kicker" style="margin-top:14px">${esc(s.result)}${e.failed ? ` · ${esc(s.failed)}` : ""}${e.resultBytes ? ` · ${f.number(e.resultBytes)} B` : ""}</div><div class="acv-block">${esc(e.result)}</div>`;
+    const out = detailBlock(ctx, e, e.result, e.resultBytes);
+    html += `<div data-copy-scope><div class="acv-kicker" style="margin-top:14px">${esc(s.result)}${e.failed ? ` · ${esc(s.failed)}` : ""}${e.resultBytes ? ` · ${f.number(e.resultBytes)} B` : ""}${out.fields ? "" : copyButton(s, `${s.copy} ${s.result}`)}</div>${out.html}</div>`;
   } else if (e.state && e.state !== "available") {
     html += `<div class="acv-warning"><strong>${esc(fill(s.contentUnavailable, { state: e.state }))}</strong><br>${esc(s.contentUnavailableText)}</div>`;
   }
@@ -793,10 +1567,21 @@ function drawDetails(ctx, body, e) {
       folders.length === 1 ? s.oneChildAgent : fill(s.childAgents, { n: folders.length })
     )} — ${esc(s.openRelations)}</button>`;
   }
+  const changes = m.changesOf(e.id).length;
+  if (changes) {
+    html += `<button type="button" class="acv-linkish acv-to-changes" data-to-changes>${esc(fill(s.changeRecordsForStep, { n: changes }))}</button>`;
+  }
   if (state.navStack.length) html += `<button type="button" class="acv-btn" style="margin-top:12px" data-back-parent>${esc(s.backToParentStream)}</button>`;
   body.innerHTML = html;
   (_a = body.querySelector("[data-to-relations]")) == null ? void 0 : _a.addEventListener("click", () => ctx.showTab("relations"));
-  (_b = body.querySelector("[data-back-parent]")) == null ? void 0 : _b.addEventListener("click", () => ctx.goBack());
+  (_b = body.querySelector("[data-to-changes]")) == null ? void 0 : _b.addEventListener("click", () => ctx.showTab("changes"));
+  (_c = body.querySelector("[data-back-parent]")) == null ? void 0 : _c.addEventListener("click", () => ctx.goBack());
+  body.querySelectorAll("[data-copy]").forEach(
+    (b) => b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      copyField(b, ctx.s.copied);
+    })
+  );
 }
 function drawRelations(ctx, body, e) {
   const { s, model: m, state } = ctx;
@@ -835,6 +1620,11 @@ function drawRelations(ctx, body, e) {
     }
   );
 }
+function detailBlock(ctx, e, text, bytes) {
+  const body = textBody(text, e.kind, ctx.s);
+  const note = clipNote(ctx, text, bytes);
+  return { html: `<div class="acv-block">${body.html}${note ? `<div class="acv-clip-note">${note}</div>` : ""}</div>`, fields: body.fields };
+}
 async function drawEvidence(ctx, body, e) {
   var _a;
   const { s, f, state } = ctx;
@@ -846,18 +1636,21 @@ async function drawEvidence(ctx, body, e) {
     seen.add(k);
     return true;
   });
+  const same = (a, b) => a.seq === b.seq && a.row === b.row && (a.block ?? null) === (b.block ?? null);
+  const own = list.length;
+  if (state.rawRef && !list.some((r) => same(r, state.rawRef))) list.push(state.rawRef);
   if (!list.length) {
     body.innerHTML = `<div class="acv-empty">${esc(s.derivedByAssembly)}</div>`;
     return;
   }
-  const pick = (state.rawRef && list.find((r) => r.seq === state.rawRef.seq && r.row === state.rawRef.row)) ?? list[0];
-  const role = (i) => e.kind === "tool" || e.kind === "agent.call" ? i === 0 ? s.request : s.result : list.length > 1 ? `${s.part} ${i + 1}` : s.record;
+  const pick = (state.rawRef && list.find((r) => same(r, state.rawRef))) ?? list[0];
+  const role = (i) => i >= own ? s.changeRecordRef : e.kind === "tool" || e.kind === "agent.call" ? i === 0 ? s.request : s.result : own > 1 ? `${s.part} ${i + 1}` : s.record;
   const shown = e.text ? new TextEncoder().encode(e.text).length : 0;
   const clipped = e.bytes && shown && e.bytes > shown;
   body.innerHTML = `
     <div class="acv-kicker">${esc(s.landedPositions)}</div>
     <div class="acv-ref-row">${list.map(
-    (r, i) => `<button type="button" class="acv-ref-chip${r === pick ? " on" : ""}" data-ref="${r.seq}/${r.row}">
+    (r, i) => `<button type="button" class="acv-ref-chip${r === pick ? " on" : ""}" data-ref="${r.seq}/${r.row}/${r.block ?? ""}">
         <b>${esc(role(i))}</b><span>seq ${r.seq} · row ${r.row}${r.block != null ? ` · block ${r.block}` : ""}</span></button>`
   ).join("")}</div>
     ${e.text ? `<div class="acv-kicker" style="margin-top:12px">${esc(s.clippedText)}${clipped ? ` · ${esc(fill(s.fullTextNote, { shown: f.number(shown), total: f.number(e.bytes) }))}` : ""}</div>
@@ -868,8 +1661,8 @@ async function drawEvidence(ctx, body, e) {
     <div class="acv-record-box">${ctx.loadRecord ? `<button type="button" class="acv-btn" data-load-record>${esc(s.loadFullRecord)}</button>` : ""}</div>`;
   body.querySelectorAll("[data-ref]").forEach(
     (b) => b.onclick = () => {
-      const [seq, row] = b.dataset.ref.split("/").map(Number);
-      state.rawRef = { seq, row };
+      const [seq, row, block] = b.dataset.ref.split("/");
+      state.rawRef = { seq: Number(seq), row: Number(row), ...block ? { block: Number(block) } : {} };
       state.explain = null;
       ctx.drawInspector();
     }
@@ -977,7 +1770,8 @@ const PANELS = [
     max: () => Math.max(280, (globalThis.innerWidth || 1280) - 420),
     fallback: 350,
     measure: (root, e) => root.querySelector(".acv-workbench").getBoundingClientRect().right - e.clientX,
-    current: (root) => root.querySelector(".acv-inspector").getBoundingClientRect().width
+    current: (root) => root.querySelector(".acv-inspector").getBoundingClientRect().width,
+    floating: (ctx) => ctx.state.inspectorPopped
   },
   {
     key: "acv.dock",
@@ -1016,7 +1810,8 @@ function setupPanels(ctx) {
     return v;
   };
   const onResize = () => {
-    for (const p of PANELS) set(p, p.current(root));
+    var _a2;
+    for (const p of PANELS) if (!((_a2 = p.floating) == null ? void 0 : _a2.call(p, ctx))) set(p, p.current(root));
   };
   for (const p of PANELS) {
     const stored = read(p.key);
@@ -1181,18 +1976,18 @@ function drawTimeline(ctx) {
     delete back.dataset.upTalk;
   }
   const LADDER = [1, 2, 5, 10, 15, 30, 60, 120, 360, 720, 1440].map((min) => min * 6e4);
-  const marks = [];
+  const marks2 = [];
   for (const b of g.bands) {
     const perMs = b.width / Math.max(1, b.to - b.from);
     const every = LADDER.find((ms) => ms * perMs >= 100) ?? LADDER[LADDER.length - 1];
     for (let t = Math.ceil(b.from / every) * every; t <= b.to; t += every) {
       const prev = t - every;
-      marks.push({ x: b.left + (t - b.from) * perMs, t, every, newDay: prev < b.from || f.day(t) !== f.day(prev), label: false });
+      marks2.push({ x: b.left + (t - b.from) * perMs, t, every, newDay: prev < b.from || f.day(t) !== f.day(prev), label: false });
     }
   }
-  marks.sort((a, b) => a.x - b.x);
+  marks2.sort((a, b) => a.x - b.x);
   let lastLabel = -1e9;
-  for (const mk of marks) {
+  for (const mk of marks2) {
     mk.label = mk.x - lastLabel >= 92;
     if (mk.label) lastLabel = mk.x;
   }
@@ -1277,7 +2072,7 @@ function drawTimeline(ctx) {
     stream,
     ev,
     pos,
-    marks,
+    marks: marks2,
     folders: shown,
     fpos,
     canvasW,
@@ -1367,7 +2162,8 @@ function paintViewport(ctx) {
     const q = p.pos.get(e.id);
     if (!inView(q.x, q.w)) continue;
     const says = e.kind === "context.injection" ? injectionSays(e.text) : null;
-    html += `<button type="button" class="acv-clip acv-kind-${e.type}${e.id === state.sel ? " selected" : ""}${p.near && !p.near.has(e.id) ? " dim" : ""}" data-node="${esc(e.id)}" data-talk="${esc(e.talk ?? "")}" title="${esc(e.at ? `${f.time(e.at)} · ` : "")}${esc(kindTitle(e.kind, s))}${e.name ? ` · ${esc(e.name)}` : ""}" style="left:${q.x}px;top:${q.y}px;width:${q.w}px">${esc(says ? says.says : e.name || kindTitle(e.kind, s))}</button>`;
+    const mark = e.hasChanges ? icon(tallyChanges(ctx.model.changesOf(e.id)).observation === "skipped" ? ICON_READONLY : ICON_CHANGES, "acv-clip-mark") : "";
+    html += `<button type="button" class="acv-clip acv-kind-${e.type}${e.id === state.sel ? " selected" : ""}${p.near && !p.near.has(e.id) ? " dim" : ""}${mark ? " marked" : ""}" data-node="${esc(e.id)}" data-talk="${esc(e.talk ?? "")}" title="${esc(e.at ? `${f.time(e.at)} · ` : "")}${esc(kindTitle(e.kind, s))}${e.name ? ` · ${esc(e.name)}` : ""}${mark ? ` · ${esc(s.changes)}` : ""}" style="left:${q.x}px;top:${q.y}px;width:${q.w}px">${mark}${esc(says ? says.says : e.name || kindTitle(e.kind, s))}</button>`;
   }
   for (const fo of p.folders) {
     const q = p.fpos.get(fo.key);
@@ -1457,6 +2253,27 @@ function bindTimeline(ctx) {
     { passive: false }
   );
 }
+const CLAMP_CHARS = 380;
+const CLAMP_LINES = 6;
+function textBlock(ctx, e, which, text, bytes, cls) {
+  const { s, state } = ctx;
+  const body = textBody(text, e.kind, s);
+  const key = `${e.id}|${which}`;
+  const long = text.length > CLAMP_CHARS || body.lines > CLAMP_LINES;
+  const open = long && state.openTexts.has(key);
+  const note = clipNote(ctx, text, bytes);
+  const more = long && !open ? `<button type="button" class="acv-linkish acv-text-more" data-text-toggle="${esc(key)}">${esc(s.showAllLines)}</button>` : "";
+  return {
+    html: `<span class="acv-text ${cls}${long && !open ? " clamped" : ""}${open ? " open" : ""}">${body.html}${note ? `<span class="acv-clip-note">${note}</span>` : ""}</span>${more}`,
+    fields: body.fields
+  };
+}
+function resultBlock(ctx, e) {
+  const { s, f } = ctx;
+  const out = textBlock(ctx, e, "out", e.result, e.resultBytes, "mono result");
+  return `<span class="acv-result-block" data-copy-scope><span class="acv-result-label">${esc(s.result)}${e.failed ? ` · ${esc(s.failed)}` : ""}${e.resultBytes ? ` · ${f.number(e.resultBytes)} B` : ""}${e.reqToRes != null ? ` · ${esc(f.duration(e.reqToRes))} ${esc(s.toReturn)}` : ""}${out.fields ? "" : copyButton(s, `${s.copy} ${s.result}`)}</span>
+        ${out.html}</span>`;
+}
 function present(ctx, e) {
   const { s, model: m } = ctx;
   const st = m.streamByName.get(e.stream);
@@ -1505,17 +2322,17 @@ function stepCard(ctx, e, prev, near) {
   const link = fs ? `<button type="button" class="acv-stream-link" data-open="${esc(fs.name)}">${esc(s.openStream)} ${esc(fs.label || fs.name.slice(0, 10))} →</button>` : "";
   const unavailable = e.state && e.state !== "available" ? `<span class="acv-mini acv-warn">[${esc(e.state)}]</span>` : "";
   const title = e.durationMs ? `${f.duration(e.durationMs)} ${s.turn}` : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says : e.name || kindTitle(e.kind, s);
-  return `${sep}<button type="button" class="acv-card ${p.cls}${e.id === state.sel ? " selected" : ""}${near && !near.has(e.id) ? " dim" : ""}" data-card="${esc(e.id)}" title="${esc(s.locateInTimeline)}"${indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
+  return `${sep}<div class="acv-card ${p.cls}${e.id === state.sel ? " selected" : ""}${near && !near.has(e.id) ? " dim" : ""}" role="button" tabindex="0" data-card="${esc(e.id)}" title="${esc(s.locateInTimeline)}"${indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
     <span class="acv-time"><strong>${esc(f.time(e.at))}</strong>${esc(e.kind)}</span>
     <span class="acv-content">
       <span class="acv-role">${esc(p.role)}</span>
       <span class="acv-title acv-kind-${p.color}"><span class="acv-type-mark"></span>${esc(title)}
-        <span class="acv-mini">${e.bytes ? `${f.number(e.bytes)} B` : ""}</span> ${unavailable}</span>
+        <span class="acv-mini">${e.bytes ? `${f.number(e.bytes)} B` : ""}</span> ${unavailable}${changePill(ctx, e)}</span>
       ${e.text ? `${e.result ? `<span class="acv-result-label">${esc(s.input)}${e.bytes ? ` · ${f.number(e.bytes)} B` : ""}</span>` : ""}
-        <span class="acv-text${mono ? " mono" : ""}${e.text.length > 380 ? " clamped" : ""}">${esc(e.text)}</span>` : ""}
-      ${e.result ? `<span class="acv-result-block"><span class="acv-result-label">${esc(s.result)}${e.failed ? ` · ${esc(s.failed)}` : ""}${e.resultBytes ? ` · ${f.number(e.resultBytes)} B` : ""}${e.reqToRes != null ? ` · ${esc(f.duration(e.reqToRes))} ${esc(s.toReturn)}` : ""}</span>
-        <span class="acv-text mono result${e.result.length > 380 ? " clamped" : ""}">${esc(e.result)}</span></span>` : ""}
-    </span></button>${link}`;
+        ${textBlock(ctx, e, "in", e.text, e.bytes, mono ? "mono" : "").html}` : ""}
+      ${e.result ? resultBlock(ctx, e) : ""}
+      ${inlineChanges(ctx, e)}
+    </span></div>${link}`;
 }
 function talkCards(ctx, t, prevTo) {
   var _a;
@@ -1622,6 +2439,54 @@ function bindTranscript(ctx) {
       ctx.selectFolder(open.dataset.open);
       return;
     }
+    const redraw = redrawBoth(ctx);
+    const inList = (selector) => `.acv-transcript-list ${selector}`;
+    const pill = target.closest("[data-changes-toggle]");
+    if (pill) {
+      ev.stopPropagation();
+      const id = pill.dataset.changesToggle;
+      if (ctx.state.openChanges.has(id)) ctx.state.openChanges.delete(id);
+      else ctx.state.openChanges.add(id);
+      redraw(inList(`[data-changes-toggle="${cssEscape(id)}"]`));
+      return;
+    }
+    const fileRow2 = target.closest("[data-change-file]");
+    if (fileRow2) {
+      ev.stopPropagation();
+      const key = fileRow2.dataset.changeFile;
+      if (ctx.state.openChangeFiles.has(key)) ctx.state.openChangeFiles.delete(key);
+      else ctx.state.openChangeFiles.add(key);
+      redraw(inList(`[data-change-file="${cssEscape(key)}"]`));
+      return;
+    }
+    const more = target.closest("[data-diff-all]");
+    if (more) {
+      ev.stopPropagation();
+      ctx.state.fullDiffs.add(more.dataset.diffAll);
+      redraw(inList(`[data-change-file="${cssEscape(more.dataset.diffAll)}"]`));
+      return;
+    }
+    const copy = target.closest("[data-copy]");
+    if (copy) {
+      ev.stopPropagation();
+      copyField(copy, ctx.s.copied);
+      return;
+    }
+    const textMore = target.closest("[data-text-toggle]");
+    if (textMore) {
+      ev.stopPropagation();
+      const key = textMore.dataset.textToggle;
+      ctx.state.openTexts.add(key);
+      redraw(inList(`[data-card="${cssEscape(key.slice(0, key.lastIndexOf("|")))}"]`));
+      return;
+    }
+    const toChanges = target.closest("[data-to-changes]");
+    if (toChanges) {
+      ev.stopPropagation();
+      ctx.select(toChanges.dataset.toChanges, true, false);
+      ctx.showTab("changes");
+      return;
+    }
     const card = target.closest("[data-card]");
     if (card) {
       ev.stopPropagation();
@@ -1640,6 +2505,13 @@ function bindTranscript(ctx) {
     }
     ctx.clearFolder();
   });
+  list.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const card = ev.target;
+    if (!card.matches("[data-card]")) return;
+    ev.preventDefault();
+    ctx.select(card.dataset.card, true, false);
+  });
 }
 const ASZ_VIEW_FORMAT = "asz.view";
 const ASZ_VIEW_MAJOR_VERSION = 1;
@@ -1651,11 +2523,15 @@ function isSupportedDocument(v) {
   return major === ASZ_VIEW_MAJOR_VERSION && Array.isArray(d.talks);
 }
 function skeleton(s) {
-  return `
+  return `${symbolDefs()}
   <div class="acv-strip"><div class="acv-status"></div>
     <div class="acv-problems acv-explain" hidden>
       <div class="acv-explain-head"><span class="acv-explain-title acv-problems-title"></span><button type="button" class="acv-explain-close acv-problems-close" aria-label="${esc(s.close)}">×</button></div>
       <div class="acv-problems-body"></div>
+    </div>
+    <div class="acv-changes acv-explain" id="acv-changes" hidden>
+      <div class="acv-explain-head"><span class="acv-explain-title acv-changes-title"></span><button type="button" class="acv-explain-close acv-changes-close" aria-label="${esc(s.close)}">×</button></div>
+      <div class="acv-changes-body"></div>
     </div>
     <div class="acv-overview" id="acv-overview" hidden>
       <section class="acv-summary" aria-label="${esc(s.overview)}"></section>
@@ -1675,15 +2551,20 @@ function skeleton(s) {
         <div class="acv-transcript-list"></div>
       </section>
       <div class="acv-splitter acv-split-inspector" role="separator" aria-orientation="vertical" tabindex="0"></div>
+      <div class="acv-scrim" hidden></div>
       <aside class="acv-inspector">
         <div class="acv-inspector-head">
-          <div class="acv-heading"><span class="acv-kicker">${esc(s.inspector)}</span><h2 class="acv-inspector-title">—</h2></div>
+          <div class="acv-inspector-headrow">
+            <div class="acv-heading"><span class="acv-kicker">${esc(s.inspector)}</span><h2 class="acv-inspector-title">—</h2></div>
+            <button type="button" class="acv-btn acv-pop-btn" aria-pressed="false" title="${esc(s.popOutInspector)}">⤢</button>
+          </div>
           <div class="acv-inspector-meta"></div>
         </div>
         <div class="acv-tablist" role="tablist">
           <button class="acv-tab" type="button" role="tab" data-tab="details" aria-selected="true">${esc(s.details)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="relations" aria-selected="false">${esc(s.relations)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="evidence" aria-selected="false">${esc(s.evidence)}</button>
+          <button class="acv-tab" type="button" role="tab" data-tab="changes" aria-selected="false" hidden>${esc(s.changes)}</button>
         </div>
         <div class="acv-inspector-body" role="tabpanel"></div>
       </aside>
@@ -1752,7 +2633,13 @@ function mountConversationView(host, opts) {
     openTalks: /* @__PURE__ */ new Set(),
     autoOpen: /* @__PURE__ */ new Set(),
     explain: null,
-    overviewOpen: false
+    overviewOpen: false,
+    changesOpen: false,
+    openChanges: /* @__PURE__ */ new Set(),
+    openChangeFiles: /* @__PURE__ */ new Set(),
+    openTexts: /* @__PURE__ */ new Set(),
+    inspectorPopped: false,
+    fullDiffs: /* @__PURE__ */ new Set()
   };
   let muted = 0;
   const emit = () => {
@@ -1794,6 +2681,7 @@ function mountConversationView(host, opts) {
     drawInspector: () => drawInspector(ctx),
     drawStreamTabs: () => drawStreamTabs(ctx),
     drawTalkList: () => drawTalkList(ctx),
+    drawChangesPanel: () => drawChangesPanel(ctx),
     centerOn,
     announce: (text) => {
       ctx.q(".acv-sr").textContent = text;
@@ -1820,6 +2708,7 @@ function mountConversationView(host, opts) {
     state.autoOpen.clear();
     const ev = model.stepsOfTalk(t.id);
     state.sel = ((_a = ev[0]) == null ? void 0 : _a.id) ?? ((_b = model.steps(t.stream)[0]) == null ? void 0 : _b.id) ?? null;
+    state.rawRef = null;
     drawTalkList(ctx);
     renderAll(true);
   }
@@ -1838,6 +2727,7 @@ function mountConversationView(host, opts) {
       op = steps.find((e) => e.kind === "message.external") ?? steps[0];
     }
     if (op) state.sel = op.id;
+    state.rawRef = null;
     drawStreamTabs(ctx);
     drawTimeline(ctx);
     drawTranscript(ctx);
@@ -1851,7 +2741,10 @@ function mountConversationView(host, opts) {
     if (!model.streamByName.has(name)) return;
     state.stream = name;
     const ev = model.steps(name);
-    if (ev.length && !ev.some((e) => e.id === state.sel)) state.sel = ev[0].id;
+    if (ev.length && !ev.some((e) => e.id === state.sel)) {
+      state.sel = ev[0].id;
+      state.rawRef = null;
+    }
     const talkId = ((_a = model.step(state.sel)) == null ? void 0 : _a.talk) ?? ((_b = model.talksOf(name)[0]) == null ? void 0 : _b.id) ?? null;
     state.talk = talkId ? model.talkById.get(talkId) ?? null : null;
     renderAll(true);
@@ -1936,6 +2829,7 @@ function mountConversationView(host, opts) {
     if (!t) return;
     state.stream = t.stream;
     state.sel = t.sel;
+    state.rawRef = null;
     state.talk = t.talk ? model.talkById.get(t.talk) ?? null : null;
     renderAll(true);
   }
@@ -1998,6 +2892,8 @@ function mountConversationView(host, opts) {
     drawTimeline(ctx);
   };
   ctx.q(".acv-fit").onclick = () => centerOn(state.sel, "smooth");
+  ctx.q(".acv-pop-btn").onclick = () => setInspectorPopped(ctx, !state.inspectorPopped);
+  ctx.q(".acv-scrim").onclick = () => setInspectorPopped(ctx, false);
   ctx.q(".acv-tl-back").onclick = () => {
     const b = ctx.q(".acv-tl-back");
     if (b.dataset.upStream && b.dataset.upStep) goToOpener(b.dataset.upStream, b.dataset.upStep, b.dataset.upTalk || null);
@@ -2019,10 +2915,19 @@ function mountConversationView(host, opts) {
     if (!help.hidden && !(t && (t.closest(".acv-dock-help") || t.closest(".acv-dock-help-btn")))) help.hidden = true;
     const problems = ctx.q(".acv-problems");
     if (!problems.hidden && !(t && (t.closest(".acv-problems") || t.closest(".acv-integrity")))) setProblemsOpen(ctx, false);
+    if (state.changesOpen && !(t && (t.closest(".acv-changes") || t.closest(".acv-changes-toggle")))) setChangesOpen(ctx, false);
   };
   document.addEventListener("pointerdown", onPointerDown);
   const onKey = (e) => {
     const active = document.activeElement;
+    if (e.key === "Escape" && state.inspectorPopped) {
+      setInspectorPopped(ctx, false);
+      return;
+    }
+    if (e.key === "Tab" && state.inspectorPopped) {
+      trapFocus(ctx, e);
+      return;
+    }
     if (e.key === "Escape" && state.overviewOpen) {
       setOverviewOpen(ctx, false);
       return;
@@ -2033,6 +2938,10 @@ function mountConversationView(host, opts) {
     }
     if (e.key === "Escape" && !ctx.q(".acv-problems").hidden) {
       setProblemsOpen(ctx, false);
+      return;
+    }
+    if (e.key === "Escape" && state.changesOpen) {
+      setChangesOpen(ctx, false);
       return;
     }
     if (active && ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName)) return;

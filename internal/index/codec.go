@@ -32,7 +32,7 @@ var magic = [4]byte{'A', 'S', 'I', 'X'}
 const (
 	// seq row stream batch kind trigger flags ts  record parent call run continues tool child started_by label  first count
 	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*9 + 4 + 4 // 72
-	blockWidth = 4 + 2 + 1 + 4 + 4                           // 15
+	blockWidth = 4 + 2 + 1 + 4 + 4 + 4 + 4                   // 23
 )
 
 var le = binary.LittleEndian
@@ -244,6 +244,8 @@ func encodeBlock(b []byte, k *Block) {
 	b[6] = byte(k.Kind)
 	le.PutUint32(b[7:], k.ToolID)
 	le.PutUint32(b[11:], k.Name)
+	le.PutUint32(b[15:], k.Adds)
+	le.PutUint32(b[19:], k.Dels)
 }
 
 func decodeBlock(b []byte, k *Block) {
@@ -252,4 +254,6 @@ func decodeBlock(b []byte, k *Block) {
 	k.Kind = BlockKind(b[6])
 	k.ToolID = le.Uint32(b[7:])
 	k.Name = le.Uint32(b[11:])
+	k.Adds = le.Uint32(b[15:])
+	k.Dels = le.Uint32(b[19:])
 }

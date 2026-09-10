@@ -63,10 +63,12 @@ adapters:
     metrics_lookback: 24h
 
     collector:
-      # watch polls the source continuously. once makes a single pass and
-      # exits, which is the backfill path over history that already exists.
-      # asz view in watch mode also refreshes on this interval and shows the
-      # last and the next refresh on its list page.
+      # watch runs the pipeline continuously: every interval it lands what
+      # is new, parses what moved, and sends what the export block asks
+      # for. once makes a single pass and exits, which is the backfill path
+      # over history that already exists. asz server runs the same pipeline
+      # beside the page, and shows the last and the next refresh on its
+      # list page.
       mode: watch
       interval: 5s
 
@@ -125,8 +127,9 @@ parse:
   max_round_bytes: 2097152
 
 export:
-  # asz push sends every landed file and every round to an OpenTelemetry logs
-  # receiver as OTLP logs, over gRPC by default or over HTTP, one log record
+  # asz collect sends every landed file and every round to an OpenTelemetry
+  # logs receiver at the end of every pass, and asz push sends a root that is
+  # already there in one pass. Both send them as OTLP logs, over gRPC by default or over HTTP, one log record
   # per file with the file's bytes as the body, so the receiver stores each
   # file as landed and checks its digest at once. Records carry service.name, service.instance.id,
   # service.layer, telemetry.sdk.name "asz", and asz.* attributes naming the
@@ -141,7 +144,8 @@ export:
     # Where the receiver listens. For grpc, host:port: the OAP's gRPC port,
     # 127.0.0.1:11800 by default. For http, the receiver's base URL, to
     # which /v1/logs is appended: the OAP's REST port,
-    # http://127.0.0.1:12800. Empty means asz push refuses to run.
+    # http://127.0.0.1:12800. Empty means nothing is sent: asz collect skips
+    # the send step, and asz push refuses to run.
     endpoint: ""
     # For grpc, connect with TLS, verified against the system's roots. For
     # http, the scheme of the endpoint decides.
@@ -167,14 +171,12 @@ export:
     #   headers: { Authorization: "Bearer ..." }
     # How many file bytes one request carries at most; a file larger than
     # this is sent alone. 8 MiB keeps a request under the 10 MiB the OAP's
-    # HTTP server accepts. And how long push sleeps between passes in
-    # watch mode.
+    # HTTP server accepts.
     batch_bytes: 8388608
     # At most this many bytes on the wire per minute, for the first push
     # of a large history: a pass waits before a request until a minute's
     # budget covers it. 0 means no limit.
     max_bytes_per_minute: 0
-    interval: 5s
     # The two things a push sends, each on its own switch: the landed files
     # and rounds as OTLP logs, and the metrics spool. A receiver that takes
     # one and not the other is sent what it takes; both off is refused.

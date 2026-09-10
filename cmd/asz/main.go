@@ -19,6 +19,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -43,14 +44,15 @@ const usage = `asz - SkyWalking AI Sessionizer: conversation-level observability
 
 Usage:
   asz sources [-config FILE]        list discovered sessions and their sources
-  asz collect [-config FILE] [-once]  land new source data into the storage root
+  asz collect [-config FILE] [-once]  the pipeline: land, parse, and send what the export block asks for
   asz index [-config FILE] [SESSION]  report what the derived index holds
   asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
   asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
   asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
   asz conversation [-config FILE] [-json|-yaml] ID   fold a conversation's rounds and show the structure, or print the asz.view document
-  asz view [-config FILE] [ADDR]       serve the conversations as a page (default 127.0.0.1:8787)
-  asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
+  asz server [-config FILE] [ADDR]     collect and serve in one process (default 127.0.0.1:8787)
+  asz view [-config FILE] [ADDR]       serve an existing storage root as a page; reads only
+  asz push [-config FILE]              send a storage root to an OpenTelemetry logs receiver, in one pass
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
   asz scenario build|check FILE ...    build a session from a scenario, or check one; see asz scenario
@@ -58,7 +60,8 @@ Usage:
 
 Flags:
   -config FILE   configuration file (default: ./asz.yaml when present, else built-in defaults)
-  -once          single pass, then exit (overrides collector.mode)
+  -once          one pipeline pass rather than the collector's interval (overrides collector.mode);
+                 collect then exits, server goes on serving what that pass produced
   -terms MODE    name things as "unified" (default), "native", or "both"
   -json, -yaml   conversation: print the asz.view document instead of the summary
 `
@@ -140,7 +143,8 @@ func main() {
 	case "sources":
 		run = cmdSources
 	case "collect":
-		run = cmdCollect
+		// collect takes every local adapter; it is dispatched below.
+		run = func(*config.Config, config.Adapter, bool) error { return nil }
 	case "index":
 		run = cmdIndex
 	case "show":
@@ -153,8 +157,8 @@ func main() {
 		run = cmdConversation
 	case "glossary":
 		run = cmdGlossary
-	case "view":
-		// view takes every local adapter; it is dispatched below.
+	case "view", "server":
+		// Both take every local adapter; they are dispatched below.
 		run = func(*config.Config, config.Adapter, bool) error { return nil }
 	case "push":
 		run = cmdPush
@@ -165,10 +169,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	// The receiver adapters listen beside whatever else the command does:
-	// collect and view run for as long as the process does, and a receiver
-	// only makes sense while something is listening. The local adapter runs
-	// in the foreground, as before.
+	// The receiver adapters listen beside whatever else the command does.
+	// Only the two that write for as long as the process runs host one:
+	// collect and server. A receiver lands what it is sent, and asz view
+	// only reads.
 	var local []config.Adapter
 	for _, ad := range cfg.Adapters {
 		if !ad.Enabled {
@@ -178,7 +182,7 @@ func main() {
 		case config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges:
 			local = append(local, ad)
 		case config.AdapterClaudeCodeOTLP:
-			if cmd != "collect" && cmd != "view" {
+			if cmd != "collect" && cmd != "server" {
 				continue
 			}
 			if *once {
@@ -192,12 +196,12 @@ func main() {
 			fmt.Fprintf(os.Stderr, "skipping unknown adapter %q\n", ad.Name)
 		}
 	}
-	// sources and collect are the local adapter's own. view serves the
-	// root, with the adapter's refresh when one is enabled. Every other
-	// command reads or sends the root and runs once, with the local
-	// adapter's settings when one is enabled and the defaults otherwise, so
-	// a root fed by the receiver alone can still be parsed, verified and
-	// pushed.
+	// sources is the local adapter's own, one line per adapter. collect and
+	// server take every local adapter at once, because one pipeline pass
+	// reads them all. Every other command reads or sends the root and runs
+	// once, with the local adapter's settings when one is enabled and the
+	// defaults otherwise, so a root fed by the receiver alone can still be
+	// parsed, verified and pushed.
 	switch cmd {
 	case "sources":
 		if len(local) == 0 {
@@ -209,17 +213,22 @@ func main() {
 			}
 		}
 	case "collect":
-		for _, ad := range local {
-			if err := run(cfg, ad, *once); err != nil {
-				fatal(err)
-			}
-		}
 		if len(local) == 0 {
 			if receivers == 0 {
 				fatal(fmt.Errorf("%s: no enabled adapter", cmd))
 			}
-			// Nothing else keeps the process alive: the receivers do.
-			select {}
+			// No local source to land from, but a receiver is landing what
+			// it is sent. Send that on, on the same period.
+			if err := pushOnly(cfg); err != nil {
+				fatal(err)
+			}
+		}
+		if err := cmdCollect(cfg, local, *once); err != nil {
+			fatal(err)
+		}
+	case "server":
+		if err := cmdServer(cfg, local, *once); err != nil {
+			fatal(err)
 		}
 	case "view":
 		if err := cmdView(cfg, local, *once); err != nil {
@@ -726,14 +735,14 @@ func landedPathForSeq(dir string, seq uint32) (string, error) {
 	return "", fmt.Errorf("no landed file with seq %d in %s", seq, dir)
 }
 
-func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
-	if ad.Name == config.AdapterClaudeCodeChanges {
-		return cmdCollectChanges(cfg, ad, once)
-	}
-	root, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
-	if err != nil {
-		return err
-	}
+// cmdCollect is the pipeline, on the collector's interval: land what is new
+// from every local source, parse what moved, and send what the export block
+// asks for. It is one pass with -once or collector.mode: once, and runs
+// until it is stopped otherwise.
+//
+// It takes every enabled local adapter at once, rather than one at a time,
+// so a source that watches does not keep the others from ever running.
+func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 	zoneRoot, err := cfg.ResolvedRoot()
 	if err != nil {
 		return err
@@ -741,65 +750,87 @@ func cmdCollect(cfg *config.Config, ad config.Adapter, once bool) error {
 	if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
 		return err
 	}
-	col := claudecode.New(root, storage.NewZone(zoneRoot), ad.Collector.MaxDeltaBytes)
-	match := claudecode.NewMatcher(ad.Include, ad.Exclude).Match
-	deriver, err := newDeriver(storage.NewZone(zoneRoot), ad, once || ad.Collector.Mode == config.ModeOnce)
+	zone := storage.NewZone(zoneRoot)
+	ref, err := newRefresher(nil, zone, ads, cfg.Parse.MaxRoundBytes, once)
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("source root : %s\nstorage root: %s\n", root, zoneRoot)
-	if deriver != nil {
-		fmt.Printf("metrics     : %s, derived from the landed files, look-back %s on the first pass\n", metrics.TokenUsage, lookbackWord(deriver.Lookback))
+	if ref == nil {
+		return fmt.Errorf("collect: no local source found under the configured adapters")
+	}
+	pusher, closeClient, err := newPusher(cfg, zoneRoot)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+	ref.pusher = pusher
+	if once || ref.base.Mode == config.ModeOnce {
+		// Nothing follows a single pass, so whatever it could not do is
+		// reported rather than left for a pass that never comes.
+		ref.last = true
+		if pusher != nil {
+			pusher.WaitForExport = exportWait
+		}
 	}
 
-	first := true
-	pass := func() error {
-		start := time.Now()
-		st, err := col.CollectAll(match)
-		if err != nil {
-			return err
-		}
-		derived := ""
-		if deriver != nil {
-			// The first pass looks at every session, so history that was
-			// landed before the flag went on is derived once; later passes
-			// look only at what this pass changed.
-			var sessions []string
-			if !first {
-				sessions = st.Changed
-			}
-			ms, err := deriver.Pass(sessions)
-			if err != nil {
-				return err
-			}
-			st.Errors = append(st.Errors, ms.Errors...)
-			derived = fmt.Sprintf(" metrics=%d", ms.Requests)
-		}
-		first = false
-		fmt.Printf("[%s] sessions=%d sources=%d landed=%d records=%d bytes=%s indexed=%d gone=%d conflicts=%d busy=%d pending=%d%s errors=%d (%s)\n",
-			time.Now().Format("15:04:05"), st.Sessions, st.SourcesSeen, st.SourcesLanded,
-			st.Records, humanBytes(st.Bytes), st.Indexed, st.SourcesGone, st.Conflicts,
-			st.Busy, st.Pending, derived, len(st.Errors), time.Since(start).Round(time.Millisecond))
-		for _, e := range st.Errors {
-			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
-		}
-		if !st.Complete() {
-			// A pass that under-collected must not look like a clean one.
-			return fmt.Errorf("pass incomplete: %d source(s) still pending, %d error(s)",
-				st.Pending, len(st.Errors))
-		}
-		return nil
+	fmt.Printf("storage root: %s\n", zoneRoot)
+	printPipeline(ref, cfg)
+	err = ref.pass()
+	if once || ref.base.Mode == config.ModeOnce {
+		// A single pass that left work behind must not look like a clean
+		// one: an unattended backfill is read by its exit status.
+		return err
 	}
+	ref.loop()
+	return nil
+}
 
-	if once || ad.Collector.Mode == config.ModeOnce {
-		return pass()
+// pushOnly is what a configuration with no local source but a receiver
+// runs: the receiver lands what it is sent, and this sends it on, on the
+// collector's period. Without it a received record would sit in the root
+// until someone ran asz push by hand.
+func pushOnly(cfg *config.Config) error {
+	zoneRoot, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
 	}
+	p, closeClient, err := newPusher(cfg, zoneRoot)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+	if p == nil {
+		// Nothing to send anywhere. The receivers keep the process alive.
+		fmt.Println("export      : none; set export.otlp.endpoint to send what the receiver lands")
+		select {}
+	}
+	interval := config.Default().Adapters[0].Collector.Interval
+	fmt.Printf("export      : %s, every %s\n", cfg.Export.OTLP.Endpoint, interval)
 	for {
-		if err := pass(); err != nil {
-			return err
+		st, perr := p.Pass()
+		if perr != nil && !errors.Is(perr, storage.ErrExportBusy) {
+			fmt.Fprintf(os.Stderr, "  error: %v\n", perr)
 		}
-		time.Sleep(ad.Collector.Interval)
+		wait := interval
+		if st != nil {
+			for _, e := range st.Errors {
+				fmt.Fprintf(os.Stderr, "  error: %v\n", e)
+			}
+			if st.Rejected > 0 {
+				// Taken by the receiver and dropped inside the request. The
+				// files are marked sent and never go again, so this line is
+				// the only place it can be seen.
+				fmt.Fprintf(os.Stderr, "  error: the receiver rejected %d record(s); they are not sent again\n", st.Rejected)
+			}
+			if st.Files > 0 || st.Metrics > 0 || st.Rejected > 0 {
+				fmt.Printf("[%s] pushed=%d metrics=%d rejected=%d\n",
+					time.Now().Format("15:04:05"), st.Files, st.Metrics, st.Rejected)
+			}
+			if st.Throttled && st.RetryAfter > wait {
+				wait = st.RetryAfter
+			}
+		}
+		time.Sleep(wait)
 	}
 }
 

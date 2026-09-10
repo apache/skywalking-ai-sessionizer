@@ -101,22 +101,43 @@ type Conversation struct {
 	// problems is what stopped the fold short of the chain's last file, in
 	// words, for the document to carry.
 	problems []string
+	// head is the round this fold actually reached, which is not always the
+	// last round on disk. A round file becomes visible before its bytes are
+	// all there, so a fold can stop one short of what the directory lists.
+	// Keeping what was folded, rather than what was listed, makes the next
+	// read try again instead of serving the short fold for good.
+	head uint64
 }
 
-// Load folds a conversation and builds its lookups, once.
+// Load folds a conversation and builds its lookups, once per round.
+//
+// A fold is kept until the chain grows past it. The check is the head round
+// on disk, which is a directory listing, not a fold. It has to be made on
+// every read: the rounds may be written by another process entirely, such
+// as an asz collect running beside a read-only asz view, and then nothing
+// in this process knows the conversation moved.
+//
+// What is kept is the round the fold reached, not the round the directory
+// listed. A round being written is visible before it is complete, so the
+// two can differ; comparing against what was folded makes the next read
+// pick the rest up.
 func (s *Server) Load(id string) (*Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if c, ok := s.loaded[id]; ok {
-		return c, nil
+		head, err := sessionflow.OpenChain(s.zone.Root(), id).Head()
+		if err == nil && head == c.head {
+			return c, nil
+		}
+		delete(s.loaded, id)
 	}
 	// The fold goes as far as the chain holds. A round that is missing or
 	// broken is reported in the document, not returned as an error, so a
 	// reader sees what could be folded and what could not; only a chain with
 	// no usable round at all is an error, because there is nothing to show.
-	v, problems, err := sessionflow.OpenChain(s.zone.Root(), id).FoldPartial()
-	if err != nil {
-		return nil, err
+	v, problems, ferr := sessionflow.OpenChain(s.zone.Root(), id).FoldPartial()
+	if ferr != nil {
+		return nil, ferr
 	}
 	if v.Round == 0 {
 		if len(problems) > 0 {
@@ -125,7 +146,7 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		return nil, fmt.Errorf("view: no rounds for %s; run asz parse", id)
 	}
 	c := &Conversation{
-		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems,
+		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems, head: v.Round,
 		at:   map[[2]uint64]int64{},
 		from: map[string][]*sessionflow.Relation{},
 		to:   map[string][]*sessionflow.Relation{},
@@ -226,6 +247,9 @@ func (c *Conversation) Edges(id string) []*sessionflow.Relation {
 }
 
 // List returns every conversation in the zone that has rounds.
+// Root is the storage root the page reads.
+func (s *Server) Root() string { return s.zone.Root() }
+
 func (s *Server) List() ([]string, error) {
 	base := filepath.Join(s.zone.Root(), "_conversations")
 	items, err := os.ReadDir(base)

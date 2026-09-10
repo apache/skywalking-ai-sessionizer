@@ -21,12 +21,10 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
-	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
-	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
 // changesMatch builds the session filter of the changes adapter, which
@@ -73,50 +71,4 @@ func cmdSourcesChanges(_ *config.Config, ad config.Adapter, _ bool) error {
 	}
 	fmt.Printf("\n%d session(s) with change records\n", len(sessions))
 	return nil
-}
-
-// cmdCollectChanges lands the plugin's change files, once or on the
-// configured interval.
-func cmdCollectChanges(cfg *config.Config, ad config.Adapter, once bool) error {
-	root, err := claudecodechanges.ResolveSourceRoot(ad.SourceRoot)
-	if err != nil {
-		return err
-	}
-	zoneRoot, err := cfg.ResolvedRoot()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
-		return err
-	}
-	col := claudecodechanges.New(root, storage.NewZone(zoneRoot), ad.Collector.MaxDeltaBytes)
-	match := changesMatch(ad)
-	fmt.Printf("changes root: %s\nstorage root: %s\n", root, zoneRoot)
-	pass := func() error {
-		start := time.Now()
-		st, err := col.CollectAll(match)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("[%s] changes: sessions=%d sources=%d landed=%d records=%d bytes=%s indexed=%d gone=%d conflicts=%d busy=%d pending=%d errors=%d (%s)\n",
-			time.Now().Format("15:04:05"), st.Sessions, st.SourcesSeen, st.SourcesLanded,
-			st.Records, humanBytes(st.Bytes), st.Indexed, st.SourcesGone, st.Conflicts,
-			st.Busy, st.Pending, len(st.Errors), time.Since(start).Round(time.Millisecond))
-		for _, e := range st.Errors {
-			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
-		}
-		if !st.Complete() {
-			return fmt.Errorf("pass incomplete: %d source(s) still pending, %d error(s)", st.Pending, len(st.Errors))
-		}
-		return nil
-	}
-	if once || ad.Collector.Mode == config.ModeOnce {
-		return pass()
-	}
-	for {
-		if err := pass(); err != nil {
-			return err
-		}
-		time.Sleep(ad.Collector.Interval)
-	}
 }

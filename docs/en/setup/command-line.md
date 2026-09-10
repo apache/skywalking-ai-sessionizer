@@ -7,14 +7,15 @@ one conversation.
 
 ```text
 asz sources [-config FILE]           list discovered sessions and their sources
-asz collect [-config FILE] [-once]   land new source data into the storage root
+asz collect [-config FILE] [-once]   the pipeline: land, parse, and send what the export block asks for
 asz index [-config FILE] [SESSION]   report what the derived index holds
 asz show [-config FILE] SESSION ID   resolve a record id or tool-use id to its payload
 asz parse [-config FILE] [SESSION]   assemble conversation structure into a round chain
 asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
 asz conversation [-config FILE] [-json|-yaml] ID   fold a conversation's rounds and show the structure, or print the asz.view document
-asz view [-config FILE] [ADDR]       serve the conversations as a page
-asz push [-config FILE] [-once]      send landed files and rounds to an OpenTelemetry logs receiver
+asz server [-config FILE] [ADDR]     collect and serve in one process
+asz view [-config FILE] [ADDR]       serve an existing storage root as a page; reads only
+asz push [-config FILE]              send a storage root to an OpenTelemetry logs receiver, in one pass
 asz glossary                         what the runtime calls the things the model names
 asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
 asz version                          print the version
@@ -25,7 +26,7 @@ asz version                          print the version
 | Flag | Meaning |
 | --- | --- |
 | `-config FILE` | Configuration file. Default: `./asz.yaml` when present, else the compiled defaults. |
-| `-once` | Single pass, then exit. Overrides `collector.mode`. |
+| `-once` | One pipeline pass rather than the collector's interval. Overrides `collector.mode`. `collect` then exits; `server` goes on serving what that pass produced, because a server that exits serves nothing. |
 | `-terms MODE` | Name things in the model's words (`unified`, the default), the runtime's (`native`), or `both`. |
 
 ## sources
@@ -38,32 +39,38 @@ written change records for, with their streams and workspace.
 
 ## collect
 
-Lands what is new from every source into the storage root and updates the index. In watch mode it
-repeats every `interval`; with `-once` or `mode: once` it makes one pass and exits. One line per
-pass:
+The pipeline. One pass does three things, in this order:
+
+1. **land** what is new from every enabled local source into the storage root, and update the index
+2. **parse** every session that moved, writing the rounds
+3. **send** what the export block asks for, when `export.otlp.endpoint` is set
+
+The order matters. The push runs last so a pass sends the rounds it has just written, rather than
+leaving them for the next one.
+
+In watch mode, the default, it repeats every `interval`; with `-once` or `mode: once` it makes one
+pass and exits. Every enabled local adapter is read in the same pass, so one watching source never
+keeps another from running. When the `claude-code-otlp` adapter is enabled, its receiver listens
+beside the pipeline for as long as the process runs.
+
+One line per pass, and a quiet pass prints nothing:
 
 ```text
-[17:14:09] sessions=44 sources=5867 landed=5867 records=359292 bytes=1.0GB indexed=359292 gone=0 conflicts=0 busy=0 pending=0 metrics=5210 errors=0 (2m39.473s)
+[10:12:03] refreshed: sessions=44 landed=12 records=8130 rounds=3 pushed=15 metrics=2 (2.4s)
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `sources` | source files seen this pass |
-| `landed` | sources that produced new data |
+| `sessions` | sessions seen this pass |
+| `landed` | source files that produced new data |
 | `records` | source records landed |
-| `indexed` | index entries across every session touched |
-| `gone` | a source deleted since the last pass. Normal: Claude Code prunes transcripts, and the landed copy outlives them. |
-| `conflicts` | a source was rotated, truncated or rewritten behind its cursor. Collection stopped for it. |
-| `busy` | a session skipped because another collector holds its lock |
-| `pending` | a source still had data when the per-pass limit was reached |
-| `metrics` | metrics requests derived this pass, with `metrics: true` on the adapter; absent otherwise |
+| `rounds` | rounds written by the parse step |
+| `pushed` | files and rounds sent, absent when no endpoint is named |
+| `metrics` | spooled metrics requests sent |
 | `errors` | listed on standard error after the line |
 
-`pending` or `errors` above zero means the pass did not collect everything, and the command exits
-non-zero. A clean pass is `pending=0 errors=0`.
-
-With the `claude-code-changes` adapter enabled, a second line per pass, prefixed `changes:`,
-reports the plugin's files with the same fields.
+Anything the pass could not do is listed on standard error under the line, and the next pass tries
+it again: a source that was busy, a session that failed to parse, a request the receiver refused.
 
 ## index
 
@@ -130,9 +137,24 @@ asz conversation -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01 > conversation.json
 asz conversation -yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01 | head
 ```
 
+## server
+
+The pipeline and the page in one process: it lands, parses and sends on the collector interval,
+and serves the result on `ADDR`, `127.0.0.1:8787` by default. This is what a person runs to watch
+their own conversations locally. It hosts the `claude-code-otlp` receiver too, when that adapter
+is enabled.
+
+`/api/status` reports the mode, the source, the last and the next refresh and the counts of the
+last pass, and the list page shows the same. The page is up before the first pass, so a large
+backfill does not look like a hung command.
+
+`server` needs a local source. To serve a root that already exists, use `view`.
+
 ## view
 
-Serves the conversations as a page on `ADDR`, `127.0.0.1:8787` by default. The list is at `/` and
+Serves the conversations as a page on `ADDR`, `127.0.0.1:8787` by default, and **only reads**:
+nothing in this process collects, parses or sends. It is the web host for a root that asz collect
+filled, or one copied from another machine, or one a receiver wrote. The list is at `/` and
 one conversation at `/c/{id}`. The page reads the folded chain on demand and caches nothing beyond
 the process.
 
@@ -144,16 +166,19 @@ talk, the selected step and the stream being read, so a link lands on the same s
 Horizon can show, the Evidence tab opens the landed record behind a step, since only asz has the
 files.
 
-With the `claude-code-local` and `claude-code-changes` adapters, when a source directory exists
-on the machine, the same process also runs the collectors and the parser: once with `-once`, or
-on the collector interval otherwise. Either source may be absent, and the other still refreshes. `/api/status` reports the mode, the source, the last and the next refresh and the counts
-of the last pass, and the list page shows the same. On a storage root copied from another machine
-there is no source, so the page serves what is there and shows no refresh.
+A root with no conversations in it is refused rather than served empty: run `asz collect` first,
+or `asz server` to collect and serve together.
+
+The list shows what the head round's header counted — talks, model calls, subagents, Bash runs,
+changes with the lines they added and removed, and open unresolved references — so it never folds a
+conversation to draw a row. A count the head round does not carry shows a dash rather than a zero:
+a round cut before that count existed does not know the answer.
 
 ## scenario
 
 ```text
-asz scenario build FILE --format {claude-code|sd} --out DIR [--at TIME] [--scale FACTOR] [--repeat N] [--through CHECKPOINT]
+asz scenario build FILE... --format {claude-code|sd} --out DIR [--at TIME] [--scale FACTOR] [--repeat N]
+                           [--every D] [--pick {cycle|random}] [--seed N] [--through CHECKPOINT]
 asz scenario check FILE [--format {claude-code|sd|all}] [--out DIR] [--at TIME] [--scale FACTOR]
 ```
 
@@ -162,11 +187,26 @@ asz scenario check FILE [--format {claude-code|sd|all}] [--out DIR] [--at TIME] 
 test against its expectation file, in every format, at every checkpoint. See
 [Scenarios](../guides/scenario.md).
 
+More than one `FILE` may be given, and a `FILE` that names a directory contributes every `.yaml`
+file in it, except the expectation files. `--pick` says which of them each session comes from.
+
+With `--every`, `build` does not stop. It writes one whole session, waits that long on the wall
+clock, then writes the next, so it stands in for a client that keeps holding conversations. Each
+session is stamped so its last record lands at the moment it was written, and carries an id no
+earlier session has, so a feed that is stopped and started again is still collected. One line per
+session:
+
+```text
+[14:22:31] assembly.yaml: c30736f2-ac0c-4a72-89b1-01a0844af62d (20 records, 15.4s)
+```
+
 ## push
 
 Sends every landed file and every round not yet sent to the OpenTelemetry logs receiver at
-`export.otlp.endpoint`, one log record per file, then exits with `-once` or repeats every
-`export.otlp.interval`. One line per pass:
+`export.otlp.endpoint`, one log record per file, then exits. One pass is all it does: a root that
+keeps growing is sent by `asz collect`, which pushes at the end of every period. This command is
+for a root that is already there, such as one copied from another machine or brought under a new
+budget by `asz repack`. One line for the pass:
 
 ```text
 [10:12:03] files=306 metrics=41 bytes=47.9MB wire=48.0MB requests=46 paused=0s errors=0 (1.1s)
@@ -174,8 +214,8 @@ Sends every landed file and every round not yet sent to the OpenTelemetry logs r
 
 `metrics` counts the spooled metrics requests sent, `wire` is what went out, the requests as
 encoded, and `paused` is how long the pass waited for budget under
-`export.otlp.max_bytes_per_minute`. A pass with errors exits non-zero with `-once`;
-the files whose requests failed are not recorded as sent and go again on the next pass. See
+`export.otlp.max_bytes_per_minute`. A pass with errors exits non-zero; the files whose requests
+failed are not recorded as sent and go again on the next pass. See
 [Export over OpenTelemetry](export-otlp.md).
 
 ## glossary

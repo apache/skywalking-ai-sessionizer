@@ -71,17 +71,22 @@ resolves it: `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME`, then `~/.claude`. Sess
 ```
 
 ```text
-[17:14:09] sessions=44 sources=5867 landed=5867 records=359292 bytes=1.0GB indexed=359292 gone=0 conflicts=0 busy=0 pending=0 errors=0 (2m39.473s)
+[17:14:09] refreshed: sessions=44 landed=5867 records=359292 rounds=44 (2m39.473s)
 ```
 
-Every source file is read from its cursor onward and written into the storage root as Session
-Data, then indexed. The line above is one machine's first pass, measured on 2026-09-03: 44
-sessions, 5,867 source files, 1.0 GB of records, in 2 minutes 39 seconds. Later passes read only
-what is new; the next pass on the same machine landed one source in 933 ms. A pass with `pending`
-or `errors` above zero did not collect everything, and the command exits non-zero so a script can
-tell. Re-running is safe: landing is idempotent by design.
+One pass does the whole pipeline. Every source file is read from its cursor onward and written
+into the storage root as Session Data, then indexed, then every session that moved is parsed into
+a round, and then, when `export.otlp.endpoint` names a receiver, what is on disk is sent. The line
+above is one machine's first pass, measured on 2026-09-03: 44 sessions, 5,867 source files,
+359,292 records, in 2 minutes 39 seconds. Later passes read only what is new; the next pass on the
+same machine landed one source in 933 ms. A pass that could not do everything says so on standard
+error and exits non-zero, so a script can tell. Re-running is safe: landing is idempotent by
+design.
 
 ## Assemble
+
+`collect` already parsed. `asz parse` does that step on its own, which is what to run on a storage
+root that arrived without a collector, or to re-read one after a repack:
 
 ```sh
 ./bin/asz parse
@@ -103,13 +108,13 @@ joined to their results, out of how many exist. A second run with nothing new wr
 ## Read
 
 ```sh
-./bin/asz view
+./bin/asz server
 ```
 
 Open `http://127.0.0.1:8787`. The list page shows every conversation; a conversation page shows
 its talks, its execution streams, the flow on a time axis, and the evidence behind every step.
 
-On a machine with Claude Code, `asz view` alone is enough. It runs the collector and the parser
+On a machine with Claude Code, `asz server` alone is enough. It runs the collector and the parser
 itself, every 5 seconds by default, and the list page shows when the data was last refreshed and
 when it will be next. The two steps above are worth running once to see what each does.
 

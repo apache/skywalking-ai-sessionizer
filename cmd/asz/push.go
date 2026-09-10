@@ -18,6 +18,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -32,8 +33,13 @@ import (
 )
 
 // cmdPush sends the storage root's landed files and rounds to an
-// OpenTelemetry logs receiver, once or on the export interval.
-func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
+// OpenTelemetry logs receiver, in one pass.
+//
+// One pass is all it does. A root that keeps growing is sent by asz collect,
+// which pushes what it has landed at the end of every period; this command
+// is for sending a root that is already there, such as one copied from
+// another machine or brought under a new budget by asz repack.
+func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 	o := cfg.Export.OTLP
 	if o.Endpoint == "" {
 		return fmt.Errorf("push: set export.otlp.endpoint: the receiver's gRPC address, for example 127.0.0.1:11800, or with protocol http its base URL, for example http://127.0.0.1:12800")
@@ -42,37 +48,14 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 	if err != nil {
 		return err
 	}
-	client, err := otlp.NewClient(otlp.Options{Protocol: o.Protocol, Endpoint: o.Endpoint, Headers: o.Headers, TLS: o.TLS})
+	p, closeClient, err := newPusher(cfg, zoneRoot)
 	if err != nil {
-		return fmt.Errorf("push: %w", err)
-	}
-	defer client.Close()
-	// The service is the configured name, or else the runtime that produced
-	// each session, read off its landed headers: one service per kind of
-	// agent, which is how a receiver lists them.
-	p := &otlp.Pusher{
-		Zone:        storage.NewZone(zoneRoot),
-		Client:      client,
-		Version:     version,
-		ServiceName: o.ServiceName,
-		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, mock.Name: mock.RuntimeName},
-		InstanceID:  o.InstanceID,
-		Layer:       o.Layer,
-		BatchBytes:  o.BatchBytes,
-
-		MaxBytesPerMinute: o.MaxBytesPerMinute,
-		NoLogs:            !o.SendLogs(),
-		NoMetrics:         !o.SendMetrics(),
-		// The metrics spool concerns Claude Code whichever adapter filled it,
-		// the local derivation or the runtime's own exporter.
-		MetricsService: claudecode.RuntimeName,
-	}
-	if o.ServiceName != "" {
-		p.MetricsService = o.ServiceName
-	}
-	if err := p.Prepare(); err != nil {
 		return err
 	}
+	defer closeClient()
+	// This command was asked to send, so it waits for a collect or a server
+	// over the same root rather than reporting success having sent nothing.
+	p.WaitForExport = exportWait
 	service := o.ServiceName
 	if service == "" {
 		service = "the runtime of each session (Claude Code, Mock Agent)"
@@ -109,23 +92,63 @@ func cmdPush(cfg *config.Config, _ config.Adapter, once bool) error {
 		if len(st.Errors) > 0 {
 			return st, fmt.Errorf("pass incomplete: %d error(s); unsent files are retried on the next pass", len(st.Errors))
 		}
+		if st.Deferred > 0 {
+			// Rounds another process was still writing. This command makes
+			// one pass, so nothing comes back for them on its own.
+			return st, fmt.Errorf("pass incomplete: %d round(s) were still being written and were not sent; run it again", st.Deferred)
+		}
 		return st, nil
 	}
-	if once {
-		_, err := pass()
-		return err
+	if _, err = pass(); errors.Is(err, storage.ErrExportBusy) {
+		return fmt.Errorf("another pass over this root held the export state for %s; nothing was sent, run it again", exportWait)
 	}
-	for {
-		st, err := pass()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
-		}
-		// A receiver that asked to slow down and named a wait gets it,
-		// when it is longer than the interval.
-		wait := o.Interval
-		if st != nil && st.Throttled && st.RetryAfter > wait {
-			wait = st.RetryAfter
-		}
-		time.Sleep(wait)
+	return err
+}
+
+// exportWait is how long a command that was asked to send waits for another
+// pass over the same root. Long enough to outlast an ordinary pass, short
+// enough that a stuck one is reported rather than waited on for ever.
+const exportWait = 2 * time.Minute
+
+// newPusher builds the pusher the configured receiver needs, and the
+// function that closes its connection. It returns a nil pusher when no
+// endpoint is named, so a caller that pushes only when it is asked to, such
+// as the pipeline asz collect runs, needs no test of its own.
+func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error) {
+	o := cfg.Export.OTLP
+	if o.Endpoint == "" {
+		return nil, func() {}, nil
 	}
+	client, err := otlp.NewClient(otlp.Options{Protocol: o.Protocol, Endpoint: o.Endpoint, Headers: o.Headers, TLS: o.TLS})
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("push: %w", err)
+	}
+	// The service is the configured name, or else the runtime that produced
+	// each session, read off its landed headers: one service per kind of
+	// agent, which is how a receiver lists them.
+	p := &otlp.Pusher{
+		Zone:        storage.NewZone(zoneRoot),
+		Client:      client,
+		Version:     version,
+		ServiceName: o.ServiceName,
+		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, mock.Name: mock.RuntimeName},
+		InstanceID:  o.InstanceID,
+		Layer:       o.Layer,
+		BatchBytes:  o.BatchBytes,
+
+		MaxBytesPerMinute: o.MaxBytesPerMinute,
+		NoLogs:            !o.SendLogs(),
+		NoMetrics:         !o.SendMetrics(),
+		// The metrics spool concerns Claude Code whichever adapter filled it,
+		// the local derivation or the runtime's own exporter.
+		MetricsService: claudecode.RuntimeName,
+	}
+	if o.ServiceName != "" {
+		p.MetricsService = o.ServiceName
+	}
+	if err := p.Prepare(); err != nil {
+		client.Close()
+		return nil, func() {}, err
+	}
+	return p, func() { client.Close() }, nil
 }

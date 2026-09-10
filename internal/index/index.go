@@ -32,7 +32,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry or Block changes;
 // a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 9
+const Schema = 11
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -211,6 +211,11 @@ const (
 	// faithful, because block positions are how a step is located inside a
 	// record.
 	BlockOther
+	// BlockChanges is a data element that is a workspace change record: a
+	// landed change record's own body, or the runtime's own patch carried
+	// beside its tool result. Name holds the record's identity. Counted as a
+	// change, never as a step.
+	BlockChanges
 )
 
 // Block is one joinable content block.
@@ -224,5 +229,9 @@ type Block struct {
 	Ord    uint16 // position within the record's content array
 	Kind   BlockKind
 	ToolID uint32 // interned tool_use id
-	Name   uint32 // interned tool name, for tool_use
+	Name   uint32 // interned tool name, for tool_use; the record's identity, for changes
+	// Adds and Dels are the lines a change record's diffs add and remove,
+	// summed over its files; zero for every other kind.
+	Adds uint32
+	Dels uint32
 }

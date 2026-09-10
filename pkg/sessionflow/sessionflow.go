@@ -120,6 +120,23 @@ type Header struct {
 	Streams    int    `json:"streams"`
 	Segments   int    `json:"segments"`
 	Unresolved int    `json:"unresolved"`
+	// Changes is how many distinct workspace change records the landed
+	// files carry as of this round: one per tool call a producer watched
+	// for file changes, whether or not the call changed any. A list of
+	// conversations reads it to say which ones a producer watched, without
+	// reading a body. Rounds written before it existed do not carry it, and
+	// a reader takes its absence as unknown, not as none.
+	Changes *int `json:"changes,omitempty"`
+	// LinesAdded and LinesRemoved are what those records' diffs add up to.
+	LinesAdded   *int `json:"lines_added,omitempty"`
+	LinesRemoved *int `json:"lines_removed,omitempty"`
+	// LLMCalls, Subagents and BashRuns are what a list of conversations
+	// shows of the work: provider calls, child agents started, and shell
+	// commands run through the runtime's Bash tool. Like Changes, absent
+	// from rounds written before they existed.
+	LLMCalls  *int `json:"llm_calls,omitempty"`
+	Subagents *int `json:"subagents,omitempty"`
+	BashRuns  *int `json:"bash_runs,omitempty"`
 }
 
 // Ref points at one landed record, and optionally one content block within it.

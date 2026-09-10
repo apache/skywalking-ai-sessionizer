@@ -87,8 +87,6 @@ type OTLP struct {
 	// pass waits before a request until a minute's budget holds it. Zero,
 	// the default, is no limit.
 	MaxBytesPerMinute int64 `yaml:"max_bytes_per_minute"`
-	// Interval is how long asz push sleeps between passes in watch mode.
-	Interval time.Duration `yaml:"interval"`
 	// Logs and Metrics switch the two things a push sends: the landed
 	// files and rounds as OTLP logs, and the metrics spool. Both are on
 	// unless set false, so a receiver that takes one and not the other is
@@ -251,7 +249,6 @@ func Default() *Config {
 			Protocol:   "grpc",
 			Layer:      "AI_AGENT",
 			BatchBytes: 8 << 20,
-			Interval:   5 * time.Second,
 			Logs:       boolPtr(true),
 			Metrics:    boolPtr(true),
 		}},
@@ -318,9 +315,6 @@ func Load(path string) (*Config, error) {
 	}
 	if o.MaxBytesPerMinute > 0 {
 		cfg.Export.OTLP.MaxBytesPerMinute = o.MaxBytesPerMinute
-	}
-	if o.Interval > 0 {
-		cfg.Export.OTLP.Interval = o.Interval
 	}
 	if o.Logs != nil {
 		cfg.Export.OTLP.Logs = o.Logs

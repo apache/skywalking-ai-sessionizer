@@ -20,6 +20,7 @@ package index
 import (
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -175,6 +176,20 @@ func blocksOf(in *Interner, rec *sessiondata.Record) []Block {
 			b.Kind = BlockThinking
 		case sessiondata.PartData:
 			b.Kind = BlockOther
+			if r, ok := changes.Decode(p.Data); ok {
+				// Its identity, the way the view tells records apart: one call
+				// two producers both recorded is two records, a record landed
+				// twice is one. Its lines, so a round can total them.
+				b.Kind, b.Name = BlockChanges, in.ID(r.CapturedBy+"|"+r.ID)
+				for _, fc := range r.Changes {
+					if fc.Additions != nil {
+						b.Adds += uint32(*fc.Additions)
+					}
+					if fc.Deletions != nil {
+						b.Dels += uint32(*fc.Deletions)
+					}
+				}
+			}
 		default:
 			b.Kind = BlockOther
 		}

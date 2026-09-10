@@ -37,6 +37,10 @@ type Options struct {
 	// Through stops the plan after the step carrying this checkpoint. Empty
 	// means every step.
 	Through string
+	// Watch writes the configuration with the collector in watch mode,
+	// which is what a build that keeps feeding the root needs beside it.
+	// It has no effect on the plan.
+	Watch bool
 }
 
 // EventKind is one shape of record.
@@ -198,14 +202,50 @@ type JournalLine struct {
 
 // Plan is a scenario resolved into timed records with stable ids.
 type Plan struct {
-	Session  string
-	Project  string
-	Title    string
-	Events   []Event
-	Streams  []Stream
-	Runs     []Run
+	Session string
+	Project string
+	Title   string
+	Events  []Event
+	Streams []Stream
+	Runs    []Run
+	// at is the base time the plan was resolved against, which Span
+	// measures from.
+	at       time.Time
 	interval time.Duration
 	scale    float64
+}
+
+// Span reports how far the last record sits after the base time the plan
+// was given. A record that carries no time, such as the title, is passed
+// over.
+//
+// It is measured from the base and not from the first record, because a
+// first step that says "after: 1h" starts the session an hour after the
+// base. A feed stamps a session by moving the base back one span, so that
+// hour has to be counted; leaving it out would put the last record an hour
+// ahead of the clock a receiver reads it with.
+func (p *Plan) Span() time.Duration {
+	// A lost record is planned but no writer writes it, so it cannot be the
+	// session's last one. The same test the writers use, so the two agree.
+	lost := map[string]bool{}
+	for _, s := range p.Streams {
+		if s.Lost {
+			lost[s.ID] = true
+		}
+	}
+	var last time.Time
+	for _, e := range p.Events {
+		if e.Lost || lost[e.Stream] {
+			continue
+		}
+		if e.At.After(last) {
+			last = e.At
+		}
+	}
+	if last.IsZero() || last.Before(p.at) {
+		return 0
+	}
+	return last.Sub(p.at)
 }
 
 // Plan resolves a scenario: every step becomes records on a clock, with ids
@@ -228,7 +268,7 @@ func (sc *Scenario) Plan(opts Options) (*Plan, error) {
 	if scale == 0 {
 		scale = 1
 	}
-	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, interval: interval, scale: scale}
+	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, at: at, interval: interval, scale: scale}
 	if p.Project == "" {
 		p.Project = "-Users-dev-scenario"
 	}

@@ -20,6 +20,8 @@ package storage
 import (
 	"errors"
 	"os"
+	"path/filepath"
+	"time"
 )
 
 // ErrSessionBusy means another collector holds this session.
@@ -55,6 +57,46 @@ func LockChain(chainDir string) (*SessionLock, error) {
 		return nil, ErrChainBusy
 	}
 	return l, err
+}
+
+// ErrExportBusy means another pusher holds this root's export state.
+var ErrExportBusy = errors.New("storage: the export state is held by another pusher")
+
+// LockExport takes an exclusive lock over one storage root's export state.
+//
+// A push is a read-then-write over push.state: read what has already gone,
+// send what has not, then record it. Two pushers over one root would both
+// read the same state and send the same records, and a token counted twice
+// is worse than one counted late. The commands put two pipelines on one
+// root on purpose - asz server locally beside an asz collect elsewhere - so
+// this is an ordinary case, not a rare one.
+//
+// The directory name starts with an underscore, so a storage root's session
+// listing passes over it as it passes over _conversations.
+func LockExport(root string) (*SessionLock, error) {
+	l, err := lockDir(filepath.Join(root, "_export"))
+	if errors.Is(err, ErrSessionBusy) {
+		return nil, ErrExportBusy
+	}
+	return l, err
+}
+
+// LockExportWait is LockExport, waiting up to timeout for the lock rather
+// than giving up at once.
+//
+// A command asked to send, such as asz push or a single collect pass, has
+// to send: reporting success while another pass holds the state would hide
+// the files that landed after that pass had already listed them. A watching
+// pass has no such problem and skips instead, because it comes round again.
+func LockExportWait(root string, timeout time.Duration) (*SessionLock, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		l, err := LockExport(root)
+		if !errors.Is(err, ErrExportBusy) || time.Now().After(deadline) {
+			return l, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // Unlock releases the lock.

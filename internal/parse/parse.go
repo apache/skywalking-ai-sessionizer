@@ -268,6 +268,7 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			return nil, err
 		}
 		fromTime, throughTime := windowTimes(ix, view.ThroughSeq, through)
+		ch := changeStats(ix, through)
 		sessionFrom, sessionThrough, title := sessionRange(res, opt.Session)
 		w, err := sessionflow.NewWriter(sessionflow.Header{
 			Conversation: opt.Conversation, Session: opt.Session,
@@ -278,6 +279,9 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			SessionFromTime: sessionFrom, SessionThroughTime: sessionThrough,
 			Title: title, Talks: countKind(res, model.KindTalk), Steps: countSteps(res), Streams: countKind(res, model.KindStream),
 			Segments: countKind(res, model.KindSegment), Unresolved: countOpen(res),
+			Changes: &ch.records, LinesAdded: &ch.added, LinesRemoved: &ch.removed,
+			LLMCalls: ptr(countKind(res, model.KindLLMCall)), Subagents: ptr(countChildStreams(res)),
+			BashRuns: ptr(countTool(res, "Bash")),
 		})
 		if err != nil {
 			return nil, err
@@ -390,6 +394,74 @@ func inputDigestFor(z *storage.Zone, session, previous string, after, through ui
 	}
 	return sessionflow.ChainInputDigest(previous, added), nil
 }
+
+// changeStats is what the landed files' workspace change records add up to,
+// up to the round's watermark: how many distinct records (the plugin's,
+// landed as records of their own kind, and the runtime's own patches,
+// carried as a data element beside a tool result) and the lines their diffs
+// add and remove. The index marks each decoded record's element with its
+// identity and its lines, so the count is the view's: a record landed twice
+// is one, a line that does not decode is none.
+type changeCounts struct{ records, added, removed int }
+
+func changeStats(ix *index.Index, through uint64) changeCounts {
+	seen := map[uint32]bool{}
+	var c changeCounts
+	for i := range ix.Blocks {
+		b := &ix.Blocks[i]
+		if b.Kind != index.BlockChanges || uint64(ix.Entries[b.Entry].Seq) > through || seen[b.Name] {
+			continue
+		}
+		seen[b.Name] = true
+		c.records++
+		c.added += int(b.Adds)
+		c.removed += int(b.Dels)
+	}
+	return c
+}
+
+// countChildStreams is how many streams the fold classed as children: the
+// subagents. Counted by role rather than as the streams less one, since a
+// document may hold a child whose main stream has not landed.
+func countChildStreams(res *assemble.Result) int {
+	n := 0
+	for i := range res.Nodes {
+		nd := &res.Nodes[i]
+		if nd.Kind != model.KindStream || len(nd.Attrs) == 0 {
+			continue
+		}
+		var a struct {
+			Role string `json:"role"`
+		}
+		if json.Unmarshal(nd.Attrs, &a) == nil && a.Role == model.StreamChild {
+			n++
+		}
+	}
+	return n
+}
+
+// countTool is how many calls the fold made of the tool of that name. A call
+// that started a child agent is classed as an agent call and keeps its name,
+// so it counts too; otherwise the count would fall when a child's transcript
+// lands.
+func countTool(res *assemble.Result, name string) int {
+	n := 0
+	for i := range res.Nodes {
+		nd := &res.Nodes[i]
+		if (nd.Kind != model.KindTool && nd.Kind != model.KindAgentCall) || len(nd.Attrs) == 0 {
+			continue
+		}
+		var a struct {
+			Name string `json:"name"`
+		}
+		if json.Unmarshal(nd.Attrs, &a) == nil && a.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+func ptr(n int) *int { return &n }
 
 // windowTimes is the earliest and the latest record time among the landed
 // files a round consumes, from the index. They are what the runtime wrote,

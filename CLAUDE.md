@@ -99,13 +99,15 @@ network, a packaging change rather than a refactor.
 while landing. No configuration of Claude Code required, and it works on history that already exists.
 **Phase 2 (implemented):** assembly into a conversation, published as an append-only chain of
 immutable rounds — see `design-notes/02` and the assembly doc.
-**Phase 3 (in progress):** read and export. `asz view` serves the conversations as a page: a list at
-`/`, and one conversation at `/c/{id}` drawn by Horizon's conversation renderer, embedded from a
-pinned Horizon commit so asz and the SkyWalking UI draw a conversation identically; the page adds
-the landed record behind a step, which only asz has. It reads the folded chain on demand. With the local Claude Code adapter it also runs the
-collector and the parser in the same process, once or on the watch interval, and the list page shows
-the last and the next refresh. A static export and OTLP push belong here too; both add measurement
-only, never structure.
+**Phase 3 (in progress):** read and export. `asz collect` is the pipeline: every period it lands
+what is new, parses what moved, and sends what `export.otlp` asks for, in that order. `asz view`
+serves the conversations as a page and only reads: a list at `/`, and one conversation at `/c/{id}`
+drawn by Horizon's conversation renderer, embedded from a pinned Horizon commit so asz and the
+SkyWalking UI draw a conversation identically; the page adds the landed record behind a step, which
+only asz has. It reads the folded chain on demand. `asz server` is the pipeline and the page in one
+process, which is what a person runs locally, and the list page shows the last and the next refresh.
+`asz push` sends a root that is already there, in one pass. A static export belongs here too; it
+adds measurement only, never structure.
 
 ## Build
 

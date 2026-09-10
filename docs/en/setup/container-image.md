@@ -36,16 +36,17 @@ commit id for a build that is not a release.
 
 ## Serve a storage root
 
-The default command serves the page on port 8787, listening on every interface because a
-container's loopback is not reachable from outside.
+`view` serves the page on port 8787, listening on every interface because a container's loopback
+is not reachable from outside. It only reads.
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
-  ghcr.io/apache/skywalking-ai-sessionizer:latest
+  ghcr.io/apache/skywalking-ai-sessionizer:latest view 0.0.0.0:8787
 ```
 
-There is no Claude Code inside the container, so the page serves what the storage root holds and
-shows no refresh. This is the way to read a storage root that was collected elsewhere.
+This is the way to read a storage root that was collected elsewhere. The image's default command
+is `server`, which serves the same page and also collects; use `view` when nothing is mounted for
+it to collect from.
 
 ## Collect from the host
 
@@ -75,6 +76,9 @@ docker run --rm -p 8787:8787 \
   -v "$PWD/data:/asz/data" \
   ghcr.io/apache/skywalking-ai-sessionizer:latest
 ```
+
+The default command is `server`, so this lands, parses and serves on the collector's interval. To
+collect without serving a page, put `collect` after the image name.
 
 The container user is not the host user, so on Linux the storage root must be writable by it.
 Running with `--user "$(id -u):$(id -g)"` is the simplest way. Docker Desktop on macOS maps

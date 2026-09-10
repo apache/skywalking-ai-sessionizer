@@ -83,6 +83,13 @@ html[data-appearance="light"] .logo-light { display: block; }
 .refresh .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
 .refresh .dot.busy { animation: pulse 1s ease-in-out infinite; }
 .refresh .warn { color: var(--orange); }
+/* A count the round did not carry, and the changes cell, as Horizon draws them. */
+.dim { color: var(--faint); }
+.changes { white-space: nowrap; }
+.changes svg { vertical-align: -1px; margin-right: 3px; color: var(--blue); }
+.lines { margin-left: 6px; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.add { color: var(--green); }
+.del { color: var(--red); }
 @keyframes pulse { 50% { opacity: .25; } }
 .theme-pick { margin-left: 9px; padding-left: 9px; border-left: 1px solid var(--line); color: var(--faint); font-size: 11px; white-space: nowrap; }
 .theme-pick select { margin-left: 6px; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
@@ -147,7 +154,7 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
     <input id="filter" type="search" placeholder="Filter by title or session id" aria-label="Filter conversations">
     <div class="segmented" role="group" aria-label="Sort order">
       <button type="button" data-sort="to" aria-pressed="true">Recent</button>
-      <button type="button" data-sort="steps" aria-pressed="false">Largest</button>
+      <button type="button" data-sort="talks" aria-pressed="false">Largest</button>
       <button type="button" data-sort="title" aria-pressed="false">Name</button>
     </div>
     <span class="count" id="count"></span>
@@ -157,9 +164,11 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
     <thead><tr>
       <th>Conversation</th>
       <th>Talks</th>
-      <th class="hide-narrow">Steps</th>
-      <th class="hide-narrow">Streams</th>
-      <th class="hide-narrow">Segments</th>
+      <th class="hide-narrow">Model calls</th>
+      <th class="hide-narrow">Subagents</th>
+      <th class="hide-narrow">Bash runs</th>
+      <th>Changes</th>
+      <th class="hide-narrow">Unresolved</th>
       <th>Span</th>
       <th>Last activity</th>
     </tr></thead>
@@ -177,6 +186,30 @@ const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 // language, so two people looking at one conversation saw different text.
 const LOCALE = "en-US";
 const num = n => (n ?? 0).toLocaleString(LOCALE);
+
+// A count the head round did not carry. A round cut before the count existed
+// does not know the answer, and a dash says that where a zero would lie.
+const ABSENT = "Not reported by the Sessionizer version that wrote this round.";
+const count = n => n === null || n === undefined
+  ? `<span class="dim" title="${ABSENT}">\u2014</span>`
+  : num(n);
+
+// The changes cell, drawn as Horizon draws it: the mark, the count, then the
+// lines those records added and removed.
+const CHANGE_MARK = `<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"`
+  + ` stroke-width="2" stroke-linecap="round" aria-hidden="true">`
+  + `<path d="M12 3.5v8M8 7.5h8"/><path d="M8 17.5h8"/></svg>`;
+function changes(r) {
+  if (r.changes === null || r.changes === undefined) {
+    return `<span class="dim" title="${ABSENT}">\u2014</span>`;
+  }
+  if (!r.changes) return "0";
+  const lines = r.lines_added !== null && r.lines_added !== undefined
+    && r.lines_removed !== null && r.lines_removed !== undefined
+    ? ` <span class="lines"><span class="add">+${num(r.lines_added)}</span> <span class="del">\u2212${num(r.lines_removed)}</span></span>`
+    : "";
+  return `<span class="changes">${CHANGE_MARK}${num(r.changes)}${lines}</span>`;
+}
 function dur(ms) {
   if (!ms || ms < 0) return "—";
   if (ms < 60000) return `${Math.round(ms / 1000)} s`;
@@ -203,21 +236,28 @@ function load() {
 }
 
 // The server says when it last refreshed the zone and when it will next. The
-// list is fetched again only when that time moves, so a static server costs
+// list is fetched again only when that time moves, so a quiet server costs
 // one small poll a second and nothing else.
+//
+// A static server has no collector of its own, so it shows no refresh banner.
+// It still reports when the root last changed, because another process may be
+// writing to it, so the list is still reloaded when that moves.
 const clock = ms => ms ? new Date(ms).toLocaleTimeString(LOCALE,
   { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }) : "—";
 let seenRefresh = -1;
 function poll() {
   return fetch("/api/status").then(r => r.json()).then(s => {
     const el = $("refresh");
-    if (s.mode === "static") { el.hidden = true; return; }
-    el.hidden = false;
-    el.title = `${s.adapter} · ${s.source}` + (s.last_error ? `\n${s.last_error}` : "");
-    el.innerHTML = (s.refreshing ? `<i class="dot busy"></i><span>refreshing…</span>` : `<i class="dot"></i>`)
-      + `<span>last refresh <strong>${clock(s.last_refresh)}</strong></span>`
-      + (s.next_refresh ? `<span>next <strong>${clock(s.next_refresh)}</strong></span>` : "")
-      + (s.last_error ? `<span class="warn">last pass had errors</span>` : "");
+    if (s.mode === "static") {
+      el.hidden = true;
+    } else {
+      el.hidden = false;
+      el.title = `${s.adapter} · ${s.source}` + (s.last_error ? `\n${s.last_error}` : "");
+      el.innerHTML = (s.refreshing ? `<i class="dot busy"></i><span>refreshing…</span>` : `<i class="dot"></i>`)
+        + `<span>last refresh <strong>${clock(s.last_refresh)}</strong></span>`
+        + (s.next_refresh ? `<span>next <strong>${clock(s.next_refresh)}</strong></span>` : "")
+        + (s.last_error ? `<span class="warn">last pass had errors</span>` : "");
+    }
     if (seenRefresh >= 0 && s.last_refresh !== seenRefresh) load();
     seenRefresh = s.last_refresh;
   }).catch(() => {});
@@ -230,9 +270,9 @@ function draw() {
     !f || (r.title || "").toLowerCase().includes(f) || (r.id || "").toLowerCase().includes(f));
   rows.sort((a, b) =>
     state.sort === "title" ? (a.title || "").localeCompare(b.title || "")
-      : state.sort === "steps" ? b.steps - a.steps
+      : state.sort === "talks" ? b.talks - a.talks
         : (b.to || 0) - (a.to || 0));
-  const most = Math.max(1, ...rows.map(r => r.steps));
+  const most = Math.max(1, ...rows.map(r => r.talks));
 
   $("count").textContent = rows.length === state.rows.length
     ? `${num(rows.length)} shown`
@@ -241,12 +281,14 @@ function draw() {
   $("rows").innerHTML = rows.map(r => `
     <tr data-id="${esc(r.id)}" tabindex="0">
       <td><span class="title">${esc(r.title || "(untitled)")}</span>
-        <span class="sub">${esc(r.id)}${r.unresolved ? ` · <span class="warn">${r.unresolved} unresolved</span>` : ""}</span></td>
-      <td><span class="big">${num(r.talks)}</span></td>
-      <td class="hide-narrow"><span class="big">${num(r.steps)}</span>
-        <span class="bar"><i style="width:${Math.round(r.steps / most * 100)}%"></i></span></td>
-      <td class="hide-narrow">${num(r.streams)}</td>
-      <td class="hide-narrow">${num(r.segments)}</td>
+        <span class="sub">${esc(r.id)}</span></td>
+      <td><span class="big">${num(r.talks)}</span>
+        <span class="bar"><i style="width:${Math.round(r.talks / most * 100)}%"></i></span></td>
+      <td class="hide-narrow">${count(r.llm_calls)}</td>
+      <td class="hide-narrow">${count(r.subagents)}</td>
+      <td class="hide-narrow">${count(r.bash_runs)}</td>
+      <td>${changes(r)}</td>
+      <td class="hide-narrow">${r.unresolved ? `<span class="warn">${num(r.unresolved)}</span>` : "0"}</td>
       <td>${esc(dur(r.to - r.from))}</td>
       <td>${esc(when(r.to))}</td>
     </tr>`).join("");

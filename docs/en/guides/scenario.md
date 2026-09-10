@@ -18,11 +18,10 @@ inspectable on disk before the next.
 
 ```sh
 asz scenario build FILE --format claude-code --out DIR      # generate the runtime's files, under DIR/_source
-asz collect -once -config DIR/asz.yaml                      # load: the real adapter lands them as .sd
-asz parse -config DIR/asz.yaml                              # parse: the real parser writes the .sf rounds
+asz collect -once -config DIR/asz.yaml                      # load and parse: the real adapter and the real parser
 asz verify -config DIR/asz.yaml                             # every digest and every chain
-asz view -config DIR/asz.yaml                               # the page, on 127.0.0.1:8787
-asz push -once -config DIR/asz.yaml                         # export: every file to an OTLP receiver
+asz server -config DIR/asz.yaml                             # the page, on 127.0.0.1:8787
+asz push -config DIR/asz.yaml                               # export: every file to an OTLP receiver
 ```
 
 With `--format sd` the Session Data is landed by the build itself, so the collect step is skipped
@@ -54,9 +53,61 @@ it, such as the export block, is kept across builds.
 | `--scale` | multiplies every delta; `60` turns a scenario typed in seconds into minutes |
 | `--interval` | overrides the scenario's interval |
 | `--repeat N` | N sessions end to end on the clock, each with its own id |
+| `--every D` | keep building: one session every D of wall clock, until the command is stopped |
+| `--pick MODE` | with a set of scenarios, `cycle` through them in order or take a `random` one |
+| `--seed N` | seeds `--pick random`; `0`, the default, varies with each run |
 | `--through NAME` | only the steps up to the checkpoint NAME |
 
 With a fixed `--at`, every file is identical on every run.
+
+## A feed: keep sending conversations
+
+`--repeat` writes its sessions in one burst and stops. `--every` does not stop. It builds one whole
+session, waits that long on the wall clock, builds the next, and goes on until it is stopped. That
+is a mock client: run it beside a watching collector and conversations keep arriving.
+
+```sh
+asz scenario build tests/scenarios/assembly.yaml --format claude-code --out DIR --every 30s &
+asz server -config DIR/asz.yaml                             # collect, parse and serve, on the interval
+```
+
+`server` refreshes on the interval because the configuration the build writes says `mode: watch`.
+To feed a receiver instead of a page, name it under `export.otlp` and run `asz collect`, which
+sends at the end of every period.
+
+Two things differ from a one-shot build, and both are what a live feed needs.
+
+A session is stamped so its **last record lands at the moment it was written**. A real session that
+has just ended has its last record now, and a receiver reads nothing stamped ahead of the clock it
+reads it with. A one-shot build starts at `--at` instead and runs forward from there.
+
+Each session gets an id **no earlier session has**, taken from the moment it was written rather
+than from a counter. A counter starts again at one when the feed is restarted. The repeated id
+would rewrite the same source file in place, and the collector, which reads forward from where it
+stopped, would see no growth and land nothing at all.
+
+The configuration the build writes says `mode: watch` rather than `mode: once`, because the source
+keeps growing.
+
+### A set of scenarios
+
+More than one file may be given, and a directory contributes every `.yaml` file in it, except the
+expectation files. `--pick cycle`, the default, walks the list in the order it was written and
+starts again at the top. `--pick random` takes one each time; `--seed` makes that order repeatable.
+
+```sh
+asz scenario build tests/scenarios --format claude-code --out DIR --every 1m --pick random
+asz scenario build a.yaml b.yaml c.yaml --format sd --out DIR --every 10s
+```
+
+With `--format sd` a feed lands its Session Data itself, so there is nothing for a collector to
+watch and `server` does not notice the later sessions. Run `asz parse -config DIR/asz.yaml` beside
+it, or feed in `claude-code` format, which goes through the real adapter and is the closer stand-in
+for a client anyway.
+
+`--every` with `--repeat N` stops after N sessions rather than running on, and does not wait after
+the last one. The period must be at least `1ms`: a feed id carries the moment it was written, in
+milliseconds, so a shorter period could not give every session an id of its own.
 
 ## The scenario
 

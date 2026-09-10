@@ -72,10 +72,13 @@ func HorizonCommit() string {
 	return ""
 }
 
-// assets serves the renderer's files. They change only when the pin does,
-// so a browser may keep them for a day; a redeploy under a new pin serves
-// new bytes under the same paths, which a day-old cache would miss, and the
-// page's own HTML is never cached.
+// assets serves the renderer's files.
+//
+// Every page names them with the pin on the end, so the URL changes when the
+// pin does and a browser cannot answer from yesterday's copy. That makes the
+// bytes at a URL immutable, which is what the cache headers say. The page's
+// own HTML carries no cache headers and is fetched every time, so a new pin
+// reaches a returning reader on their next load.
 func assets() http.Handler {
 	sub, err := fs.Sub(renderer, "conversation-view")
 	if err != nil {
@@ -87,13 +90,40 @@ func assets() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Header().Set("Cache-Control", "public, max-age=86400, immutable")
 		files.ServeHTTP(w, r)
 	})
 }
 
 //go:embed index.html
 var indexHTML []byte
+
+// The two pages as served: the renderer URLs carry the pin. Stamped once,
+// because the pin cannot change while the process runs.
+var (
+	indexPage = stamped(indexHTML)
+	pagePage  = stamped(pageHTML)
+)
+
+// assetRef matches a renderer URL in a page, so stamped can put the pin on
+// the end of it.
+var assetRef = regexp.MustCompile(`/assets/conversation-view/[A-Za-z0-9._/-]+`)
+
+// stamped names every renderer file with the pin it was built from.
+//
+// Without it a re-pin is invisible to anyone who has the page cached: the
+// files keep their paths, so the browser keeps serving the renderer it
+// already has until the day is out. With it, a new pin is a new URL.
+func stamped(b []byte) []byte {
+	pin := HorizonCommit()
+	if pin == "" {
+		return b
+	}
+	suffix := []byte("?v=" + pin[:12])
+	return assetRef.ReplaceAllFunc(b, func(u []byte) []byte {
+		return append(append([]byte{}, u...), suffix...)
+	})
+}
 
 //go:embed favicon.svg
 var faviconSVG []byte
@@ -114,7 +144,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(indexHTML)
+	_, _ = w.Write(indexPage)
 }
 
 // page serves one conversation, named by the path.
@@ -123,7 +153,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 // reader can keep a link to one and an export can be laid out the same way.
 func (s *Server) page(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(pageHTML)
+	_, _ = w.Write(pagePage)
 }
 
 // svg serves one embedded image. The tab icon and the header of every page

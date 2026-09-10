@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -94,6 +95,12 @@ type Pusher struct {
 	// BatchBytes is how many file bytes one request carries at most. A file
 	// larger than the budget is sent alone, in a request of its own.
 	BatchBytes int64
+	// WaitForExport is how long Pass waits for another pass over the same
+	// root to finish before giving up with storage.ErrExportBusy. Zero, the
+	// default, does not wait, which is what a watching pass wants: it comes
+	// round again anyway.
+	WaitForExport time.Duration
+
 	// MaxBytesPerMinute caps what goes on the wire: a pass waits before a
 	// request until a minute's budget, refilled continuously, holds the
 	// request's size. Zero, the default, is no limit. A first push of a
@@ -115,6 +122,11 @@ type Stats struct {
 	Requests int
 	// Metrics is how many spooled metrics requests were sent.
 	Metrics int
+	// Deferred is how many rounds were left for a later pass because they
+	// were still being written. A pass that comes round again picks them
+	// up; a pass that does not has to report them.
+	Deferred int
+
 	// Rejected is how many records and data points receivers said they
 	// rejected inside requests they took. The protocol says not to resend
 	// them, so they are counted and reported, and the files are marked.
@@ -236,6 +248,26 @@ func (p *Pusher) Pass() (*Stats, error) {
 	if err := p.Prepare(); err != nil {
 		return nil, err
 	}
+	// One pusher at a time over one root. Reading push.state, sending, and
+	// recording what went is one operation; two passes running it at once
+	// would both send what neither had recorded yet, and a token counted
+	// twice cannot be taken back. storage.ErrExportBusy says another pass
+	// holds it, which is not a failure: it is already doing this work.
+	// The root has to be there before the lock is taken: taking it creates a
+	// directory under the root, which would make a mistyped path look like
+	// an empty one and send nothing without a word.
+	if _, err := os.Stat(p.Zone.Root()); err != nil {
+		return nil, err
+	}
+	// A pass told to wait is one that was asked to send: it must not report
+	// success while another pass holds the state, because files that landed
+	// after that pass listed its work would be left unsent with nobody
+	// coming back for them. A watching pass waits for nothing and skips.
+	lock, err := storage.LockExportWait(p.Zone.Root(), p.WaitForExport)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Unlock() }()
 	st := &Stats{}
 	state, err := loadState(p.statePath())
 	if err != nil {
@@ -410,6 +442,13 @@ func (b *batch) addRounds(conv string) {
 			continue
 		}
 		if err := b.addRound(rel, path, conv); err != nil {
+			// A round still being written is left for the next pass, not
+			// reported as a failure: another builder is finishing it right
+			// now. It is counted, so a pass with no next one can say so.
+			if errors.Is(err, errRoundUnfinished) {
+				b.st.Deferred++
+				continue
+			}
 			b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", rel, err))
 		}
 	}
@@ -699,15 +738,29 @@ func (b *batch) addRound(rel, path, conv string) error {
 		Streams      *int64 `json:"streams"`
 		Segments     *int64 `json:"segments"`
 		Unresolved   *int64 `json:"unresolved"`
+		Changes      *int64 `json:"changes"`
+		LinesAdded   *int64 `json:"lines_added"`
+		LinesRemoved *int64 `json:"lines_removed"`
+		LLMCalls     *int64 `json:"llm_calls"`
+		Subagents    *int64 `json:"subagents"`
+		BashRuns     *int64 `json:"bash_runs"`
 	}
 	if err := json.Unmarshal(headerLine, &hdr); err != nil {
 		return fmt.Errorf("decode round header: %w", err)
 	}
+	// A round is written straight to its final name, not to a temporary one,
+	// so the file is there to be read before all of its bytes are. The last
+	// frame a finished round carries is its commit, and the round's digest
+	// is in it; a file without one is still being written. Send the short
+	// read and it is recorded as sent, and the finished bytes never go.
+	if !roundIsFinished(data, path) {
+		return errRoundUnfinished
+	}
+	digest := digestOf(data)
 	session := hdr.Session
 	if session == "" {
 		session = conv
 	}
-	digest := digestOf(data)
 	attrs := []*commonpb.KeyValue{
 		str("asz.format", "sf"),
 		str("asz.format.version", hdr.Schema),
@@ -743,6 +796,24 @@ func (b *batch) addRound(rel, path, conv string) error {
 			integer("asz.conversation.streams", *hdr.Streams),
 			integer("asz.conversation.segments", *hdr.Segments),
 			integer("asz.conversation.unresolved", *hdr.Unresolved))
+		// These counts came later than the ones above, so a round may carry
+		// those and not these; each travels on its own, so one that is
+		// missing never holds the others back.
+		for _, c := range []struct {
+			key string
+			v   *int64
+		}{
+			{"asz.conversation.changes", hdr.Changes},
+			{"asz.conversation.lines_added", hdr.LinesAdded},
+			{"asz.conversation.lines_removed", hdr.LinesRemoved},
+			{"asz.conversation.llm_calls", hdr.LLMCalls},
+			{"asz.conversation.subagents", hdr.Subagents},
+			{"asz.conversation.bash_runs", hdr.BashRuns},
+		} {
+			if c.v != nil {
+				attrs = append(attrs, integer(c.key, *c.v))
+			}
+		}
 	}
 	// A round is stamped with the session's last activity as of the round,
 	// which only widens, so a receiver's newest row per conversation is the
@@ -911,6 +982,39 @@ func conversationDirs(root string) ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
+
+// errRoundUnfinished says a round file was read before it was completely
+// written. It is not a failure: the next pass reads it whole.
+var errRoundUnfinished = errors.New("round is still being written")
+
+// roundIsFinished reports whether a round file holds every byte it will.
+//
+// The test is its last frame: a finished round ends with a commit carrying
+// the digest of everything before it, and that digest's first twelve hex
+// digits are the ones in the file's name. A file being written has no
+// commit line yet, or only part of one.
+func roundIsFinished(data []byte, path string) bool {
+	m := roundNameRe.FindStringSubmatch(filepath.Base(path))
+	if m == nil {
+		// Not a name this can check. Leave it to the reader.
+		return true
+	}
+	trimmed := bytes.TrimRight(data, "\n")
+	i := bytes.LastIndexByte(trimmed, '\n')
+	var commit struct {
+		T      string `json:"t"`
+		Digest string `json:"digest"`
+	}
+	if err := json.Unmarshal(trimmed[i+1:], &commit); err != nil {
+		return false
+	}
+	// "commit" is Session Flow's frame name. It is written out rather than
+	// imported: the push is on the collector side, and the two sides meet
+	// only at the storage root, which tests/boundary enforces.
+	return commit.T == "commit" && strings.HasPrefix(commit.Digest, m[2])
+}
+
+var roundNameRe = regexp.MustCompile(`^r(\d{6,})-([0-9a-f]{12})\.sf$`)
 
 func roundFiles(root, conv string) ([]string, error) {
 	dir := filepath.Join(root, "_conversations", conv, "rounds")

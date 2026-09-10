@@ -31,6 +31,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -372,4 +375,74 @@ func (sc *Scenario) Checkpoints() []string {
 		}
 	}
 	return out
+}
+
+// Loaded is one scenario and the file it came from, so a feed can name the
+// scenario it is emitting.
+type Loaded struct {
+	Path     string
+	Scenario *Scenario
+}
+
+// LoadSet loads every scenario named by paths. A path that names a
+// directory contributes every ".yaml" file directly inside it, except the
+// expectation files, which are not scenarios. The result keeps the order
+// the paths were given, and directory entries are sorted, so a fixed list
+// is emitted in a fixed order.
+func LoadSet(paths []string) ([]Loaded, error) {
+	var out []Loaded
+	seen := map[string]bool{}
+	for _, p := range paths {
+		files, err := scenarioFiles(p)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			abs, err := filepath.Abs(f)
+			if err != nil {
+				return nil, err
+			}
+			if seen[abs] {
+				continue
+			}
+			seen[abs] = true
+			sc, err := Load(f)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, Loaded{Path: f, Scenario: sc})
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("scenario: no scenario files given")
+	}
+	return out, nil
+}
+
+// scenarioFiles expands one path into the scenario files it names.
+func scenarioFiles(path string) ([]string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []string{path}, nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".expect.yaml") {
+			continue
+		}
+		files = append(files, filepath.Join(path, name))
+	}
+	sort.Strings(files)
+	if len(files) == 0 {
+		return nil, fmt.Errorf("scenario: %s holds no scenario files", path)
+	}
+	return files, nil
 }
