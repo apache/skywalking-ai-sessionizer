@@ -34,9 +34,9 @@ transcripts.
 ## adapters
 
 A list. `claude-code-local` reads Claude Code's files from this machine. `claude-code-changes`
-reads the change records the asz Claude Code plugin writes beside them; see
+reads the change records the asz Claude Code plugin writes beside them. See
 [the changes adapter](#the-changes-adapter). `claude-code-otlp` receives the runtime's own
-exporter; see [the receiver adapter](#the-receiver-adapter). Every command runs once per enabled
+exporter. See [the receiver adapter](#the-receiver-adapter). Every command runs once per enabled
 adapter.
 
 | Key | Default | Meaning |
@@ -48,7 +48,7 @@ adapter.
 | `exclude` | `/private/tmp/**` | Session filters, see below. |
 | `metrics` | `false` | Derive the runtime's own metric family from the landed files, `claude_code.token.usage` in phase one, name for name with the runtime's exporter. See [Metrics](export-otlp.md#metrics). |
 | `listen` | none | On `claude-code-otlp` only: the address the runtime's exporter is pointed at, such as `127.0.0.1:4317`, serving gRPC and HTTP with protobuf on the one port. |
-| `metrics_lookback` | `24h` | How far back the first derivation over a root reaches. A duration such as `24h`, or a number of days such as `7d`; `0` or `none` derives everything. Later passes derive every new file whole. |
+| `metrics_lookback` | `24h` | How far back the first derivation over a root reaches. A duration such as `24h`, or a number of days such as `7d`. `0` or `none` derives everything. Later passes derive every new file whole. |
 
 ### Session filters
 
@@ -70,9 +70,30 @@ are the tool's, not yours, which is why they are excluded by default.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass and exits, which is the backfill path over history that already exists. `-once` on the command line overrides the file. |
+| `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass, which is the backfill path over history that already exists. `asz collect` then exits, and `asz server` goes on serving what that pass produced. `-once` on the command line overrides the file. |
 | `interval` | `5s` | How long the pipeline sleeps between passes in watch mode. It is the whole period: `asz collect` and `asz server` land, parse and send once per interval. |
-| `max_delta_bytes` | `2097152` | The largest `.sd` file the collector writes, 2 MiB. A large catch-up is split into several files, and a single record larger than this is landed whole. A file travels whole as one log record, so this is also the largest record a receiver has to accept. A change applies to new files only; `asz repack` brings an existing root under a new budget. |
+| `max_delta_bytes` | `2097152` | How much of a growing source the collector lands in one `.sd` file, 2 MiB. A large catch-up is split into several files. When the next source line is longer than the budget, the collector reads to the end of the source instead. That file then holds the long line and every complete line after it. A file travels whole as one log record, so the largest record a receiver has to accept is the largest file, not the budget. A change applies to new files only. `asz repack` brings an existing root under a new budget. |
+
+### Several local adapters
+
+`collector` is set on each adapter, but `asz collect` and `asz server` run one pipeline for all
+the enabled local adapters, `claude-code-local` and `claude-code-changes`. One pass reads them
+all. See [collect](command-line.md#collect). One pipeline has one mode and one period, so the
+settings combine:
+
+- It watches when any of them has `mode: watch`. It makes a single pass only when every one of
+  them has `mode: once`, or with `-once`.
+- It runs at the shortest `interval` among them. A source that asks for 2 seconds is still read
+  every 2 seconds when another asks for a minute.
+- `max_delta_bytes` does not combine. Each adapter cuts its own files at its own budget.
+
+A disabled adapter does not count. The receiver, `claude-code-otlp`, takes no `collector` block,
+so it does not count either. When it is the only adapter enabled, `asz collect` sends what it
+lands to `export.otlp.endpoint` every 5 seconds, the compiled default.
+
+Both commands print the result when they start, on their `source` line: `(every 5s)` when the
+pipeline watches, `(once)` when it does not. `asz view` collects nothing, but it checks the root
+for new rounds at the same shortest interval.
 
 ## parse
 
@@ -137,10 +158,10 @@ adapters:
 `claude-code-changes` lands the records the [asz Claude Code plugin](claude-code-plugin.md)
 writes: which files each shell command changed, and each edit made inside a subagent, as
 git-style hunks. Empty `source_root` resolves `plugins/data` under the same directory
-`claude-code-local` resolves, and reads every plugin directory named `asz-changes-*` under it;
-set it to collect from a copy. The session filters are the ones above, judged by the workspace
-each session's records name. It is on by default because it costs nothing when the plugin is not
-installed: there is nothing to discover. It takes no `metrics`.
+`claude-code-local` resolves, and reads every plugin directory named `asz-changes-*` under it.
+Set `source_root` to collect from a copy. The session filters are the ones above, judged by the
+workspace each session's records name. It is on by default because it costs nothing when the
+plugin is not installed: there is nothing to discover. It takes no `metrics`.
 
 ## The receiver adapter
 
@@ -155,7 +176,7 @@ adapters:
 `claude-code-otlp` receives what Claude Code's own OpenTelemetry exporter sends, with the
 runtime configured as its documentation says: `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
 `OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` at `listen`, over gRPC or
-`http/protobuf`. Phase one lands its metrics in the storage root's spool for `asz push`; logs and
+`http/protobuf`. Phase one lands its metrics in the storage root's spool for `asz push`. Logs and
 traces are accepted and dropped. It runs while `asz collect` or `asz server` runs, beside the
 local adapter, and not with `-once`. `metrics` may be on here or on `claude-code-local`, never
 on both: the configuration refuses to load, since the two would count the same tokens twice.

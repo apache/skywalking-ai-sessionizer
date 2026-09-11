@@ -28,10 +28,16 @@ const Dialect = "claude-code/1"
 
 // glossary is what Claude Code calls the things the model names.
 //
-// It lives beside the extraction code on purpose. Every entry with a Native
-// value corresponds to a field the converter reads, so a rename in the
-// runtime changes both together, and a test checks that the model's whole
-// vocabulary is accounted for here.
+// It lives in the same package as the extraction code on purpose, so a rename
+// in the runtime is made to both in one change. A Native value says where the
+// runtime records something, and the adapter reads it there unless the Note
+// says it is not read. Such an entry keeps its Native value anyway, because an
+// empty one would say the runtime has no word for the thing. A test checks
+// that the model's whole vocabulary is accounted for here.
+//
+// Each name has one entry. NewGlossary keeps only the last entry for a name,
+// so a second one silently hides the first. Run, stream and tool are each both
+// a role and a node kind, and their entries are with the kinds.
 //
 // An empty Native is not a gap. A Talk, a Segment, a correlation quality - the
 // runtime records none of them, and saying so is more useful than a plausible
@@ -42,31 +48,28 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.RoleParent, Native: "parentUuid", Where: "record"},
 	model.Term{Unified: model.RoleCall, Native: "message.id", Where: "record",
 		Note: "not requestId, which a client-fabricated record can reuse"},
-	model.Term{Unified: model.RoleRun, Native: "promptId", Where: "record",
-		Note: "on user records only; a model response reaches one through its parents"},
 	model.Term{Unified: model.RoleBatch, Native: "toolUseResult.runId", Where: "a workflow launch result",
 		Note: "also the name of the directory the batch's records are filed under"},
-	model.Term{Unified: model.RoleStream, Native: "agentId", Where: "a child record, and its filename",
-		Note: "main has no name of its own; it is the session's own transcript"},
 	model.Term{Unified: model.RoleContinues, Native: "logicalParentUuid", Where: "a compact_boundary record",
 		Note: "the only link back; a boundary's own parentUuid is null"},
-	model.Term{Unified: model.RoleTool, Native: "tool_use_id", Where: "a tool_result block, a notification, a sidecar"},
 	model.Term{Unified: model.RoleChild, Native: "toolUseResult.agentId", Where: "a launch result, a journal record"},
 	model.Term{Unified: model.RoleTime, Native: "timestamp", Where: "record"},
 	model.Term{Unified: model.RoleModel, Native: "message.model", Where: "an assistant record",
 		Note: "<synthetic> on a record the client fabricated"},
 	model.Term{Unified: model.RoleTrigger, Native: "origin.kind", Where: "record, and attachment.origin.kind"},
 
-	// ---- structure the model derived; the runtime records none of it ----
+	// ---- structure; the runtime names a session, a stream and a run, and the model derives the rest ----
 	model.Term{Unified: model.KindConversation, Note: "supplied, never inferred; defaults to the session id"},
 	model.Term{Unified: model.KindSegment, Note: "an activity window chosen for commit"},
 	model.Term{Unified: model.KindSession, Native: "sessionId", Where: "record, and the transcript filename"},
-	model.Term{Unified: model.KindStream, Native: "agentId", Where: "a child record",
+	// The file name, not the record: the adapter reads the in-record agentId
+	// only on a sidecar or a journal record.
+	model.Term{Unified: model.KindStream, Native: "agentId", Where: "a child transcript's file name, agent-<id>.jsonl",
 		Note: "the parent lineage is the session transcript itself"},
 	model.Term{Unified: model.KindEpoch, Note: "the span between two compact_boundary records"},
 	model.Term{Unified: model.KindTalk, Note: "one readable interaction; derived from where a run was triggered"},
 	model.Term{Unified: model.KindRun, Native: "promptId", Where: "record",
-		Note: "one loop per distinct promptId"},
+		Note: "one loop per distinct promptId in a stream. A model response carries none and reaches one through its parents"},
 
 	// ---- steps ----
 	model.Term{Unified: model.KindMessageExternal, Native: "origin.kind == \"human\"", Where: "a user record",
@@ -88,13 +91,17 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.KindEpochBoundary, Native: "system/compact_boundary", Where: "a system record"},
 	model.Term{Unified: model.KindEpochSummary, Native: "isCompactSummary", Where: "a user record"},
 	model.Term{Unified: model.KindErrorAPI, Native: "system/api_error", Where: "a system record"},
-	model.Term{Unified: model.KindControlInterrupt, Native: "toolUseResult.interrupted", Where: "a tool result"},
-	model.Term{Unified: model.KindControlPermission, Native: "permission-mode", Where: "a record type"},
+	// The runtime has a word for these two, so the Native value stays, but
+	// nothing reads it yet.
+	model.Term{Unified: model.KindControlInterrupt, Native: "toolUseResult.interrupted", Where: "a tool result",
+		Note: "not read, so asz emits no step of this kind today"},
+	model.Term{Unified: model.KindControlPermission, Native: "permission-mode", Where: "a record type",
+		Note: "not read, so asz emits no step of this kind today"},
 	model.Term{Unified: model.KindControlCommand, Native: "system/local_command", Where: "a system record"},
 	model.Term{Unified: model.KindTurnDuration, Native: "system/turn_duration", Where: "a system record",
 		Note: "the runtime measured it; it is not the gap between two record timestamps"},
 	model.Term{Unified: model.KindControlNotice, Native: "system/away_summary, bridge_status, informational, model_refusal_fallback",
-		Where: "a system record", Note: "anything the runtime says about the session itself"},
+		Where: "a system record", Note: "anything the runtime says about the session itself, including every system subtype no other row names"},
 
 	// ---- relations ----
 	model.Term{Unified: model.RelStarts, Native: "toolUseResult.agentId, or a run journal", Where: "a launch result"},
@@ -106,7 +113,8 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.RelSummarizes, Native: "parentUuid", Where: "an isCompactSummary record"},
 	model.Term{Unified: model.RelInSegment, Note: "an activity window chosen for commit"},
 	model.Term{Unified: model.RelRetries, Note: "unavailable; retry identity is not recorded"},
-	model.Term{Unified: model.RelCancels, Native: "toolUseResult.interrupted", Where: "a tool result"},
+	model.Term{Unified: model.RelCancels, Native: "toolUseResult.interrupted", Where: "a tool result",
+		Note: "not read, so asz writes no cancels relation today"},
 	model.Term{Unified: model.RelInputOf, Note: "unavailable; the serialized provider request is not written locally"},
 
 	// ---- qualification; all of it is this project's judgement ----

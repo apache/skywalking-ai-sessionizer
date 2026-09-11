@@ -116,3 +116,9 @@
 - `export.otlp.logs` and `export.otlp.metrics` switch the two things a push sends, the landed
   files and rounds as logs and the metrics spool as metrics, each on its own, both on unless set
   off. `asz push` says which it is sending, and a configuration with both off is refused.
+
+## Documentation
+
+- `design-notes/` is removed. What its three notes described that has landed is now documented in
+  these pages, checked against the code rather than copied from the notes, which were older than
+  the code. The notes remain in the git history. The documentation is the one reference.

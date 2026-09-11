@@ -7,8 +7,10 @@ steps with the text the referenced records carry, and the streams, the segments,
 the rounds and the files sit beside them, each verified. The evidence is inside it once, so a
 viewer never opens a `.sd` file; the `ref` on a node is a citation, not a pointer to fetch.
 
-It is never a file that the project writes. Package `pkg/sessionview` defines and owns the shape,
-and three things produce it from the same code:
+It is never a file that the project writes. A stored copy would have to be kept in step with the
+rounds and the landed files, and it would be the copy that falls out of date. Built from them each
+time, it always agrees with them. Package `pkg/sessionview` defines and owns the shape, and three
+things produce it from the same code:
 
 | How | What you get |
 | --- | --- |
@@ -110,7 +112,7 @@ usable round at all is an error, because there is nothing to show.
 | `ref`, `refs` | the record it stands on and every record it covers, as `{seq, row, block}`, kept so a viewer can show the evidence |
 | `text`, `state`, `bytes` | the part the node stands on: its readable text, clipped to the longest prefix of whole characters within 2,000 bytes, whether the content is `available`, and its full size. For a `data` part the text is the data as compact JSON. A reader wanting the whole record reads it by address. |
 | `usage`, `flags`, `dropped` | what else the referenced record says, copied once: on an `llm.call`, the token counts `in`, `out`, `cache_read`, `cache_write` from the one record `usage_at` names, never a sum over fragments; the record's `flags`; and its `dropped` list, so a viewer can say what was left out and why |
-| a talk adds | `label`, `reply` (its last assistant message, clipped the same way), `runs`, `steps`, `tools`, `from`, `to`, `child`, `segment` |
+| a talk adds | `label` and `reply`, clipped the same way and described below, then `runs`, `steps`, `tools`, `from`, `to`, `child`, `segment` |
 | a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly |
 | a `turn.duration` step adds | `duration_ms`, `duration_measured_by` |
 | `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced |
@@ -118,6 +120,26 @@ usable round at all is an error, because there is nothing to show.
 
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
 the fold and the records say. Where the fold says `unavailable`, the document says it too.
+
+**A talk's label and reply.** A talk's `label` is the text of the first `message.external` step in
+it. A talk can have none. A talk opened by a command typed locally is one example, because the
+runtime records no origin for such a command. The label is then the first text that is not empty
+among the talk's first three `context.injection` steps, in record order. A text that starts with
+`{"type":"deferred_tools_delta"` is skipped. It is Claude Code's record of a change in the tools
+available, and it says nothing about the work. So a label is not always something a person typed.
+A talk's `reply` is the last `message.assistant` or `agent.output` step in it, in record order. The
+earlier messages are what the agent said between tool calls, as the
+[Unified Conversation Model](../concepts-and-designs/unified-conversation-model.md#hierarchy)
+explains. Either key is absent when no step gives it a text.
+
+**Request to result is not tool time.** `request_to_result_ms` is the time between two records the
+runtime wrote, the request and its result, tied together by the tool-use id. It is not how long the
+tool ran. It can include waiting and other work between the two records. So `timing` in `attrs`
+stays `unavailable` beside it, for the reason the
+[Claude Code adapter](../adapters/claude-code.md#step-mapping) gives. Both keys are absent when the
+join is not `exact_unique`, when either record has no time, or when the result is earlier than the
+request. A gap under one millisecond keeps `request_to_result_join` and leaves out
+`request_to_result_ms`, because its value is zero.
 
 ## Workspace changes
 
@@ -152,7 +174,7 @@ checks the property `view_covers_the_session` at its end. This is how each view 
 
 | View | Read |
 | --- | --- |
-| **Transcript** | `talks`, in order. Each talk's `label` is the person's input and its `reply` the last assistant message; its `children` are the runs, a run's children the steps, and a call's children what it produced: thinking, messages, tools. `text` is what to show for a step, `name` and `result` for a tool, `usage` on a call. `loose` holds whatever no talk contains, and is usually empty. |
+| **Transcript** | `talks`, in order. Each talk's `label` is usually the person's input and its `reply` the last thing the agent said in it, as [A node in `talks`](#a-node-in-talks) defines them; its `children` are the runs, a run's children the steps, and a call's children what it produced: thinking, messages, tools. `text` is what to show for a step, `name` and `result` for a tool, `usage` on a call. `loose` holds whatever no talk contains, and is usually empty. |
 | **Flow timeline** | every node of every tree by `at`, with `kind` and `stream`; a node with `at` of `0` was never observed at a time and is placed by its position. |
 | **Cross-stream flow** | `edges` on a node, and `relations` as the whole list: `starts` from an agent call to the child's `stream`, `reports` from the notification that resumed the parent, `ends_with` from a stream to the child's output, `follows` between epochs across a reset, `summarizes` from a summary to its boundary, `in_segment` from a talk to its window. Containment never crosses a stream; a child's work is under the child. |
 | **Streams and segments** | `streams` with `role`, `label`, `parent` and `opened_by`, the step that started each; `segments` with the span of the talks placed in them. |
@@ -180,3 +202,22 @@ document with Horizon's conversation renderer, which asz embeds from a pinned Ho
 conversation looks the same in `asz view` and in the SkyWalking UI.
 The largest conversation measured, 357 talks and 16,121 steps, is 19 MB as one document and was
 built in 0.7 s.
+
+A running `asz view` notices new rounds without being told. On every read it lists the
+conversation's rounds directory and compares the newest round there with the round it folded. When
+they differ, it folds again and builds a new document. So an `asz view` beside a separate
+`asz collect` stays current. The comparison is with the round the fold reached, not the newest one
+listed, so a round that was still being written at one read is picked up by the next.
+
+The page writes nothing derived to disk, such as a read index. It folds the chain when asked,
+because folding was measured to be fast enough. The sample was the largest session of a corpus of
+62 Claude Code sessions, 1,100.1 MB of landed records. It holds 53,106 nodes and 922 talks.
+
+| On that session | Took |
+| --- | ---: |
+| fold the whole chain | 302 ms |
+| build the ordered talk list | 1 ms |
+| one talk's subtree, at the 99th percentile | 13 microseconds |
+| walk every talk's subtree | 11 ms |
+
+A read index is added only when reading one talk takes more than 200 ms at the 99th percentile.

@@ -7,6 +7,5 @@ data
 .local
 *.wal
 docs
-design-notes
 tests
 *.md

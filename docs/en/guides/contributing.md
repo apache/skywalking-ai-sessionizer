@@ -54,8 +54,7 @@ rather than approximating. The same rule holds in the code. The model never inve
 sessions, parentage or causal links; a reference that cannot be resolved is carried as data and
 shown as such.
 
-`design-notes/` holds the working notes: measurements, corrections and open questions, unpolished
-by intent. `docs/` is the official documentation and is published on the SkyWalking website.
+`docs/` is the official documentation and is published on the SkyWalking website.
 
 ## Invariants
 

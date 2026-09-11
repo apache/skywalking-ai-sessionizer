@@ -6,10 +6,6 @@
 
 **Conversation-level observability, measurement, and export for long-lived AI agents.**
 
-> **Status:** pre-alpha. The conversation model and the Claude Code data mapping are defined and
-> evidence-backed. Collection and assembly are implemented. The local page that serves the
-> assembled conversations is in progress; static export and OTLP push are not started.
-
 SkyWalking AI Sessionizer assembles fragmented agent telemetry into one durable conversation structure. It
 preserves sessions as source provenance, keeps parent and child-agent execution lineages separate,
 measures model-message continuity, and projects the same committed snapshot into storage, export and
@@ -60,7 +56,7 @@ adapter reports it as `unavailable` rather than approximating it.
 
 | Runtime | Status | Collection |
 | --- | --- | --- |
-| [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists. The [plugin](docs/en/setup/claude-code-plugin.md) adds which files each shell command changed. |
+| [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists. The [plugin](docs/en/setup/claude-code-plugin.md) adds which files each shell command changed. The [receiver](docs/en/setup/configuration.md#the-receiver-adapter), `claude-code-otlp`, is off by default. When Claude Code's own OpenTelemetry exporter is pointed at it, it lands the exporter's metrics requests. It drops the exporter's logs and traces. |
 | Codex | planned | — |
 | LangChain / LangGraph | planned | — |
 
@@ -92,10 +88,6 @@ Official documentation lives in [`docs/`](docs/) and is indexed by
 [`docs/menu.yml`](docs/menu.yml): concepts and designs, setup, the data formats, adapters, guides
 and the changelog. It is published at
 [skywalking.apache.org/docs/skywalking-ai-sessionizer](https://skywalking.apache.org/docs/skywalking-ai-sessionizer/next/readme/).
-
-[`design-notes/`](design-notes/) holds working engineering notes — measurements, corrections and open
-questions produced while designing against real runtime data. They are deliberately unpolished and
-are **not** part of the published documentation.
 
 ## Contributing
 

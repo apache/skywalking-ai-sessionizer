@@ -110,6 +110,7 @@ rather than synthesised.
 | | `control.interrupt` | an externally initiated interruption |
 | | `control.permission` | a permission decision or mode change |
 | | `control.command` | a runtime command invoked in-line |
+| | `control.notice` | the runtime telling the requester something about the session itself, such as a lost connection, a fallback it took, or a summary of what happened while the requester was away |
 | | `turn.duration` | a runtime-reported duration for a completed turn |
 
 **A tool use is one step, not three.** It carries `name`, `input` (for a shell tool, the command
@@ -238,6 +239,37 @@ attempt identity.
 
 An adapter that cannot expose ordered provider input must report model-context coverage as
 `unavailable`. Timing and cache counters do not prove model-input membership.
+
+**A glossary for its dialect**
+
+The model uses its own names. A reader can ask for the runtime's words instead, or for both side by
+side, with `-terms` (see [Command Line](../setup/command-line.md#flags)). An adapter that lands
+Session Data makes this possible. Every landed header names the
+[dialect](../formats/session-data.md#header) its records were read as, and the adapter declares a
+[glossary](glossary.md#adapters) for that dialect. The glossary says what the runtime calls each
+name the model can emit, and where that word appears in the runtime's records.
+
+A glossary belongs to a dialect, not to an adapter. A local reader and a push receiver for one
+runtime read the same schema, so they share one glossary. Records of a different shape get a
+different dialect, even when the same runtime produced them.
+
+Three rules keep a glossary complete and checkable:
+
+1. **Every name the model can emit has an entry**, even when the runtime has no word for it. A
+   reader that asks for native words is shown the model's own name wherever there is no native
+   one. So a missing entry looks exactly like a thing the runtime never records. Without this rule,
+   the reader cannot tell "no native name exists" from "nobody wrote one down".
+2. **An empty native name is an answer.** It says the runtime has no word for the thing, because
+   the model derived it. The entry carries a note that says what the thing is. It names no
+   location, because there is no field in the runtime's records to point to.
+3. **A native name says where it appears** in the runtime's records. Without that, a reader learns
+   a word but not where to look for it.
+
+The model lists the names a glossary is checked against in `model.Vocabulary`. For the
+[built-in runtime adapter](../adapters/claude-code-glossary.md), a test fails when an entry breaks
+rule 2 or rule 3, or when a name in that list has no entry. The list leaves out one name the model
+emits, `control.notice`. So no test would fail if the entry for it were missing. The built-in
+glossary has that entry.
 
 ## Non-goals
 
