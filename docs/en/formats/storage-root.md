@@ -325,7 +325,7 @@ Measured on 2026-09-03 on one machine's storage root of 48 Claude Code sessions:
 | cursors and state | 6,766 | 3 MB | |
 
 The landed data is smaller than its source because a record keeps its content and its provenance,
-not its envelope. Of the transcript content, 550 MB is carried verbatim; 64,667 reasoning parts are
+not its envelope. Of the transcript content, 550 MB is carried whole; 64,667 reasoning parts are
 marked unavailable because Claude Code stores only a signature for them, and each record says so.
 The store had also outlived its source: it held 48 sessions where the source directory still had
 44.

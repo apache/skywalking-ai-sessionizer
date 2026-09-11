@@ -321,6 +321,7 @@ type planner struct {
 	p    *Plan
 	main *lane
 	n    int
+	runs map[string]string
 }
 
 // tick advances a lane by a step's delta, or the interval.
@@ -552,7 +553,16 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		}
 	case c.Workflow != nil:
 		w := c.Workflow
-		runID := "wf_" + strings.ReplaceAll(w.Name, " ", "-")
+		runID := "wf_" + runName(w.Name)
+		if b.runs == nil {
+			b.runs = make(map[string]string)
+		}
+		// Scenario sources also run on filesystems that ignore letter case.
+		key := strings.ToLower(runID)
+		if previous, exists := b.runs[key]; exists {
+			return fmt.Errorf("scenario: workflows %q and %q use the same run id ignoring letter case: %q", previous, w.Name, runID)
+		}
+		b.runs[key] = w.Name
 		res := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: b.tick(l, 0), ID: id + "-result", Parent: l.last, Run: run,
 			Of: tool.ID, Text: "workflow launched", Launch: &Launch{Run: runID, Name: w.Name}, Lost: lost}
 		b.emit(res)

@@ -138,9 +138,11 @@ later agreeing observation.
 
 **Landed record** — a source record converted once into
 [Session Data](../formats/session-data.md#record) and written to a `.sd` file. Its content becomes
-parts, and its identifiers take role names. It does not keep the source bytes. It keeps where they
-were and what they were: the line number counting from 1, the byte offset, their size, and a
-digest, the first 12 hexadecimal characters of their SHA-256. Content the dialect cannot describe
+parts, and its identifiers take role names. It does not always keep the source record whole. It
+keeps its line number counting from 1, byte offset, size, and the first 12 hexadecimal characters
+of the SHA-256 of its bytes. Where a part carries the source's own JSON, such as a call's input,
+it keeps those bytes apart from whitespace between tokens (see
+[What data holds](../formats/session-data.md#what-data-holds)). Content the dialect cannot describe
 keeps every one of its bytes in an `unknown` part, so nothing is guessed or dropped. When those
 bytes are not valid UTF-8, all of them are kept as base64 (see
 [Parts](../formats/session-data.md#parts)). A reader is handed parts, so it never meets a

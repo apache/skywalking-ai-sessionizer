@@ -78,6 +78,7 @@ type Properties struct {
 	RecordsMatch          *bool `yaml:"records_match"`
 	RecordsWellFormed     *bool `yaml:"records_well_formed"`
 	EveryLineARecord      *bool `yaml:"every_line_a_record"`
+	PartsKeepSourceBytes  *bool `yaml:"parts_keep_source_bytes"`
 	DiscoveryIgnoresNoise *bool `yaml:"discovery_ignores_noise"`
 	RepackKeepsStructure  *bool `yaml:"repack_keeps_structure"`
 	PushFollowsTheWire    *bool `yaml:"push_follows_the_wire"`

@@ -104,7 +104,7 @@ role names. The part level carries what the content is.
 
 | Field | Meaning |
 | --- | --- |
-| `ord`, `off`, `sha`, `bytes` | where the record was in the source: its line number counting from 1, the byte offset its line starts at, the first twelve hexadecimal characters of the SHA-256 of its bytes, and their size. The bytes themselves are not kept. The digest stays, so provenance is provable and a record that claims a source it did not come from is detectable. |
+| `ord`, `off`, `sha`, `bytes` | where the record was in the source: its line number counting from 1, the byte offset its line starts at, the first twelve hexadecimal characters of the SHA-256 of its bytes, and their size. The source record is not always kept whole. [What data holds](#what-data-holds) describes what its parts keep. The digest stays, so provenance is provable and a record that claims a source it did not come from is detectable. |
 | `id`, `parent` | the record's own identity and its containment parent |
 | `call` | the provider call this record is a fragment of |
 | `run` | the agent loop it belongs to, one per trigger |
@@ -184,6 +184,47 @@ Every part carries `state` and `bytes`. `state` is one of `available`, `truncate
 `omitted` or `unavailable`, and `bytes` is the size of the original even when the part holds less.
 A reader is always told how much of the original it has.
 
+### What data holds
+
+`data` is one JSON value. What it holds depends on the part:
+
+- A piece of the source's own JSON: a call's input, a result's structured form or content that is
+  not text, an attachment with no prose, or a record or document with no message. A journal line,
+  sidecar, manifest, system record or line the asz plugin wrote can land whole this way. The
+  writer inserts that JSON after `json.Compact`, keeping its bytes apart from whitespace between
+  tokens. This keeps each landed record on one line. Whitespace inside strings is unchanged.
+- Bytes the dialect could not describe: an `unknown` part holds them inside one JSON string,
+  using base64 when needed, as described below. `Part.Raw` returns the original bytes whatever
+  escapes that string uses.
+- A value the adapter built: a `media` part's base64 is written again as a string, and a
+  `changes/1` record derived beside a result uses asz's own encoding. These are not source slices.
+
+The writer never re-encodes `data`, so its bytes after compaction do not depend on whether asz
+uses Go's JSON v2 engine. Existing escapes stay as the source wrote them. Unknown strings and
+derived change records still use Go's `json.Marshal`, and plugin lines keep the escapes their
+producer wrote. Strings the writer encodes itself, such as `text`, `label` and identifiers, are
+values rather than source bytes. It writes `<`, `>` and `&` literally in those strings, but escapes
+U+2028 and U+2029 as `\u2028` and `\u2029`.
+
+Whitespace between tokens is removed without a `dropped` entry or warning. If a runtime starts
+writing such whitespace, those bytes will be lost silently. The
+[scenario check](../guides/scenario.md#check) compares source bytes only in scenarios; it does not
+monitor real source files.
+
+Earlier writers, including asz 0.2.0 and development builds before this change, encoded `<`, `>`
+and `&` as `\u003c`, `\u003e` and `\u0026`, including inside `data`. They encoded U+2028 and U+2029
+there as `\u2028` and `\u2029`. The JSON values are the same, but the bytes can differ. Old files
+are never rewritten, and `asz repack` carries their record lines unchanged. Old and new files can
+share one root and round chain; each digest covers the bytes actually written.
+
+Measured on 2026-09-12 on one machine's Claude Code sources, the writer kept all 229,341 parts
+carrying source JSON byte for byte. The earlier encoding kept 144,464 (62.99%). The sample held
+6,377 files from 85 sessions, with 444,881 source records, copied over 34 seconds and then read
+from the frozen copies. No source JSON in that sample needed whitespace removed. Both Go 1.27.1
+JSON engines gave the same result through the final writer and reader. Separately, all 177
+unknown parts returned their bytes through `Part.Raw`. The 2,560 derived change parts were not
+counted as source JSON, and the sample held no plugin change records.
+
 No fixed rule could decide how much of a part to keep or show, because tool output varies too much.
 The measured corpus is 62 Claude Code sessions: 3,032 files and 1,100.1 MB of source records. One
 tool result in it was 1.1 MB. Over its 28 sessions larger than 1 MB, the share of a session that is
@@ -243,12 +284,13 @@ counts.
 and chose not to carry. Everything it did not understand travels as an `unknown` part, so a later
 version of the dialect can interpret it without collecting again.
 
-The source bytes are not kept, so a `.sd` file is the only landed copy of what it holds, and
-everything above the adapter treats it as the authority. A conversion error on content the dialect
-understood, a message, a thought, a call or a result, can be corrected only by collecting again
-from the runtime's source, and only while that source exists. Claude Code deletes its own
-transcripts, and a storage root outlives them (see [Storage Root](storage-root.md#size)). Only an
-`unknown` part can be read again from the store alone, because only it carries its original bytes.
+A source record is not always kept whole, so a `.sd` file is the only landed copy of what its parts
+hold, and everything above the adapter treats it as the authority. Content that was converted to
+text, such as a message or a thought, needs the runtime's source to correct a conversion error.
+Claude Code deletes its own transcripts, and a storage root outlives them (see
+[Storage Root](storage-root.md#size)). An `unknown` part can be interpreted again from its original
+bytes in the store. A part that keeps the source's JSON can also be interpreted again, subject to
+the whitespace and older-file limits in [What data holds](#what-data-holds).
 
 ## Producing Session Data
 

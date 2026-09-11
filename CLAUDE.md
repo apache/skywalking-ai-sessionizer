@@ -168,7 +168,9 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Platform-specific calls live in one file per platform.** The session lock is `flock` on Unix
   and an exclusive open on Windows; a file's identity is an inode on Unix and a volume serial plus
   file index on Windows. Relative source paths are written with forward slashes everywhere.
-- **Payload bytes are the source bytes**, byte-for-byte. `json.RawMessage` both directions.
+- **Payload bytes are the source bytes** where a part carries the source's own JSON: byte for
+  byte, apart from whitespace between tokens. `json.RawMessage` both directions, and the writer
+  never re-encodes a part's data. Older files hold `\u003c`, `\u003e` and `\u0026` for the same values.
 - **Land before committing the cursor.** At-least-once is intentional; the reverse loses data.
 - **`next_seq` is monotonic across all streams in a session**, so a session is processed
   single-threaded and under a lock. The filesystem is the authority on the counter.

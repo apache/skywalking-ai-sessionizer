@@ -186,6 +186,17 @@ receiver is sent them a second time. A feed never reuses an id.
 
 ## The scenario
 
+A `claude-code` build writes `<`, `>` and `&` literally in its source JSON strings, as Claude Code
+does, and writes U+2028 and U+2029 as the characters. In scenario YAML, write the last two as
+`\u2028` and `\u2029` in double-quoted strings. This keeps them visible in an editor; a plain YAML
+scalar treats the literal characters as line breaks.
+
+A workflow's run id starts with `wf_`. Its name supplies the rest: characters other than ASCII
+letters, digits, `_` and `-` become hyphens. If that result does not start with a letter or digit,
+`run-` is added first. The script's file name uses the same name. A build refuses two workflows
+whose names produce the same run id, ignoring letter case. `source-bytes.yaml` includes the name
+`<all> & report` to check punctuation at the start as well as inside a name.
+
 ```yaml
 session: mock-build-and-check       # optional; default derived from the steps
 title: build and check              # optional
@@ -331,6 +342,7 @@ properties:                               # all on unless set false
   repack_keeps_structure: true
   recollect_idempotent: true              # runtime formats only
   every_line_a_record: true               # runtime formats only
+  parts_keep_source_bytes: true           # runtime formats only
   discovery_ignores_noise: true           # runtime formats only
   pruned_sources_gone: true               # runtime formats only
   cross_format: true
@@ -350,12 +362,22 @@ writable; the landed files and rounds are self-sufficient without index and stat
 round's header says what the fold holds; a parse with no new evidence writes nothing; every landed
 record carries only the fields the format states a purpose for; a repack under the smallest budget
 keeps every record and the whole structure; and, for a runtime format, a second collect lands
-nothing, every source line becomes one landed record, discovery passes over the noise the writer
-plants beside the session, and a pass after Claude Code prunes the session's files sets their
-active cursors to `source_gone` and lands nothing. Across formats, the folds must agree, and so must
+nothing, every source line becomes one landed record, parts carrying source JSON keep its bytes,
+discovery passes over the noise the writer plants beside the session, and a pass after Claude Code
+prunes the session's files sets their active cursors to `source_gone` and lands nothing. Across
+formats, the folds must agree, and so must
 the landed records themselves, field by field: the runtime's adapter and the sd writer must land
 the same evidence from the same scenario, which is what makes a scenario a conformance test for an
 adapter.
+
+`parts_keep_source_bytes` compares each checked record's `sha` with the digest of the source bytes
+named by `off` and `bytes`. A call, result or data part with `data` must hold bytes found unchanged in
+that source record; an unknown part must return such bytes through `Part.Raw`. Media and change records
+derived beside a result are skipped, because their encoding is the adapter's own. Only the newest
+version of a rewritten source is checked, since that is what the source file still holds. This
+property runs in `internal/scenario/run` for `claude-code` scenarios only. It does not check real
+source files during collection. `source-bytes.yaml` exercises `<`, `>`, `&`, U+2028 and U+2029 in
+source JSON and unknown script bytes.
 
 The document is checked too: at the end of every scenario, `view_covers_the_session` holds the
 `asz.view` document to the whole session: every round, verified; every landed file with its digest

@@ -20,7 +20,6 @@ package scenario
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -121,7 +120,7 @@ func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 		if err := put(fmt.Sprintf("%s/subagents/agent-%s.jsonl", p.Session, s.ID), lines); err != nil {
 			return nil, nil, err
 		}
-		meta, _ := json.Marshal(map[string]any{
+		meta := jsLine(map[string]any{
 			"agentType": "general-purpose", "description": s.Label, "toolUseId": s.Tool, "spawnDepth": 1,
 		})
 		if err := put(fmt.Sprintf("%s/subagents/agent-%s.meta.json", p.Session, s.ID), []string{string(meta)}); err != nil {
@@ -140,7 +139,7 @@ func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 		if err := put(fmt.Sprintf("%s/subagents/workflows/%s/journal.jsonl", p.Session, r.ID), journal); err != nil {
 			return nil, nil, err
 		}
-		manifest, _ := json.Marshal(map[string]any{
+		manifest := jsLine(map[string]any{
 			"runId": r.ID, "taskId": "task-" + r.ID, "workflowName": r.Name, "status": "completed", "agentCount": len(r.Children),
 		})
 		if err := put(fmt.Sprintf("%s/workflows/%s.json", p.Session, r.ID), []string{string(manifest)}); err != nil {
@@ -150,7 +149,7 @@ func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 		if r.ScriptProject != "" {
 			scriptDir = filepath.Join(root, r.ScriptProject)
 		}
-		if err := putUnder(scriptDir, fmt.Sprintf("%s/workflows/scripts/%s-%s.js", p.Session, strings.ReplaceAll(r.Name, " ", "-"), r.ID), strings.Split(r.Script, "\n")); err != nil {
+		if err := putUnder(scriptDir, fmt.Sprintf("%s/workflows/scripts/%s-%s.js", p.Session, runName(r.Name), r.ID), strings.Split(r.Script, "\n")); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -206,8 +205,7 @@ func (w *ccWriter) rec(m map[string]any, stream string) string {
 			m["agentId"] = stream
 		}
 	}
-	b, _ := json.Marshal(m)
-	return string(b)
+	return string(jsLine(m))
 }
 
 func ccUsage(u Usage) map[string]any {

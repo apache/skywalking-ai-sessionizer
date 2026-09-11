@@ -1,0 +1,48 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# A landed part holds its source's own bytes wherever it carries the
+# source's own JSON. Claude Code writes <, > and & as they are, and U+2028
+# and U+2029 as the characters themselves, and each place such a character
+# reaches a part's data holds some: the title, a tool's input and its
+# result, a system record, a child's label and the prompt it was given, and
+# a workflow's name, manifest and script. No file name holds < or >, which
+# Windows refuses: a child's file is named by a digest of its name, and a
+# workflow's run id and script by its name with such characters made hyphens.
+title: "compare a < b & c > d"
+steps:
+  - input: "is a < b && c > d?"
+  - call:
+      text: "Checking <both> & reporting."
+      tool:
+        id: tool-compare
+        name: Bash
+        input: {command: "test 1 -lt 2 && echo '<ok>' > out.txt", note: "one\u2028two\u2029three"}
+        result: {text: "<ok> & done\u2028next"}
+  - system: {subtype: local_command, fields: {content: "<local-command-stdout>a && b</local-command-stdout>"}}
+  - call:
+      agent:
+        name: "checker <a> & <b>"
+        prompt: "check that a < b & b > c\u2028and say so"
+        steps:
+          - call: {text: "a < b holds."}
+        notify: true
+  - call:
+      workflow:
+        name: "<all> & report"
+        children:
+          - {name: part-0, prompt: "do part 0 & report <briefly>", steps: [{call: {text: "part 0 done"}}]}

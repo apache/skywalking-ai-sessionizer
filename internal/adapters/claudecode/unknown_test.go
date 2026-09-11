@@ -29,16 +29,11 @@ import (
 
 // An unknown part keeps every byte it was given, including bytes that are
 // not valid UTF-8, and a reader gets them back from the landed file by the
-// rule the format page states. A scenario cannot express this. A claude-code
-// build writes every record, sidecar, journal line and manifest with
-// json.Marshal, which always writes valid UTF-8, and writes whole lines.
-// Only a workflow script is written as text, made from the workflow's name.
-// A name given as YAML binary can hold such a byte, but it also names the
-// run's directory, which macOS refuses to create, and an sd build passes the
-// script through json.Marshal. The cases are ways such bytes can reach the
-// adapter: a line that is not JSON, a write cut short and joined to the next
-// line, a block of a type the dialect does not know, and a workflow script
-// saved in another encoding.
+// rule the format page states. A scenario's JSON encoder writes valid UTF-8
+// and whole lines. These cases exercise malformed records it cannot write:
+// a line that is not JSON, a write cut short and joined to the next line,
+// and a block of a type the dialect does not know. They also cover arbitrary
+// script bytes read directly from disk.
 func TestUnknownPartKeepsEveryByte(t *testing.T) {
 	transcript := claudecode.Source{Kind: claudecode.SrcMainTranscript, Session: "s", Stream: "main"}
 	script := claudecode.Source{Kind: claudecode.SrcWorkflowScript, Session: "s", RunID: "wf_r1"}

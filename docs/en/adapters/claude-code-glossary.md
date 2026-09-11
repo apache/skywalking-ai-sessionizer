@@ -115,7 +115,7 @@ The mapping runs both ways, and this direction matters for anyone going back to 
 | `agentId` | equals the stream name for a child stream; carrying it would store the same value twice. |
 | `sessionId` | the landed file already says which session it belongs to. |
 | `isSidechain` | absent on 28.7% of parent-lineage records, so it cannot say which stream a record belongs to. The file can. |
-| `cwd`, `gitBranch`, `slug`, `version`, `userType` | environment, not conversation. Not in the landed record. [A record keeps no source bytes](../formats/session-data.md#record), and no Session Data field holds these. The adapter reads `cwd` only to make an edited file's path relative. |
+| `cwd`, `gitBranch`, `slug`, `version`, `userType` | environment, not conversation. Not lifted onto the record. A record with no message or attachment keeps its whole source line as `data`, so these fields may remain inside it (see [What data holds](../formats/session-data.md#what-data-holds)). No other Session Data field holds them. The adapter reads `cwd` only to make an edited file's path relative. |
 | `thinking.signature` | 13.3% of the corpus, wrapping 0.1 MB of reasoning text. A provider verifies it; a reader cannot read it. |
 
 ## What Claude Code does not supply at all

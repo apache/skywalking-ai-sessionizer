@@ -98,6 +98,13 @@ jobs:
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./cmd/... ./pkg/... ./internal/... ./plugins/...
       - name: Scenarios, chain and boundary tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
+      # Raw JSON must survive both implementations of encoding/json. The
+      # chain tests also read files made by the earlier writer.
+      - name: JSON compatibility with the earlier engine
+        if: runner.os == 'Linux'
+        env:
+          GOEXPERIMENT: nojsonv2
+        run: go test -count=1 ./pkg/sessiondata/ ./tests/...
       # The same scenarios once more, through the command a person runs, so
       # the command is exercised and a failure prints as a person sees it.
       - name: Scenarios through the command

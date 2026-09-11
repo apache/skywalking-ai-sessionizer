@@ -19,6 +19,7 @@ package sessiondata
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -30,12 +31,10 @@ import (
 // Writer emits a .sd file: a header line, one line per record, and a closing
 // line carrying a digest of everything before it.
 //
-// The closing digest is what makes a landed file self-verifying. It replaces a
-// check that is no longer possible: a record used to keep its source bytes, so
-// its digest could be recomputed from them. Now the source bytes are converted
-// on the way in and not kept, so what can still be proved is that the file has
-// not changed since it was written - and that a file cut short mid-write is
-// recognised as incomplete rather than read as short.
+// The digest proves the file has not changed since it was written. It also
+// makes a file cut short mid-write fail as incomplete. A record's source
+// digest has a different purpose: it identifies the source record before
+// conversion, including any envelope fields the conversion leaves out.
 type Writer struct {
 	bw *bufio.Writer
 	h  hash.Hash
@@ -57,7 +56,7 @@ func NewWriter(w io.Writer, h *Header) (*Writer, error) {
 	}
 	sum := sha256.New()
 	bw := bufio.NewWriterSize(io.MultiWriter(w, sum), 1<<20)
-	enc, err := json.Marshal(h)
+	enc, err := encodeLine(h)
 	if err != nil {
 		return nil, fmt.Errorf("sessiondata: encode header: %w", err)
 	}
@@ -72,7 +71,7 @@ func NewWriter(w io.Writer, h *Header) (*Writer, error) {
 
 // Write appends one record.
 func (w *Writer) Write(r *Record) error {
-	enc, err := json.Marshal(r)
+	enc, err := encodeRecord(r)
 	if err != nil {
 		return fmt.Errorf("sessiondata: encode record %d: %w", r.Ord, err)
 	}
@@ -112,7 +111,7 @@ func (w *Writer) Close() error {
 		return err
 	}
 	end := End{T: "end", Records: w.n, Digest: hex.EncodeToString(w.h.Sum(nil))}
-	enc, err := json.Marshal(end)
+	enc, err := encodeLine(end)
 	if err != nil {
 		return err
 	}
@@ -123,4 +122,65 @@ func (w *Writer) Close() error {
 		return err
 	}
 	return w.bw.Flush()
+}
+
+// encodeLine leaves <, > and & readable in the fields the writer owns.
+func encodeLine(v any) ([]byte, error) {
+	var b bytes.Buffer
+	e := json.NewEncoder(&b)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(b.Bytes(), []byte{'\n'}), nil
+}
+
+var dataSlot = []byte(`"data":null`)
+
+// encodeRecord keeps each part's data apart from whitespace between tokens.
+// The JSON encoder still rewrites RawMessage values, including U+2028 and
+// U+2029 under Go's JSON v2 engine, even with HTML escaping disabled. Insert
+// the compacted data after encoding the other fields so its spelling survives.
+func encodeRecord(r *Record) ([]byte, error) {
+	if r == nil {
+		return encodeLine(r)
+	}
+	var held [][]byte
+	size := 0
+	cp := *r
+	cp.Parts = append([]Part(nil), r.Parts...)
+	for i := range cp.Parts {
+		if len(cp.Parts[i].Data) == 0 {
+			continue
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, cp.Parts[i].Data); err != nil {
+			return nil, fmt.Errorf("part %d: %w", i, err)
+		}
+		held = append(held, compact.Bytes())
+		size += compact.Len()
+		cp.Parts[i].Data = json.RawMessage("null")
+	}
+	line, err := encodeLine(&cp)
+	if err != nil || len(held) == 0 {
+		return line, err
+	}
+	// A string cannot contain this literal field: its quotes are escaped.
+	if n := bytes.Count(line, dataSlot); n != len(held) {
+		return nil, fmt.Errorf("found %d places for the data of %d parts", n, len(held))
+	}
+	out := make([]byte, 0, len(line)+size)
+	for _, data := range held {
+		i := bytes.Index(line, dataSlot) + len(`"data":`)
+		out = append(out, line[:i]...)
+		out = append(out, data...)
+		line = line[i+len("null"):]
+	}
+	out = append(out, line...)
+	// A part is inside three record containers. JSON near the depth limit
+	// can be valid on its own but unreadable after insertion into a record.
+	if !json.Valid(out) {
+		return nil, fmt.Errorf("encoded record is not valid JSON")
+	}
+	return out, nil
 }

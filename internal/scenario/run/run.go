@@ -313,6 +313,16 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 				name string
 				on   *bool
 				fn   func() ([]string, error)
+			}{"parts_keep_source_bytes", ex.Properties.PartsKeepSourceBytes, func() ([]string, error) {
+				return partsKeepSourceBytes(out, session, map[string]string{
+					claudecode.Name:        filepath.Join(out, "_source"),
+					claudecodechanges.Name: filepath.Join(out, "_source", "plugins", "data"),
+				})
+			}},
+			struct {
+				name string
+				on   *bool
+				fn   func() ([]string, error)
 			}{"discovery_ignores_noise", ex.Properties.DiscoveryIgnoresNoise, func() ([]string, error) { return discoveryIgnoresNoise(out, session) }},
 			struct {
 				name string

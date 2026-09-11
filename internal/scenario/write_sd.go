@@ -20,7 +20,6 @@ package scenario
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -285,9 +284,9 @@ func (w *sdWriter) run(r Run) error {
 		return err
 	}
 	off = 0
-	src, _ := json.Marshal(r.Script)
-	s := &sessiondata.Record{From: sessiondata.FromRuntime, Parts: []sessiondata.Part{{
-		Kind: sessiondata.PartUnknown, Text: "the source is a program, not data", Data: src, State: "available", Bytes: len(r.Script)}}}
+	script := sessiondata.Part{Kind: sessiondata.PartUnknown, Text: "the source is a program, not data", State: "available", Bytes: len(r.Script)}
+	script.SetRaw([]byte(r.Script))
+	s := &sessiondata.Record{From: sessiondata.FromRuntime, Parts: []sessiondata.Part{script}}
 	finish(s, 1, &off)
 	_, err := w.land(dir, "script", "script.cursor", sessiondata.Header{Kind: sessiondata.KindWorkflowScript, Src: w.source("runs", r.ID+"/script"), Batch: r.ID}, []*sessiondata.Record{s})
 	return err
@@ -344,7 +343,7 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 			if input == nil {
 				input = map[string]any{}
 			}
-			data, _ := json.Marshal(input)
+			data := jsLine(input)
 			r.Parts = []sessiondata.Part{{Kind: sessiondata.PartCall, Data: data, ID: e.Tool.ID, Name: e.Tool.Name, State: "available", Bytes: len(data)}}
 		}
 	case EvResult:
@@ -367,7 +366,7 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 			data = "a bare string, not an object"
 		}
 		if !e.Replayed {
-			part.Data, _ = json.Marshal(data)
+			part.Data = jsLine(data)
 		}
 		r.Parts = []sessiondata.Part{part}
 		// An editing tool's patch travels beside the raw result, as the
@@ -413,7 +412,7 @@ func textPart(text string) sessiondata.Part {
 }
 
 func dataPart(v any) sessiondata.Part {
-	data, _ := json.Marshal(v)
+	data := jsLine(v)
 	return sessiondata.Part{Kind: sessiondata.PartData, Data: data, State: "available", Bytes: len(data)}
 }
 
@@ -422,7 +421,7 @@ func dataPart(v any) sessiondata.Part {
 // source bytes to name.
 func finish(r *sessiondata.Record, ord uint64, off *uint64) {
 	r.Ord, r.Off = ord, *off
-	b, _ := json.Marshal(r)
+	b := jsLine(r)
 	sum := sha256.Sum256(b)
 	r.Sha, r.Bytes = hex.EncodeToString(sum[:6]), len(b)
 	*off += uint64(len(b)) + 1

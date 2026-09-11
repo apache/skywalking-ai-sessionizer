@@ -26,6 +26,26 @@
   way, and a workflow script saved in another encoding is another. Measured on 2026-09-11 on one
   machine's storage root of 60 sessions, none of its 151 `unknown` parts had lost a byte. That root
   held no change records of the plugin, so the measurement covers `claude-code-local` only.
+- Source JSON in a part's `data` now keeps its bytes, apart from whitespace between tokens. The
+  writer inserts it after `json.Compact` instead of re-encoding it. Earlier writers changed `<`,
+  `>` and `&` to `\u003c`, `\u003e` and `\u0026`, and U+2028 and U+2029 to `\u2028` and `\u2029`.
+  Turning HTML escaping off alone still changes the last two under Go 1.27's JSON v2 engine.
+  Inserting the compact JSON keeps `data` the same under both Go JSON engines. Unknown strings,
+  derived change records and plugin lines keep their own encodings. Whitespace between tokens
+  is still removed without a warning. [What data holds](../formats/session-data.md#what-data-holds)
+  describes the exact boundary. On a 2026-09-12 sample of 6,377 source files from 85 sessions, all
+  229,341 source JSON parts landed byte for byte, compared with 144,464 (62.99%) before. Both Go
+  JSON engines gave the same result. The schema stays `sd/1`; old files and their digests stay intact.
+  A data-only step can therefore show escapes from an old file and literal characters from a new
+  one. The example `asz-view-example.yaml` is regenerated with the new writer. OAP's copies need
+  a paired follow-up: regenerate both fixture scenarios and their example documents from the same
+  asz commit, then replace their landed files and expected documents together.
+- The new `parts_keep_source_bytes` scenario property compares source JSON and unknown bytes
+  with landed parts and checks source digests. It runs on `claude-code` scenarios only, including
+  the new `source-bytes.yaml`; it does not monitor real sources. Scenario writers now preserve
+  literal `<`, `>`, `&`, U+2028 and U+2029. Workflow names produce valid run ids even when they
+  start with punctuation, and a build refuses names that produce the same run id, ignoring letter
+  case.
 - A source Claude Code pruned now has its cursor set to `source_gone`, as the documentation said.
   A pass visits only the files discovery lists. So before, only a file that went while a pass read
   it was marked, and a pruned file's cursor said `active` forever. Measured on 2026-09-11 on one

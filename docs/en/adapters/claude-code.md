@@ -721,8 +721,14 @@ into a `changes/1` record as a second `data` part beside the raw result, with th
 its id, `captured_by: claude-code`, `basis: runtime_reported`, the path relative to the record's
 `cwd`, the hunks as the runtime wrote
 them, or computed from the two versions when it wrote none, and the content before and after
-hashed. The raw result stays byte for byte. A subagent's transcript carries no such patch: 0 of
-453 in the same corpus.
+hashed. The raw result stays beside it as the JSON Claude Code wrote, apart from whitespace between
+tokens (see [What data holds](../formats/session-data.md#what-data-holds)). A subagent's transcript
+carries no such patch: 0 of 453 in the same corpus.
+
+In the 2026-09-12 source sample described on that page, all 32,887 tool result data parts from
+main transcripts, 164 from direct subagents and 166 from workflow subagents landed byte for byte.
+These counts include the structured result or content that is not text. The earlier encoding
+kept 21,569, 43 and 166 of them byte for byte, respectively.
 
 **The plugin's observations.** The [asz Claude Code plugin](../setup/claude-code-plugin.md)
 records shell commands, and edits inside subagents, into its own data directory beside Claude

@@ -18,8 +18,11 @@
 package scenario
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,6 +114,50 @@ func TestAWorkflowRunsItsChildrenAtTheSameTime(t *testing.T) {
 	for i := 1; i < len(j); i++ {
 		if j[i].At.Before(j[i-1].At) {
 			t.Fatalf("journal line %d (%s at %s) is before line %d (%s at %s)", i, j[i].Type, j[i].At, i-1, j[i-1].Type, j[i-1].At)
+		}
+	}
+}
+
+// Invalid paths cannot be represented as a successful runtime scenario.
+func TestWorkflowRunNames(t *testing.T) {
+	for _, name := range []string{"<all> & report", "_check", "--", "中文", "check", "check 2"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "names.yaml")
+			body := fmt.Sprintf("steps:\n  - input: check\n  - call:\n      workflow:\n        name: %q\n        children: [{name: child, steps: [{call: {text: done}}]}]\n", name)
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sc, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := sc.Plan(Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Runs) != 1 || !regexp.MustCompile(`^wf_[A-Za-z0-9][A-Za-z0-9_-]*$`).MatchString(plan.Runs[0].ID) {
+				t.Fatalf("invalid workflow run: %+v", plan.Runs)
+			}
+		})
+	}
+}
+
+func TestWorkflowRunNameCollision(t *testing.T) {
+	for _, names := range [][2]string{{"check <a>", "check [a]"}, {"same", "same"}, {"Check", "check"}} {
+		path := filepath.Join(t.TempDir(), "collision.yaml")
+		body := "steps:\n  - input: check\n"
+		for _, name := range names {
+			body += fmt.Sprintf("  - call:\n      workflow:\n        name: %q\n        children: [{name: child, steps: [{call: {text: done}}]}]\n", name)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		sc, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sc.Plan(Options{}); err == nil || !strings.Contains(err.Error(), "same run id") {
+			t.Fatalf("colliding workflows %q: %v", names, err)
 		}
 	}
 }

@@ -121,6 +121,8 @@ type Part struct {
 	Text string `json:"text,omitempty"`
 	// Data is structure a reader may want but cannot read as prose: a call's
 	// input, a result's parsed form, the raw bytes of an unknown part.
+	// Where it is a piece of the source's own JSON, the writer keeps its
+	// bytes as given, apart from whitespace between tokens.
 	Data json.RawMessage `json:"data,omitempty"`
 
 	// ID is a call's own identifier; Of is the call a result belongs to.
@@ -215,8 +217,8 @@ type Record struct {
 	// Ord and Off locate the record in the SOURCE: its line number and its byte
 	// offset. Sha is the digest of the source bytes.
 	//
-	// The bytes themselves are not kept - the parts below are what a reader
-	// wants, and the rest of a raw record is envelope. The digest stays because
+	// The parts below keep what a reader wants. The source envelope is not
+	// always kept. The digest stays because
 	// provenance is still provable without them: two collectors reading the same
 	// source record produce the same digest, and a record that claims a source
 	// it did not come from is detectable.
