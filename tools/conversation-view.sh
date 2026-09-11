@@ -89,8 +89,26 @@ case "$cmd" in
     echo "conversation-view: built from Horizon $full into $dest"
     ;;
   check)
+    # The source package leaves out the two fonts: .gitattributes marks them
+    # export-ignore, because the ASF keeps a Category B work out of a source
+    # release. So in an unpacked source package the build has two files the
+    # tree cannot have, and they are left out of the comparison. A git
+    # checkout tracks them, so there a missing font is still a difference.
+    skipped=""
+    if ! ls "$here/$dest/host-shell/fonts/"*.woff2 >/dev/null 2>&1 \
+      && [ -z "$(git -C "$here" ls-files -- "$dest/host-shell/fonts/*.woff2" 2>/dev/null)" ]; then
+      for f in "$out/host-shell/fonts/"*.woff2; do
+        [ -f "$f" ] || continue
+        skipped="$skipped ${f##*/}"
+        rm -f "$f"
+      done
+      echo "left out of the comparison, because the source package does not carry them:$skipped"
+    fi
     if diff -r "$out" "$here/$dest"; then
       echo "conversation-view matches Horizon $full"
+    elif [ -n "$skipped" ]; then
+      echo "conversation-view in this source package differs from a build of Horizon $full, in the files named above" >&2
+      exit 1
     else
       echo "conversation-view differs from a build of Horizon $full: run tools/conversation-view.sh update and commit the result" >&2
       exit 1

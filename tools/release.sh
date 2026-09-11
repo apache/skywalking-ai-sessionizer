@@ -88,11 +88,17 @@
 # prepare gives a version that page in the commit after the tag, and main
 # holds it once the prepare pull request has merged.
 #
-# --dry-run prints what would change and writes nothing.
+# --dry-run prints what the stage would do. It makes no commit and no push,
+# changes nothing on dist.apache.org or GitHub, and writes no file in dist/.
+# candidate, publish and complete read the tag to make the plan, so, like a
+# real run, they fetch vVERSION from origin into this repository when it
+# does not have the tag. A candidate dry run also signs a scratch file and
+# imports KEYS, in a temporary directory that it removes.
 
 set -euo pipefail
 
-usage() { sed -n '/^# The stages of a release/,/^# --dry-run/p' "$0" | sed -E 's/^# ?//'; }
+# usage prints the comment above, down to the blank line after it.
+usage() { sed -n '/^# The stages of a release/,/^$/p' "$0" | sed -E '/^$/d; s/^# ?//'; }
 
 cmd="${1:-}"
 case "$cmd" in
@@ -266,6 +272,36 @@ need_tools() {
   [ -z "$missing" ] || fail "missing tools:$missing"
 }
 
+# keys_verify KEYRING FINGERPRINT ASC FILE verifies a signature the way a
+# voter does, against KEYRING, and prints what is wrong with it. It prints
+# nothing when gpg reports a good signature by the key whose primary key is
+# FINGERPRINT, and does not report the key that signed, or the signature,
+# as expired or revoked. The ASF counts a signature as valid only when gpg
+# verifies it as a good signature and does not complain about expired or
+# revoked keys. For a key that has expired or is revoked in KEYRING, gpg
+# still writes VALIDSIG and exits 0. It writes EXPKEYSIG or REVKEYSIG in
+# place of GOODSIG, and it writes EXPSIG for a signature that has expired.
+# So the signature needs GOODSIG, and any of those three lines fails it, as
+# BADSIG and ERRSIG do. KEYEXPIRED and KEYREVOKED are not about the
+# signature: gpg writes them for any key in the key block that has expired
+# or is revoked. With gpg 2.5.18, a KEYS entry that held an old signing
+# subkey that had expired, and a newer subkey that signed, gave KEYEXPIRED
+# beside GOODSIG, and a voter read only "Good signature". So those two lines
+# fail nothing here. candidate refuses an expired or revoked primary key or
+# signing subkey with key_state, before this runs.
+keys_verify() {
+  local st by bad
+  st=$(gpg --batch --homedir "$1" --status-fd 1 --verify "$3" "$4" 2>/dev/null || true)
+  by=$(printf '%s\n' "$st" | awk '$2 == "VALIDSIG" && !f {f = ($12 != "" ? $12 : $3)} END {print f}')
+  bad=$(printf '%s\n' "$st" | awk '$2 ~ /^(BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG)$/ && !seen[$2]++ {printf "%s%s", (n++ ? ", " : ""), $2}')
+  if [ -n "$bad" ]; then printf 'gpg reports %s' "$bad"
+  elif [ -z "$by" ]; then printf 'gpg reports no valid signature'
+  elif [ "$by" != "$2" ]; then printf 'the signature is by %s, not by %s' "$by" "$2"
+  elif ! printf '%s\n' "$st" | awk '$2 == "GOODSIG" {g = 1} END {exit !g}'; then printf 'gpg does not report a good signature'
+  fi
+  return 0
+}
+
 # asf_svn logs in as APACHE_ID when it is set, for a person whose local
 # user name is not their Apache ID.
 asf_svn() {
@@ -287,6 +323,8 @@ svn_list() {
 # fetch_tag checks that vVERSION is on origin, and that a local tag of the
 # same name, if there is one, is the same object. The vote names the tag on
 # origin, so a local tag that differs would build or describe something else.
+# When there is no local tag, it fetches that one, in a dry run too, because
+# every stage that calls it reads the tag.
 # The tag must hold the finished changelog of the version at changes.md: its
 # heading names the version and the in-development note is gone. The docs
 # the website publishes from the tag link that page, the vote mail and the
@@ -300,7 +338,10 @@ fetch_tag() {
   if local_id=$(git rev-parse -q --verify "refs/tags/$tag"); then
     [ "$local_id" = "$remote_id" ] || fail "the local tag $tag is $local_id but origin's is $remote_id. Remove the local one with 'git tag -d $tag' and run again"
   else
-    git fetch -q origin "refs/tags/$tag:refs/tags/$tag" || fail "cannot fetch $tag from origin"
+    # Only this tag. Without --no-tags, git also fetches every other tag on
+    # origin that points into its history.
+    git fetch -q --no-tags origin "refs/tags/$tag:refs/tags/$tag" || fail "cannot fetch $tag from origin"
+    say "fetched $tag from origin into this repository, which did not have it"
   fi
   tag_page=$(git show "$tag:$dev_page" 2>/dev/null) || fail "$tag does not carry $dev_page, so prepare did not make it"
   [ "$(printf '%s\n' "$tag_page" | page_version)" = "$version" ] || fail "$dev_page in $tag does not name $version in its heading, so prepare did not make $tag. The heading must read '# Changes in $version'"
@@ -373,6 +414,8 @@ if [ "$cmd" = candidate ]; then
   dev_dir="$dist_dev/ai-sessionizer/$version"
   compiled=$(git show "$tag:Makefile" | sed -nE 's/^COMPILED_TYPES[[:space:]]*:?=[[:space:]]*//p')
   [ -n "$compiled" ] || fail "the Makefile in $tag has no COMPILED_TYPES, the file types a source package must not carry"
+  compiled_files=$(git show "$tag:Makefile" | sed -nE 's/^COMPILED_FILES[[:space:]]*:?=[[:space:]]*//p')
+  [ -n "$compiled_files" ] || fail "the Makefile in $tag has no COMPILED_FILES, the names of compiled files a source package must not carry"
   # make release cross-compiles every platform on this machine, and a binary
   # that was never started proves nothing about its platform. So the package
   # for this machine is run before the upload. The script and the scenarios
@@ -478,18 +521,47 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   keys=$(gpg --batch --homedir "$keyring" --with-colons --list-keys 2>/dev/null || true)
   known=$(printf '%s\n' "$keys" | awk -F: '$1 == "fpr" {print $10}')
   has_line "$known" "$fpr" || fail "the signing key $fpr is not in $keys_url. Add it there first; only a PMC member can commit to that file"
+  # In gpg's key listing a pub or sub record carries the key's validity in
+  # field 2, its length in field 3 and its algorithm in field 4. The fpr
+  # record after it names that key. awk reads to the end rather than exit
+  # at the key, as page_version does. It once exited there, and with more
+  # than a pipe buffer of listing after the key, printf wrote into a closed
+  # pipe and pipefail stopped candidate.
+  key_record() { # key_record FINGERPRINT prints "VALIDITY ALGORITHM LENGTH"
+    printf '%s\n' "$keys" | awk -F: -v f="$1" '
+      $1 == "pub" || $1 == "sub" {valid = $2; len = $3; algo = $4; next}
+      $1 == "fpr" && $10 == f && !done {print valid, algo, len; done = 1}'
+  }
+  key=$(key_record "$signed_with")
+  [ -n "$key" ] || fail "the key that signed, $signed_with, is not in the KEYS keyring"
+  # The ASF counts a signature as valid only when gpg reports it good and
+  # does not complain about an expired or revoked key. gpg marks a key as
+  # expired with e and as revoked with r. This keyring holds KEYS alone, so
+  # what gpg marks here is what every voter's gpg reports, however valid the
+  # key is on this machine. The usual case is a key extended here while
+  # KEYS holds the old copy. The primary key and the subkey that signs both
+  # count. A revoked primary key was once refused only because its user IDs
+  # were revoked too, with a message about a missing apache.org address.
+  key_state() { # key_state VALIDITY NAME
+    case "$1" in
+      e) fail "$2 has expired in $keys_url. Every voter's gpg would warn that the key has expired, and the ASF does not count such a signature as valid. If you extended the key, have a PMC member commit the renewed public key to KEYS first" ;;
+      r) fail "$2 is revoked in $keys_url. Every voter's gpg would warn that it is revoked, and the ASF does not count such a signature as valid. Sign with a key that is not revoked, and add that key to KEYS" ;;
+    esac
+  }
+  primary=$(key_record "$fpr")
+  key_state "${primary%% *}" "the signing key $fpr"
+  if [ "$signed_with" != "$fpr" ]; then key_state "${key%% *}" "the subkey $signed_with, which signs for $fpr,"; fi
+  # Then the scratch signature is read as a voter reads a package's, so
+  # anything else gpg would complain about is found before the build too.
+  why=$(keys_verify "$keyring" "$fpr" "$work/check.asc" "$work/check")
+  [ -z "$why" ] || fail "a signature by $signed_with does not verify cleanly against $keys_url: $why. Every voter would see the same"
   # The ASF requires a release signing key to be RSA of at least 2048 bits,
   # and asks for 4096 bits in a new key. Recent gpg versions offer an
   # elliptic curve key by default, which passes every other check here. In
-  # gpg's key listing a pub or sub record carries the length in field 3 and
-  # the algorithm in field 4, where 1 and 3 are RSA. The fpr record after it
-  # names that key.
-  key=$(printf '%s\n' "$keys" | awk -F: -v f="$signed_with" '
-    $1 == "pub" || $1 == "sub" {len = $3; algo = $4; next}
-    $1 == "fpr" && $10 == f {print algo, len; exit}')
-  algo=${key%% *}
-  bits=${key##* }
-  [ -n "$key" ] || fail "the key that signed, $signed_with, is not in the KEYS keyring"
+  # the algorithm field, 1 and 3 are RSA.
+  rest=${key#* }
+  algo=${rest%% *}
+  bits=${rest##* }
   case "$algo" in
     1|3) ;;
     *) fail "the key that signed, $signed_with, is not RSA: gpg names its algorithm $algo. The ASF requires RSA keys of at least 2048 bits to sign releases. Create an RSA key of 4096 bits, add it to KEYS, and set GPG_USER to it" ;;
@@ -498,11 +570,11 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   if [ "$bits" -lt 4096 ]; then say "warning  : the key is RSA of $bits bits. The ASF asks a new key to be 4096 bits"; fi
   # SkyWalking asks the signer to be named by an apache.org address, so a
   # voter can tell whose key it is. The user IDs are those of the primary
-  # key, as KEYS holds them; a revoked one does not count.
+  # key, as KEYS holds them. A revoked or expired one does not count.
   apache_uid=$(printf '%s\n' "$keys" | awk -F: -v f="$fpr" '
     $1 == "pub" {mine = 0; first = 1; next}
     first && $1 == "fpr" {mine = ($10 == f); first = 0; next}
-    mine && $1 == "uid" && $2 != "r" {print $10}' | grep -Ei '@apache\.org>$' || true)
+    mine && $1 == "uid" && $2 != "r" && $2 != "e" {print $10}' | grep -Ei '@apache\.org>$' || true)
   [ -n "$apache_uid" ] || fail "the signing key $fpr has no user ID with an apache.org address in $keys_url. Add your apache.org address to the key as a user ID, and update KEYS with it"
   signer="${GPG_USER:-$fpr}"
   say "signer   : $fpr, RSA of $bits bits, in $keys_url as $(printf '%s\n' "$apache_uid" | sed -n 1p)"
@@ -512,7 +584,7 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   say "- make release VERSION=$version GPG_USER=$signer, in the clone"
   say "- move the packages, each with its .asc and .sha512, into $out:"
   for p in $packages; do say "    $p"; done
-  say "- verify every package: its .asc and .sha512 are there, shasum -a 512 -c passes, and gpg --verify passes against KEYS"
+  say "- verify every package: its .asc and .sha512 are there, shasum -a 512 -c passes, and gpg, reading KEYS, reports a good signature and does not report the key that signed, or the signature, as expired or revoked"
   say "- verify the source package holds LICENSE and NOTICE at its top level, no compiled file and no font file"
   if [ -n "$host_pkg" ]; then
     say "- run $host_pkg with $smoke from the clone, and stop if it fails"
@@ -529,7 +601,7 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
     say "- svn commit -m \"Add the $project $version release candidate\""
     say "- write the vote mail to $out/vote.txt and print it"
   fi
-  if [ "$dry_run" = true ]; then say "dry run: nothing was built, uploaded or written"; exit 0; fi
+  if [ "$dry_run" = true ]; then say "dry run: nothing was built or uploaded, and nothing was written into $out. The scratch signature and the KEYS keyring were in a temporary directory, which is removed"; exit 0; fi
 
   step "Build $tag from a fresh clone of origin"
   # Never the working tree: the packages must be exactly what the tag holds,
@@ -565,10 +637,9 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   [ -z "$extra" ] || fail "$out holds packages the Makefile in $tag does not name:$extra"
   for p in $packages; do
     (cd "$out" && shasum -a 512 --status -c "$p.sha512") || fail "the sha512 of $p does not match $p.sha512"
-    signed_by=$(gpg --batch --homedir "$keyring" --status-fd 1 --verify "$out/$p.asc" "$out/$p" 2>/dev/null \
-      | awk '$2 == "VALIDSIG" && !f {f = ($12 != "" ? $12 : $3)} END {print f}' || true)
-    [ "$signed_by" = "$fpr" ] || fail "the signature of $p does not verify against $keys_url as made by $fpr"
-    say "ok  $p: sha512, and signed by $fpr"
+    why=$(keys_verify "$keyring" "$fpr" "$out/$p.asc" "$out/$p")
+    [ -z "$why" ] || fail "the signature of $p does not verify cleanly against $keys_url as made by $fpr: $why"
+    say "ok  $p: sha512, and a good signature by $fpr"
   done
   # The ASF does not allow compiled code in a source release. file(1) is
   # asked for the type of every file, with the types the tag's Makefile
@@ -586,6 +657,10 @@ $fonts"
   tar -xzf "$out/$src" -C "$work/src"
   found=$(cd "$work/src" && find . -type f -print0 | xargs -0 file -N --mime-type | grep -E ": *$compiled\$" || true)
   [ -z "$found" ] || fail "$src carries compiled files:
+$found"
+  # COMPILED_FILES names the compiled files file(1) cannot tell by type.
+  found=$(cd "$work/src" && find . -type f | grep -E "$compiled_files\$" || true)
+  [ -z "$found" ] || fail "$src carries files named as compiled files, which file(1) may not tell by type:
 $found"
   say "ok  $src: LICENSE and NOTICE at the top, no compiled file, no font file"
   # The same list a voter checks in every binary package.
@@ -664,7 +739,7 @@ Guide to build the release from source:
  * $github/blob/$tag/docs/en/guides/how-to-release.md
 
 Notes for voters:
- * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. \`make conversation-view-check\`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares.
+ * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. \`make conversation-view-check\`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
  * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.
 
 Voting will start now and will remain open for at least 72 hours. All PMC members are requested to give their votes.
@@ -872,7 +947,7 @@ if [ "$cmd" = publish ]; then
   say "- write the announcement to $out/announce.txt"
   say "- write the website entries to $out/website.txt"
   say "- $manifests $version $out $out/install"
-  if [ "$dry_run" = true ]; then say "dry run: nothing was moved, removed, fetched or written"; exit 0; fi
+  if [ "$dry_run" = true ]; then say "dry run: no package was fetched, and nothing was moved, removed or written"; exit 0; fi
 
   mkdir -p "$out"
   for p in $fetch; do

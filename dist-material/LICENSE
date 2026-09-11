@@ -188,17 +188,10 @@ BSD-3-Clause licenses
 ========================================================================
 
     github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 BSD-3-Clause
-    github.com/rogpeppe/go-internal v1.16.0 BSD-3-Clause
     golang.org/x/net v0.58.0 BSD-3-Clause
     golang.org/x/sys v0.47.0 BSD-3-Clause
     golang.org/x/text v0.41.0 BSD-3-Clause
     google.golang.org/protobuf v1.36.12 BSD-3-Clause
-
-========================================================================
-MIT licenses
-========================================================================
-
-    github.com/kr/text v0.2.0 MIT
 
 ========================================================================
 MIT and Apache-2.0 licenses

@@ -57,7 +57,10 @@ Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
 - `candidate`, `vote-result` and `publish` write their files under `dist/$VERSION/` in the
   checkout, and `complete` reads the voted packages from there. `prepare` writes nothing there.
   Git ignores `dist/`.
-- `--dry-run` prints what the stage would do and writes nothing.
+- `--dry-run` prints what the stage would do. It makes no commit and no push, changes nothing on
+  dist.apache.org or GitHub, and writes no file in `dist/`. `candidate`, `publish` and `complete`
+  read the tag to make the plan. So, like a real run, they fetch `v$VERSION` from origin into the
+  local repository when it does not have the tag. They fetch that one tag and no other.
 - An option that belongs to another stage is refused, never ignored.
 - When `APACHE_ID` is set, every svn command runs as `svn --username "$APACHE_ID"`. Set it when
   your local user name is not your Apache ID.
@@ -82,8 +85,10 @@ Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
    ```
 
    `candidate` refuses to build with a key that is not in KEYS, because every voter checks the
-   signatures against that file. It also refuses a key that is not RSA of at least 2048 bits, or
-   that has no user ID with an apache.org address.
+   signatures against that file. It also refuses a key that has expired or is revoked in KEYS, a
+   key that is not RSA of at least 2048 bits, and a key that has no user ID with an apache.org
+   address. gpg reads the expiry of a key from KEYS, not from your machine. So when you extend
+   your key, have a PMC member commit the renewed public key to KEYS before the next candidate.
 2. **The tools.** git, Go 1.27 or later, make, gpg, shasum, tar, zip, unzip, file, curl, svn, and
    gh logged in to an account that can write to the repository. `prepare`, `candidate`, `publish`
    and `complete` check for the tools they use before they change anything, and name any that is
@@ -211,7 +216,7 @@ It does these steps in order, and stops at the first one that fails.
    `docs/en/changes/changes.md` must name `$VERSION` in its heading and carry no in-development
    note, as `prepare` leaves it in the commit it tags. The vote mail links that page. A local tag
    of the same name must be the same object as the one on origin. When there is no local tag, it
-   fetches the tag.
+   fetches that one tag from origin, in a dry run too, and says so.
 2. **Name the packages.** They are the ones the Makefile in the tag builds: the source package,
    and one binary package for each entry in its `PLATFORMS`. The tag is read, never the working
    tree, so a platform added later is never demanded of an older version. It also finds the
@@ -250,9 +255,23 @@ It does these steps in order, and stops at the first one that fails.
    keyring, and refuses when:
    - the primary key is not there. A voter checks every signature against KEYS, so a key missing
      there is found before the build, not during the vote.
+   - gpg marks the primary key, or the subkey that signs, as expired or revoked in that keyring.
+     Every voter's gpg reads the same KEYS, and would warn about it. The
+     [ASF release signing guide](https://infra.apache.org/release-signing.html) counts a signature
+     as valid only when gpg verifies it as a good signature and does not complain about expired
+     or revoked keys. The usual case is a key extended on your machine, while KEYS still holds the
+     old copy.
+   - gpg, reading that keyring, does not report the signature of the scratch file as good, or
+     reports the key that signed, or the signature, as expired or revoked. Those are the
+     `EXPKEYSIG`, `REVKEYSIG` and `EXPSIG` lines of its status output. A KEYS entry that also
+     holds an old subkey that has expired, beside a newer subkey that signs, is not refused. gpg
+     prints a good signature by the newer subkey and nothing about the old one. Its status output
+     has a `KEYEXPIRED` line for the old subkey. That line is not about the signature, so
+     `candidate` does not refuse it.
    - the key that signed is not RSA, or has fewer than 2048 bits. The ASF requires both. A key of
      fewer than 4096 bits gets a warning, because the ASF asks a new key to be 4096 bits.
-   - no user ID of the key, as KEYS holds it, has an apache.org address.
+   - no user ID of the key, as KEYS holds it, has an apache.org address. A revoked or expired user
+     ID does not count.
 6. **Build from a fresh clone of the tag.** It never builds from the working tree, so the packages
    hold exactly what the tag holds. By hand:
 
@@ -265,11 +284,21 @@ It does these steps in order, and stops at the first one that fails.
    mv dist/$VERSION/build/dist/*.tgz* dist/$VERSION/build/dist/*.zip* dist/$VERSION/
    ```
 
-   `make release` refuses to run unless the tag is checked out and the tree has no change and no
-   untracked file. An untracked Go file would be compiled into the binaries while the source
-   package, made from the tag, does not hold it. It also refuses when git tracks a file of a type
-   `COMPILED_TYPES` in the Makefile names, because an Apache source release must not carry compiled
-   code. It removes packages left in `dist/` by an earlier build, so none is signed with these.
+   `make release` refuses to run unless the tag is checked out, and the tree has no change and no
+   file that git does not track, ignored files included. Only its build output may be there, in
+   `dist/`, `bin/` and `plugins/claude-code/bin/`. An untracked Go file would be compiled into the
+   binaries. `asz` embeds every file in `internal/view/conversation-view/` whose name does not
+   start with `.` or `_`. The binary packages take the plugin's `.claude-plugin/` and `hooks/` and
+   `dist-material/licenses/` whole, so an ignored `.DS_Store` there would be packaged. The source
+   package, made from the tag, holds none of them. The binaries are built with `GOWORK=off` and
+   `GOFLAGS=-mod=readonly`, so a `go.work` in the tree or in a directory above it does not change
+   what they are built from.
+   `make release` also refuses when git tracks a file of a type `COMPILED_TYPES` in the Makefile
+   names, or with a name `COMPILED_FILES` names, because an Apache source release must not carry
+   compiled code. `COMPILED_FILES` is for the compiled files `file` cannot tell by type: the
+   `file` 5.41 that ships with macOS reports a WebAssembly module and a Python `.pyc` file as
+   `application/octet-stream`. It removes packages left in `dist/` by an earlier build, so none is
+   signed with these.
    Then it builds the packages [described below](#what-make-release-builds). Right after
    `git archive`, it lists the source package and stops when a font file is in it. It looks for
    the file types step 3 looks for, which `FONT_FILES` in the Makefile names. It removes that
@@ -277,10 +306,13 @@ It does these steps in order, and stops at the first one that fails.
 7. **Verify the candidate** in `dist/$VERSION/`.
    - Every package is there with its `.asc` and `.sha512`, and no other package is.
    - `shasum -a 512 -c` passes for each package.
-   - `gpg --verify` passes for each package against the KEYS keyring, signed by the checked key.
+   - gpg, reading the KEYS keyring, reports a good signature by the checked key for each package.
+     It does not report the key that signed, or the signature, as expired or revoked: no
+     `EXPKEYSIG`, `REVKEYSIG` or `EXPSIG` line. gpg exits 0 for a key that has expired in KEYS
+     too, so its exit status is not enough.
    - The source package holds `LICENSE` and `NOTICE` at its top level, and nothing outside its top
-     directory. It holds no font file, and `file` finds no file of a type `COMPILED_TYPES` in the
-     tag's Makefile names.
+     directory. It holds no font file. `file` finds no file of a type `COMPILED_TYPES` in the
+     tag's Makefile names, and no file has a name `COMPILED_FILES` there names.
    - Each binary package holds `asz`, `claude-code-plugin/bin/asz-claude-plugin`,
      `claude-code-plugin/.claude-plugin/`, `claude-code-plugin/hooks/`, `LICENSE`, `NOTICE` and
      `licenses/`. On Windows the two binaries end in `.exe`.
@@ -320,9 +352,11 @@ area and the release directory, and refuses when a candidate of `$VERSION` is th
 is released already. A new build would replace the uploaded or voted files in `dist/$VERSION/`,
 and its signatures at least would differ from them.
 
-`--dry-run` builds, runs, uploads and writes nothing, but it still signs a scratch file, so gpg may
-ask for the passphrase, and it reads svn and KEYS. Its plan names the package it would run on this
-machine.
+`--dry-run` builds, runs and uploads nothing, and writes nothing into `dist/$VERSION/`. It still
+fetches a missing tag, as step 1 says. It still checks the signing key as step 5 does: it signs a
+scratch file, so gpg may ask for the passphrase, and it reads svn and KEYS. The scratch file, its
+signature and the KEYS keyring are in a temporary directory that it removes. Its plan names the
+package it would run on this machine.
 
 Running `candidate` again rebuilds everything in `dist/$VERSION/` from the tag. After an upload it
 refuses, as step 4 says.
@@ -341,8 +375,10 @@ refuses, as step 4 says.
   binary package for each platform. Each holds `asz` (`asz.exe` on Windows), `claude-code-plugin/`
   with the Claude Code plugin's `.claude-plugin/`, `hooks/` and `bin/asz-claude-plugin`, and the
   `LICENSE`, `NOTICE` and `licenses/` of a binary distribution, generated into `dist-material/`.
-  The binaries embed the two fonts, which `dist-material/LICENSE` names.
+  They name the modules built into the two binaries on the six platforms, and no module that
+  only tests need. The binaries embed the two fonts, which `dist-material/LICENSE` names.
 - A `.sha512` checksum and an `.asc` signature beside every package. `GPG_USER` picks the key.
+  The first package that cannot be checksummed or signed stops the release.
 
 The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon and Intel, Linux on
 x86-64 and ARM 64, and Windows on x86-64 and ARM 64. That is seven packages with the source
@@ -400,7 +436,7 @@ Guide to build the release from source:
  * https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/guides/how-to-release.md
 
 Notes for voters:
- * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. `make conversation-view-check`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares.
+ * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. `make conversation-view-check`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
  * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.
 
 Voting will start now and will remain open for at least 72 hours. All PMC members are requested to give their votes.
@@ -435,9 +471,15 @@ for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "
 1. The source package and one binary package for each platform are there, each with its `.asc`
    and `.sha512`. The platforms are the `PLATFORMS` list in the Makefile of the tag.
 2. `shasum -a 512 -c` passes for each package.
-3. `gpg --verify` passes for each package, with a key from KEYS. gpg prints `Good signature`. A
-   warning that the key is not certified with a trusted signature only says your own keyring does
-   not vouch for that key.
+3. `gpg --verify` passes for each package, with a key from KEYS. gpg prints `Good signature`,
+   and nothing about an expired or revoked key: no `[expired]` after the name, no
+   `Note: This key has expired!`, and no warning that the key or a subkey
+   `has been revoked by its owner`. gpg 2.5.18 prints `Good signature` and exits 0 for an expired
+   or revoked key too. The
+   [ASF release signing guide](https://infra.apache.org/release-signing.html) counts a signature
+   as valid only when gpg verifies it as a good signature and does not complain about expired or
+   revoked keys. A warning that the key is not certified with a trusted signature only says your
+   own keyring does not vouch for that key.
 4. The source package is the tag. It unpacks into one directory, and holds exactly what
    `git archive` of the tag holds. `git archive` leaves out what the tag's `.gitattributes` marks
    `export-ignore`, such as the two fonts, so a plain clone of the tag has more files:
@@ -461,12 +503,19 @@ for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "
    [ "$(head -1 $p)" = "# Changes in $VERSION" ] && ! grep -q '^> In development' $p && echo "the changelog is final"
    ```
 
-5. The source package carries no compiled file and no font file. Both commands print nothing:
+5. The source package carries no compiled file and no font file. All three commands print
+   nothing:
 
    ```sh
-   find apache-skywalking-ai-sessionizer-$VERSION-src -type f -exec file {} + | grep -E 'ELF|Mach-O|PE32'
+   find apache-skywalking-ai-sessionizer-$VERSION-src -type f -exec file {} + | grep -E 'ELF|Mach-O|PE32|current ar archive|Java archive|compiled Java|WebAssembly|byte-compiled'
+   find apache-skywalking-ai-sessionizer-$VERSION-src -type f | grep -E '\.(a|o|so|dylib|dll|exe|lib|obj|class|jar|war|pyc|pyo|wasm)$'
    find apache-skywalking-ai-sessionizer-$VERSION-src -type f | grep -E '\.(woff2?|ttf|otf|eot)$'
    ```
+
+   The first finds compiled files by what `file` says they are: executables, libraries, object
+   files, Java classes and archives, WebAssembly modules and Python byte code. The second finds
+   them by name, because `file` cannot tell some of them. The `file` 5.41 that ships with macOS
+   calls a Python `.pyc` file only `data`. These are the files `make release` refuses too.
 
    Fonts come under licenses such as the SIL Open Font License, which the ASF puts in Category B.
    A Category B work may be in a convenience binary, never in a source release.
@@ -475,11 +524,17 @@ for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "
    names. It is Apache-2.0 code of the ASF. Horizon's package has development dependencies only,
    and none of them is bundled into it, so no third-party code is in it. Its JavaScript file
    carries no license header, and its CSS files carry Horizon's. With Node.js 24 and pnpm,
-   `make conversation-view-check` rebuilds it from that commit and fails when it differs.
+   `make conversation-view-check` rebuilds it from that commit and fails when it differs. In the
+   unpacked source package it leaves the two fonts, `inter-latin-wght-normal.woff2` and
+   `jetbrains-mono-latin-wght-normal.woff2`, out of the comparison, because the source package does
+   not carry them, and it prints their names. It compares every other file. In a clone of the tag
+   it compares the fonts too.
 7. Every package carries `LICENSE` and `NOTICE`. A binary package also carries `licenses/`, and
    its `NOTICE` carries the notices of the bundled modules. In the unpacked source,
    `make license-check` checks the license header of every source file, and
-   `make dep-licenses-check` says whether `dist-material/` is what the dependencies resolve to.
+   `make dep-licenses-check` says whether `dist-material/` is what the modules built into the two
+   binaries resolve to. A module that `go.mod` requires only for the tests of a dependency, such as
+   `github.com/kr/text`, is not in the binaries, so `dist-material/` does not list it.
 8. The source package builds and passes its tests:
 
    ```sh
@@ -684,7 +739,8 @@ It does these steps in order.
    because both download from the GitHub release. When older versions are in the release
    directory, the last step is the later run with `--remove-old`.
 
-`--dry-run` reads svn and prints the plan. It moves, removes, fetches and writes nothing.
+`--dry-run` reads svn and prints the plan. It fetches no package, and moves, removes and writes
+nothing. Like a real run, it fetches a missing tag, as `candidate` does.
 
 ## 6. Complete
 

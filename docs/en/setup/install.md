@@ -104,7 +104,14 @@ gpg --verify "$PKG.asc" "$PKG"
 ```
 
 `shasum` must print the file name and `OK`. On Linux, `sha512sum -c "$PKG.sha512"` does the same.
-`gpg` must print `Good signature`. It may also warn that the key is not certified with a trusted
+`gpg` must print `Good signature`, and nothing about an expired or revoked key: no `[expired]`
+after the name, no `Note: This key has expired!`, and no warning that the key or a subkey
+`has been revoked by its owner`. gpg 2.5.18 prints `Good signature` and exits 0 for an expired or
+revoked key too, and the
+[ASF release signing guide](https://infra.apache.org/release-signing.html) counts a signature as
+valid only when gpg verifies it as good and does not complain about an expired or revoked key. If
+gpg does complain, the package is not verified: do not use it, and ask on
+`dev@skywalking.apache.org`. gpg may also warn that the key is not certified with a trusted
 signature. That warning only says your own keyring does not vouch for the key. It does not say
 the signature is bad.
 

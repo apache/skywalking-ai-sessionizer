@@ -143,12 +143,18 @@ license-fix: $(BIN_DIR)/license-eye
 dep-check: $(BIN_DIR)/license-eye
 	$(BIN_DIR)/license-eye dependency check
 
-## dep-licenses: regenerate dist-material/LICENSE, dist-material/NOTICE and dist-material/licenses from the dependencies; every binary package carries them
+## dep-licenses: regenerate dist-material/LICENSE, dist-material/NOTICE and dist-material/licenses from the modules built into the binaries; every binary package carries them
 .PHONY: dep-licenses
+# license-eye lists every module go.mod requires, and some of them only the
+# tests of a dependency need, such as github.com/kr/text through the tests of
+# gopkg.in/yaml.v3. A binary package must account for exactly what it
+# holds. So tools/dep-notices.sh also writes a license-eye configuration
+# that excludes every module the two binaries do not use on any platform.
 dep-licenses: $(BIN_DIR)/license-eye
 	@rm -rf dist-material/licenses
-	$(BIN_DIR)/license-eye dependency resolve --summary dist-material/LICENSE.tpl --output dist-material/licenses
-	tools/dep-notices.sh dist-material/NOTICE
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
+	  tools/dep-notices.sh dist-material/NOTICE $$tmp/licenserc.yaml && \
+	  $(BIN_DIR)/license-eye -c $$tmp/licenserc.yaml dependency resolve --summary dist-material/LICENSE.tpl --output dist-material/licenses
 	@$(MAKE) --no-print-directory font-licenses OUT=dist-material/licenses
 
 # The two fonts the embedded conversation renderer carries are bundled into
@@ -159,15 +165,16 @@ font-licenses:
 	@cp internal/view/conversation-view/host-shell/fonts/LICENSE-inter.txt $(OUT)/license-inter-font.txt
 	@cp internal/view/conversation-view/host-shell/fonts/LICENSE-jetbrains-mono.txt $(OUT)/license-jetbrains-mono-font.txt
 
-## dep-licenses-check: fail when dist-material is not what go.mod resolves to, so a changed dependency cannot ship without its license
+## dep-licenses-check: fail when dist-material is not what the modules built into the binaries resolve to, so a changed dependency cannot ship without its license
 .PHONY: dep-licenses-check
 dep-licenses-check: $(BIN_DIR)/license-eye
-	@tmp=$$(mktemp -d) && cp dist-material/LICENSE.tpl $$tmp/ && \
-	  $(BIN_DIR)/license-eye -v warn dependency resolve --summary $$tmp/LICENSE.tpl --output $$tmp/licenses >/dev/null && \
-	  tools/dep-notices.sh $$tmp/NOTICE && \
-	  $(MAKE) --no-print-directory font-licenses OUT=$$tmp/licenses && \
-	  if diff -r $$tmp dist-material; then rm -rf $$tmp; echo "dist-material matches the dependencies"; \
-	  else rm -rf $$tmp; echo "dist-material is out of date: run 'make dep-licenses' and commit the result"; exit 1; fi
+	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && mkdir $$tmp/dist-material && \
+	  cp dist-material/LICENSE.tpl $$tmp/dist-material/ && \
+	  tools/dep-notices.sh $$tmp/dist-material/NOTICE $$tmp/licenserc.yaml && \
+	  $(BIN_DIR)/license-eye -v warn -c $$tmp/licenserc.yaml dependency resolve --summary $$tmp/dist-material/LICENSE.tpl --output $$tmp/dist-material/licenses >/dev/null && \
+	  $(MAKE) --no-print-directory font-licenses OUT=$$tmp/dist-material/licenses && \
+	  if diff -r $$tmp/dist-material dist-material; then echo "dist-material matches the dependencies"; \
+	  else echo "dist-material is out of date: run 'make dep-licenses' and commit the result"; exit 1; fi
 
 ## tidy: verify go.mod and go.sum are current
 .PHONY: tidy
@@ -197,6 +204,10 @@ docker: ## Build the container image, as CI builds and publishes it
 # GNU gzip 1.14 and Apple gzip 479 compressed one archive differently. So a
 # CI build, with GNU tar and GNU gzip, and a macOS build, with bsdtar and
 # Apple gzip, differ.
+# The build ignores a go.work and the GOFLAGS of the environment. A
+# workspace changes the code a dependency is compiled from, and git does not
+# show a go.work, because it is ignored. tools/release.sh builds in a clone
+# inside the checkout, where a go.work at the checkout's root applies too.
 binaries:
 	@mkdir -p $(DIST)/build
 	@epoch=$${SOURCE_DATE_EPOCH:-$$(git log -1 --format=%ct 2>/dev/null)}; stamp=""; \
@@ -208,9 +219,9 @@ binaries:
 	  rm -rf $$out && mkdir -p $$out/claude-code-plugin/bin && \
 	  cp dist-material/LICENSE dist-material/NOTICE $$out/ && cp -R dist-material/licenses $$out/licenses && \
 	  echo "building $$os/$$arch" && \
-	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
+	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
 	  cp -R $(PLUGIN_DIR)/.claude-plugin $(PLUGIN_DIR)/hooks $$out/claude-code-plugin/ && \
-	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/claude-code-plugin/bin/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
+	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/claude-code-plugin/bin/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
 	  chmod -R u=rwX,go=rX $$out || exit 1; \
 	  if [ -n "$$stamp" ]; then find $$out -exec env TZ=UTC0 touch -t $$stamp {} + || exit 1; fi; \
 	  (cd $$out && find $(BINARY)$$ext claude-code-plugin LICENSE NOTICE licenses | LC_ALL=C sort > ../$$os-$$arch.list) || exit 1; \
@@ -226,8 +237,17 @@ binaries:
 
 ## checksums: write a sha512 file beside every package in dist/
 .PHONY: checksums
+# The first failure stops it, as the first gpg failure stops release. A
+# loop ends with the status of its last command, and the shell creates the
+# .sha512 file before shasum runs. So a failed checksum once left an empty
+# .sha512, and make went on to sign every package. Each file is checked
+# right after it is written.
 checksums:
-	@cd $(DIST) && for f in *.tgz *.zip; do [ -f "$$f" ] && shasum -a 512 "$$f" > "$$f.sha512"; done; ls *.sha512
+	@cd $(DIST) && for f in *.tgz *.zip; do \
+	  [ -f "$$f" ] || continue; \
+	  { shasum -a 512 "$$f" > "$$f.sha512" && shasum -a 512 --status -c "$$f.sha512"; } \
+	    || { rm -f "$$f.sha512"; echo "cannot write the sha512 of $$f, so this stops here"; exit 1; }; \
+	done; ls *.sha512
 
 # The font files a source release must not carry. They are found by name,
 # because file(1) often reports a web font only as data. Fonts come under
@@ -238,9 +258,17 @@ checksums:
 FONT_FILES := \.(woff2?|ttf|otf|eot)
 
 # The file(1) types a source release must not carry, because the ASF says a
-# source release should not contain compiled code. tools/release.sh reads
-# this line from the tag's Makefile, so both refuse the same files.
-COMPILED_TYPES := application/(x-(mach-binary|executable|pie-executable|sharedlib|dosexec|object|java-applet)|vnd\.microsoft\.portable-executable|wasm)
+# source release should not contain compiled code. A static library, a Go
+# object and a Go archive are application/x-archive, and a jar is
+# application/java-archive. tools/release.sh reads this line from the tag's
+# Makefile, so both refuse the same files.
+COMPILED_TYPES := application/(x-(mach-binary|executable|pie-executable|sharedlib|dosexec|object|java-applet|archive|bytecode\.python)|vnd\.microsoft\.portable-executable|java-archive|wasm)
+
+# The names of compiled files, for the ones file(1) cannot tell by type.
+# The file 5.41 that ships with macOS reports a WebAssembly module and a
+# Python .pyc as application/octet-stream. tools/release.sh reads this line
+# from the tag's Makefile too.
+COMPILED_FILES := \.(a|o|so|dylib|dll|exe|lib|obj|class|jar|war|pyc|pyo|wasm)
 
 ## release: build everything a vote needs into dist/: the source package, every binary package, sha512 files and GPG signatures. Needs VERSION=x.y.z with the tag vx.y.z checked out
 .PHONY: release
@@ -248,13 +276,20 @@ release:
 	@case "$(VERSION)" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "set the version, for example: make release VERSION=0.1.0"; exit 2 ;; esac
 	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "tag v$(VERSION) does not exist"; exit 2; }
 	@[ "$$(git rev-parse HEAD)" = "$$(git rev-parse 'v$(VERSION)^{commit}')" ] || { echo "check out v$(VERSION) first: the binaries are built from the working tree"; exit 2; }
-	@# An untracked file counts too: go build compiles an untracked .go file
-	@# into the binaries, and the source package, made from the tag, would
-	@# not hold it. dist/ and bin/ are ignored, so they do not count.
-	@[ -z "$$(git status --porcelain)" ] || { echo "the working tree has changes or untracked files; a release is built from the tag alone:"; git status --porcelain; exit 2; }
+	@# A file git does not track counts too, an ignored one included. go
+	@# build compiles an untracked .go file, internal/view embeds every file
+	@# in conversation-view whose name does not start with . or _, and
+	@# binaries copies whole directories, so an ignored .DS_Store in
+	@# plugins/claude-code/hooks goes into a binary package. The source
+	@# package, made from the tag, holds none of them. Only the build output
+	@# may be there: dist/, bin/ and plugins/claude-code/bin/.
+	@left=$$(git status --porcelain --ignored | grep -v -x -e '!! $(DIST)/' -e '!! $(BIN_DIR)/' -e '!! $(PLUGIN_DIR)/bin/' || true); \
+	  [ -z "$$left" ] || { echo "the working tree has changes, or files git does not track, ignored ones included. A release is built from the tag alone, so build it in a fresh clone of the tag, as tools/release.sh candidate does:"; echo "$$left"; exit 2; }
 	@# Two build outputs were once committed by accident, so refuse any
 	@# tracked compiled file rather than ship it in the voted source package.
-	@bad=$$(git ls-files -z | xargs -0 file -N --mime-type | grep -E ': *$(COMPILED_TYPES)$$' || true); \
+	@# file(1) tells most of them by type, and COMPILED_FILES names the ones
+	@# it cannot tell. A file both of them find is named once, with its type.
+	@bad=$$( { git ls-files -z | xargs -0 file -N --mime-type | grep -E ': *$(COMPILED_TYPES)$$'; git ls-files | grep -E '$(COMPILED_FILES)$$'; } | awk -F: '!seen[$$1]++' || true); \
 	  [ -z "$$bad" ] || { echo "the source package would carry compiled files; remove them from git first:"; echo "$$bad"; exit 2; }
 	@# Packages left from an earlier build would be signed and checksummed
 	@# with these, and moved beside them.
