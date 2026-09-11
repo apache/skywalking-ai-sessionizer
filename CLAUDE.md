@@ -68,8 +68,9 @@ internal/repack/                re-cuts landed files into a new root under anoth
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/claudecodeotlp/ the claude-code-otlp adapter: a receiver for the runtime's own exporter, metrics into the spool
 internal/adapters/mock/         the mock dialect: Session Data a scenario writes directly
-internal/scenario/              scenarios: the model, the clock, and the two writers (collector side)
+internal/scenario/              scenarios: the model, the clock, the two writers, and each session's marker (collector side)
 internal/scenario/expect/       expectation files evaluated over a root (server side)
+internal/scenario/remove/       removes a sent scenario session by its marker's policy (collector side)
 internal/scenario/run/          the runner that wires build, collect, parse and check; command and tests only
 tests/scenarios/                the assembly tests, one scenario and one expectation file each
 internal/config/                YAML configuration
@@ -157,6 +158,10 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 ## Invariants worth knowing before changing collector code
 
 - **Landed files are write-once.** temp → fsync → rename → `chmod 0444`. Never appended.
+- **asz never removes a real session.** Only a session a scenario build marked is removed, by the
+  policy in its marker, and only once all of it was sent to the one receiver the pipeline sends to.
+  The product configuration has no removal setting. A removal renames each directory away before it
+  deletes it, so no reader sees half a session.
 - **A landed file is cut once.** A round addresses records by `{seq, row}` and binds to file
   digests, so a referenced file is never re-cut. A new budget applies to new files; an existing
   root is brought under it with `asz repack` into a new root, where the chains are built again.

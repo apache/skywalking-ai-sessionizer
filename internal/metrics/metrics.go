@@ -229,8 +229,7 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 					st.Errors = append(st.Errors, err)
 					continue
 				}
-				name := fmt.Sprintf("metrics-%s-%06d-%s.pb", session, lf.Seq, SourceLocal)
-				_, created, err := spool.PutNamed(name, data)
+				_, created, err := spool.PutNamed(SpoolName(session, lf.Seq), data)
 				if err != nil {
 					st.Errors = append(st.Errors, err)
 					continue

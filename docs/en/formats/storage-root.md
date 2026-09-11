@@ -42,15 +42,22 @@ session.
     .lock
     metrics-<received-at>-<seq>-otlp.pb  one request the receiver adapter was sent
     metrics-<session-id>-<seq>-local.pb  the points derived from the session's landed file <seq>
-  push.state                             what asz push has sent, with each file's digest
+  push.state                             what has been sent: each file's digest, the receivers,
+                                         and the files a receiver rejected records of
   _export/
     .lock                                one pusher per root
+  _scenario/                             only in a root a claude-code scenario build wrote
+    .lock                                one pipeline per scenario root
+  _removed/                              what a removal of a scenario session is deleting
+    <session-id>/                        the session directory, moved here whole
+    <session-id>.chain/                  its conversation's directory, moved here whole
 ```
 
 Child streams are flat siblings of `main`, keyed by agent id. The storage path deliberately does
 not mirror the source tree: a path must not encode a relationship the pipeline is supposed to
 derive. [Export over OpenTelemetry](../setup/export-otlp.md) says how the metrics spool fills and
-what `push.state` records.
+what `push.state` records. `_scenario/` and `_removed/` exist only in a root a scenario build
+wrote. [Retention](#retention) says what they are for.
 
 `liveness` in `session.state` is always `unknown`. asz has no check for whether a session is
 still running.
@@ -140,7 +147,9 @@ state         active
 Every pass takes each append source through the same steps:
 
 1. The file is gone. The cursor becomes `source_gone`, and the landed files stay. This is normal:
-   Claude Code prunes its transcripts, and the landed files outlive them.
+   Claude Code prunes its transcripts, and the landed files outlive them. A session a scenario
+   build marked is the one exception. Once all of it is sent, a pipeline removes its source first
+   and then the whole session directory, as [Retention](#retention) describes.
 2. The file is shorter than `offset`. It was cut short, and the source is a `conflict`.
 3. The size equals `offset` and the identity is unchanged. Nothing is new, and nothing more is
    read. A change is judged by the size, never by `mtime`, so clock skew and timestamp granularity
@@ -236,6 +245,12 @@ follow the head is refused, and a round file is created only when no file of tha
 made read-only. A test in `tests/chain` runs four parsers at once on one session and requires
 exactly one round.
 
+Parse takes the lock before it reads the index. A parser that read the index first could hold an
+old one while a scenario removal took the session away, and then publish a round over evidence
+that is gone. A parse of a session with no landed file and no round publishes nothing, and creates
+no chain directory when there was none. So a parse that runs after a removal leaves nothing
+behind.
+
 ## What travels
 
 A storage root is complete on its own. A copy of it can be listed, verified, re-parsed and read on
@@ -280,3 +295,75 @@ landed sequence and row, so a round whose files are gone points at records nobod
 [asz.view](asz-view.md) document is still served. Its `summary.state` is `incomplete`, and
 `summary.problems` has one line for each missing file in each round. A node that stood on a missing
 record has no text and no content state.
+
+### A scenario root
+
+asz removes a collected session on its own in one case only: a session a `claude-code` scenario
+build wrote. [Scenarios](../guides/scenario.md#removal-a-session-goes-once-it-is-sent) describes
+the policy. A real Claude Code session is never removed. Only the build writes the marker a removal
+needs, and the product configuration has no removal setting.
+
+The build writes one marker for each session, `DIR/_source/.asz-scenario/<session-id>.json`, and a
+pipeline reads it under the `source_root` of `claude-code-local`. The build writes it after every
+other file of the session, so the marker proves the build finished writing the session. It names
+the policy and lists every file the build wrote for the session, with its size and SHA-256. A
+removal deletes only the files listed there, and only while each still holds the bytes the build
+wrote. The build also creates `_scenario/` in the storage root, the sign that a pipeline over this
+root removes. Such a pipeline holds `_scenario/.lock` for as long as it runs, and a second one
+waits. It could otherwise land a removed session again through a source it listed a moment
+earlier, or parse evidence that is gone.
+
+A pipeline removes a marked session at the end of a pass, after the send, when all of these hold:
+
+- The adapters find exactly the files the marker lists, each still holding the bytes the build
+  wrote, and neither adapter would land anything more of them.
+- Every landed file of the session came from a file in the marker.
+- Every landed file, every round and every spool file of the session is in `push.state` with the
+  digest it has now, and none of them has a `rejected` line.
+- `push.state` names one receiver, the one this pipeline sends to.
+- The head round reaches the last landed file.
+- With `metrics` on, every landed file is derived.
+- The marker's policy allows it.
+- Nothing keeps every marked session. [Scenarios](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
+  lists what does, such as a source directory where Claude Code keeps its own files, or a source
+  directory discovery could not read.
+
+The removal then goes in this order:
+
+1. The marker is rewritten to say `removing`. From then on, a pass finishes the removal without
+   deciding again, and a build refuses to write the session.
+2. The source files the marker lists are deleted, then the empty directories named for the session.
+   A project directory, which every session of a feed shares, is never deleted.
+3. `<root>/<session-id>/` is renamed to `_removed/<session-id>/`, and deleted there.
+4. `_conversations/<session-id>/` is renamed to `_removed/<session-id>.chain/`, and deleted there.
+5. The spool files the session owns are deleted.
+6. The session's lines in `push.state` and `metrics.state` are dropped.
+7. The marker is deleted.
+
+Each step comes where it does for a reason:
+
+- **The source goes first.** The cursors live in `<root>/<session-id>/`. A source that outlived
+  them would be read again from byte 0, landed under new names and sent again, because
+  `push.state` is keyed by path.
+- **The landed files go before the chain.** With them gone, nothing parses the session again, and
+  every round left is already sent. The other way round, a restart would parse the landed files
+  into a new chain, and a round of it that differs from one already sent would be sent again.
+- **The state lines go last.** A line is dropped only once its file is gone, so no file is sent or
+  derived twice.
+- **The session directory and the chain directory each go in one rename.** Deleting a session
+  directory in place takes one call per
+  file, and a walk in name order reaches `index/` before `streams/`. A stop in the middle left a
+  session with no index and some of its landed files. Parse then rebuilt the index from what was
+  left and published a round of tombstones. A rename is one call. Before it the directory is whole,
+  and after it nothing that lists sessions or chains finds any of it: the session listings pass
+  over names that start with `_`, and `_removed/` is outside `_conversations/`. In a pipeline over
+  a scenario root, the removal step at the end of every pass first deletes whatever a stopped
+  removal left in `_removed/`. When `_removed` is a symbolic link, or not a directory, nothing is
+  deleted through it and nothing is moved into it. The pass then removes no session, and says why.
+
+Between the two renames the page still lists the conversation, because its rounds exist, and shows
+it as a conversation whose landed files are gone, as above. Once the chain is gone too, the page
+stops listing it, and the receiver holds the only copy. A test in `tests/chain` stops a removal at
+every point it reaches, including after each source file and each spool file it deletes, then runs
+the whole pipeline again as after a restart. Each time nothing is landed, derived, parsed or sent
+again, the session ends fully removed, and `_removed/` is empty.

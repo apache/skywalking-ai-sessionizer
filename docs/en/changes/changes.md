@@ -8,6 +8,10 @@
   on the record. It is what a token count is reported under, so a metric per model can be
   produced from the landed data alone. Records landed before this carry none, and the glossary
   says where the runtime writes it.
+- A parse takes the conversation's lock before it reads the session's index. A parser that read
+  the index first could hold an old one while a scenario removal took the session away, and then
+  publish a round over evidence that is gone. A parse of a session with no landed files and no
+  chain creates nothing.
 
 ## Commands
 
@@ -30,6 +34,21 @@
   every `.yaml` in it, with `--pick cycle` or `--pick random` and `--seed` to repeat an order.
   Each session is stamped so its last record lands when it was written, and carries an id no
   earlier session has. It is a mock client to run beside `asz server` or `asz collect`.
+- `asz scenario build --remove` says when a pipeline may remove each session a `claude-code` build
+  writes: `immediately`, the default, or a duration such as `24h` or `7d` after the session's last
+  record. The build writes a marker for each session after every other file of it, naming the
+  policy and every file it wrote for the session with its size and SHA-256. `asz collect` and
+  `asz server` remove a marked session at the end of a pass, once every landed file, round and
+  metrics request of it is recorded as sent to the receiver they send to and none was rejected.
+  They remove its source files, its landed files, its chain, its spool files, its lines in the state
+  files, and last the marker. The session directory and its chain directory are each renamed into
+  `_removed/` in one call before they are deleted, so a crash never leaves half a session for a
+  parse to read. Only a pipeline whose storage
+  root is the build's `--out` removes. It holds `_scenario/.lock` there, and a second one waits.
+  When the configuration keeps every marked session, the `scenario :` line at the start says why.
+  Removal is a policy of the scenario, never of the product. The configuration has no removal
+  setting, and a session no build marked, which is every real Claude Code session, is never
+  removed.
 
 ## Read
 
@@ -199,6 +218,16 @@
 - `export.otlp.logs` and `export.otlp.metrics` switch the two things a push sends, the landed
   files and rounds as logs and the metrics spool as metrics, each on its own, both on unless set
   off. `asz push` says which it is sending, and a configuration with both off is refused.
+
+## Export
+
+- `push.state` names the receiver its files were sent to, on an `endpoint` line, and each file a
+  receiver rejected records of, on a `rejected` line. Both lines are kept on every save. A
+  `push.state` written before this names no receiver. It is read as sent to an unknown receiver, so
+  a scenario root that holds one removes nothing.
+- Over HTTP, a 2xx answer counts as sent only when its body is empty or protobuf, and a redirect is
+  not followed. Before, an HTML page answered with 200, or a redirect to a login page, left files
+  recorded as sent that no receiver stored.
 
 ## Documentation
 

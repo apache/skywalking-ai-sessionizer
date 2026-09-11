@@ -35,6 +35,10 @@ export:
     endpoint: 127.0.0.1:11800
 ```
 
+Once a receiver is named, `asz collect` and `asz server` also remove each session a `claude-code`
+build wrote, once all of it is sent, as [Removal](#removal-a-session-goes-once-it-is-sent)
+describes. `asz push` sends and never removes.
+
 The pushed records say where they came from. A `claude-code` build is landed by the Claude Code
 adapter and is attributed to `Claude Code`; an `sd` build carries the `mock/1` dialect and is
 attributed to `Mock Agent`, so a receiver never lists an invented conversation as a real one.
@@ -57,6 +61,7 @@ it, such as the export block, is kept across builds.
 | `--pick MODE` | with a set of scenarios, `cycle` through them in order or take a `random` one |
 | `--seed N` | seeds `--pick random`; `0`, the default, varies with each run |
 | `--through NAME` | only the steps up to the checkpoint NAME |
+| `--remove POLICY` | `claude-code` only: when a pipeline removes a session once all of it is sent, `immediately` (default) or a duration such as `24h` or `7d` after its last record. See [Removal](#removal-a-session-goes-once-it-is-sent) |
 
 With a fixed `--at`, every file is identical on every run.
 
@@ -73,7 +78,9 @@ asz server -config DIR/asz.yaml                             # collect, parse and
 
 `server` refreshes on the interval because the configuration the build writes says `mode: watch`.
 To feed a receiver instead of a page, name it under `export.otlp` and run `asz collect`, which
-sends at the end of every period.
+sends at the end of every period. With a receiver named, under either command, each session of the
+feed is removed once all of it is sent, or later with `--remove`.
+[Removal](#removal-a-session-goes-once-it-is-sent) says how.
 
 Two things differ from a one-shot build, and both are what a live feed needs.
 
@@ -108,6 +115,74 @@ for a client anyway.
 `--every` with `--repeat N` stops after N sessions rather than running on, and does not wait after
 the last one. The period must be at least `1ms`: a feed id carries the moment it was written, in
 milliseconds, so a shorter period could not give every session an id of its own.
+
+## Removal: a session goes once it is sent
+
+A `claude-code` build also says when a pipeline may remove each session it writes. It writes a
+marker for the session, `DIR/_source/.asz-scenario/<session-id>.json`, after every other file of
+it. The marker names the policy and lists each file the build wrote, with its size and SHA-256.
+`--remove` sets the policy:
+
+| `--remove` | A session goes at the first pass where all of it is sent and |
+| --- | --- |
+| `immediately`, the default | nothing more is needed |
+| a duration, such as `30m`, `24h` or `7d` | its last record is at least that old |
+
+In a watching pipeline, a session whose last call may go on in a later file waits two minutes
+before its metrics are derived, so it goes about two minutes after it lands. A single pass does not
+wait.
+
+`asz collect` and `asz server` remove a session at the end of a pass, after the send, once every
+landed file, every round and every metrics request of it is recorded as sent to the receiver they
+send to. They remove the source files the build wrote, the landed files, the chain, the spool files
+and the session's lines in the state files, and the marker last. Once removed, the conversation
+leaves the page, and the receiver holds the only copy.
+[Storage Root](../formats/storage-root.md#a-scenario-root) gives the order and the reason for each
+step.
+
+The pipeline removes only over the storage root the build wrote, `DIR` itself, where the build
+creates `_scenario/`. The `DIR/asz.yaml` the build writes sets `storage.root` to `DIR`. A pipeline
+with another `storage.root` lands and sends the sessions but never removes them, and prints no line
+about it.
+
+A duration counts from the session's last record, never from when it landed, so the same landed
+data always gives the same answer. A feed stamps each session so its last record falls when it was
+written, so a feed's session stays about that long after it was written. A one-shot build with an
+old `--at` is already past its duration, and goes as soon as it is sent. `d` counts whole days, as
+`metrics_lookback` does. One run applies one policy to every session it writes.
+
+The policy belongs to the scenario, never to the product. The configuration has no removal
+setting, and a session no build marked, which is every real Claude Code session, is never removed.
+An sd build writes no source and no marker, so its sessions are never removed, and `--remove` with
+`--format sd` is refused.
+
+Nothing is removed that the pipeline cannot prove sent. Each of these keeps every marked session,
+and the pass says why once, on standard error, as `kept: every marked session: <reason>`:
+
+- There is no `export.otlp.endpoint`, so nothing is sent.
+- `export.otlp.logs` or `export.otlp.metrics` is switched off.
+- The `claude-code-changes` adapter is switched off, or reads anything but
+  `DIR/_source/plugins/data`, where the build wrote the plugin's output.
+- `push.state` in the root records files sent to another receiver, or to one it cannot name.
+- The source directory is one of the places Claude Code keeps its files, holds one, or lies inside
+  one. All three are checked, whichever one the environment selects: what `CLAUDE_CONFIG_DIR`
+  names, `XDG_CONFIG_HOME/claude` and `~/.claude`.
+- `DIR/_removed` is a symbolic link, or not a directory.
+
+One session is kept, with a `kept: <session-id>: <reason>` line, when something about it needs a
+person. Examples are a receiver that rejected records of it, a file the build wrote that has
+changed or is missing, and a file for it that the build did not write. A kept line is not an error.
+Such a session stays until a person removes it. A session that is only not sent yet, or not old
+enough, is kept without a line.
+
+One pipeline works on a root at a time. A pipeline over a root a `claude-code` build wrote holds
+`DIR/_scenario/.lock` for as long as it runs, and a second one waits and says so.
+[collect](../setup/command-line.md#a-scenario-root) shows what each prints.
+
+A build refuses to write a session whose marker says a pipeline is removing it. Building a
+one-shot or `--repeat` scenario into the same directory again, after its sessions were removed,
+writes the same ids again. The pipeline lands and sends them as new, under new file names, so the
+receiver is sent them a second time. A feed never reuses an id.
 
 ## The scenario
 
@@ -242,6 +317,7 @@ properties:                               # all on unless set false
   cross_format: true
   records_match: true
   push_follows_the_wire: true
+  removed_after_sent: true
   view_covers_the_session: true
 parse:
   max_round_bytes: 0                      # a parse setting, when the scenario needs one
@@ -277,6 +353,16 @@ read on. A refused request must leave every file for the next pass, a second pas
 nothing, and writing every body back to its path must give a root that verifies and folds the
 same. `push.kinds` names the file kinds a scenario's push must carry; `all-kinds.yaml` names all
 six.
+
+The removal is checked too. `removed_after_sent` makes full copies of the finished root and runs a
+pipeline's pass over each: collect, derive, parse, send to a receiver in the test, then remove.
+Nothing is removed before a push, after a refused push, after a partial success, when `push.state`
+names another receiver, or when the marker is gone. After a clean push, `immediately` removes the
+whole session in one pass, and after that nothing is landed, derived, parsed or sent again. A
+retention of 24 hours keeps the session one second before its last record is 24 hours old, and
+removes it at that moment. An sd build is never marked. `removed-after-sent.yaml` holds every kind
+of file a removal deletes, and the tests in `tests/chain` stop its removal at every point it
+reaches.
 
 The project's own tests are scenarios under `tests/scenarios/`, one property of assembly each,
 run in both formats by `go test ./tests/`.

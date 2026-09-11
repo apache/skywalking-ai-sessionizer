@@ -18,6 +18,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -135,5 +137,55 @@ func TestChooserRandomRepeatsWithASeed(t *testing.T) {
 	}
 	if !varied {
 		t.Fatal("random never left the first scenario")
+	}
+}
+
+// TestTheRemovePolicyIsRefusedWhereItMeansNothing. --remove is a policy for
+// the pipeline over a claude-code build's root. An sd build writes no source
+// to remove, and a check keeps nothing, so both refuse it, as they refuse a
+// value that is no policy. Each is refused before anything is written.
+func TestTheRemovePolicyIsRefusedWhereItMeansNothing(t *testing.T) {
+	out := t.TempDir()
+	for name, args := range map[string][]string{
+		"an sd build":              {"build", "x.yaml", "--format", "sd", "--out", out, "--remove", "1h"},
+		"a check":                  {"check", "x.yaml", "--remove", "1h"},
+		"a retention of nothing":   {"build", "x.yaml", "--format", "claude-code", "--out", out, "--remove", "0"},
+		"a word that is no policy": {"build", "x.yaml", "--format", "claude-code", "--out", out, "--remove", "soon"},
+	} {
+		if code := cmdScenario(args); code != 2 {
+			t.Errorf("%s: exit status %d, want 2", name, code)
+		}
+	}
+	if items, err := os.ReadDir(out); err != nil || len(items) != 0 {
+		t.Fatalf("a refused build wrote %d entries: %v", len(items), err)
+	}
+}
+
+// TestABuildRecordsTheRemovePolicy. The policy a person gives reaches the
+// session's marker, which is the only place a pipeline reads it from.
+func TestABuildRecordsTheRemovePolicy(t *testing.T) {
+	out := t.TempDir()
+	file := filepath.Join("..", "..", "tests", "scenarios", "assembly.yaml")
+	if code := cmdScenario([]string{"build", file, "--format", "claude-code", "--out", out, "--at", "2026-01-01T00:00:00Z", "--remove", "7d"}); code != 0 {
+		t.Fatalf("exit status %d", code)
+	}
+	markers, err := filepath.Glob(filepath.Join(out, "_source", scenario.MarkerDir, "*.json"))
+	if err != nil || len(markers) != 1 {
+		t.Fatalf("%d markers: %v", len(markers), err)
+	}
+	m, err := scenario.ReadMarker(markers[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Policy != scenario.PolicyRetain || m.Retain != "168h0m0s" {
+		t.Fatalf("the marker says %q %q, want retain 168h0m0s", m.Policy, m.Retain)
+	}
+	// Without the flag, an sd build is not refused, and writes no marker.
+	sd := t.TempDir()
+	if code := cmdScenario([]string{"build", file, "--format", "sd", "--out", sd, "--at", "2026-01-01T00:00:00Z"}); code != 0 {
+		t.Fatalf("an sd build with no --remove exited %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(sd, "_scenario")); !os.IsNotExist(err) {
+		t.Fatal("an sd build made a scenario root")
 	}
 }

@@ -27,7 +27,10 @@ package parse
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/assemble"
@@ -150,6 +153,68 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		opt.Now = time.Now
 	}
 
+	policy := policyFor(opt.IdleGap)
+	chain := sessionflow.OpenChain(z.Root(), opt.Conversation)
+	nothing := &Round{Session: opt.Session, Conversation: opt.Conversation}
+
+	// A session with no landed files and no chain has nothing to parse. Taking
+	// the lock would create the chain's directory, so the parse returns first
+	// and creates nothing. Otherwise a parse that ran after a scenario root
+	// removed a sent session would leave a stub of its chain behind.
+	if _, err := os.Stat(chain.Dir()); errors.Is(err, fs.ErrNotExist) {
+		empty, err := noLandedFiles(z, opt.Session)
+		if err != nil {
+			return nil, err
+		}
+		if empty {
+			return nothing, nil
+		}
+	}
+
+	// Publishing is a read followed by a write - decide the next round from what
+	// is on disk, then create it. Two builders doing that at once would both
+	// read round N and both write an N+1, and because the digest is part of the
+	// filename their files would not even collide.
+	//
+	// The lock is taken before the index is read. A parser that read the index
+	// first could hold an old one while a scenario removal took the session
+	// away, and then publish a round over evidence that is gone.
+	lock, err := chain.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	// The filesystem is the authority on how far the chain got. A crash between
+	// publishing a round and saving state leaves a round on disk that state does
+	// not mention, and folding must see it.
+	view, err := chain.Fold()
+	if err != nil {
+		return nil, err
+	}
+	if view.Round > 0 {
+		if view.Parser != Parser || view.Policy != policy {
+			return nil, fmt.Errorf(
+				"parse: this chain was built by parser %q under policy %q; this build is %q/%q. "+
+					"A chain is one interpretation of one body of evidence, so it cannot be extended "+
+					"across a change to either", view.Parser, view.Policy, Parser, policy)
+		}
+		if view.Session != opt.Session {
+			return nil, fmt.Errorf("parse: this chain carries session %q, not %q", view.Session, opt.Session)
+		}
+	} else {
+		// Checked again under the lock. The chain's directory can exist with
+		// no round in it, holding only the lock, and with no landed files
+		// either there is nothing to publish.
+		empty, err := noLandedFiles(z, opt.Session)
+		if err != nil {
+			return nil, err
+		}
+		if empty {
+			return nothing, nil
+		}
+	}
+
 	ix, ok, err := index.Load(z.IndexDir(opt.Session), opt.Session)
 	if err != nil {
 		return nil, err
@@ -179,38 +244,6 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 			if s := uint64(ix.Entries[i].Seq); s > through {
 				through = s
 			}
-		}
-	}
-
-	policy := policyFor(opt.IdleGap)
-	chain := sessionflow.OpenChain(z.Root(), opt.Conversation)
-
-	// Publishing is a read followed by a write - decide the next round from what
-	// is on disk, then create it. Two builders doing that at once would both
-	// read round N and both write an N+1, and because the digest is part of the
-	// filename their files would not even collide.
-	lock, err := chain.Lock()
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = lock.Unlock() }()
-
-	// The filesystem is the authority on how far the chain got. A crash between
-	// publishing a round and saving state leaves a round on disk that state does
-	// not mention, and folding must see it.
-	view, err := chain.Fold()
-	if err != nil {
-		return nil, err
-	}
-	if view.Round > 0 {
-		if view.Parser != Parser || view.Policy != policy {
-			return nil, fmt.Errorf(
-				"parse: this chain was built by parser %q under policy %q; this build is %q/%q. "+
-					"A chain is one interpretation of one body of evidence, so it cannot be extended "+
-					"across a change to either", view.Parser, view.Policy, Parser, policy)
-		}
-		if view.Session != opt.Session {
-			return nil, fmt.Errorf("parse: this chain carries session %q, not %q", view.Session, opt.Session)
 		}
 	}
 
@@ -335,6 +368,15 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	out.Nodes, out.Relations, out.Unresolved = len(d.nodes), len(d.relations), len(d.unresolved)
 	out.Tombstones = d.tombstones
 	return out, nil
+}
+
+// noLandedFiles reports whether a session has no landed file at all.
+func noLandedFiles(z *storage.Zone, session string) (bool, error) {
+	files, err := storage.LandedFiles(z, session)
+	if err != nil {
+		return false, err
+	}
+	return len(files) == 0, nil
 }
 
 // rebuild reconstructs a missing index from the landed files themselves.

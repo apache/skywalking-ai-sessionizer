@@ -32,7 +32,9 @@ import (
 // ErrSourceGone means the source file no longer exists.
 //
 // This is an expected state, not a failure: Claude Code prunes transcripts, and
-// our landed deltas deliberately outlive them.
+// our landed deltas deliberately outlive them. For a real session they always
+// do. The one exception is a session a scenario build marked: once all of it
+// is sent, a pipeline removes its source and then its landed files.
 var ErrSourceGone = errors.New("claudecode: source gone")
 
 // ConflictError means the source changed underneath the cursor. Collection

@@ -18,6 +18,8 @@
 package scenario
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -33,7 +35,10 @@ import (
 // file is written whole, so a build through a later checkpoint into the
 // same directory is an append to what the earlier build wrote, which is
 // what the collector's cursor expects of a live session.
-func writeClaudeCode(p *Plan, root string) ([]string, error) {
+//
+// It also returns every file of the session, relative to root, with the size
+// and digest of the bytes written, for the session's marker.
+func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 	proj := filepath.Join(root, p.Project)
 	w := &ccWriter{p: p, files: map[string][]string{}, plugin: map[string][]string{}}
 	lost := p.lostStreams()
@@ -45,14 +50,15 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 			continue
 		}
 		if err := w.event(e); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	var written []string
-	putUnder := func(dir, rel string, lines []string) error {
+	marked := map[string]MarkerFile{}
+	putFile := func(dir, rel string, lines []string) (string, []byte, error) {
 		path := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
+			return "", nil, err
 		}
 		var buf []byte
 		for _, l := range lines {
@@ -60,23 +66,46 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 			buf = append(buf, '\n')
 		}
 		if err := os.WriteFile(path, buf, 0o644); err != nil {
-			return err
+			return "", nil, err
 		}
 		written = append(written, path)
+		return path, buf, nil
+	}
+	// putUnder writes a file of the session and records it for the marker.
+	// The size and digest are of the bytes written, so a removal deletes a
+	// file only while it still holds exactly them.
+	putUnder := func(dir, rel string, lines []string) error {
+		path, buf, err := putFile(dir, rel, lines)
+		if err != nil {
+			return err
+		}
+		under, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(buf)
+		under = filepath.ToSlash(under)
+		marked[under] = MarkerFile{Path: under, Size: int64(len(buf)), SHA256: hex.EncodeToString(sum[:])}
 		return nil
 	}
 	put := func(rel string, lines []string) error { return putUnder(proj, rel, lines) }
+	// putShared writes a file every session of the project shares. It belongs
+	// to no session, so no marker lists it and no removal deletes it.
+	putShared := func(rel string, lines []string) error {
+		_, _, err := putFile(proj, rel, lines)
+		return err
+	}
 	if err := put(p.Session+".jsonl", w.files["main"]); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Noise a real project directory holds: a file whose name is not a
 	// session id, and a directory that is not a session. Discovery must pass
 	// over both, and every scenario checks that it does.
-	if err := put("not-a-uuid.jsonl", []string{`{"type":"summary","summary":"not a session"}`}); err != nil {
-		return nil, err
+	if err := putShared("not-a-uuid.jsonl", []string{`{"type":"summary","summary":"not a session"}`}); err != nil {
+		return nil, nil, err
 	}
-	if err := put("memory/notes.md", []string{"# notes", "", "not a session either"}); err != nil {
-		return nil, err
+	if err := putShared("memory/notes.md", []string{"# notes", "", "not a session either"}); err != nil {
+		return nil, nil, err
 	}
 	for _, s := range p.Streams {
 		if s.Lost {
@@ -85,18 +114,18 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 		lines := w.files[s.ID]
 		if s.Batch != "" {
 			if err := put(fmt.Sprintf("%s/subagents/workflows/%s/agent-%s.jsonl", p.Session, s.Batch, s.ID), lines); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			continue
 		}
 		if err := put(fmt.Sprintf("%s/subagents/agent-%s.jsonl", p.Session, s.ID), lines); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		meta, _ := json.Marshal(map[string]any{
 			"agentType": "general-purpose", "description": s.Label, "toolUseId": s.Tool, "spawnDepth": 1,
 		})
 		if err := put(fmt.Sprintf("%s/subagents/agent-%s.meta.json", p.Session, s.ID), []string{string(meta)}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for _, r := range p.Runs {
@@ -109,31 +138,36 @@ func writeClaudeCode(p *Plan, root string) ([]string, error) {
 			journal = append(journal, w.rec(m, ""))
 		}
 		if err := put(fmt.Sprintf("%s/subagents/workflows/%s/journal.jsonl", p.Session, r.ID), journal); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		manifest, _ := json.Marshal(map[string]any{
 			"runId": r.ID, "taskId": "task-" + r.ID, "workflowName": r.Name, "status": "completed", "agentCount": len(r.Children),
 		})
 		if err := put(fmt.Sprintf("%s/workflows/%s.json", p.Session, r.ID), []string{string(manifest)}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		scriptDir := proj
 		if r.ScriptProject != "" {
 			scriptDir = filepath.Join(root, r.ScriptProject)
 		}
 		if err := putUnder(scriptDir, fmt.Sprintf("%s/workflows/scripts/%s-%s.js", p.Session, strings.ReplaceAll(r.Name, " ", "-"), r.ID), strings.Split(r.Script, "\n")); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	// The plugin's output, where it keeps it: its own data directory beside
 	// projects, one file per stream of the session.
 	for stream, lines := range w.plugin {
 		if err := putUnder(root, PluginOutputDir+"/"+p.Session+"/"+stream+".jsonl", lines); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	sort.Strings(written)
-	return written, nil
+	files := make([]MarkerFile, 0, len(marked))
+	for _, f := range marked {
+		files = append(files, f)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	return written, files, nil
 }
 
 // PluginOutputDir is where, under the source root, a Claude Code build

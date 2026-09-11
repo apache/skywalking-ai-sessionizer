@@ -41,6 +41,10 @@ type Options struct {
 	// which is what a build that keeps feeding the root needs beside it.
 	// It has no effect on the plan.
 	Watch bool
+	// Remove is when a pipeline may remove a session a claude-code build
+	// wrote, once all of it is sent. The build records it in the session's
+	// marker. It has no effect on the plan.
+	Remove Removal
 }
 
 // EventKind is one shape of record.

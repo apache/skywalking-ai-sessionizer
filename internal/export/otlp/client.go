@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -196,10 +197,14 @@ func newHTTP(o Options) (Client, error) {
 	if !strings.HasPrefix(o.Endpoint, "http://") && !strings.HasPrefix(o.Endpoint, "https://") {
 		return nil, fmt.Errorf("otlp: an http endpoint is a URL such as http://127.0.0.1:12800: %s", o.Endpoint)
 	}
+	// A redirect is not followed. A receiver that moved is configured again.
+	// A redirect to a login page, followed, answers 200 with a page, and that
+	// must never read as records taken.
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &httpClient{
 		base:    strings.TrimRight(o.Endpoint, "/"),
 		headers: o.Headers,
-		http:    &http.Client{Timeout: o.timeout()},
+		http:    &http.Client{Timeout: o.timeout(), CheckRedirect: noRedirect},
 	}, nil
 }
 
@@ -231,10 +236,15 @@ func (c *httpClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceReques
 	return out.GetPartialSuccess().GetRejectedDataPoints(), nil
 }
 
-// post sends one request as protobuf and returns the answer's body when it
-// is an OTLP response, or nothing when the receiver answered with anything
-// else, such as an empty body from a proxy, which is a full success as far
-// as it says.
+// post sends one request as protobuf and returns the answer's body.
+//
+// A 2xx answer with an empty body is a full success, whatever its type,
+// since that is how a proxy in front of a receiver often answers. A 2xx
+// answer with a body is an OTLP response only when its type is protobuf.
+// Anything else is an error, and nothing is recorded as sent. Taking such an
+// answer as success was measured against a real listener: an HTML page
+// answered with 200, and a redirect to a login page, both left the files
+// marked sent while the receiver stored nothing.
 func (c *httpClient) post(url string, req proto.Message) ([]byte, error) {
 	body, err := proto.Marshal(req)
 	if err != nil {
@@ -269,10 +279,24 @@ func (c *httpClient) post(url string, req proto.Message) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("otlp: %s answered %s: %s", url, resp.Status, strings.TrimSpace(string(snippet)))
 	}
-	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/x-protobuf") {
+	if len(answer) == 0 {
 		return nil, nil
 	}
-	return answer, nil
+	// OTLP names application/x-protobuf. A review of the OAP found that its
+	// HTTP handlers answer with application/protobuf, so both are taken, and
+	// any parameters are ignored.
+	contentType := resp.Header.Get("Content-Type")
+	media, _, _ := mime.ParseMediaType(contentType)
+	if media == "application/x-protobuf" || media == "application/protobuf" {
+		return answer, nil
+	}
+	if media == "" {
+		media = strings.TrimSpace(contentType)
+	}
+	if media == "" {
+		media = "no content type"
+	}
+	return nil, fmt.Errorf("otlp: %s answered %s with %s, not an OTLP response; nothing is recorded as sent", url, resp.Status, media)
 }
 
 func (c *httpClient) Close() error {

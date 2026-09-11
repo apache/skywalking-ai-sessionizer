@@ -46,6 +46,9 @@ const (
 	CursorActive = "active"
 	// CursorSourceGone means the source file was deleted. This is expected, not
 	// an error: Claude Code prunes transcripts, and our landed deltas outlive them.
+	// That holds for every real session. The one exception is a session a
+	// scenario build marked: once all of it is sent, a pipeline removes its
+	// source and then its whole session directory, this cursor included.
 	CursorSourceGone = "source_gone"
 	// CursorConflict means the source changed underneath us - rotated, truncated,
 	// or rewritten behind the cursor. Collection stops rather than resuming from

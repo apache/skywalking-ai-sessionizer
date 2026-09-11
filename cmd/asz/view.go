@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -218,12 +219,17 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 	}
 	if ref.pusher == nil {
 		fmt.Println("export   : none; set export.otlp.endpoint to send what is landed")
-		return
+	} else {
+		o := cfg.Export.OTLP
+		endpoint := o.Endpoint + " over gRPC"
+		if o.Protocol == otlp.ProtocolHTTP {
+			endpoint = o.Endpoint + " over HTTP"
+		}
+		fmt.Printf("export   : %s, at the end of every pass\n", endpoint)
 	}
-	o := cfg.Export.OTLP
-	endpoint := o.Endpoint + " over gRPC"
-	if o.Protocol == otlp.ProtocolHTTP {
-		endpoint = o.Endpoint + " over HTTP"
+	// A root a claude-code scenario build wrote. Only there does a pipeline
+	// remove anything, and only what a build marked.
+	if fi, err := os.Stat(filepath.Join(ref.zone.Root(), storage.ScenarioDir)); err == nil && fi.IsDir() {
+		fmt.Printf("scenario : %s\n", ref.removalSays())
 	}
-	fmt.Printf("export   : %s, at the end of every pass\n", endpoint)
 }

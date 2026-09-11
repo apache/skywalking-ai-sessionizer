@@ -18,6 +18,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,6 +31,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
+	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
@@ -260,6 +263,10 @@ func testRefresher(t *testing.T, zone *storage.Zone, root string) *refresher {
 	if ref == nil {
 		t.Fatal("no refresher for a root that has a source beside it")
 	}
+	// A scenario root's lock is held for the life of a process. A test ends
+	// long before its process does, and the next one may put another
+	// refresher on the same root.
+	t.Cleanup(ref.close)
 	return ref
 }
 
@@ -376,12 +383,18 @@ func TestAnotherBuilderHoldingTheChainIsNotAFailure(t *testing.T) {
 	}
 
 	// A single pass has no next pass to carry it to, so it must say so
-	// rather than exit clean with data unparsed.
+	// rather than exit clean with data unparsed. It is a second pipeline
+	// over a scenario root, so the first lets go of the root before it runs,
+	// or it would wait for the root and fail for that reason instead.
+	ref.close()
 	final := testRefresher(t, zone, root)
 	final.last = true
 	if err := final.pass(); err == nil {
 		t.Fatal("a single pass exited clean while another builder held a session it had landed for")
+	} else if strings.Contains(err.Error(), "scenario root") {
+		t.Fatalf("the single pass failed on the scenario root, not on the chain: %v", err)
 	}
+	final.close()
 
 	// The other builder is done. The next pass must pick the session up
 	// again, even though its source has not grown since.
@@ -463,5 +476,416 @@ func TestOnlyOnePassSendsAtATime(t *testing.T) {
 	}
 	if len(rcv.Requests()) == 0 {
 		t.Fatal("nothing was sent once the export state was free")
+	}
+}
+
+// scenarioRoot builds one claude-code session into a fresh root. Claude
+// Code's own directory is a place of the test's, so no guard depends on the
+// machine the test runs on.
+func scenarioRoot(t *testing.T, name string) (string, *scenario.Built) {
+	t.Helper()
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	root := t.TempDir()
+	sc, err := scenario.Load(filepath.Join("..", "..", "tests", "scenarios", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := scenario.Build(sc, scenario.FormatClaudeCode, root, scenario.Options{At: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, b
+}
+
+// bothAdapters is what a build's configuration enables: both local
+// adapters, the plugin's reading under the build's source unless another
+// directory is given, and metrics derived with no look-back.
+func bothAdapters(root, changes string) []config.Adapter {
+	source := filepath.Join(root, "_source")
+	if changes == "" {
+		changes = filepath.Join(source, "plugins", "data")
+	}
+	return []config.Adapter{
+		{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: source, Metrics: true, MetricsLookback: "none",
+			Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}},
+		{Name: config.AdapterClaudeCodeChanges, Enabled: true, SourceRoot: changes,
+			Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}},
+	}
+}
+
+// pipelineOver is the pipeline asz collect -once runs over a root.
+func pipelineOver(t *testing.T, root string, ads []config.Adapter) *refresher {
+	t.Helper()
+	zone := storage.NewZone(root)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ref.close)
+	return ref
+}
+
+func receiver(t *testing.T) *otlptest.Receiver {
+	t.Helper()
+	rcv, err := otlptest.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rcv.Close)
+	return rcv
+}
+
+// sendingTo gives the pipeline a pusher that records the receiver it sends
+// to, as newPusher builds one.
+func sendingTo(t *testing.T, ref *refresher, rcv *otlptest.Receiver) {
+	t.Helper()
+	o := rcv.Options(otlp.ProtocolGRPC)
+	client, err := otlp.NewClient(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close() })
+	ref.pusher = &otlp.Pusher{
+		Zone: ref.zone, Client: client, Endpoint: otlp.EndpointOf(o.Protocol, o.Endpoint, o.TLS), Version: "test",
+		ServiceName: "Removal Test", InstanceID: "removal-test", Layer: "AI_AGENT", BatchBytes: 8 << 20,
+		MetricsService: "Removal Test",
+	}
+	if err := ref.pusher.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// stderrOf runs fn and returns what it wrote to standard error, where a pass
+// says why it kept a session.
+func stderrOf(t *testing.T, fn func()) string {
+	t.Helper()
+	return written(t, &os.Stderr, fn)
+}
+
+// stdoutOf runs fn and returns what it wrote to standard output, where the
+// pipeline says what it will do.
+func stdoutOf(t *testing.T, fn func()) string {
+	t.Helper()
+	return written(t, &os.Stdout, fn)
+}
+
+// written runs fn with *stream sent into a pipe, and returns what fn wrote.
+func written(t *testing.T, stream **os.File, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make(chan string)
+	go func() {
+		data, _ := io.ReadAll(r)
+		out <- string(data)
+	}()
+	old := *stream
+	*stream = w
+	func() {
+		defer func() { *stream = old; _ = w.Close() }()
+		fn()
+	}()
+	return <-out
+}
+
+func pathExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}
+
+// TestOnePassSendsAndRemovesAScenarioSession. Over a root a claude-code
+// build wrote, the pass that sends a session whole also removes it, and the
+// page stops listing it. The next pass has nothing to send or remove.
+func TestOnePassSendsAndRemovesAScenarioSession(t *testing.T) {
+	root, b := scenarioRoot(t, "workspace-changes.yaml")
+	rcv := receiver(t)
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	sendingTo(t, ref, rcv)
+	if err := ref.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if len(rcv.Requests()) == 0 {
+		t.Fatal("the pass sent nothing")
+	}
+	for _, p := range []string{b.Marker, filepath.Join(root, b.Session), filepath.Join(root, "_conversations", b.Session)} {
+		if pathExists(p) {
+			t.Errorf("%s is still there after the pass that sent all of it", p)
+		}
+	}
+	ids, err := ref.srv.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if id == b.Session {
+			t.Fatal("the page still lists the removed conversation")
+		}
+	}
+	rcv.Reset()
+	if err := ref.pass(); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(rcv.Requests()) + len(rcv.MetricsRequests()); n != 0 {
+		t.Fatalf("the next pass sent %d request(s)", n)
+	}
+	if pathExists(filepath.Join(root, b.Session)) {
+		t.Fatal("the next pass made the removed session again")
+	}
+}
+
+// TestAScenarioSessionIsKeptWithoutAnEndpoint. With nothing sent, nothing
+// can be proved sent, so nothing is removed. The pass says why, once, and it
+// is not a failure: the product has no removal setting that could be wrong.
+func TestAScenarioSessionIsKeptWithoutAnEndpoint(t *testing.T) {
+	root, b := scenarioRoot(t, "workspace-changes.yaml")
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	var err error
+	said := stderrOf(t, func() { err = ref.pass() })
+	if err != nil {
+		t.Fatalf("a pass with no endpoint failed: %v", err)
+	}
+	if !strings.Contains(said, "kept: every marked session: no export endpoint") {
+		t.Fatalf("the pass did not say why the session is kept:\n%s", said)
+	}
+	if !pathExists(b.Marker) || !pathExists(filepath.Join(root, b.Session)) {
+		t.Fatal("a session was removed with no endpoint to send it to")
+	}
+	if said := stderrOf(t, func() { _ = ref.pass() }); strings.Contains(said, "kept:") {
+		t.Fatalf("the reason was said a second time:\n%s", said)
+	}
+}
+
+// TestAScenarioSessionIsKeptWhenTheChangesAdapterReadsElsewhere. The build
+// wrote plugin output under its own source. A changes adapter that reads any
+// other directory never lands it, so it is never sent, and the session stays.
+func TestAScenarioSessionIsKeptWhenTheChangesAdapterReadsElsewhere(t *testing.T) {
+	root, b := scenarioRoot(t, "workspace-changes.yaml")
+	rcv := receiver(t)
+	ref := pipelineOver(t, root, bothAdapters(root, t.TempDir()))
+	sendingTo(t, ref, rcv)
+	var err error
+	said := stderrOf(t, func() { err = ref.pass() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(said, "kept: every marked session: the changes adapter reads") {
+		t.Fatalf("the pass did not say why the session is kept:\n%s", said)
+	}
+	if !pathExists(b.Marker) || !pathExists(filepath.Join(root, b.Session)) {
+		t.Fatal("a session was removed while its plugin output could never be landed")
+	}
+}
+
+// TestTheScenarioLineSaysWhyNothingIsRemoved. At the start, over a scenario
+// root, the pipeline says what the removal will do. It asks the check each
+// removal pass makes before it looks at any session, so it never promises a
+// removal the configuration prevents. The line printed when a pass takes the
+// lock says the same.
+func TestTheScenarioLineSaysWhyNothingIsRemoved(t *testing.T) {
+	root, _ := scenarioRoot(t, "workspace-changes.yaml")
+	rcv := receiver(t)
+	cfg := &config.Config{}
+	cfg.Export.OTLP.Endpoint = rcv.Options(otlp.ProtocolGRPC).Endpoint
+	for _, c := range []struct {
+		name string
+		ads  []config.Adapter
+		send bool
+		// metricsOff and logsOff are what export.otlp.metrics: false and
+		// export.otlp.logs: false do to the pusher.
+		metricsOff bool
+		logsOff    bool
+		want       string
+	}{
+		{name: "no endpoint", ads: bothAdapters(root, ""),
+			want: "scenario : no session is removed: no export endpoint; nothing is sent, so nothing is removed\n"},
+		{name: "metrics off", ads: bothAdapters(root, ""), send: true, metricsOff: true,
+			want: "scenario : no session is removed: export.otlp.metrics is off;"},
+		{name: "logs off", ads: bothAdapters(root, ""), send: true, logsOff: true,
+			want: "scenario : no session is removed: export.otlp.logs is off;"},
+		{name: "the changes adapter elsewhere", ads: bothAdapters(root, t.TempDir()), send: true,
+			want: "scenario : no session is removed: the changes adapter reads "},
+		{name: "no claude-code-local", ads: bothAdapters(root, "")[1:], send: true,
+			want: "scenario : no session is removed: claude-code-local is not enabled"},
+		{name: "nothing prevents it", ads: bothAdapters(root, ""), send: true,
+			want: "scenario : a session a build marked is removed by its policy once all of it is sent\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ref := pipelineOver(t, root, c.ads)
+			if c.send {
+				sendingTo(t, ref, rcv)
+				ref.pusher.NoMetrics = c.metricsOff
+				ref.pusher.NoLogs = c.logsOff
+			}
+			said := stdoutOf(t, func() { printPipeline(ref, cfg) })
+			if !strings.Contains(said, c.want) {
+				t.Fatalf("the start-up lines do not say %q:\n%s", c.want, said)
+			}
+		})
+	}
+
+	// A root no build wrote has no such line.
+	plain := t.TempDir()
+	said := stdoutOf(t, func() { printPipeline(pipelineOver(t, plain, bothAdapters(plain, "")), cfg) })
+	if strings.Contains(said, "scenario :") {
+		t.Fatalf("a root with no %s has a scenario line:\n%s", storage.ScenarioDir, said)
+	}
+
+	// The lock's line ends with the same words as the start-up line.
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	said = stdoutOf(t, func() { _ = stderrOf(t, func() { _ = ref.pass() }) })
+	want := "scenario : this pipeline holds " + filepath.Join(root, storage.ScenarioDir, ".lock") +
+		"; no session is removed: no export endpoint; nothing is sent, so nothing is removed\n"
+	if !strings.Contains(said, want) {
+		t.Fatalf("the lock's line is not %q:\n%s", want, said)
+	}
+}
+
+// TestASecondPipelineWaitsForTheScenarioRoot. Two pipelines over one
+// scenario root would race a removal: one could land again what the other
+// just removed. So the second does nothing while the first holds the root.
+func TestASecondPipelineWaitsForTheScenarioRoot(t *testing.T) {
+	root, b := scenarioRoot(t, "assembly.yaml")
+	held, err := storage.LockScenario(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone := storage.NewZone(root)
+	watching := testRefresher(t, zone, root)
+	if err := watching.pass(); err != nil {
+		t.Fatalf("a watching pass over a root another pipeline holds failed: %v", err)
+	}
+	if pathExists(filepath.Join(root, b.Session)) || pathExists(filepath.Join(root, "_conversations")) {
+		t.Fatal("a pass over a root another pipeline holds landed or parsed")
+	}
+	single := testRefresher(t, zone, root)
+	single.last, single.scenarioWait = true, 200*time.Millisecond
+	if err := single.pass(); err == nil || !strings.Contains(err.Error(), "another pipeline holds this scenario root") {
+		t.Fatalf("a single pass over a held root gave %v", err)
+	}
+	if err := held.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := watching.pass(); err != nil {
+		t.Fatal(err)
+	}
+	rounds, err := filepath.Glob(filepath.Join(root, "_conversations", b.Session, "rounds", "*"))
+	if err != nil || len(rounds) == 0 {
+		t.Fatalf("once the root was released the pass wrote %d round(s): %v", len(rounds), err)
+	}
+}
+
+// TestTheDeriverSeesTheChangesAdaptersSessions. After the first pass, the
+// derivation takes only the sessions a pass moved. A session that only the
+// changes adapter moved has to be among them. Otherwise its new files wait
+// for a pass that moves nothing at all, which never comes while a feed runs.
+func TestTheDeriverSeesTheChangesAdaptersSessions(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	root := t.TempDir()
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	growth, err := scenario.Load(filepath.Join("..", "..", "tests", "scenarios", "growth.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withChanges, err := scenario.Load(filepath.Join("..", "..", "tests", "scenarios", "workspace-changes.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scenario.Build(growth, scenario.FormatClaudeCode, root, scenario.Options{At: at, Through: "turn1"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := scenario.Build(withChanges, scenario.FormatClaudeCode, root, scenario.Options{At: at.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The plugin's output is not there on the first pass.
+	plugin := filepath.Join(root, "_source", filepath.FromSlash(scenario.PluginOutputDir), "..")
+	hidden := filepath.Join(root, "_source", "plugins", "hidden")
+	if err := os.Rename(plugin, hidden); err != nil {
+		t.Fatal(err)
+	}
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	if err := ref.pass(); err != nil {
+		t.Fatal(err)
+	}
+	// Now it is, and the local adapter moves only the other session.
+	if err := os.Rename(hidden, plugin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scenario.Build(growth, scenario.FormatClaudeCode, root, scenario.Options{At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ref.pass(); err != nil {
+		t.Fatal(err)
+	}
+	zone := storage.NewZone(root)
+	files, err := storage.LandedFiles(zone, b.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived, err := metrics.LoadDerived(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saw := 0
+	for _, lf := range files {
+		if !strings.HasPrefix(filepath.Base(lf.Path), "changes-") {
+			continue
+		}
+		saw++
+		rel, _ := filepath.Rel(root, lf.Path)
+		digest, err := storage.FileDigest(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !derived.Has(filepath.ToSlash(rel), digest) {
+			t.Errorf("%s, which only the changes adapter landed, was not derived", rel)
+		}
+	}
+	if saw == 0 {
+		t.Fatal("the second pass landed no plugin output")
+	}
+}
+
+// TestNoListingSeesRemoved. A removal renames a directory under _removed
+// before it deletes it. Until it is deleted, nothing that lists sessions or
+// chains may see it, or it would be parsed, sent or shown again.
+func TestNoListingSeesRemoved(t *testing.T) {
+	first, b := scenarioRoot(t, "assembly.yaml")
+	if err := pipelineOver(t, first, bothAdapters(first, "")).pass(); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "_source", "plugins", "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	removed := filepath.Join(root, storage.RemovedDir)
+	if err := os.MkdirAll(removed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(first, b.Session), filepath.Join(removed, b.Session)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(first, "_conversations", b.Session), filepath.Join(removed, b.Session+".chain")); err != nil {
+		t.Fatal(err)
+	}
+	rcv := receiver(t)
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	sendingTo(t, ref, rcv)
+	if err := ref.pass(); err != nil {
+		t.Fatalf("a pass over a root with a removal in progress failed: %v", err)
+	}
+	if rounds, _ := filepath.Glob(filepath.Join(root, "_conversations", "*", "rounds", "*")); len(rounds) != 0 {
+		t.Fatalf("the pass wrote %d round(s) from what was removed", len(rounds))
+	}
+	if n := len(rcv.Requests()) + len(rcv.MetricsRequests()); n != 0 {
+		t.Fatalf("the pass sent %d request(s) from what was removed", n)
+	}
+	if chains, _, _, err := verifyChains(root, ""); err != nil || chains != 0 {
+		t.Fatalf("asz verify found %d chain(s): %v", chains, err)
+	}
+	if ids, err := view.New(storage.NewZone(root), nil).List(); err != nil || len(ids) != 0 {
+		t.Fatalf("the page lists %v: %v", ids, err)
 	}
 }

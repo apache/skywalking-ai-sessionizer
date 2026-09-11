@@ -20,7 +20,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +32,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
+	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/remove"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 )
@@ -86,6 +89,23 @@ type refresher struct {
 	// only at what moved, and a session whose source has stopped growing
 	// never moves again. So they are carried until one pass gets the lock.
 	retry map[string]bool
+
+	// remover removes the sessions a scenario build marked, once all of
+	// each is sent. It exists when claude-code-local is enabled, and it runs
+	// only while this pipeline holds the scenario lock. A root no build wrote
+	// has no marker, so nothing there is ever removed.
+	remover *remove.Remover
+	// scenarioLock is held for the life of the process once the root is a
+	// scenario root. scenarioWait is how long a single pass waits for it.
+	scenarioLock *storage.SessionLock
+	scenarioWait time.Duration
+	// waitingSaid says a pass already reported that another pipeline holds
+	// the scenario root, so later passes wait quietly.
+	waitingSaid bool
+	// derive holds sessions the removal found not derived yet. The next
+	// derivation takes them beside what moved, because a session that no
+	// longer lands anything would otherwise never be derived again.
+	derive map[string]bool
 }
 
 // newRefresher wires the local adapters into one pipeline, or returns nil
@@ -153,7 +173,113 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 	if mode == config.ModeWatch {
 		r.base.IntervalMS = r.interval.Milliseconds()
 	}
+	// A build writes a session under claude-code-local's source, so only a
+	// pipeline that collects from there can remove one.
+	if r.col != nil {
+		r.remover = &remove.Remover{
+			Zone: zone, Source: r.colSource, Local: r.col, LocalMatch: r.match,
+			Changes: r.changes, ChangesRoot: r.changesSource, ChangesMatch: r.cmatch,
+			Derives: r.deriver != nil,
+		}
+	}
+	r.scenarioWait = exportWait
 	return r, nil
+}
+
+// holdScenario takes the scenario lock when the root is a scenario root, and
+// reports whether this pass may go on. A root is one when a claude-code
+// build created _scenario in it. The check runs on every pass, so a feed
+// started after the pipeline is covered from its first session.
+//
+// A second pipeline over the same root does nothing at all, rather than run
+// without removing. Its collector could make an emptied session directory
+// again and save cursors there, and its parser could publish over evidence
+// that is gone.
+func (r *refresher) holdScenario() (bool, error) {
+	if r.scenarioLock != nil {
+		return true, nil
+	}
+	root := r.zone.Root()
+	fi, err := os.Stat(filepath.Join(root, storage.ScenarioDir))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return true, nil
+	case err != nil:
+		return false, err
+	case !fi.IsDir():
+		return true, nil
+	}
+	lockPath := filepath.Join(root, storage.ScenarioDir, ".lock")
+	var lock *storage.SessionLock
+	if r.last {
+		// A single pass has to do its work or say it could not.
+		lock, err = storage.LockScenarioWait(root, r.scenarioWait)
+		if errors.Is(err, storage.ErrScenarioBusy) {
+			err = fmt.Errorf("another pipeline holds this scenario root (%s) and did not release it within %s; nothing was done", lockPath, r.scenarioWait)
+			st := r.base
+			st.LastError = err.Error()
+			r.setStatus(st)
+			return false, err
+		}
+	} else {
+		lock, err = storage.LockScenario(root)
+		if errors.Is(err, storage.ErrScenarioBusy) {
+			if !r.waitingSaid {
+				msg := fmt.Sprintf("another pipeline holds %s; this one does nothing until it is released", lockPath)
+				fmt.Printf("waiting  : %s\n", msg)
+				st := r.base
+				if r.srv != nil {
+					st.LastRefresh = r.srv.Status().LastRefresh
+				}
+				st.LastError = msg
+				r.setStatus(st)
+				r.waitingSaid = true
+			}
+			return false, nil
+		}
+	}
+	if err != nil {
+		return false, err
+	}
+	r.scenarioLock, r.waitingSaid = lock, false
+	fmt.Printf("scenario : this pipeline holds %s; %s\n", lockPath, r.removalSays())
+	return true, nil
+}
+
+// close releases the scenario lock. The commands never call it, because the
+// lock lives as long as the process, and the system releases it when the
+// process ends. Tests call it, to put a second pipeline on the same root.
+func (r *refresher) close() {
+	if r.scenarioLock != nil {
+		_ = r.scenarioLock.Unlock()
+		r.scenarioLock = nil
+	}
+}
+
+// removeInput is what a removal needs to know about this pipeline that the
+// root does not say: where it sends, what it sends, and what it is holding
+// back to parse again.
+func (r *refresher) removeInput() remove.Input {
+	in := remove.Input{Busy: r.retry}
+	if r.pusher != nil {
+		in.Endpoint, in.SendLogs, in.SendMetrics = r.pusher.Endpoint, !r.pusher.NoLogs, !r.pusher.NoMetrics
+	}
+	return in
+}
+
+// removalSays is what a scenario : line says about removal. It asks the
+// check each removal pass makes before it looks at any session. Before, the
+// line promised a removal whenever there was an endpoint, even with metrics
+// sending off or the changes adapter reading another directory, where every
+// session is kept.
+func (r *refresher) removalSays() string {
+	if r.remover == nil {
+		return "no session is removed: claude-code-local is not enabled, and a build writes every session under its source directory"
+	}
+	if reason := r.remover.Blocked(r.removeInput()); reason != "" {
+		return "no session is removed: " + reason
+	}
+	return "a session a build marked is removed by its policy once all of it is sent"
 }
 
 // present reports whether a source directory is there to be read.
@@ -186,6 +312,11 @@ func present(dir string, optional bool) (bool, error) {
 // than leave a backfill half done without saying so. A watching pass logs
 // the same and goes round again.
 func (r *refresher) pass() error {
+	// Before anything else. Over a scenario root, a pass that cannot hold
+	// the root lands, parses and sends nothing.
+	if held, err := r.holdScenario(); !held {
+		return err
+	}
 	start := time.Now()
 	first := r.full
 
@@ -268,10 +399,13 @@ func (r *refresher) pass() error {
 		}
 	}
 	if r.deriver != nil && cs != nil {
-		// The first pass derives history once; later passes only what moved.
+		// The first pass derives history once. A later pass derives what
+		// either adapter moved, what waited on a lock, and what the removal
+		// found not derived yet. The last is how a file the deriver held for
+		// its grace is derived while a feed lands something on every pass.
 		var scope []string
 		if !r.full {
-			scope = cs.Changed
+			scope = deriveScope(changed, r.derive)
 		}
 		if ms, derr := r.deriver.Pass(scope); derr != nil {
 			errs = append(errs, derr)
@@ -351,6 +485,30 @@ func (r *refresher) pass() error {
 			r.pushAfter = time.Now().Add(ps.RetryAfter)
 		}
 	}
+	// Remove what a scenario build marked and what is proved sent. It runs
+	// after the push, so a session can be sent and removed in one pass, and
+	// before the checks below, so the status the page records includes it.
+	removed := 0
+	var kept []remove.Kept
+	if r.remover != nil && r.scenarioLock != nil {
+		res := r.remover.Pass(r.removeInput())
+		errs = append(errs, res.Errors...)
+		kept = res.Kept
+		removed = len(res.Removed)
+		for _, id := range res.Removed {
+			// The page caches a folded conversation. A session carried in
+			// retry would be parsed again, and a parse of nothing is quiet,
+			// but there is nothing left to wait for.
+			if r.srv != nil {
+				r.srv.Forget(id)
+			}
+			delete(r.retry, id)
+		}
+		r.derive = map[string]bool{}
+		for _, id := range res.DeriveNext {
+			r.derive[id] = true
+		}
+	}
 	if r.last && len(r.retry) > 0 {
 		// No pass follows, so these are not deferred, they are unparsed.
 		errs = append(errs, fmt.Errorf("%d session(s) were held by another builder and are not parsed", len(r.retry)))
@@ -378,7 +536,10 @@ func (r *refresher) pass() error {
 	r.setStatus(st)
 
 	// A quiet pass every few seconds is not worth a line. The first one and
-	// any that changed or failed are.
+	// any that changed, removed or failed are.
+	if removed > 0 {
+		pushed += fmt.Sprintf(" removed=%d", removed)
+	}
 	if first || landed > 0 || rounds > 0 || busy > 0 || pushed != "" || len(errs) > 0 {
 		contended := ""
 		if busy > 0 {
@@ -394,6 +555,17 @@ func (r *refresher) pass() error {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
 		}
 	}
+	// A marked session kept for a reason a person has to act on. Each reason
+	// is said once per process, whether or not the pass line is printed. None
+	// is an error: a root that keeps a session it cannot prove sent is doing
+	// what it should.
+	for _, k := range kept {
+		who := k.Session
+		if who == "" {
+			who = "every marked session"
+		}
+		fmt.Fprintf(os.Stderr, "  kept: %s: %s\n", who, k.Reason)
+	}
 	return errors.Join(errs...)
 }
 
@@ -402,6 +574,23 @@ func (r *refresher) setStatus(st view.Status) {
 	if r.srv != nil {
 		r.srv.SetStatus(st)
 	}
+}
+
+// deriveScope is what a later pass derives: the sessions that moved, and the
+// ones the removal carried. It is nil when both are empty, and a nil scope
+// derives every session, as a pass where nothing moved always has.
+func deriveScope(changed, carried map[string]bool) []string {
+	var out []string
+	for id := range changed {
+		out = append(out, id)
+	}
+	for id := range carried {
+		if !changed[id] {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // loop runs passes one interval apart, forever. A pass that fails is

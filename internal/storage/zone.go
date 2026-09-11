@@ -50,6 +50,11 @@ func (z *Zone) Root() string { return z.root }
 
 // SessionDir is the directory holding everything collected for one session.
 // It is the unit of retention: purging a session is removing this directory.
+//
+// asz never removes it for a real session, so what was landed outlives the
+// source. The one exception is a session a scenario build marked. Once all
+// of it is sent, a pipeline renames this directory into RemovedDir and
+// deletes it there, so no reader ever sees half of it.
 func (z *Zone) SessionDir(session string) string {
 	return filepath.Join(z.root, session)
 }

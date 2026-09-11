@@ -34,6 +34,26 @@ Landed files and rounds are both write-once, so each is sent once. `push.state` 
 root lists what was sent, with the digest each file had; a file is recorded only after the request
 carrying it succeeded, so a failed request leaves it for the next pass.
 
+`push.state` also names the receivers the files went to, with one `endpoint` line each:
+`grpc://host:port`, `grpcs://host:port` with `tls: true`, or the HTTP base URL. A `rejected` line
+names each file of a request a receiver took while it rejected some of its records, as
+[Transport](#transport) describes. Every save writes all three kinds, so neither new line is lost
+at the next request. An older asz passes over both, and drops them when it saves the file.
+
+```text
+schema 1
+updated_at 2026-09-11T10:00:00Z
+endpoint grpc://127.0.0.1:11800
+pushed <session-id>/streams/main/transcript-20260911T095959.000000000Z-000001.sd 9f2c…
+rejected <session-id>/streams/main/transcript-20260911T095959.000000000Z-000001.sd
+```
+
+Removing a [scenario session](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
+depends on these lines. A session goes only when `push.state` names exactly one receiver, the one
+the pipeline sends to, and no file of the session has a `rejected` line. A `push.state` that lists
+files and names no receiver was written before these lines existed, or saved by an older asz. It
+then names the receiver `unknown`, and no scenario session on that root is removed after that.
+
 ## Transport
 
 The request is the `ExportLogsServiceRequest` of the OpenTelemetry protocol, built from the
@@ -49,7 +69,23 @@ logs receiver reads it.
 `headers` travel with every request on both transports, as gRPC metadata or as HTTP headers,
 which is where an authorization token goes. A receiver that answers with a partial success,
 saying it rejected some records, has taken the request, and the protocol says not to send it
-again: the count is reported on the pass line as `rejected`, and the files are marked sent.
+again: the count is reported on the pass line as `rejected`, and the files are marked sent. Each
+file of that request also gets a `rejected` line in `push.state`, because the answer does not say
+which records were rejected. A scenario session with such a file is never removed.
+
+Over HTTP, a request counts as taken only when the answer has a 2xx status and a body that is empty
+or protobuf: `application/x-protobuf`, as OTLP names it, or `application/protobuf`, whatever the
+parameters. A 2xx answer with a body of any other type is an error. Nothing in the request is
+recorded as sent, so it goes again on the next pass:
+
+```text
+otlp: http://127.0.0.1:12800/v1/logs answered 200 OK with text/html, not an OTLP response; nothing is recorded as sent
+```
+
+A redirect is not followed. It is an error like any other answer outside 2xx, and a receiver that
+moved is configured again. Before this rule, an HTML page answered with 200, and a redirect to a
+login page, both left files recorded as sent that no receiver stored. The rule is the same for logs
+and metrics. Over gRPC, a call that returns without an error always carries the receiver's answer.
 
 ## What every record carries
 
@@ -200,7 +236,8 @@ and not the other is sent what it takes.
 On the way out the resource is normalised to asz's identity, the service, the layer, the sender,
 so the OAP holds one service for the runtime. A receiver that answers with a partial success has
 taken the request, and the protocol says not to send it again: the rejected records or points are
-counted on the pass line as `rejected` and the file is marked sent.
+counted on the pass line as `rejected`, the file is marked sent, and `push.state` gets a `rejected`
+line for it.
 
 ## Rate
 

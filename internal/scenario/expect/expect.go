@@ -87,6 +87,12 @@ type Properties struct {
 	// step, never a step. Checked when a scenario has changes.
 	ChangesLeaveTheFold *bool `yaml:"changes_leave_the_fold"`
 	MetricsMatchThePlan *bool `yaml:"metrics_match_the_plan"`
+	// RemovedAfterSent says what a pipeline's removal does with the session,
+	// on copies of the finished root. Nothing goes before all of it is sent
+	// to the one receiver the pipeline sends to. All of it goes once it is,
+	// by its marker's policy, and nothing is made or sent again afterwards.
+	// A session with no marker stays.
+	RemovedAfterSent *bool `yaml:"removed_after_sent"`
 }
 
 // On reports whether a property is enabled.

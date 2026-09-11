@@ -63,6 +63,11 @@ type Pusher struct {
 	Zone *storage.Zone
 	// Client is the receiver, over either transport; see NewClient.
 	Client Client
+	// Endpoint names the receiver Client sends to, as EndpointOf gives it.
+	// push.state records it beside what was sent, so a reader can tell which
+	// receiver took the files. Empty records no receiver, and then nothing
+	// that asks where the files went trusts what this pusher sent.
+	Endpoint string
 	// Version is what the sender reports about itself.
 	Version string
 	// ServiceName is the service every record is attributed to, when one is
@@ -386,7 +391,12 @@ func (p *Pusher) pushSpool(b *batch) {
 			}
 			continue
 		}
-		state.mark(rel, digestOf(data))
+		state.mark(rel, digestOf(data), p.Endpoint)
+		// A partial success is not sent again, as the protocol says. It is
+		// recorded, so no reader takes the file as received whole.
+		if rejected > 0 {
+			state.reject(rel)
+		}
 		st.Metrics++
 		if err := state.save(p.statePath(), p.Now()); err != nil {
 			st.Errors = append(st.Errors, err)
@@ -492,7 +502,7 @@ func (p *Pusher) sessionsOldestFirst() ([]session, error) {
 	return out, nil
 }
 
-func (p *Pusher) statePath() string { return filepath.Join(p.Zone.Root(), "push.state") }
+func (p *Pusher) statePath() string { return filepath.Join(p.Zone.Root(), StateFile) }
 
 // batch accumulates files and sends them when the budget is reached. A file
 // is recorded as pushed only after the request carrying it succeeded, so a
@@ -585,7 +595,12 @@ func (b *batch) flush() error {
 		return err
 	}
 	for _, f := range pending {
-		b.state.mark(f.rel, f.digest)
+		b.state.mark(f.rel, f.digest, b.p.Endpoint)
+		// The request was taken, so it is not sent again. The answer does not
+		// say which records were rejected, so every file in it is recorded.
+		if rejected > 0 {
+			b.state.reject(f.rel)
+		}
 	}
 	b.st.Files += len(pending)
 	return b.state.save(b.p.statePath(), b.p.Now())
@@ -1035,13 +1050,34 @@ func roundFiles(root, conv string) ([]string, error) {
 	return out, nil
 }
 
-// pushState is the set of files already sent, with the digest each had.
+// StateFile is the file in a storage root that records what was sent.
+const StateFile = "push.state"
+
+// pushState is what push.state records: the files already sent, with the
+// digest each had, the receivers they went to, and the files of a request a
+// receiver took while it rejected some of the request's records.
+//
+// Every save writes all three. An older asz reads only the pushed lines, and
+// rewrites the file without the other two. So a file with pushed lines and
+// no endpoint line names the receiver unknown, and nothing that asks where
+// the files went trusts it.
 type pushState struct {
-	files map[string]string
+	files     map[string]string
+	endpoints map[string]bool
+	rejected  map[string]bool
+}
+
+// unknownEndpoint is the receiver of files that push.state records with no
+// endpoint: a file written before endpoints were recorded, or rewritten by an
+// older asz.
+const unknownEndpoint = "unknown"
+
+func newPushState() *pushState {
+	return &pushState{files: map[string]string{}, endpoints: map[string]bool{}, rejected: map[string]bool{}}
 }
 
 func loadState(path string) (*pushState, error) {
-	s := &pushState{files: map[string]string{}}
+	s := newPushState()
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1059,28 +1095,60 @@ func loadState(path string) (*pushState, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The two newer line kinds have two fields. An older asz keeps only
+		// three-field pushed lines, so it passes over them.
 		fields := strings.Fields(string(line))
-		if len(fields) == 3 && fields[0] == "pushed" {
+		switch {
+		case len(fields) == 3 && fields[0] == "pushed":
 			s.files[fields[1]] = fields[2]
+		case len(fields) == 2 && fields[0] == "endpoint":
+			s.endpoints[fields[1]] = true
+		case len(fields) == 2 && fields[0] == "rejected":
+			s.rejected[fields[1]] = true
 		}
+	}
+	if len(s.files) > 0 && len(s.endpoints) == 0 {
+		s.endpoints[unknownEndpoint] = true
 	}
 	return s, nil
 }
 
-func (s *pushState) pushed(rel string) bool  { _, ok := s.files[rel]; return ok }
-func (s *pushState) mark(rel, digest string) { s.files[rel] = digest }
+func (s *pushState) pushed(rel string) bool { _, ok := s.files[rel]; return ok }
 
-func (s *pushState) save(path string, now time.Time) error {
-	keys := make([]string, 0, len(s.files))
-	for k := range s.files {
-		keys = append(keys, k)
+// mark records rel as sent with its digest, to endpoint when one is named.
+func (s *pushState) mark(rel, digest, endpoint string) {
+	s.files[rel] = digest
+	if endpoint != "" {
+		if s.endpoints == nil {
+			s.endpoints = map[string]bool{}
+		}
+		s.endpoints[endpoint] = true
 	}
-	sort.Strings(keys)
+}
+
+// reject records that a receiver rejected records of rel.
+func (s *pushState) reject(rel string) {
+	if s.rejected == nil {
+		s.rejected = map[string]bool{}
+	}
+	s.rejected[rel] = true
+}
+
+// save writes every line kind, every time. flush and pushSpool save after
+// each request, so a kind left out here would be gone after the next request,
+// and a file a receiver rejected records of would then read as taken whole.
+func (s *pushState) save(path string, now time.Time) error {
 	return storage.WriteAtomic(path, storage.PermState, func(w io.Writer) error {
 		bw := bufio.NewWriter(w)
 		fmt.Fprintf(bw, "schema 1\nupdated_at %s\n", now.UTC().Format(time.RFC3339Nano))
-		for _, k := range keys {
+		for _, e := range sortedKeys(s.endpoints) {
+			fmt.Fprintf(bw, "endpoint %s\n", e)
+		}
+		for _, k := range sortedKeys(s.files) {
 			fmt.Fprintf(bw, "pushed %s %s\n", k, s.files[k])
+		}
+		for _, k := range sortedKeys(s.rejected) {
+			fmt.Fprintf(bw, "rejected %s\n", k)
 		}
 		return bw.Flush()
 	})

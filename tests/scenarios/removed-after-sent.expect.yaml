@@ -1,0 +1,36 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+checkpoints:
+  final:
+    rounds: 5
+    # Six calls: four on main, one in the helper, one in lint. The helper
+    # and the workflow are each started by an agent call and end with an
+    # output. Only the helper notifies. The main stream has two runs, the
+    # person's and the notification's.
+    kinds: {stream: 3, talk: 3, run: 4, llm.call: 6, tool: 1, agent.call: 2, agent.launch_ack: 2, agent.output: 2, runtime.notification: 1, message.external: 1, message.assistant: 4}
+    talks_on: {main: 1, helper: 1, lint: 1}
+    relations: {starts: 2, ends_with: 2, reports: 1}
+    unresolved: {open: 0}
+    view: {state: verified, rounds: 5, changes: 1, changes_joined: 1, captured_by: {asz-plugin: 1}}
+# A small round budget cuts the chain into several rounds, so a round sent
+# twice, or parsed again after a removal, would show. One expectation holds
+# for both formats. At 3072 bytes both cut five rounds, while at 4096 the
+# claude-code landing cuts four and the sd landing five.
+parse: {max_round_bytes: 3072}
+push:
+  kinds: [transcript, agent_meta, journal, workflow_manifest, workflow_script, changes, round]

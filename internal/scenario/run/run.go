@@ -160,12 +160,12 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		if err != nil {
 			return nil, "", err
 		}
-		if err := collect(f, out); err != nil {
+		if _, err := collect(f, out); err != nil {
 			return nil, "", err
 		}
 		// The runtime's metric family, derived as the collector derives it,
 		// after each landing and before anything later happens to the root.
-		if err := derive(out); err != nil {
+		if _, err := derive(out); err != nil {
 			return nil, "", err
 		}
 		round, err = parseAll(out, built.Session, ex.Parse.MaxRoundBytes)
@@ -244,6 +244,9 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		{"repack_keeps_structure", ex.Properties.RepackKeepsStructure, func() ([]string, error) { return repackKeepsStructure(out, session, ex.Parse.MaxRoundBytes) }},
 		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) {
 			return pushFollowsTheWire(out, session, f, ex.Push, expectedTokens(built.Plan), expect.On(ex.Properties.MetricsMatchThePlan))
+		}},
+		{"removed_after_sent", ex.Properties.RemovedAfterSent, func() ([]string, error) {
+			return removedAfterSent(sc, f, out, session, built.Plan.Project, ex.Parse.MaxRoundBytes, opts)
 		}},
 		{"view_covers_the_session", ex.Properties.ViewCoversTheSession, func() ([]string, error) { return expect.ViewCoversTheSession(out, session) }},
 		{"changes_leave_the_fold", ex.Properties.ChangesLeaveTheFold, func() ([]string, error) {
@@ -352,41 +355,47 @@ func lose(out, session string, l expect.Lose, ctx *expect.Context) (string, erro
 }
 
 // derive writes the runtime's metric family for what is landed and not yet
-// derived, with no look-back: a scenario is history by construction.
-func derive(out string) error {
-	d := &metrics.Deriver{Zone: storage.NewZone(out), Options: metrics.Options{Grace: -1, Version: "check", Now: func() time.Time { return time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) }}}
+// derived, with no look-back: a scenario is history by construction. It
+// returns how many requests it put in the spool.
+func derive(out string) (int, error) {
+	d := &metrics.Deriver{Zone: storage.NewZone(out), Options: metrics.Options{Grace: -1, Version: "check", Now: checkNow}}
 	st, err := d.Pass(nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(st.Errors) != 0 {
-		return fmt.Errorf("metrics: %v", st.Errors)
+		return 0, fmt.Errorf("metrics: %v", st.Errors)
 	}
-	return nil
+	return st.Requests, nil
 }
 
-// collect lands a runtime format's source through its adapter. An sd build
-// is landed already.
-func collect(f scenario.Format, out string) error {
+// checkNow is the clock of everything a check runs after the build: the
+// deriver, the pusher and the removal. It is fixed, so a check writes the
+// same bytes every time.
+func checkNow() time.Time { return time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC) }
+
+// collect lands a runtime format's source through its adapter, and returns
+// how many sources it landed from. An sd build is landed already.
+func collect(f scenario.Format, out string) (int, error) {
 	if f != scenario.FormatClaudeCode {
-		return nil
+		return 0, nil
 	}
 	st, err := claudecode.New(filepath.Join(out, "_source"), storage.NewZone(out), 0).CollectAll(nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(st.Errors) != 0 {
-		return fmt.Errorf("collect: %v", st.Errors)
+		return 0, fmt.Errorf("collect: %v", st.Errors)
 	}
 	// The plugin's lines, through their own adapter, as asz view runs both.
 	cs, err := claudecodechanges.New(filepath.Join(out, "_source", "plugins", "data"), storage.NewZone(out), 0).CollectAll(nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(cs.Errors) != 0 {
-		return fmt.Errorf("collect changes: %v", cs.Errors)
+		return 0, fmt.Errorf("collect changes: %v", cs.Errors)
 	}
-	return nil
+	return st.SourcesLanded + cs.SourcesLanded, nil
 }
 
 // changesLeaveTheFold builds the scenario again without its changes and
@@ -400,7 +409,7 @@ func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session 
 	if err != nil {
 		return nil, err
 	}
-	if err := collect(f, plain); err != nil {
+	if _, err := collect(f, plain); err != nil {
 		return nil, err
 	}
 	if _, err := parseAll(plain, built.Session, maxRound); err != nil {

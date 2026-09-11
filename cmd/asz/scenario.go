@@ -31,7 +31,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/run"
 )
 
-const scenarioUsage = `asz scenario build FILE... --format {claude-code|sd} --out DIR [--at TIME] [--scale FACTOR] [--repeat N] [--every D] [--pick {cycle|random}] [--seed N] [--through CHECKPOINT]
+const scenarioUsage = `asz scenario build FILE... --format {claude-code|sd} --out DIR [--at TIME] [--scale FACTOR] [--repeat N] [--every D] [--pick {cycle|random}] [--seed N] [--through CHECKPOINT] [--remove {immediately|DURATION}]
 asz scenario check FILE [--format {claude-code|sd|all}] [--out DIR] [--at TIME] [--scale FACTOR]
 
 build writes a scenario's input into DIR and stops: for claude-code, the runtime's own files under
@@ -52,6 +52,11 @@ conversations keep arriving.
   asz scenario build tests/scenarios --format claude-code --out DIR --every 30s --pick random
   asz server -config DIR/asz.yaml
 
+A claude-code build also records, for each session, when the pipeline may remove it. asz collect
+and asz server remove a session once all of it has been sent to the configured receiver:
+immediately, or once its last record is older than --remove. A session no build wrote is never
+removed.
+
 check builds, collects and parses at every checkpoint, compares the fold with FILE's expectation
 file (NAME.expect.yaml), runs the properties every chain must have, and compares the formats with
 each other. It exits non-zero on any failure and keeps its directory when one is given.
@@ -64,6 +69,8 @@ each other. It exits non-zero on any failure and keeps its directory when one is
   --pick MODE      cycle through the scenarios in order, or random (default cycle)
   --seed N         seeds --pick random; 0 varies with each run (default 0)
   --through NAME   build only the steps up to this checkpoint (build only)
+  --remove POLICY  immediately (default), or a duration such as 24h or 7d counted from the
+                   session's last record: when the pipeline removes a sent session (claude-code build only)
 `
 
 // cmdScenario handles both subcommands. It is dispatched before the common
@@ -85,6 +92,7 @@ func cmdScenario(args []string) int {
 	pick := fs.String("pick", "cycle", "cycle or random, when more than one scenario is given")
 	seed := fs.Int64("seed", 0, "seeds --pick random; 0 varies with each run")
 	through := fs.String("through", "", "build only through this checkpoint")
+	remove := fs.String("remove", scenario.PolicyImmediately, "immediately, or a duration such as 24h or 7d")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, scenarioUsage) }
 	// A file may come before the flags, as the usage shows, or after them,
 	// and there may be several: parse, take the file the parse stopped on,
@@ -126,6 +134,19 @@ func cmdScenario(args []string) int {
 			fmt.Fprintf(os.Stderr, "asz: --pick %q; use %s or %s\n", *pick, pickCycle, pickRandom)
 			return 2
 		}
+		// Removal is a policy of the scenario, never an option of the
+		// product: each session's marker records it, and a pipeline reads it
+		// from there. An sd build writes no source and no marker.
+		if scenario.Format(*format) == scenario.FormatSD && given["remove"] {
+			fmt.Fprintln(os.Stderr, "asz: --remove applies to a claude-code build; an sd build writes no source, and its sessions are never removed")
+			return 2
+		}
+		removal, err := scenario.ParseRemove(*remove)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "asz: --remove %q; use immediately, or a duration such as 30m, 24h or 7d\n", *remove)
+			return 2
+		}
+		marks := scenario.Format(*format) == scenario.FormatClaudeCode
 		set, err := scenario.LoadSet(files)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "asz:", err)
@@ -157,12 +178,15 @@ func cmdScenario(args []string) int {
 		// already written, and the collector, which reads forward from where
 		// it stopped, would land nothing for the second.
 		used := map[string]bool{}
-		opts := scenario.Options{At: base, Scale: *scale, Interval: *interval, Through: *through, Watch: *every > 0}
+		opts := scenario.Options{At: base, Scale: *scale, Interval: *interval, Through: *through, Watch: *every > 0, Remove: removal}
 		if opts.At.IsZero() {
 			opts.At = time.Now()
 		}
 		if *every > 0 {
 			fmt.Printf("out      : %s\nevery    : %s\nscenarios: %d, %s\n", *out, *every, len(set), *pick)
+			if marks {
+				fmt.Printf("remove   : %s\n", removal.Describe())
+			}
 		}
 		for k := 1; count == 0 || k <= count; k++ {
 			l := next(k)
@@ -221,10 +245,19 @@ func cmdScenario(args []string) int {
 			opts.At = last.Add(gap)
 			if k == count {
 				fmt.Printf("out      : %s\nconfig   : %s\n", b.Out, b.Config)
+				if marks {
+					fmt.Printf("remove   : %s\n", removal.Describe())
+				}
 			}
 		}
 		return 0
 	case "check":
+		// A check builds and removes its own copies. A policy for a pipeline
+		// has nothing to act on here.
+		if given["remove"] {
+			fmt.Fprintln(os.Stderr, "asz: --remove is for scenario build")
+			return 2
+		}
 		var formats []scenario.Format
 		if *format != "" && *format != "all" {
 			formats = []scenario.Format{scenario.Format(*format)}

@@ -127,8 +127,11 @@ func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error
 	// each session, read off its landed headers: one service per kind of
 	// agent, which is how a receiver lists them.
 	p := &otlp.Pusher{
-		Zone:        storage.NewZone(zoneRoot),
-		Client:      client,
+		Zone:   storage.NewZone(zoneRoot),
+		Client: client,
+		// Recorded beside what is sent, so a scenario root removes a session
+		// only once it is sent to the receiver this pipeline sends to.
+		Endpoint:    otlp.EndpointOf(o.Protocol, o.Endpoint, o.TLS),
 		Version:     version,
 		ServiceName: o.ServiceName,
 		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, mock.Name: mock.RuntimeName},

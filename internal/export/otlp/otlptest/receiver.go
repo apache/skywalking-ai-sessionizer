@@ -17,7 +17,7 @@
 
 // Package otlptest is an in-process OTLP logs receiver for tests. It serves
 // both transports at once, keeps every request it accepted, and can be told
-// to refuse them. The scenario checks and the exporter's own tests use it,
+// to refuse them, or to take them and reject some of their records. The scenario checks and the exporter's own tests use it,
 // so the same receiver reads what a pusher sent over either transport.
 package otlptest
 
@@ -55,6 +55,9 @@ type Receiver struct {
 	// retryAfter over HTTP when it is set.
 	throttle   bool
 	retryAfter time.Duration
+	// reject is how many records or data points every accepted request is
+	// answered as rejected, in a partial success.
+	reject int64
 
 	web  *httptest.Server
 	rpc  *grpc.Server
@@ -128,6 +131,16 @@ func (r *Receiver) Throttle(on bool, after time.Duration) {
 	r.throttle, r.retryAfter = on, after
 }
 
+// Reject makes the receiver answer every request it accepts, over both
+// transports, with a partial success that rejects n records or data points.
+// Zero answers a full success again. The requests are kept either way, as a
+// receiver that took them keeps them.
+func (r *Receiver) Reject(n int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.reject = n
+}
+
 // errThrottled is the receiver asking to slow down.
 var errThrottled = errors.New("slow down")
 
@@ -137,24 +150,46 @@ func (r *Receiver) Close() {
 	r.rpc.Stop()
 }
 
-func (r *Receiver) accept(req *collogspb.ExportLogsServiceRequest) error {
+// accept keeps a request, or refuses it, and returns how many of its records
+// the answer rejects.
+func (r *Receiver) accept(req *collogspb.ExportLogsServiceRequest) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.refusal(); err != nil {
-		return err
+		return 0, err
 	}
 	r.reqs = append(r.reqs, req)
-	return nil
+	return r.reject, nil
 }
 
-func (r *Receiver) acceptMetrics(req *collmetricspb.ExportMetricsServiceRequest) error {
+func (r *Receiver) acceptMetrics(req *collmetricspb.ExportMetricsServiceRequest) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.refusal(); err != nil {
-		return err
+		return 0, err
 	}
 	r.metrics = append(r.metrics, req)
-	return nil
+	return r.reject, nil
+}
+
+// logsAnswer is the answer to an accepted logs request: a full success, or a
+// partial one that rejects n records.
+func logsAnswer(n int64) *collogspb.ExportLogsServiceResponse {
+	if n <= 0 {
+		return &collogspb.ExportLogsServiceResponse{}
+	}
+	return &collogspb.ExportLogsServiceResponse{PartialSuccess: &collogspb.ExportLogsPartialSuccess{
+		RejectedLogRecords: n, ErrorMessage: "rejected by the test receiver"}}
+}
+
+// metricsAnswer is the answer to an accepted metrics request: a full
+// success, or a partial one that rejects n data points.
+func metricsAnswer(n int64) *collmetricspb.ExportMetricsServiceResponse {
+	if n <= 0 {
+		return &collmetricspb.ExportMetricsServiceResponse{}
+	}
+	return &collmetricspb.ExportMetricsServiceResponse{PartialSuccess: &collmetricspb.ExportMetricsPartialSuccess{
+		RejectedDataPoints: n, ErrorMessage: "rejected by the test receiver"}}
 }
 
 func (r *Receiver) refusal() error {
@@ -185,11 +220,12 @@ func (r *Receiver) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "not an ExportMetricsServiceRequest: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		if err := r.acceptMetrics(&msg); err != nil {
+		rejected, err := r.acceptMetrics(&msg)
+		if err != nil {
 			r.refuse(w, err)
 			return
 		}
-		out, _ := proto.Marshal(&collmetricspb.ExportMetricsServiceResponse{})
+		out, _ := proto.Marshal(metricsAnswer(rejected))
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		_, _ = w.Write(out)
 		return
@@ -199,11 +235,12 @@ func (r *Receiver) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "not an ExportLogsServiceRequest: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := r.accept(&msg); err != nil {
+	rejected, err := r.accept(&msg)
+	if err != nil {
 		r.refuse(w, err)
 		return
 	}
-	out, _ := proto.Marshal(&collogspb.ExportLogsServiceResponse{})
+	out, _ := proto.Marshal(logsAnswer(rejected))
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	_, _ = w.Write(out)
 }
@@ -230,13 +267,14 @@ type metricsServer struct {
 }
 
 func (s *metricsServer) Export(_ context.Context, req *collmetricspb.ExportMetricsServiceRequest) (*collmetricspb.ExportMetricsServiceResponse, error) {
-	if err := s.r.acceptMetrics(req); err != nil {
+	rejected, err := s.r.acceptMetrics(req)
+	if err != nil {
 		if errors.Is(err, errThrottled) {
 			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
-	return &collmetricspb.ExportMetricsServiceResponse{}, nil
+	return metricsAnswer(rejected), nil
 }
 
 type logsServer struct {
@@ -245,13 +283,14 @@ type logsServer struct {
 }
 
 func (s *logsServer) Export(_ context.Context, req *collogspb.ExportLogsServiceRequest) (*collogspb.ExportLogsServiceResponse, error) {
-	if err := s.r.accept(req); err != nil {
+	rejected, err := s.r.accept(req)
+	if err != nil {
 		if errors.Is(err, errThrottled) {
 			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
-	return &collogspb.ExportLogsServiceResponse{}, nil
+	return logsAnswer(rejected), nil
 }
 
 // Attrs flattens attributes for a check. An integer is written as int:N so

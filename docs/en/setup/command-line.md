@@ -76,17 +76,68 @@ One line per pass, and a quiet pass prints nothing:
 | `busy` | how many times another process on the same root held a session, a conversation's chain or the export state this pass needed, absent when 0 |
 | `pushed` | files and rounds sent, absent when no endpoint is named |
 | `metrics` | spooled metrics requests sent |
+| `rejected` | records and points a receiver took and rejected, absent when 0. It also gives an `error:` line, because they are never sent again. |
+| `removed` | scenario sessions removed, absent when 0. See [A scenario root](#a-scenario-root). |
 | `errors` | listed on standard error after the line |
 
 `busy` is not an error. Running two pipelines on one root is supported, and the process that holds
-a lock is doing the same work. A session whose chain was held is parsed on a later pass. A single
-pass has no later pass, so there that session is listed as an error. So is an export state that
-another process still holds after two minutes of waiting, because then nothing was sent.
+a lock is doing the same work. A scenario root is the exception, below. A session whose chain was
+held is parsed on a later pass. A single pass has no later pass, so there that session is listed
+as an error. So is an export state that another process still holds after two minutes of waiting,
+because then nothing was sent.
 
 Anything else the pass could not do is listed on standard error under the line, one `error:` line
 each: a session that failed to parse, a request the receiver refused. A watching collector goes on
 to the next pass. A single pass exits non-zero, so an unattended backfill can be read by its exit
 status.
+
+### A scenario root
+
+A root a `claude-code` scenario build wrote holds `_scenario/`. There a pass does one more thing,
+after the send. It removes each session the build marked that is now sent in full, by the policy in
+the session's marker. [Removal](../guides/scenario.md#removal-a-session-goes-once-it-is-sent) says
+what that takes. A root no build wrote has no `_scenario/`, and nothing in it is ever removed.
+
+When the root holds `_scenario/` at the start, a `scenario :` line says what the removal will do.
+It asks the check each removal pass makes before it looks at any session, so it never promises a
+removal the configuration prevents. When nothing in the configuration prevents one, it prints:
+
+```text
+scenario : a session a build marked is removed by its policy once all of it is sent
+```
+
+Otherwise it prints `scenario : no session is removed: <reason>`, where the reason names what keeps
+every marked session, such as `no export endpoint; nothing is sent, so nothing is removed`. A root
+that gets `_scenario/` only later, from a feed started after the pipeline, has no such line at the
+start.
+
+Such a root takes one pipeline at a time. The first pass that finds `_scenario/` takes
+`_scenario/.lock` and holds it until the process ends. It prints the lock, then the same words as
+the line above:
+
+```text
+scenario : this pipeline holds <root>/_scenario/.lock; a session a build marked is removed by its policy once all of it is sent
+```
+
+A second watching pipeline over the same root prints `waiting  : another pipeline holds
+<root>/_scenario/.lock; this one does nothing until it is released` once. It then lands, parses and
+sends nothing until the lock is free. A single pass waits up to two minutes for the lock, then exits
+non-zero with nothing done. A second pipeline that went on could land a removed session again, or
+parse evidence that is gone.
+
+A marked session the pass cannot prove sent is kept. When a person has to act, the reason is
+printed once per process on standard error:
+
+```text
+  kept: every marked session: no export endpoint; nothing is sent, so nothing is removed
+  kept: 3189c1f0-9ec4-4bd2-88dc-8eda88ac6db3: the receiver rejected records of 3189c1f0-…/streams/main/transcript-…-000001.sd
+```
+
+`every marked session` means the reason holds for all of them. A kept session is not an error, and
+a single pass does not exit non-zero for it. A session that is only not sent yet, or not yet old
+enough for its policy, is kept with no line. A removal that stops part way on a check, such as a
+source file that changed since the build wrote it, is an `error:` line that names the file. That
+session is left for a person.
 
 ## index
 
@@ -178,6 +229,9 @@ is enabled.
 `/api/status` reports the mode, the source, the last and the next refresh and the counts of the
 last pass, and the list page shows the same. The page is up before the first pass, so a large
 backfill does not look like a hung command.
+
+Over a [scenario root](#a-scenario-root), it removes sent sessions as `collect` does, and the page
+stops listing each one it removes.
 
 `server` needs a local source. To serve a root that already exists, use `view`.
 
@@ -271,6 +325,7 @@ and of folding again while a conversation is still being written, has not been m
 ```text
 asz scenario build FILE... --format {claude-code|sd} --out DIR [--at TIME] [--scale FACTOR] [--repeat N]
                            [--every D] [--pick {cycle|random}] [--seed N] [--through CHECKPOINT]
+                           [--remove {immediately|DURATION}]
 asz scenario check FILE [--format {claude-code|sd|all}] [--out DIR] [--at TIME] [--scale FACTOR]
 ```
 
@@ -292,16 +347,31 @@ session:
 [14:22:31] assembly.yaml: c30736f2-ac0c-4a72-89b1-01a0844af62d (20 records, 15.4s)
 ```
 
+A `claude-code` build also writes a marker for each session, with the policy `--remove` names:
+`immediately`, the default, or a duration such as `30m`, `24h` or `7d`, counted from the session's
+last record. `asz collect` and `asz server` remove a marked session by that policy once all of it
+is sent, as [Removal](../guides/scenario.md#removal-a-session-goes-once-it-is-sent) describes. The
+build prints the policy after `config`, and a feed prints it in its header:
+
+```text
+remove   : 24h after its last record, once sent
+```
+
+`--remove` with `--format sd` is refused, because an sd build writes no source and its sessions are
+never removed. `check` refuses `--remove`, and `build` refuses zero, a negative duration and
+anything it cannot read. Each refusal exits with status 2 and writes nothing.
+
 ## push
 
 Sends every landed file and every round not yet sent to the OpenTelemetry logs receiver at
 `export.otlp.endpoint`, one log record per file, then exits. One pass is all it does: a root that
 keeps growing is sent by `asz collect`, which pushes at the end of every period. This command is
 for a root that is already there, such as one copied from another machine or brought under a new
-budget by `asz repack`. One line for the pass:
+budget by `asz repack`. It never removes anything, even over a [scenario root](#a-scenario-root).
+One line for the pass:
 
 ```text
-[10:12:03] files=306 metrics=41 bytes=47.9MB wire=48.0MB requests=46 paused=0s errors=0 (1.1s)
+[10:12:03] files=306 metrics=41 bytes=47.9MB wire=48.0MB requests=46 paused=0s rejected=0 errors=0 (1.1s)
 ```
 
 `metrics` counts the spooled metrics requests sent, `wire` is what went out, the requests as

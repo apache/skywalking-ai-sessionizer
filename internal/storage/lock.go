@@ -99,6 +99,48 @@ func LockExportWait(root string, timeout time.Duration) (*SessionLock, error) {
 	}
 }
 
+// ScenarioDir is the directory a claude-code scenario build creates in its
+// storage root. A pipeline over a root that has it takes the scenario lock
+// there, because a pipeline over such a root removes sessions.
+//
+// The name starts with an underscore, so a storage root's session listing
+// passes over it as it passes over _conversations.
+const ScenarioDir = "_scenario"
+
+// ErrScenarioBusy means another pipeline holds this scenario root.
+var ErrScenarioBusy = errors.New("storage: the scenario root is held by another pipeline")
+
+// LockScenario takes the lock one pipeline holds over a scenario root for as
+// long as it runs.
+//
+// A pipeline over a scenario root removes a session once all of it is sent.
+// A second pipeline over the same root could land a removed session again
+// through a source it listed a moment earlier, or parse evidence that is
+// gone. So only one pipeline works on such a root at a time. A rolling
+// update that starts a new process before the old one stops makes two of
+// them an ordinary case.
+func LockScenario(root string) (*SessionLock, error) {
+	l, err := lockDir(filepath.Join(root, ScenarioDir))
+	if errors.Is(err, ErrSessionBusy) {
+		return nil, ErrScenarioBusy
+	}
+	return l, err
+}
+
+// LockScenarioWait is LockScenario, waiting up to timeout for the lock
+// rather than giving up at once. A single pass waits, because it has to do
+// its work or say it could not. A watching pipeline tries on every pass.
+func LockScenarioWait(root string, timeout time.Duration) (*SessionLock, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		l, err := LockScenario(root)
+		if !errors.Is(err, ErrScenarioBusy) || time.Now().After(deadline) {
+			return l, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // Unlock releases the lock.
 func (l *SessionLock) Unlock() error {
 	if l == nil || l.f == nil {

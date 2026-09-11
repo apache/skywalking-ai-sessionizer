@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
 // Format names a writer: what a build leaves in the output directory.
@@ -48,6 +50,9 @@ type Built struct {
 	Config  string
 	Files   []string
 	Events  int
+	// Marker is the marker a claude-code build wrote for the session, and
+	// empty for an sd build, which writes none.
+	Marker string
 }
 
 // Build plans a scenario and writes it into out with the named writer, then
@@ -78,7 +83,24 @@ func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error
 	res := &Built{Plan: p, Session: p.Session, Format: format, Out: out, Events: len(p.Events)}
 	switch format {
 	case FormatClaudeCode:
-		res.Files, err = writeClaudeCode(p, source)
+		// The sign of a scenario root. A pipeline over a root that has it
+		// takes the scenario lock, and only such a pipeline removes.
+		if err := os.MkdirAll(filepath.Join(out, storage.ScenarioDir), 0o755); err != nil {
+			return nil, err
+		}
+		if err := clearMarker(out, source, p.Session); err != nil {
+			return nil, err
+		}
+		var marked []MarkerFile
+		res.Files, marked, err = writeClaudeCode(p, source)
+		if err != nil {
+			return nil, err
+		}
+		// Written last, after every file of the session. The writer writes
+		// one file after another with no other sign of being done, so the
+		// marker is the only proof that the build finished the session.
+		res.Marker = MarkerPath(source, p.Session)
+		err = WriteMarker(res.Marker, newMarker(p.Session, opts.Remove, marked))
 	case FormatSD:
 		now := opts.At
 		if now.IsZero() {
