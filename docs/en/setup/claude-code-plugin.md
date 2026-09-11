@@ -35,7 +35,8 @@ window open at the same time sees it as shared with the edit and names it.
 ## Install
 
 The binary package for your platform holds `claude-code-plugin/`: the plugin's manifest, its
-hooks, and its binary under `bin/`. Point Claude Code at that directory:
+hooks, and its binary under `bin/`. [Install](install.md) says where to get the package, and
+where each package manager puts this directory. Point Claude Code at it:
 
 ```sh
 claude --plugin-dir /path/to/claude-code-plugin
@@ -274,5 +275,13 @@ every event inside a subagent and on no event of the main stream. No event in th
 a message id or a request id.
 
 The plugin itself was run inside Claude Code on macOS with a shell command, an edit and a
-subagent. asz collected and showed the result. Windows is a build target. Its hook command line
-has not been exercised.
+subagent. asz collected and showed the result.
+
+On Windows the plugin has run only outside Claude Code. CI's `packages` job runs
+`tools/package-smoke.sh` on each binary package, on a runner of the package's own platform. On
+2026-09-11, the CI of pull request #6 ran it on `windows-latest`, x86-64, and on `windows-11-arm`,
+ARM 64. Both jobs passed, in 30 and 33 seconds. The script unpacks the zip with `Expand-Archive`.
+It runs the packaged plugin with a `SessionStart`, a `PreToolUse`, a `PostToolUse` and a
+`SessionEnd` event on standard input, writes a file between the two tool events, and requires the
+plugin to record that change. Claude Code itself has not run the hooks on Windows, so the command
+line in `hooks/hooks.json` has not run there.

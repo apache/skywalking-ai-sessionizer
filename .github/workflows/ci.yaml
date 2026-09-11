@@ -270,9 +270,9 @@ jobs:
       - name: Lint
         run: make lint
 
-  # The container image. A pull request builds it; a push to main or a
-  # version tag builds it for both platforms and publishes it to GHCR under
-  # this repository's name.
+  # The container image. A pull request builds it. A push to main, the
+  # released event of a GitHub release, or a run started by hand builds it
+  # for both platforms and publishes it to GHCR under this repository's name.
   docker:
     name: Docker
     runs-on: ubuntu-latest

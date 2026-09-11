@@ -85,8 +85,9 @@ Expand-Archive $Pkg -DestinationPath asz
 ```
 
 Claude Code has not yet run the plugin's hooks on Windows, so the command line in `hooks/hooks.json`
-has not run there. CI starts the packaged plugin on its Windows runners and gives it each hook
-event on standard input, outside Claude Code.
+has not run there. CI unpacks each Windows package on a Windows runner of its processor, outside
+Claude Code. It runs the packaged plugin with a `SessionStart`, a `PreToolUse`, a `PostToolUse` and
+a `SessionEnd` event on standard input.
 [Claude Code Plugin](claude-code-plugin.md#what-was-verified) says what was verified.
 
 ## Verify a package

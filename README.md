@@ -62,8 +62,9 @@ adapter reports it as `unavailable` rather than approximating it.
 
 ## Quick start
 
-Each release carries a binary package for macOS, Linux and Windows; see the
-[quick start](docs/en/setup/quick-start.md). Or build it:
+From 0.3.0 on, each release ships a signed binary package for macOS, Linux and Windows, on ARM 64
+and x86-64. [Install](docs/en/setup/install.md) says where to download them and how to verify
+them. Or build from a checkout, as the [quick start](docs/en/setup/quick-start.md) does:
 
 ```sh
 make build                 # builds ./bin/asz
@@ -104,10 +105,11 @@ Apache SkyWalking, SkyWalking, and the Apache feather logo are trademarks of The
 ## Container image
 
 CI publishes a Linux image for amd64 and arm64 to GHCR. It carries the `asz`
-binary only. Docker Desktop on Windows runs it as a Linux container; the
-Windows binary package is the path without Docker. Mount a storage root at
-`/asz/data`. The default command is `server`, which collects and serves; with
-no source mounted, ask for `view`, which only reads:
+binary and its license files. Docker Desktop on Windows runs it as a Linux
+container. Without Docker, use the Windows binary package from
+[Install](docs/en/setup/install.md). Mount a storage root at `/asz/data`. The
+default command is `server`, which collects and serves. With no source
+mounted, ask for `view`, which only reads:
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
@@ -116,12 +118,15 @@ docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
 
 | Tag | Points at |
 | --- | --- |
-| `0.2.0` | that release, never moved |
-| `latest` | the newest release |
+| `<version>`, such as `0.2.0` | the image built from the git tag `v<version>`, moved only by a run started by hand for that tag |
+| `latest` | the highest version tag, once its GitHub release is created or a run started by hand publishes it |
 | `main` | the development head |
-| `<commit id>` | one commit, by its complete id, never moved |
+| `<commit id>` | one commit, by its complete id, moved only by a run started by hand for a tag on it |
 
-A `v*` tag is a release candidate until the Apache vote passes and publishes
-nothing. Releasing it on GitHub, after the vote, publishes the version tags.
-Any `asz` command runs the same way: put it after the image name. See [Container Image](docs/en/setup/container-image.md).
-`make docker` builds the image locally.
+A git tag `v*` names a release candidate, and pushing one publishes nothing.
+The GitHub release of a version is created after the Apache vote passes, and
+creating it publishes the image under that version. The image is a
+convenience, not part of the Apache release. Any `asz` command runs the same
+way: put it after the image name. See
+[Container Image](docs/en/setup/container-image.md). `make docker` builds the
+image locally.

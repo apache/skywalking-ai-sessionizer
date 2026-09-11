@@ -7,9 +7,9 @@ installed.
 
 ## Get the binary
 
-Each release ships a signed binary package for macOS, Linux and Windows. [Install](install.md)
-says where to download the one for your platform, and how to verify it. Unpack it, put `asz` on
-your path, and check it:
+From 0.3.0 on, each release ships a signed binary package for macOS, Linux and Windows.
+[Install](install.md) says where to download the one for your platform, and how to verify it.
+Unpack it, put `asz` on your path, and check it:
 
 ```sh
 asz version
