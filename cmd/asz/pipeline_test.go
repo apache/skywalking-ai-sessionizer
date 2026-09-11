@@ -81,6 +81,9 @@ func TestOnePassLandsParsesAndSends(t *testing.T) {
 	if ref == nil {
 		t.Fatal("no refresher for a root that has a source beside it")
 	}
+	// The refresher holds the scenario root's lock file open until close.
+	// Windows cannot delete an open file, so the temporary root would stay.
+	t.Cleanup(ref.close)
 	ref.pusher = &otlp.Pusher{
 		Zone: zone, Client: client, Version: "test",
 		ServiceName: "Pipeline Test", InstanceID: "pipeline-test", Layer: "AI_AGENT",
@@ -143,6 +146,7 @@ func TestAPassWithNoReceiverStillLandsAndParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(ref.close)
 	ref.pass() // ref.pusher is nil: no endpoint was named.
 	rounds, err := filepath.Glob(filepath.Join(root, "_conversations", "*", "rounds", "*"))
 	if err != nil {
