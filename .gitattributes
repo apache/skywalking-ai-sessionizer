@@ -24,3 +24,11 @@
 # The fixture corpus reproduces another program's files byte for byte and is
 # never to be touched by git.
 tests/adapter/claudecode/local/claudecode-files/** -text
+
+# The two fonts the embedded renderer carries are under the SIL Open Font
+# License, a Category B license. The ASF allows Category B works in a
+# convenience binary, never in a source release, so git archive leaves them
+# out of the source package. Their license texts stay, because the binary
+# packages' license files are copied from them. A build from the source
+# package serves the page in its fallback fonts.
+internal/view/conversation-view/host-shell/fonts/*.woff2 export-ignore

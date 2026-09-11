@@ -6,6 +6,10 @@
 *.test
 *.out
 coverage.txt
+# go build ./tools/<name> run at the root drops the helper here; the
+# source package must never carry a compiled file.
+/collectorcheck
+/otlpdump
 
 # Go workspace
 go.work

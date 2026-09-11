@@ -20,6 +20,8 @@ package view_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -38,14 +40,25 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		return rec
 	}
-	for path, ctype := range map[string]string{
-		view.AssetPrefix + "conversation-view.js":                                    "text/javascript",
-		view.AssetPrefix + "conversation-view.css":                                   "text/css",
-		view.AssetPrefix + "host-shell/horizon-theme.css":                            "text/css",
-		view.AssetPrefix + "host-shell/themes.json":                                  "application/json",
-		view.AssetPrefix + "host-shell/fonts/inter-latin-wght-normal.woff2":          "font/woff2",
-		view.AssetPrefix + "host-shell/fonts/jetbrains-mono-latin-wght-normal.woff2": "font/woff2",
-	} {
+	assets := map[string]string{
+		view.AssetPrefix + "conversation-view.js":         "text/javascript",
+		view.AssetPrefix + "conversation-view.css":        "text/css",
+		view.AssetPrefix + "host-shell/horizon-theme.css": "text/css",
+		view.AssetPrefix + "host-shell/themes.json":       "application/json",
+	}
+	// The two fonts are under the SIL Open Font License, which the ASF keeps
+	// out of source releases, so a build from the source package has neither
+	// and the page falls back to system fonts. A checkout has both and serves
+	// them.
+	for _, font := range []string{"inter-latin-wght-normal.woff2", "jetbrains-mono-latin-wght-normal.woff2"} {
+		path := view.AssetPrefix + "host-shell/fonts/" + font
+		if _, err := os.Stat(filepath.Join("conversation-view", "host-shell", "fonts", font)); err == nil {
+			assets[path] = "font/woff2"
+		} else if rec := get(path); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: %d without the font file, want 404", path, rec.Code)
+		}
+	}
+	for path, ctype := range assets {
 		rec := get(path)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: %d", path, rec.Code)
