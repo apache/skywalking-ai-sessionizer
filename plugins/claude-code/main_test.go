@@ -165,7 +165,7 @@ func TestAnEditInsideASubagentComesFromTheResponse(t *testing.T) {
 	data := t.TempDir()
 	ws := t.TempDir()
 	const session = "11111111-2222-4333-8444-555555555555"
-	resp := `{"filePath":"` + ws + `/poc.txt","oldString":"alpha","newString":"beta","originalFile":"line one alpha\nline two\n","structuredPatch":[{"oldStart":1,"oldLines":2,"newStart":1,"newLines":2,"lines":["-line one alpha","+line one beta"," line two"]}],"userModified":false,"replaceAll":false}`
+	resp := `{"filePath":` + jsonString(filepath.Join(ws, "poc.txt")) + `,"oldString":"alpha","newString":"beta","originalFile":"line one alpha\nline two\n","structuredPatch":[{"oldStart":1,"oldLines":2,"newStart":1,"newLines":2,"lines":["-line one alpha","+line one beta"," line two"]}],"userModified":false,"replaceAll":false}`
 	now := time.Now()
 	runHook(strings.NewReader(hookInput("PostToolUse", session, "a0123456789abcdef", "Edit", "toolu_e", `{"file_path":"x"}`, resp, "")), data, ws, now)
 	recs := readLines(t, output.Path(data, session, "a0123456789abcdef"))
@@ -205,11 +205,11 @@ func TestAnEditIsNeverFoundAsNobodysChange(t *testing.T) {
 	// The runtime's own Edit on the main stream: the file changes, the
 	// hook reports it, the plugin writes no record and learns the file.
 	write("poc.txt", "line one beta\nline two\n")
-	resp := `{"filePath":"` + ws + `/poc.txt","oldString":"alpha","newString":"beta","originalFile":"line one alpha\nline two\n","structuredPatch":[],"userModified":false,"replaceAll":false}`
+	resp := `{"filePath":` + jsonString(filepath.Join(ws, "poc.txt")) + `,"oldString":"alpha","newString":"beta","originalFile":"line one alpha\nline two\n","structuredPatch":[],"userModified":false,"replaceAll":false}`
 	runHook(strings.NewReader(hookInput("PostToolUse", session, "", "Edit", "toolu_e", `{"file_path":"x"}`, resp, "")), data, ws, now.Add(4*time.Second))
 	// A Write inside a subagent: recorded from the response, and learned.
 	write("sub.txt", "from subagent")
-	wresp := `{"type":"create","filePath":"` + ws + `/sub.txt","content":"from subagent","structuredPatch":[],"originalFile":null,"userModified":false}`
+	wresp := `{"type":"create","filePath":` + jsonString(filepath.Join(ws, "sub.txt")) + `,"content":"from subagent","structuredPatch":[],"originalFile":null,"userModified":false}`
 	runHook(strings.NewReader(hookInput("PostToolUse", session, "a0123456789abcdef", "Write", "toolu_w", `{"file_path":"x"}`, wresp, "")), data, ws, now.Add(6*time.Second))
 
 	// The next scanned window finds nothing nobody made.
@@ -232,7 +232,7 @@ func TestAnEditIsNeverFoundAsNobodysChange(t *testing.T) {
 	// named on it, not taken as the window's own.
 	runHook(strings.NewReader(hookInput("PreToolUse", session, "a0123456789abcdef", "Bash", "toolu_2", cmd, "", "")), data, ws, now.Add(12*time.Second))
 	write("poc.txt", "line one gamma\nline two\n")
-	resp2 := `{"filePath":"` + ws + `/poc.txt","oldString":"beta","newString":"gamma","originalFile":"line one beta\nline two\n","structuredPatch":[],"userModified":false,"replaceAll":false}`
+	resp2 := `{"filePath":` + jsonString(filepath.Join(ws, "poc.txt")) + `,"oldString":"beta","newString":"gamma","originalFile":"line one beta\nline two\n","structuredPatch":[],"userModified":false,"replaceAll":false}`
 	runHook(strings.NewReader(hookInput("PostToolUse", session, "", "Edit", "toolu_e2", `{"file_path":"x"}`, resp2, "")), data, ws, now.Add(14*time.Second))
 	runHook(strings.NewReader(hookInput("PostToolUse", session, "a0123456789abcdef", "Bash", "toolu_2", cmd, `{"stdout":"","stderr":""}`, "")), data, ws, now.Add(16*time.Second))
 	agent = readLines(t, output.Path(data, session, "a0123456789abcdef"))

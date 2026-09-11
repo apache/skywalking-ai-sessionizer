@@ -21,10 +21,11 @@
 // The index exists because structure resolution needs identifiers, not content:
 // removing duplicate records needs record ids, provider-call grouping needs message ids,
 // tool joins need tool-use ids, spawn joins need agent and run ids. None of it
-// reads message text. Measured on a real corpus, the index is ~12x smaller than
-// the payloads it describes - 16 MB for the largest session, 95 MB for 1.1 GB
-// of conversation - which is what lets the whole thing stay resident with
-// random access.
+// reads message text. The index is much smaller than the landed payload it
+// describes, which is what lets the whole thing stay resident with random
+// access. docs/en/concepts-and-designs/conversation-assembly.md gives the
+// measured ratio, and docs/en/formats/storage-root.md the size on a later
+// sample.
 //
 // It is DERIVED and DISPOSABLE. Deleting it loses nothing; it rebuilds from the
 // landed files. Nothing downstream may treat it as authoritative.

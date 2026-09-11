@@ -91,9 +91,11 @@ jobs:
           go build -o plugins/claude-code/bin/ ./plugins/claude-code
       # The suite is split so a failure names which layer broke. The race
       # detector needs a C toolchain, which the Windows runner does not put on
-      # its path, so Windows runs without it.
+      # its path, so Windows runs without it. The tests of the command and of
+      # the Claude Code plugin run here too. The plugin's tests run its hook
+      # from end to end, and this is their only run on Windows.
       - name: Unit tests
-        run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./pkg/... ./internal/...
+        run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./cmd/... ./pkg/... ./internal/... ./plugins/...
       - name: Scenarios, chain and boundary tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
       # The same scenarios once more, through the command a person runs, so
@@ -106,6 +108,31 @@ jobs:
             echo "== $f"
             ./bin/asz${{ runner.os == 'Windows' && '.exe' || '' }} scenario check "$f" || exit 1
           done
+
+  # A voter builds and tests the source package, not a clone. The source
+  # package is git archive of the tag, so it lacks what .gitattributes marks
+  # export-ignore, such as the renderer's fonts, and it has no .git. A test
+  # that needs either passes in the build job and fails for every voter.
+  # This job makes the package the way make release does, with its prefix,
+  # unpacks it outside the checkout, where git finds no repository, and
+  # builds and tests it there.
+  source-package:
+    name: Source package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      - name: Build and test the unpacked source package
+        run: |
+          set -eu
+          name="apache-skywalking-ai-sessionizer-$(git rev-parse HEAD)-src"
+          git archive --format=tar --prefix="$name/" HEAD | tar -xf - -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/$name"
+          go build ./...
+          go test -count=1 ./...
 
   # A real OpenTelemetry Collector, not the in-process receiver the scenario
   # checks use: the protobuf the sender writes must be accepted by an OTLP
@@ -355,7 +382,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, lint, docker, binaries, packages, collector, conversation-view]
+    needs: [license, build, source-package, lint, docker, binaries, packages, collector, conversation-view]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

@@ -251,6 +251,34 @@ Those hooks ran no scan. How long a scan takes has not been measured.
 A hook that fails, for any reason, exits 0 and writes to `${CLAUDE_PLUGIN_DATA}/log/plugin.log`.
 It never stops the tool.
 
+## The hook command
+
+`hooks/hooks.json` gives every hook the binary as its command and `hook` as its one argument:
+
+```json
+{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin", "args": ["hook"], "timeout": 60}
+```
+
+When a hook has `args`, Claude Code starts the binary itself, with no shell, on every platform. It
+puts the plugin's directory in place of `${CLAUDE_PLUGIN_ROOT}` as plain text, so a space, an
+apostrophe or a `$` in that path does no harm. The Claude Code
+[hooks reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) calls this the
+exec form.
+
+The plugin used to give one command line and no `args`:
+`"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin" hook`. Claude Code runs such a line in a shell. On
+Windows without Git Bash, that shell is PowerShell. PowerShell does not run a quoted path followed
+by a word unless the call operator `&` comes first, and Claude Code 2.1.260 does not add it.
+PowerShell 7.5.3 refused the line with `Unexpected token 'hook' in expression or statement`, so no
+hook started.
+
+A Claude Code that does not know `args` may drop it and run the binary with no argument. The binary
+would then print its usage text and exit 2, and exit status 2 from a `PreToolUse` hook blocks the
+tool. So with no argument, the binary runs as `hook` when standard input is a pipe, a socket, a
+file, or anything else that is not a terminal or another character device.
+Claude Code 2.1.245, 2.1.259 and 2.1.260 know `args`. The first version that knows it is
+unavailable.
+
 ## What was verified
 
 Each of these was read from a run of Claude Code 2.1.260 with a logging plugin, not from
@@ -277,11 +305,38 @@ a message id or a request id.
 The plugin itself was run inside Claude Code on macOS with a shell command, an edit and a
 subagent. asz collected and showed the result.
 
+On 2026-09-11, Claude Code 2.1.260 on macOS ran the hooks in exec form, in a session whose one
+shell command wrote a file. The command ran, and the plugin's record named the file as created. The
+session had its own configuration directory. Its model was a local program that answers as the
+Messages API does, so no request left the machine. The same session with `args` removed from every
+hook ran the binary with no argument. A binary without the no-argument rule above printed its usage
+text and exited 2, and Claude Code blocked the shell command. The current binary ran as `hook` and
+recorded the change. In both forms, Claude Code handed each hook its event on a socket.
+
 On Windows the plugin has run only outside Claude Code. CI's `packages` job runs
 `tools/package-smoke.sh` on each binary package, on a runner of the package's own platform. On
 2026-09-11, the CI of pull request #6 ran it on `windows-latest`, x86-64, and on `windows-11-arm`,
 ARM 64. Both jobs passed, in 30 and 33 seconds. The script unpacks the zip with `Expand-Archive`.
 It runs the packaged plugin with a `SessionStart`, a `PreToolUse`, a `PostToolUse` and a
-`SessionEnd` event on standard input, writes a file between the two tool events, and requires the
-plugin to record that change. Claude Code itself has not run the hooks on Windows, so the command
-line in `hooks/hooks.json` has not run there.
+`SessionEnd` event on standard input, and writes a file between the two tool events. Those runs
+checked only that some file in the plugin's data directory named it. The plugin's scan writes its
+own files, which name it too, before the plugin writes the record. So those runs do not show that
+the plugin wrote its record on Windows. The script now requires the record in
+`output/<session-id>/main.jsonl` to name the file as created, and CI's unit tests now run the
+plugin's own tests on each system. Neither has run on Windows yet.
+
+Claude Code itself has not run the hooks on Windows. The exec form involves no shell, so whether
+Git Bash is installed no longer matters. One thing is still unknown. The Windows packages hold
+`bin\asz-claude-plugin.exe`, and `hooks/hooks.json` names `bin/asz-claude-plugin`. The Claude Code
+documentation says only that on Windows the command must resolve to a real executable, such as a
+`.exe`. To find out, on Windows x86-64 or ARM 64:
+
+1. Unpack the package for the machine, and start Claude Code with
+   `claude --plugin-dir <package>\claude-code-plugin`.
+2. Ask for one shell command that writes a file.
+3. Look in the plugin's data directory. For a plugin loaded with `--plugin-dir`, Claude Code 2.1.260
+   on macOS put it at `plugins/data/asz-changes-inline` under its configuration directory. A record
+   in `output\<session-id>\main.jsonl` there that names the file means the hooks work. If
+   `log\plugin.log` does not exist, the binary never started. The likely cause is that the name did
+   not resolve, and then the Windows packages need a `hooks/hooks.json` of their own that names
+   `asz-claude-plugin.exe`.

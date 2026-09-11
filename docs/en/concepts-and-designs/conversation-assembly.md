@@ -18,7 +18,7 @@ files holding 365,825 records, 1.09 GB in all, from 25 project directories. The 
 measurement is unavailable.
 
 Assembling everything each time is cheap because the index is small. In the corpus, 365,554 index
-entries describing 1.0 GB of landed payload took 47 MB of index, about 12 times smaller. The largest
+entries describing 1.0 GB of landed payload took 47 MB of index, about 21 times smaller. The largest
 single session's index is 16 MB, and it loads in 4.5 ms with every lookup map rebuilt. That is why
 the lookup maps are rebuilt on load and never stored. [Storage Root](../formats/storage-root.md#size)
 gives the index size on a later sample.

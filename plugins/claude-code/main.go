@@ -68,16 +68,15 @@ Usage:
   asz-claude-plugin prune     drop idle snapshot bytes and expired output now
   asz-claude-plugin version   print the version
 
+With no command, it runs as hook when standard input is a pipe, a socket, a
+file, or anything else that is not a terminal or another character device.
+
 The plugin's data directory is CLAUDE_PLUGIN_DATA, which Claude Code sets for
 every hook. status and prune take it from the environment too.
 `
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
-	}
-	switch os.Args[1] {
+	switch subcommand(os.Args[1:], os.Stdin) {
 	case "hook":
 		os.Exit(runHook(os.Stdin, os.Getenv("CLAUDE_PLUGIN_DATA"), os.Getenv("CLAUDE_PROJECT_DIR"), time.Now()))
 	case "version":
@@ -96,6 +95,24 @@ func main() {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
+}
+
+// subcommand is what to run: the first argument, or hook when there is
+// none and standard input is not a terminal or another character device.
+// hooks/hooks.json passes hook in "args", and a Claude Code that does not
+// know "args" may drop it and run the binary alone. The usage text exits
+// 2, and exit status 2 from a PreToolUse hook blocks the tool, which a hook
+// must never do. Claude Code 2.1.260 on macOS handed every hook its event
+// on a socket, so a check for a pipe missed it. A person at a terminal
+// still gets the usage text.
+func subcommand(args []string, stdin *os.File) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	if info, err := stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice == 0 {
+		return "hook"
+	}
+	return ""
 }
 
 // plugin is one hook invocation's state.
