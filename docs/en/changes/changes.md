@@ -49,6 +49,11 @@
   Removal is a policy of the scenario, never of the product. The configuration has no removal
   setting, and a session no build marked, which is every real Claude Code session, is never
   removed.
+- A workflow in a scenario starts its children as one batch, and they run at the same time, as the
+  runtime's do. Before, each child started only after the one before it had ended, so a review by
+  four agents was drawn as four reviews in a row. The parent's next step waits for the last child.
+  The `push_follows_the_wire` check now compares record times as times rather than as text, which
+  the overlapping children showed it needed.
 
 ## Read
 

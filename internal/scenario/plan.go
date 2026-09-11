@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -191,8 +192,8 @@ type Run struct {
 	// ScriptProject is the project directory the script is filed under,
 	// when not the session's own.
 	ScriptProject string
-	// Journal is the run's journal, in order: a started line per child, and
-	// a result line when a child finished.
+	// Journal is the run's journal in time order: a started line per child,
+	// and a result line when a child finished.
 	Journal []JournalLine
 	Script  string
 }
@@ -557,12 +558,16 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		b.emit(res)
 		l.last = res.ID
 		r := Run{ID: runID, Name: w.Name, Script: "export const meta = {\n  name: '" + w.Name + "',\n}", ScriptProject: w.ScriptProject}
-		t := res.At
-		for _, ch := range w.Children {
+		// The children start as one batch and run at the same time, as the
+		// runtime's do. Each starts one interval after the launch and a moment
+		// after the one before it, so the order they were started in stays
+		// readable. The parent resumes once the last of them has finished.
+		start, end := res.At.Add(b.scaled(b.p.interval)), res.At
+		for i, ch := range w.Children {
 			child := agentID(w.Name + "/" + ch.Name)
 			r.Children = append(r.Children, child)
 			b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: ch.Name, Prompt: ch.Prompt, Batch: runID, Lost: ch.Lost})
-			t = t.Add(b.scaled(b.p.interval))
+			t := start.Add(b.scaled(time.Duration(i) * 100 * time.Millisecond))
 			r.Journal = append(r.Journal, JournalLine{Type: "started", Child: child, At: t})
 			cl := &lane{stream: child, batch: runID, t: t, prefix: ch.Name, lost: ch.Lost}
 			prompt := Event{Kind: EvInput, Stream: child, Batch: runID, At: t, ID: child + "-prompt", Run: child + "-cycle", Text: ch.Prompt, Lost: ch.Lost}
@@ -575,13 +580,16 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 				return err
 			}
 			r.Journal = append(r.Journal, JournalLine{Type: "result", Child: child, At: cl.t.Add(b.scaled(100 * time.Millisecond))})
-			if cl.t.After(t) {
-				t = cl.t
+			if cl.t.After(end) {
+				end = cl.t
 			}
 		}
+		// The runtime appends to a journal as things happen, so its lines are
+		// in time order, not grouped by child.
+		sort.SliceStable(r.Journal, func(i, j int) bool { return r.Journal[i].At.Before(r.Journal[j].At) })
 		b.p.Runs = append(b.p.Runs, r)
-		if t.After(l.t) {
-			l.t = t
+		if end.After(l.t) {
+			l.t = end
 		}
 	}
 	return nil

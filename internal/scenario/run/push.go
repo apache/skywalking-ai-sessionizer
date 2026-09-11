@@ -546,7 +546,11 @@ func landedAndRounds(out, session string) (map[string]*wireFile, error) {
 func sessionLatest(files map[string]*wireFile) string {
 	latest := ""
 	for _, f := range files {
-		if f.format == "sd" && f.through > latest {
+		// Compared as times, not as text. RFC3339 with nanoseconds drops
+		// trailing zeros, so "00:00:04Z" sorts after "00:00:04.2Z" as text.
+		// Workflow children that run at the same time can end a session on a
+		// fraction of a second, which is where this showed.
+		if f.format == "sd" && f.through != "" && (latest == "" || stampNS(f.through) > stampNS(latest)) {
 			latest = f.through
 		}
 	}
