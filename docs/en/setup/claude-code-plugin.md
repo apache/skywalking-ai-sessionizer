@@ -62,14 +62,35 @@ ${CLAUDE_PLUGIN_DATA}/output/<session-id>/main.jsonl
 ${CLAUDE_PLUGIN_DATA}/output/<session-id>/<agent-id>.jsonl
 ```
 
+A record goes to the file of the stream its hook event came from. An event inside a subagent
+carries `agent_id`, and the file takes that name. No event on the main stream carries `agent_id`,
+so an event without one goes to `main.jsonl`. The same absence decides who records an edit: the
+plugin records one only when the event carries `agent_id`. See
+[What was verified](#what-was-verified).
+
 Each line is a `changes/1` record: the tool-use id it belongs to as its id, `captured_by:
 asz-plugin`, the session, the stream, the time, how it was observed, the root, the policy it ran
 under, and for each changed file its path, the operation, size and hash before and after, and the
 hunks as a unified diff with line numbers. `pkg/changes` in the repository defines the shape.
+Hook input carries neither a message id nor a request id. So a record names its tool call and
+never the provider call that made it, and the view joins it to its step by the tool-use id alone.
+See [Workspace changes](../adapters/claude-code.md#workspace-changes).
+
+Two hooks can run at the same time. So each record is written whole, in one write to a file
+opened for appending, and synced to disk before the hook returns. asz lands a file only up to its
+last complete newline, and a line still being written waits for the next pass. Appending with
+`cat >>` to one shared file from concurrent subagents was seen to corrupt lines above about 64 KB.
+The sample it was seen on is unavailable.
 
 asz's `claude-code-changes` adapter, on by default, finds these files beside Claude Code's own,
 tails them, and lands each line as a record of kind `changes` under the stream the tool ran in.
 See [Configuration](configuration.md#the-changes-adapter).
+
+Each file it lands names the dialect `asz-changes/1` in its
+[header](../formats/session-data.md#header), not `claude-code/1`. The plugin writes its records in
+the model's own words, not in Claude Code's shape. Records of a different shape get a different
+dialect, even when the same runtime produced them, as the
+[adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) says.
 
 ## Settings
 
@@ -181,7 +202,8 @@ go     version env list doc
 `git add` is on the list because it changes only `.git/`, which is excluded scope. `git commit`
 is not, because a pre-commit hook can rewrite files. A miss is not a loss: the next scan compares
 against the last manifest, so a write that slipped through lands as an unattributed change. On
-the corpus above, 69.3% of shell commands are read-only under this list. The fixture
+the corpus above, 69.3% of shell commands are read-only under this list, so most shell commands
+wait for no scan. The fixture
 `plugins/claude-code/internal/readonly/testdata/commands.txt` holds 93 real commands with the
 outcome each must get, and the classifier's test reads it.
 
@@ -213,21 +235,44 @@ only one window spans is that window's alone; one changed in a step both span is
 each record names the other under `overlaps`. Nothing claims who wrote a byte: a person or an
 editor can write inside any window. The record says which tool windows could have.
 
-A scan stops at `scan_timeout` and the record says so, with `coverage: partial`. A hook that
-fails, for any reason, exits 0 and writes to `${CLAUDE_PLUGIN_DATA}/log/plugin.log`; it never
-stops the tool.
+Claude Code runs a hook synchronously, so the tool call waits until the hook returns. That is why
+a scan has a cap. A scan stops at `scan_timeout` and the record says so, with `coverage: partial`.
+The cap is for one scan, and a hook scans each root in turn. The default, 30 seconds, is half the
+60 seconds `hooks/hooks.json` gives each tool event. A hook still running at its timeout is killed
+and leaves no record for its call, so a `scan_timeout` near 60 seconds loses records instead of
+marking them partial. The scans of one root take turns under a lock, and a hook waiting for that
+lock is bounded only by its own timeout. The session's start and end run no scan, and get 30
+seconds.
+
+On 5 live headless sessions with a hook on every event, a hook invocation took about 5.6 ms.
+Those hooks ran no scan. How long a scan takes has not been measured.
+
+A hook that fails, for any reason, exits 0 and writes to `${CLAUDE_PLUGIN_DATA}/log/plugin.log`.
+It never stops the tool.
 
 ## What was verified
 
 Each of these was read from a run of Claude Code 2.1.260 with a logging plugin, not from
-documentation: `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` loads and fires; every tool event
-carries `session_id`, `tool_use_id`, `tool_input` and `cwd`; every event inside a subagent
-carries `agent_id`, and it is the id in the subagent transcript's file name; a failed shell
-command fires `PostToolUseFailure` with the exit code in `error`; the `Edit` response carries the
-patch and the original content, and so does a `Write` over an existing file, whose patch ends with
-the git marker line for a missing final newline; the `NotebookEdit` response names its file as
-`notebook_path` with the whole file before and after and no patch, so the plugin diffs the two;
-`CLAUDE_PLUGIN_DATA` exists before the first hook runs; a hook past its `timeout` is killed and the
-tool proceeds. The plugin itself was run inside Claude Code on macOS with a shell command, an
-edit and a subagent, and asz collected and showed the result. Windows is a build target; its hook
-command line has not been exercised.
+documentation:
+
+- `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` loads and fires.
+- Every tool event carries `session_id`, `tool_use_id`, `tool_input` and `cwd`.
+- Every event inside a subagent carries `agent_id`. It is the id in the subagent transcript's file
+  name.
+- No event on the main stream carries `agent_id`.
+- A failed shell command fires `PostToolUseFailure`, with the exit code in `error`.
+- The `Edit` response carries the patch and the original content.
+- So does a `Write` over an existing file. Its patch ends with the git marker line for a missing
+  final newline.
+- The `NotebookEdit` response names its file as `notebook_path`. It carries the whole file before
+  and after and no patch, so the plugin computes the hunks from the two.
+- `CLAUDE_PLUGIN_DATA` exists before the first hook runs.
+- A hook past its `timeout` is killed, and the tool proceeds.
+
+A second sample, 5 live headless sessions with a hook on every event, agrees. `agent_id` is on
+every event inside a subagent and on no event of the main stream. No event in that sample carries
+a message id or a request id.
+
+The plugin itself was run inside Claude Code on macOS with a shell command, an edit and a
+subagent. asz collected and showed the result. Windows is a build target. Its hook command line
+has not been exercised.

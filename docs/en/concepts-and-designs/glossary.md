@@ -136,8 +136,15 @@ later agreeing observation.
 
 ## Storage
 
-**Landed record** — a source record copied into the storage zone, byte-for-byte. Write-once and
-read-only: temp file, fsync, rename, `chmod 0444`. Never appended to.
+**Landed record** — a source record converted once into
+[Session Data](../formats/session-data.md#record) and written to a `.sd` file. Its content becomes
+parts, and its identifiers take role names. It does not keep the source bytes. It keeps where they
+were and what they were: the line number counting from 1, the byte offset, their size, and a
+digest, the first 12 hexadecimal characters of their SHA-256. Content the dialect cannot describe
+keeps its bytes verbatim in an `unknown` part, so nothing is guessed or dropped. A reader is handed
+parts, so it never meets a runtime's shape. The digest still ties each record to its source.
+Write-once and read-only: temporary file, fsync, `chmod 0444`, rename. Never appended to.
+*Not:* a copy of the source record.
 
 **Delta** — one file of landed records, covering a contiguous run of a source. A source becomes many
 deltas over time.

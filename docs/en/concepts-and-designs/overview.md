@@ -40,11 +40,25 @@ Where a runtime cannot supply something, the adapter reports it as `unavailable`
 approximating it. A missing model input, an unrecorded parent, or an unobservable causal link is
 never manufactured to make a tree look complete.
 
-## Status
+## What is implemented
 
-Pre-alpha. The conversation model and the Claude Code data mapping are defined and evidence-backed.
-Collection, the derived index and assembly into a round chain are implemented. A local page that
-serves the assembled conversations is in progress. Static export and OTLP push are not started.
+The conversation model and the Claude Code data mapping are defined and evidence-backed. These
+parts are implemented:
+
+- **Collection, the derived index and assembly** into a round chain. `asz collect` runs them as one
+  pipeline. When `export.otlp.endpoint` is set, it also sends at the end of every pass.
+- **The local page.** [`asz view`](../setup/command-line.md#view) serves the assembled
+  conversations and only reads. [`asz server`](../setup/command-line.md#server) runs the pipeline
+  and the page in one process.
+- **Export over OpenTelemetry.** [`asz push`](../setup/export-otlp.md) sends the landed files and
+  the rounds to an OpenTelemetry logs receiver. It also sends the token metric when an adapter
+  produces it.
+- **One conversation as one document.** [asz.view](../formats/asz-view.md) is what the page draws
+  and what `asz conversation -json` prints.
+- **A storage root that travels on its own.** A copy of it can be verified, re-parsed and read on
+  another machine with no source files. See [What travels](../formats/storage-root.md#what-travels).
+
+A static export is not built.
 
 ## Non-goals
 

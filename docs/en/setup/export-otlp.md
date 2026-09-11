@@ -155,14 +155,26 @@ account for. `go run ./tools/otlpdump -redact FILE.pb` prints any spooled reques
 With `metrics: true` on the `claude-code-local` adapter, the collector derives the points from
 the landed files by the assembler's own rule: the usage of a call is its last fragment's in line
 order, never a sum, and only a call that finished counts. A main transcript repeats the final usage
-on every fragment; a child's carries streaming partials on all but the last, and a call with no
-terminal fragment, 7% of a real corpus's child calls, has no usage at all. A call cut at a landed
-file boundary is read on into the next file of its stream, and a file ending mid-call waits for
-that file for a short grace before it is derived with what it has, under a watching collector; a
-single pass, the backfill over history that already exists, derives with what is there and never
-waits. A call is counted once however
-many files its records reach, and a record the runtime re-emitted before a context reset is the
-same call again.
+on every fragment. A child's carries streaming partials on all but the last. A call has finished
+when one of its fragments reports a stop reason. A call that never does is left out, because its
+usage block is a streaming stub, not a count. That is about 10% of all calls in a corpus of 2,970
+files and 365,825 records written by Claude Code 2.1.220 to 2.1.251. It is 14.5% of the calls on
+child streams and 0.02% of those on main transcripts, as
+[Provider calls](../adapters/claude-code.md#provider-calls) reports.
+
+A call cut at a landed file boundary is read on into the next file of its stream only when the
+file's last record is a fragment of that call. The reading stops at the first record of the next
+file that is not a fragment of the call. A tool result carries no call id, and in the same corpus a
+call's own tool results sit between its fragments on 24% of multi-fragment calls. So a call cut
+next to one of its own tool results is read short. On a child stream only the last fragment says
+the call finished, so such a call is left out of the metric. On a main transcript every fragment
+repeats the final usage, so the call still counts in full, in the minute of the last fragment read.
+
+Under a watching collector, a file whose last record is a fragment of a call not yet counted waits
+a short grace for the next file of its stream, then is derived with what it has. A file that ends
+with a tool result does not wait. A single pass, the backfill over history that already exists,
+derives with what is there and never waits. A call is never counted twice, however many files its
+records reach, and a record the runtime re-emitted before a context reset is the same call again.
 
 Points are summed per minute and attribute set, and the windows of one series never overlap: a
 point takes its minute unless the series already has a point at or past it, as when two children
@@ -176,8 +188,9 @@ again to the same bytes and nothing is counted twice.
 
 The other source of the same family is the runtime's exporter itself: the `claude-code-otlp`
 adapter receives what Claude Code sends and lands each metrics request in the same spool, bytes as
-received. One root sends one source: `metrics` may be on for the local adapter or for the
-receiver, and the configuration refuses both.
+received. The receiver does not check whether it has landed a request before. A request the
+exporter sends twice lands twice, and `asz push` sends both copies. One root sends one source:
+`metrics` may be on for the local adapter or for the receiver, and the configuration refuses both.
 
 The points wait in the storage root's `_metrics/` spool, one write-once file per landed file
 with points or per request received, and go out in order under the same budget and the same
