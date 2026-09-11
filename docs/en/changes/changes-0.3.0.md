@@ -52,10 +52,81 @@
 
 ## Release
 
-- A release publishes the container image under the version the tag names, and under `latest`
-  when it is the newest release, and nothing looser. The `major.minor` line tag, `0.2` beside
-  `0.2.0`, is no longer published: a reader who pulled it could not tell which release answered.
-  The `0.2` tag that 0.2.0 published stays on the registry and points at the same image as `0.2.0`.
+- `tools/release.sh` runs the Apache release in five stages, each started by hand. `prepare` tags
+  the candidate and opens the pull request, as before. Its tag message, its commit and its pull
+  request no longer call the candidate a release, and it checks for the tools it uses first.
+  `candidate` builds the packages from a fresh clone of the tag, signs them, verifies them against
+  the KEYS file the way a voter does, uploads them to the dev area of dist.apache.org and writes
+  the vote mail. `vote-result` counts the votes, refuses a vote that did not pass, and writes the
+  result mail. `publish`, run by a PMC member, moves the voted packages to the release directory
+  and writes the announcement, the website entries and the install manifests. `complete` creates
+  the GitHub release. [How to Release](../guides/how-to-release.md) walks through each stage and
+  the svn commands it runs.
+- `candidate` refuses a signing key that is not RSA of at least 2048 bits, as the ASF requires,
+  or that has no apache.org user ID, and a source package that would hold a font file, since
+  fonts are Category B works the ASF keeps out of source releases. The vote mail names the signing
+  key and tells voters what the committed conversation renderer is. `--no-upload` writes its mail
+  to `vote-preview.txt` and refuses once a candidate is uploaded.
+- `tools/package-smoke.sh` checks one binary package the way a person uses it. It verifies the
+  package's sha512, unpacks it, checks that every file is there, and then runs `asz` and the plugin
+  from the unpacked files: four scenarios through `asz scenario check`, the list page and one
+  conversation page from `asz view`, and one shell command through the plugin's hooks. A new CI
+  job, `packages`, runs it on all six packages, each on a GitHub runner of its own platform. The
+  `binaries` job cross-compiles every platform on one Linux runner, and a binary that was never
+  started proves nothing about its platform. The voters' check list asks each voter to run it on
+  the package for their own platform.
+- `candidate` runs the package for the release manager's machine with the tag's
+  `tools/package-smoke.sh`, after it verifies the candidate and before the upload. When the check
+  fails, nothing is uploaded and no vote mail is written. On a machine no package is built for, it
+  runs none and says so.
+- The result mail lists every vote, +0 and non-binding -1 included, and `--thread` links the vote
+  thread. Only binding votes decide. Names are compared without case, and an empty list option is
+  refused rather than taking the next option as a name.
+- `publish` also holds each local signature to the voted one, dates the website entries by the day
+  of the move, and refuses `--remove-old` in the run that moves: older versions leave the release
+  directory in a later run, once the website links them from the archive. The announcement is
+  titled `[ANNOUNCE]`, and the website entries link the packages through closer.lua.
+- The notes of the GitHub release name the Apache release, the downloads page, the signatures and
+  KEYS. They no longer point at a git checkout or the container image.
+- `complete` uploads the voted packages to the GitHub release, each with its signature and
+  checksum, after checking each against the file downloads.apache.org serves. CI no longer
+  attaches the packages it builds, because they are not the signed files the vote approved. It
+  still builds every platform on every run, and keeps the packages as a workflow artifact.
+- Windows on ARM 64 joins the platforms, so a version ships six binary packages beside the source
+  package.
+- `tools/install-manifests.sh` writes a Homebrew formula, a Scoop manifest and the winget
+  manifests from the voted binary packages, and `publish` runs it. They are conveniences,
+  submitted after the release and after the PMC agrees to each channel. The Homebrew formula
+  installs the voted binary package for macOS or Linux, on ARM 64 or x86-64. It builds nothing, so
+  it needs no Go, and the `asz` it installs serves the page with the renderer's fonts. It
+  downloads from the GitHub release, with archive.apache.org as its mirror, and goes to a tap,
+  because homebrew-core does not take a formula that installs a binary built for each platform.
+  The winget manifests download from the GitHub release too, because the archive slows down and
+  bans heavy use. Each package must match the voted `.sha512` beside it.
+  [Install](../setup/install.md) lists every way to get asz.
+- `make release` refuses to build when git tracks a compiled file, because an Apache source release
+  must not carry compiled code, and `candidate` refuses the same file types. It also refuses a tree
+  with any change or untracked file, and removes packages an earlier build left in `dist/`.
+  `GPG_USER` picks the key it signs with.
+- The source package holds no font file. The two fonts of the conversation renderer are under the
+  SIL Open Font License, which the ASF puts in Category B, and the ASF does not allow a Category B
+  work in a source release. `.gitattributes` marks them `export-ignore`, so `git archive` leaves
+  them out, and `make release` stops and removes a source package that holds a font file anyway.
+  The binaries in the binary packages embed the fonts, and `dist-material/LICENSE` names them. A
+  build from the source package draws the page with system fonts.
+- Two builds of one tag give the same binary packages, byte for byte, when they use the same Go,
+  the same tar and the same gzip. Go records the tag in each binary as the module's version, so a
+  build of the commit before it was tagged differs. Every file has the commit's time, owner and group are 0, and
+  the entries are sorted. No package records who built it or when. GNU tar and bsdtar write their
+  headers differently, and GNU gzip and Apple's gzip compress differently, so a CI build, made
+  with GNU tar and GNU gzip, and a macOS build, made with bsdtar and Apple's gzip, differ.
+- The compiled `collectorcheck` and `otlpdump` helpers, committed at the repository root by
+  mistake, are removed, and `.gitignore` keeps them out. Their sources stay under `tools/`.
+- Creating the GitHub release publishes the container image under the version the tag names, and
+  under `latest` when it is the newest version, and nothing looser. The `major.minor` line tag,
+  `0.2` beside `0.2.0`, is no longer published: a reader who pulled it could not tell which release
+  answered. The `0.2` tag that 0.2.0 published stays on the registry and points at the same image
+  as `0.2.0`.
 
 ## Workspace changes
 

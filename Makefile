@@ -36,9 +36,13 @@ PLUGIN_BINARY := asz-claude-plugin
 
 # The platforms a release ships binaries for. Every one is cross-compiled
 # from any host: the binary is pure Go and needs no C toolchain.
-PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64
+PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
 DIST      := dist
 PKG_BASE  := apache-skywalking-ai-sessionizer-$(VERSION)-bin
+
+# The GPG key that signs a release, by id, fingerprint or email. Empty means
+# gpg's default key. The key must be in the SkyWalking KEYS file.
+GPG_USER  ?=
 
 GOLANGCI_LINT_VERSION := v2.13.2
 LICENSE_EYE_VERSION   := v0.9.0
@@ -178,21 +182,44 @@ docker: ## Build the container image, as CI builds and publishes it
 
 ## binaries: cross-compile every platform in PLATFORMS and package each, with the Claude Code plugin, the LICENSE, the NOTICE and the dependency licenses, into dist/
 .PHONY: binaries
+# Two builds of one tag give the same bytes when they use the same Go, the
+# same tar and the same gzip. Go records the tag in each binary as the
+# module's version, so a build of the commit before it was tagged differs.
+# A rebuild can then be held against a
+# package, and no package records who built it or when. So every staged
+# file gets the commit's time and the same modes, entries are stored in one
+# sorted order with owner and group 0, and neither gzip nor zip adds a time
+# or a local user of its own. The time is SOURCE_DATE_EPOCH when set, else
+# the commit's. An unpacked source package has neither, and its packages
+# keep the build time. GNU tar and bsdtar name the same settings
+# differently, and they write their headers differently. From the same
+# staged files, GNU tar 1.35 and bsdtar 3.5.3 wrote different archives, and
+# GNU gzip 1.14 and Apple gzip 479 compressed one archive differently. So a
+# CI build, with GNU tar and GNU gzip, and a macOS build, with bsdtar and
+# Apple gzip, differ.
 binaries:
 	@mkdir -p $(DIST)/build
-	@for t in $(PLATFORMS); do \
+	@epoch=$${SOURCE_DATE_EPOCH:-$$(git log -1 --format=%ct 2>/dev/null)}; stamp=""; \
+	if [ -n "$$epoch" ]; then stamp=$$(date -u -d "@$$epoch" +%Y%m%d%H%M.%S 2>/dev/null || date -u -r "$$epoch" +%Y%m%d%H%M.%S) || exit 1; fi; \
+	if tar --version 2>/dev/null | grep -q 'GNU tar'; then owner="--owner=0 --group=0 --numeric-owner"; else owner="--uid 0 --gid 0 --numeric-owner"; fi; \
+	for t in $(PLATFORMS); do \
 	  os=$${t%/*}; arch=$${t#*/}; out=$(DIST)/build/$$os-$$arch; ext=""; \
 	  if [ "$$os" = windows ]; then ext=.exe; fi; \
-	  mkdir -p $$out && cp dist-material/LICENSE dist-material/NOTICE $$out/ && rm -rf $$out/licenses && cp -R dist-material/licenses $$out/licenses && \
+	  rm -rf $$out && mkdir -p $$out/claude-code-plugin/bin && \
+	  cp dist-material/LICENSE dist-material/NOTICE $$out/ && cp -R dist-material/licenses $$out/licenses && \
 	  echo "building $$os/$$arch" && \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
-	  rm -rf $$out/claude-code-plugin && mkdir -p $$out/claude-code-plugin/bin && \
 	  cp -R $(PLUGIN_DIR)/.claude-plugin $(PLUGIN_DIR)/hooks $$out/claude-code-plugin/ && \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/claude-code-plugin/bin/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
+	  chmod -R u=rwX,go=rX $$out || exit 1; \
+	  if [ -n "$$stamp" ]; then find $$out -exec env TZ=UTC0 touch -t $$stamp {} + || exit 1; fi; \
+	  (cd $$out && find $(BINARY)$$ext claude-code-plugin LICENSE NOTICE licenses | LC_ALL=C sort > ../$$os-$$arch.list) || exit 1; \
 	  if [ "$$os" = windows ]; then \
-	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && (cd $$out && zip -qr ../../$(PKG_BASE)-$$os-$$arch.zip $(BINARY)$$ext claude-code-plugin LICENSE NOTICE licenses); \
+	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && \
+	    (cd $$out && TZ=UTC0 zip -X -q ../../$(PKG_BASE)-$$os-$$arch.zip -@ < ../$$os-$$arch.list) || exit 1; \
 	  else \
-	    tar -C $$out -czf $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz $(BINARY) claude-code-plugin LICENSE NOTICE licenses; \
+	    (cd $$out && tar --format=ustar $$owner --no-recursion -cf ../$$os-$$arch.tar -T ../$$os-$$arch.list) && \
+	    gzip -n -c $(DIST)/build/$$os-$$arch.tar > $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz || exit 1; \
 	  fi; \
 	done
 	@ls -la $(DIST)/$(PKG_BASE)-*
@@ -202,17 +229,18 @@ binaries:
 checksums:
 	@cd $(DIST) && for f in *.tgz *.zip; do [ -f "$$f" ] && shasum -a 512 "$$f" > "$$f.sha512"; done; ls *.sha512
 
-## release-notes: print the text for the GitHub release page of VERSION, from its changelog page
-.PHONY: release-notes
-release-notes:
-	@f=docs/en/changes/changes-$(VERSION).md; [ -f "$$f" ] || { echo "$$f not found"; exit 2; }; \
-	tail -n +2 "$$f" | sed '/^> In development/,/^$$/d' | sed '1{/^$$/d;}'; \
-	printf '%s\n' '' '#### Where to get it' \
-	  '- Binary packages for macOS, Linux and Windows, with a sha512 beside each: attached to this release' \
-	  '- Container image: `ghcr.io/apache/skywalking-ai-sessionizer:$(VERSION)`' \
-	  '- From source: `git checkout v$(VERSION) && make build`, or `make binaries` for every platform' \
-	  '- Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v$(VERSION)/docs/README.md' \
-	  '- Full changelog: https://github.com/apache/skywalking-ai-sessionizer/blob/v$(VERSION)/docs/en/changes/changes-$(VERSION).md'
+# The font files a source release must not carry. They are found by name,
+# because file(1) often reports a web font only as data. Fonts come under
+# licenses such as the SIL Open Font License, which the ASF puts in
+# Category B, and a Category B work must not be in a source release.
+# tools/release.sh candidate refuses the same list, in font_files, so
+# change both together.
+FONT_FILES := \.(woff2?|ttf|otf|eot)
+
+# The file(1) types a source release must not carry, because the ASF says a
+# source release should not contain compiled code. tools/release.sh reads
+# this line from the tag's Makefile, so both refuse the same files.
+COMPILED_TYPES := application/(x-(mach-binary|executable|pie-executable|sharedlib|dosexec|object|java-applet)|vnd\.microsoft\.portable-executable|wasm)
 
 ## release: build everything a vote needs into dist/: the source package, every binary package, sha512 files and GPG signatures. Needs VERSION=x.y.z with the tag vx.y.z checked out
 .PHONY: release
@@ -220,12 +248,41 @@ release:
 	@case "$(VERSION)" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "set the version, for example: make release VERSION=0.1.0"; exit 2 ;; esac
 	@git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null || { echo "tag v$(VERSION) does not exist"; exit 2; }
 	@[ "$$(git rev-parse HEAD)" = "$$(git rev-parse 'v$(VERSION)^{commit}')" ] || { echo "check out v$(VERSION) first: the binaries are built from the working tree"; exit 2; }
-	@git diff --quiet HEAD || { echo "the working tree has changes; a release is built from the tag alone"; exit 2; }
+	@# An untracked file counts too: go build compiles an untracked .go file
+	@# into the binaries, and the source package, made from the tag, would
+	@# not hold it. dist/ and bin/ are ignored, so they do not count.
+	@[ -z "$$(git status --porcelain)" ] || { echo "the working tree has changes or untracked files; a release is built from the tag alone:"; git status --porcelain; exit 2; }
+	@# Two build outputs were once committed by accident, so refuse any
+	@# tracked compiled file rather than ship it in the voted source package.
+	@bad=$$(git ls-files -z | xargs -0 file -N --mime-type | grep -E ': *$(COMPILED_TYPES)$$' || true); \
+	  [ -z "$$bad" ] || { echo "the source package would carry compiled files; remove them from git first:"; echo "$$bad"; exit 2; }
+	@# Packages left from an earlier build would be signed and checksummed
+	@# with these, and moved beside them.
+	@rm -f $(DIST)/*.tgz $(DIST)/*.zip $(DIST)/*.tgz.* $(DIST)/*.zip.*
 	@$(MAKE) binaries VERSION=$(VERSION)
 	git archive --format=tar --prefix=$(RELEASE_NAME)/ v$(VERSION) | gzip -n > $(DIST)/$(RELEASE_NAME).tgz
+	@# .gitattributes leaves the renderer's fonts out of git archive. This is
+	@# the last guard, for the day that changes. It stops the release before
+	@# anything is checksummed or signed, and removes the package, so it
+	@# cannot be uploaded by hand.
+	@listing=$$(tar -tzf $(DIST)/$(RELEASE_NAME).tgz) || { echo "cannot list $(DIST)/$(RELEASE_NAME).tgz"; exit 2; }; \
+	  fonts=$$(printf '%s\n' "$$listing" | grep -E '$(FONT_FILES)$$' || true); \
+	  [ -z "$$fonts" ] || { rm -f $(DIST)/$(RELEASE_NAME).tgz; \
+	    echo "the source package holds font files, so $(DIST)/$(RELEASE_NAME).tgz was removed:"; echo "$$fonts"; \
+	    echo "Fonts come under licenses such as the SIL Open Font License, which the ASF puts in Category B. The ASF third-party license policy says: \"Do not include Category B licensed works in source releases.\" See https://www.apache.org/legal/resolved.html#category-b. Mark each font export-ignore in .gitattributes."; \
+	    exit 2; }
 	@$(MAKE) checksums VERSION=$(VERSION)
-	@cd $(DIST) && for f in *.tgz *.zip; do gpg --armor --detach-sign --yes "$$f"; done
-	@ls -la $(DIST)/*.tgz* $(DIST)/*.zip*
+	@# A name that is not a file is skipped. With no Windows package, *.zip
+	@# stays as it is, and gpg would be asked to sign a file of that name.
+	@# The first gpg failure stops the release. A loop ends with the status of
+	@# its last command, so a failure followed by a success would pass.
+	@cd $(DIST) && for f in *.tgz *.zip; do \
+	  [ -f "$$f" ] || continue; \
+	  gpg --armor --detach-sign --yes $(if $(GPG_USER),--local-user "$(GPG_USER)",) "$$f" \
+	    || { echo "gpg could not sign $$f, so the release stops here"; exit 1; }; \
+	done
+	@# The zip files are listed only when there are some, for the same reason.
+	@cd $(DIST) && ls -la *.tgz* $$(ls *.zip* 2>/dev/null)
 
 check: vet lint license-check dep-check dep-licenses-check test
 

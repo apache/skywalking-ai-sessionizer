@@ -7,18 +7,9 @@ installed.
 
 ## Get the binary
 
-Each release ships one package per platform, with the binary, `LICENSE` and `NOTICE` inside:
-
-| Platform | Package |
-| --- | --- |
-| macOS, Apple silicon | `apache-skywalking-ai-sessionizer-<version>-bin-darwin-arm64.tgz` |
-| macOS, Intel | `apache-skywalking-ai-sessionizer-<version>-bin-darwin-amd64.tgz` |
-| Linux, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-amd64.tgz` |
-| Linux, ARM 64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-arm64.tgz` |
-| Windows, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-windows-amd64.zip` |
-
-They are attached to the [GitHub release](https://github.com/apache/skywalking-ai-sessionizer/releases)
-with a sha512 checksum beside each. Unpack one, put `asz` on your path, and check it:
+Each release ships a signed binary package for macOS, Linux and Windows. [Install](install.md)
+says where to download the one for your platform, and how to verify it. Unpack it, put `asz` on
+your path, and check it:
 
 ```sh
 asz version
