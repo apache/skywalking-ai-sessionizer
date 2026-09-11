@@ -29,6 +29,8 @@ side.
 ## Before opening a pull request
 
 - `make check` passes. CI runs the same targets and one required check fans them in.
+- Record each change users can see in `docs/en/changes/changes.md`, the changelog of the version
+  in development, under the heading of its area.
 - Every source file carries the Apache license header. `make license-fix` inserts missing ones.
 - The conversation renderer `asz view` embeds is Horizon's `@skywalking-horizon-ui/conversation-view`,
   built from the commit named in `internal/view/conversation-view/HORIZON_COMMIT` and committed

@@ -88,6 +88,18 @@
   titled `[ANNOUNCE]`, and the website entries link the packages through closer.lua.
 - The notes of the GitHub release name the Apache release, the downloads page, the signatures and
   KEYS. They no longer point at a git checkout or the container image.
+- The changelog has the layout of Apache SkyWalking and SkyWalking SWCK. On `main`,
+  `docs/en/changes/changes.md` is the changelog of the version in development, and Current Version
+  in the menu always points at it. In the commit it tags, `prepare` only removes the
+  in-development note, so the tag and the source package hold the finished changelog where the
+  menu and the welcome page of the tag link it. The website publishes the docs of each version
+  from its tag. In the next commit, `prepare` moves the page to `changes-VERSION.md`, lists the
+  version under Changelog, and writes a new `changes.md` for the next version. The vote mail, the
+  announcement, the GitHub release and the winget manifest link the tag's `changes.md`. `complete`
+  builds the text of the GitHub release from that page when it runs, in place of the
+  `release-notes-VERSION.md` file `prepare` used to store.
+  [How to Release](../guides/how-to-release.md#the-changelog) describes the layout, which the root
+  `CHANGES.md` used to describe.
 - `complete` uploads the voted packages to the GitHub release, each with its signature and
   checksum, after checking each against the file downloads.apache.org serves. CI no longer
   attaches the packages it builds, because they are not the signed files the vote approved. It

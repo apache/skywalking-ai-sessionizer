@@ -22,15 +22,19 @@
 #
 #   tools/release.sh prepare [VERSION] [NEXT] [--dry-run] [--skip-check] [--no-push]
 #       On a branch release/VERSION cut from the current commit: check the
-#       tree, the headers and the suite; finalise VERSION's changelog page;
-#       list VERSION under Changelog and in CHANGES.md; write the release
-#       notes into docs/en/changes/release-notes-VERSION.md; commit and tag
-#       vVERSION on that commit, so the tag carries the notes and the
-#       finished changelog. Then open NEXT as the version in development in
-#       a second commit, push the branch and the tag, and raise the pull
-#       request against main. Both versions are asked for when not given.
-#       A dry run installs no tool: a check whose tool is not in bin/ yet
-#       is listed, not run.
+#       tree, the headers and the suite. docs/en/changes/changes.md is the
+#       changelog of the version in development, and must name VERSION in
+#       its heading and carry the in-development note. Remove the note,
+#       commit, and tag vVERSION on that commit. The tag keeps the finished
+#       changelog at changes.md, the page its menu and its welcome page
+#       link, because the website publishes the docs of each version from
+#       its tag. Then, in a second commit, move changes.md to
+#       changes-VERSION.md, list VERSION under Changelog in docs/menu.yml,
+#       and write a new changes.md for NEXT. Push the branch and the tag,
+#       and raise the pull request against main. Both versions are asked
+#       for when not given, and the heading of changes.md gives the offered
+#       VERSION. A dry run installs no tool: a check whose tool is not in
+#       bin/ yet is listed, not run.
 #
 #   tools/release.sh candidate [VERSION] [--dry-run] [--no-upload]
 #       After the prepare pull request has merged: build the release
@@ -71,11 +75,18 @@
 #       the older versions from the archive.
 #
 #   tools/release.sh complete [VERSION] [--dry-run]
-#       Create the GitHub release for vVERSION from the notes stored in the
-#       tag, not a draft and not a prerelease, and attach the voted packages
-#       from dist/VERSION once each matches the file downloads.apache.org
-#       serves. The GitHub release is a convenience. CI publishes the image
-#       when the released event fires; nothing here waits for it.
+#       Create the GitHub release for vVERSION, not a draft and not a
+#       prerelease. Its text is built at this point from the tag's
+#       docs/en/changes/changes.md, followed by where to get the version,
+#       and printed. Attach the voted packages from dist/VERSION once each
+#       matches the file downloads.apache.org serves. The GitHub release is
+#       a convenience. CI publishes the image when the released event
+#       fires, and nothing here waits for it.
+#
+# When VERSION is not given, candidate, vote-result, publish and complete
+# offer the newest version with a page docs/en/changes/changes-X.Y.Z.md.
+# prepare gives a version that page in the commit after the tag, and main
+# holds it once the prepare pull request has merged.
 #
 # --dry-run prints what would change and writes nothing.
 
@@ -173,6 +184,13 @@ doit() { [ "$dry_run" = false ]; }
 
 cd "$(git rev-parse --show-toplevel)"
 changes_dir=docs/en/changes
+# On main, the changelog of the version in development is always at this
+# path, so Current Version in the menu and the welcome page link it once and
+# never change at a release. The tag keeps the finished changelog of its
+# version at this path too, because the website publishes the docs of each
+# version from its tag, and there the same links reach it. prepare moves it
+# to changes-VERSION.md in the commit after the tag.
+dev_page=$changes_dir/changes.md
 menu=docs/menu.yml
 project="Apache SkyWalking AI Sessionizer"
 github=https://github.com/apache/skywalking-ai-sessionizer
@@ -192,19 +210,25 @@ closer=https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer
 # both together.
 font_files='\.(woff2?|ttf|otf|eot)$'
 
-# list_in_changes puts a line at the top of the version list in CHANGES.md,
-# so versions read newest first. The list is the run of lines starting "- [".
-list_in_changes() {
-  awk -v line="$1" '/^- \[/ && !d {print line; d=1} {print} END {if (!d) {print ""; print line}}' CHANGES.md > CHANGES.md.tmp && mv CHANGES.md.tmp CHANGES.md
-}
-
+# newest_page is the newest version prepare has finished, since only
+# prepare gives a version its page changes-VERSION.md. It does so in the
+# commit after the tag, which main holds once the prepare pull request has
+# merged. On main, changes.md is the version in development, never one to
+# build, publish or release on GitHub.
 newest_page() { ls "$changes_dir" | sed -nE 's/^changes-([0-9]+\.[0-9]+\.[0-9]+.*)\.md$/\1/p' | sort -V | tail -1; }
 
-# newest_notes is the newest version prepare has made, since only prepare
-# writes release notes. The newest changelog page is the version still in
-# development once the prepare pull request merges, so it is never the
-# version to build, publish or release on GitHub.
-newest_notes() { ls "$changes_dir" | sed -nE 's/^release-notes-([0-9]+\.[0-9]+\.[0-9]+.*)\.md$/\1/p' | sort -V | tail -1; }
+# page_version prints the version a changelog page on standard input names
+# in its heading, as in "# Changes in 0.4.0". Only the first top-level
+# heading counts, because it is the title of the page. awk reads to the
+# end rather than exit at the heading: a writer into a pipe that closed
+# early fails, and pipefail reports that as a failure of the pipe.
+page_version() {
+  awk '!seen && /^# / {seen = 1; if (sub(/^# Changes in /, "")) {sub(/[ \t\r]+$/, ""); print}}'
+}
+
+# has_note says whether a changelog page on standard input carries the
+# in-development note. It reads to the end too, for the same reason.
+has_note() { awk '/^> In development/ {n = 1} END {exit !n}'; }
 
 ask() { # ask VAR PROMPT DEFAULT
   # The prompt goes to stderr. Every caller captures stdout, and a prompt
@@ -263,8 +287,13 @@ svn_list() {
 # fetch_tag checks that vVERSION is on origin, and that a local tag of the
 # same name, if there is one, is the same object. The vote names the tag on
 # origin, so a local tag that differs would build or describe something else.
+# The tag must hold the finished changelog of the version at changes.md: its
+# heading names the version and the in-development note is gone. The docs
+# the website publishes from the tag link that page, the vote mail and the
+# announcement link it, and complete builds the text of the GitHub release
+# from it. A tag prepare did not make fails here, before anything is built.
 fetch_tag() {
-  local refs remote_id local_id
+  local refs remote_id local_id tag_page
   refs=$(git ls-remote --tags origin "refs/tags/$tag") || fail "cannot list the tags on origin"
   remote_id=$(printf '%s\n' "$refs" | awk -v r="refs/tags/$tag" '$2 == r {print $1}')
   [ -n "$remote_id" ] || fail "$tag is not on origin; run prepare and merge its pull request first"
@@ -273,7 +302,9 @@ fetch_tag() {
   else
     git fetch -q origin "refs/tags/$tag:refs/tags/$tag" || fail "cannot fetch $tag from origin"
   fi
-  git cat-file -e "$tag:$notes" 2>/dev/null || fail "$tag does not carry $notes; it was not made by prepare"
+  tag_page=$(git show "$tag:$dev_page" 2>/dev/null) || fail "$tag does not carry $dev_page, so prepare did not make it"
+  [ "$(printf '%s\n' "$tag_page" | page_version)" = "$version" ] || fail "$dev_page in $tag does not name $version in its heading, so prepare did not make $tag. The heading must read '# Changes in $version'"
+  if printf '%s\n' "$tag_page" | has_note; then fail "$dev_page in $tag still carries the in-development note, so prepare did not make $tag"; fi
   commit=$(git rev-parse "$tag^{commit}")
 }
 
@@ -321,10 +352,9 @@ expected_packages() {
 }
 
 pick_version() { # pick_version PROMPT
-  [ -n "$version" ] || version=$(ask v "$1" "$(newest_notes)")
+  [ -n "$version" ] || version=$(ask v "$1" "$(newest_page)")
   is_version "$version" || fail "'$version' is not of the form MAJOR.MINOR.PATCH"
   tag="v$version"
-  notes="$changes_dir/release-notes-$version.md"
   out="dist/$version"
 }
 
@@ -613,7 +643,7 @@ Hi the SkyWalking Community:
 This is a call for vote to release $project version $version.
 
 Release notes:
- * $github/blob/$tag/docs/en/changes/changes-$version.md
+ * $github/blob/$tag/docs/en/changes/changes.md
 
 Release Candidate:
  * $dev_dir
@@ -881,7 +911,7 @@ SkyWalking AI Sessionizer: conversation-level observability for long-lived AI ag
 SkyWalking: APM (application performance monitor) tool for distributed systems, especially designed for microservices, cloud native and container-based architectures.
 
 Download Links: https://skywalking.apache.org/downloads/
-Release Notes: $github/blob/$tag/docs/en/changes/changes-$version.md
+Release Notes: $github/blob/$tag/docs/en/changes/changes.md
 Website: https://skywalking.apache.org/
 Documents: https://skywalking.apache.org/docs/skywalking-ai-sessionizer/$tag/readme/
 
@@ -1051,18 +1081,38 @@ if [ "$cmd" = complete ]; then
   done
 
   step "The release"
+  # release_text prints the text of the GitHub release: the tag's
+  # changes.md without its heading, because the release has its own title,
+  # then where to get the version. It is built from the tag each time and
+  # stored nowhere, so a change made on main after prepare cannot reach it.
+  # It sends a reader to the Apache release and to the signatures, never to
+  # a git checkout, as the ASF release policy asks.
+  release_text() {
+    git show "$tag:$dev_page" | tail -n +2 | sed '1{/^$/d;}'
+    cat <<TEXT
+
+#### Where to get it
+
+- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The files attached to this GitHub release are the same signed packages, each with its \`.asc\` signature and \`.sha512\` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install]($github/blob/$tag/docs/en/setup/install.md#verify-a-package) describes.
+- To build from the source package, see [Install]($github/blob/$tag/docs/en/setup/install.md#build-from-the-source-package).
+- Documentation: $github/blob/$tag/docs/README.md
+- Full changelog: $github/blob/$tag/docs/en/changes/changes.md
+TEXT
+  }
+  text=$(release_text)
   say "tag      : $tag"
   say "title    : $version"
-  say "notes    : $notes, as stored in the tag"
+  say "text     : $dev_page as $tag holds it, then where to get $version"
   say "assets   : ${#assets[@]} files, the voted packages with their .asc and .sha512"
+  say "---- the text of the release"
+  printf '%s\n' "$text"
   say "----"
-  git show "$tag:$notes" | sed -n '1,12p'
-  say "..."
   if [ "$dry_run" = true ]; then say "dry run: no release created and nothing uploaded"; exit 0; fi
   tmp=$(mktemp)
-  git show "$tag:$notes" > "$tmp"
+  trap 'rm -f "$tmp"' EXIT
+  printf '%s\n' "$text" > "$tmp"
   gh release create "$tag" --verify-tag --title "$version" --notes-file "$tmp"
-  rm -f "$tmp"
   say "created. CI publishes the image when the released event fires; nothing to wait for here."
   gh release upload "$tag" "${assets[@]}" || fail "the upload stopped part way. Finish it with: gh release upload $tag $out/$pkg-$version-* --clobber"
   say "attached ${#assets[@]} files to the GitHub release $tag: the voted packages, their signatures and their checksums"
@@ -1083,22 +1133,31 @@ from=$(git branch --show-current)
 say "cutting the release branch from $from at $(git rev-parse --short HEAD)"
 
 step "The versions"
-current=$(newest_page)
+# The heading of changes.md names the version in development, and that is
+# the version offered. It is checked before the question, so a heading
+# such as "# Changes in the next version" stops the run instead of being
+# offered as the version.
+[ -f "$dev_page" ] || fail "$dev_page is missing. It is the changelog of the version in development, which prepare moves to the version's own page after the tag"
+current=$(page_version < "$dev_page")
+is_version "$current" || fail "the first heading of $dev_page does not name a version of the form MAJOR.MINOR.PATCH. It must read '# Changes in VERSION', where VERSION is the version in development"
 [ -n "$version" ] || version=$(ask v "Version to release" "$current")
 is_version "$version" || fail "$version is not of the form MAJOR.MINOR.PATCH"
+[ "$version" = "$current" ] || fail "$dev_page is the changelog of $current, as its heading says, not of $version. Release $current, or correct the heading first"
 [ -n "$next" ] || next=$(ask v "Next version, where development continues" "$(printf '%s' "$version" | awk -F. '{printf "%d.%d.0", $1, $2 + 1}')")
 is_version "$next" || fail "$next is not of the form MAJOR.MINOR.PATCH"
 [ "$(printf '%s\n%s\n' "$version" "$next" | sort -V | tail -1)" = "$next" ] && [ "$version" != "$next" ] || fail "next version $next must come after $version"
 tag="v$version"
 branch="release/$version"
 page="$changes_dir/changes-$version.md"
-notes="$changes_dir/release-notes-$version.md"
-next_page="$changes_dir/changes-$next.md"
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || fail "tag $tag already exists"
 ! git rev-parse -q --verify "refs/heads/$branch" >/dev/null || fail "branch $branch already exists"
-[ -f "$page" ] || fail "$page does not exist; the version's changelog page is written during its development"
-grep -q "path: /en/changes/changes-$version\$" "$menu" || fail "$menu does not point Current Version at $version"
-[ ! -f "$next_page" ] || fail "$next_page already exists; $next is already open"
+has_note < "$dev_page" || fail "$dev_page has no in-development note, a line starting '> In development' under its heading. The page of the version in development always carries it, and prepare removes it in the commit it tags"
+[ ! -e "$page" ] || fail "$page exists already, so $version was prepared before"
+[ ! -e "$changes_dir/changes-$next.md" ] || fail "$changes_dir/changes-$next.md exists already, so $next was prepared before"
+# Current Version stays on changes.md, so the menu and the welcome page
+# link the version in development after every release without an edit.
+current_path=$(awk '/^        - name: Current Version$/ {cv=1; next} cv && /^          path:/ {sub(/^ *path: */, ""); print; exit}' "$menu")
+[ "$current_path" = /en/changes/changes ] || fail "Current Version in $menu points at '$current_path'. It must point at /en/changes/changes, the page of the version in development"
 say "releasing $version on $branch, then opening $next"
 
 step "License headers"
@@ -1113,58 +1172,26 @@ if [ "$skip_check" = false ]; then
   else say "- make check, left out: it would install license-eye and golangci-lint into bin/ first"; fi
 fi
 
-# release_notes prints the text of the GitHub release page: the finished
-# changelog page, then where to get the version. complete publishes it as
-# the tag stores it, after the release, so a later fix cannot reach it. It
-# sends a reader to the Apache release and to the signatures, never to a
-# git checkout, as the ASF release policy asks.
-release_notes() {
-  tail -n +2 "$page" | sed '/^> In development/,/^$/d' | sed '1{/^$/d;}'
-  cat <<NOTES
-
-#### Where to get it
-
-- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
-- The files attached to this GitHub release are the same signed packages, each with its \`.asc\` signature and \`.sha512\` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install]($github/blob/$tag/docs/en/setup/install.md#verify-a-package) describes.
-- To build from the source package, see [Install]($github/blob/$tag/docs/en/setup/install.md#build-from-the-source-package).
-- Documentation: $github/blob/$tag/docs/README.md
-- Full changelog: $github/blob/$tag/docs/en/changes/changes-$version.md
-NOTES
-}
-
 step "Prepare the $version candidate"
-plan=()
-if grep -q '^> In development' "$page"; then plan+=("remove the in-development note from $page"); fi
-grep -q "^        - name: $version\$" "$menu" || plan+=("list $version under Changelog in $menu, right after Current Version")
-if grep -q "^- \[$version\](.*) (in development)\$" CHANGES.md; then plan+=("remove the in-development mark of $version in CHANGES.md")
-elif ! grep -q "^- \[$version\]" CHANGES.md; then plan+=("link $version from CHANGES.md"); fi
-plan+=("write $notes from the changelog page, and where to get the version")
-plan+=("commit \"Prepare the $version candidate\" on $branch and tag $tag on it")
-for p in "${plan[@]}"; do say "- $p"; done
+say "- remove the in-development note from $dev_page, which keeps its path"
+say "- commit \"Prepare the $version candidate\" on $branch and tag $tag on it"
 
 if doit; then
   git checkout -q -b "$branch"
-  if grep -q '^> In development' "$page"; then
-    awk 'BEGIN{skip=0} /^> In development/{skip=1} skip&&/^$/{skip=0; next} !skip{print}' "$page" > "$page.tmp" && mv "$page.tmp" "$page"
-  fi
-  if ! grep -q "^        - name: $version\$" "$menu"; then
-    awk -v v="$version" '
-      {print}
-      /^        - name: Current Version$/ {cv=1; next}
-      cv && /^          path:/ {print "        - name: " v; print "          path: /en/changes/changes-" v; cv=0}' "$menu" > "$menu.tmp" && mv "$menu.tmp" "$menu"
-  fi
-  if grep -q "^- \[$version\](.*) (in development)\$" CHANGES.md; then
-    sed -i.bak "s|^- \[$version\](\(.*\)) (in development)\$|- [$version](\1)|" CHANGES.md && rm -f CHANGES.md.bak
-  elif ! grep -q "^- \[$version\]" CHANGES.md; then
-    list_in_changes "- [$version](docs/en/changes/changes-$version.md)"
-  fi
-  release_notes > "$notes"
-  git add "$changes_dir" "$menu" CHANGES.md
+  # Only the note goes, and the page keeps its path. The website publishes
+  # the docs of each version from its tag, and the menu and the welcome
+  # page of the tag link changes.md, so the finished changelog must be
+  # there. That is also the order Apache SkyWalking and SkyWalking SWCK
+  # follow on their tags.
+  # Remove only the note's own lines and one blank line after them. A
+  # heading written straight under the note must stay in the changelog.
+  awk '/^> In development/{skip=1; next} skip && /^>/{next} skip && /^$/{skip=0; next} {skip=0; print}' "$dev_page" > "$dev_page.tmp" && mv "$dev_page.tmp" "$dev_page"
+  git add "$dev_page"
   git commit -q -m "Prepare the $version candidate
 
-The $version changelog page loses its in-development note, the version
-is listed under Changelog, and its release notes are stored beside it.
-The tag goes on this commit, as the candidate for the vote."
+The changelog of $version loses its in-development note and keeps its
+path, docs/en/changes/changes.md, which the menu and the welcome page
+link. The tag goes on this commit, as the candidate for the vote."
   # The tag is the candidate the vote is about, not the release, so its
   # message does not call it one, and neither does the commit.
   git tag -a "$tag" -m "$project $version"
@@ -1172,29 +1199,35 @@ The tag goes on this commit, as the candidate for the vote."
 fi
 
 step "Open $next"
-say "- create $next_page with the in-development note"
-say "- point Current Version at $next in $menu"
-say "- list $next as in development in CHANGES.md and on the welcome page"
+say "- git mv $dev_page to $page"
+if grep -Fxq "        - name: $version" "$menu"; then say "- leave $menu as it is: it lists $version under Changelog already"
+else say "- list $version under Changelog in $menu, right after Current Version"; fi
+say "- write a new $dev_page for $next, with the in-development note"
 say "- commit \"Open $next\" on $branch"
 if doit; then
-  cat > "$next_page" <<PAGE
+  # The move and the new page at the old path go in one commit. git records
+  # no rename, but git log --follow finds the moved page by its content, so
+  # it traces changes-$version.md back through changes.md.
+  git mv "$dev_page" "$page"
+  if ! grep -Fxq "        - name: $version" "$menu"; then
+    awk -v v="$version" '
+      {print}
+      /^        - name: Current Version$/ {cv=1; next}
+      cv && /^          path:/ {print "        - name: " v; print "          path: /en/changes/changes-" v; cv=0}' "$menu" > "$menu.tmp" && mv "$menu.tmp" "$menu"
+  fi
+  # The heading and the note are the ones the next prepare reads back.
+  cat > "$dev_page" <<PAGE
 # Changes in $next
 
 > In development, not yet released. \`tools/release.sh prepare $next\` removes this note.
-
-Nothing yet.
 PAGE
-  awk -v v="$next" '
-    /^        - name: Current Version$/ {cv=1; print; next}
-    cv && /^          path:/ {print "          path: /en/changes/changes-" v; cv=0; next}
-    {print}' "$menu" > "$menu.tmp" && mv "$menu.tmp" "$menu"
-  list_in_changes "- [$next](docs/en/changes/changes-$next.md) (in development)"
-  sed -i.bak "s|en/changes/changes-[0-9][0-9.A-Za-z-]*\.md|en/changes/changes-$next.md|" docs/README.md && rm -f docs/README.md.bak
-  git add "$changes_dir" "$menu" CHANGES.md docs/README.md
+  git add "$page" "$menu" "$dev_page"
   git commit -q -m "Open $next
 
-$next has its changelog page and Current Version points at it. $version
-keeps its own page, its entry and its release notes."
+The changelog of $version moves from changes.md to its own page,
+changes-$version.md, and the version is listed under Changelog, right
+after Current Version. changes.md is the changelog of $next from here.
+Current Version and the welcome page still link changes.md."
   say "committed $(git rev-parse --short HEAD)"
 fi
 
@@ -1214,5 +1247,5 @@ fi
 git push -u origin "$branch"
 git push origin "$tag"
 gh pr create --base "$from" --head "$branch" --title "Prepare the $version candidate and open $next" \
-  --body "Finalises the $version changelog, stores its release notes, and opens $next. Tag $tag is on the first of the two commits, and is the candidate for the vote. After merging, run \`tools/release.sh candidate $version\` to build the candidate and upload it for the vote."
+  --body "The first commit removes the in-development note from the $version changelog, docs/en/changes/changes.md. Tag $tag is on it, and is the candidate for the vote. The second commit moves the changelog to changes-$version.md, lists $version under Changelog, and opens $next in a new changes.md. After merging, run \`tools/release.sh candidate $version\` to build the candidate and upload it for the vote."
 say "pushed $branch and $tag; pull request opened. After it merges: tools/release.sh candidate $version"

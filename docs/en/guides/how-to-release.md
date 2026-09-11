@@ -49,9 +49,11 @@ GitHub releases as pre-releases, or to remove their packages, is for the PMC to 
 
 Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
 
-- Each takes the version as its first argument, or asks for it. `candidate`, `vote-result`,
-  `publish` and `complete` offer the newest version `prepare` has made, read from the newest
-  `docs/en/changes/release-notes-*.md` in the checkout.
+- Each takes the version as its first argument, or asks for it. `prepare` offers the version the
+  heading of `docs/en/changes/changes.md` names. `candidate`, `vote-result`, `publish` and
+  `complete` offer the newest version `prepare` has finished, read from the newest
+  `docs/en/changes/changes-X.Y.Z.md` in the checkout. `prepare` makes that page in the commit
+  after the tag, and `main` holds it once the prepare pull request has merged.
 - `candidate`, `vote-result` and `publish` write their files under `dist/$VERSION/` in the
   checkout, and `complete` reads the voted packages from there. `prepare` writes nothing there.
   Git ignores `dist/`.
@@ -95,12 +97,34 @@ Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
    first candidate creates the first one. The first `publish` creates the second one with
    `svn mkdir`.
 
+## The changelog
+
+The changelog is part of the documentation. The SkyWalking website publishes the docs of each
+version from the commit of its tag, the changelog with them. It has the layout Apache SkyWalking
+and SkyWalking SWCK use: one page for the version in development, and one page for each finished
+version. Their tags show the order. Apache SkyWalking `v10.3.0` and SkyWalking SWCK `v0.11.0` each
+hold `docs/en/changes/changes.md` headed with their own version, and the page moves to its own
+name in a later commit.
+
+- On `main`, `docs/en/changes/changes.md` is the changelog of the version in development. Its
+  heading names that version, as in `# Changes in 0.4.0`, and a note under the heading starts
+  `> In development`. Current Version in `docs/menu.yml` points at `/en/changes/changes`, and the
+  welcome page links `en/changes/changes.md`, so neither has to change at a release.
+- In the commit it tags, `prepare` only removes the note. So the tag and the source package hold
+  the finished changelog at `changes.md`, where the menu and the welcome page of the tag link it.
+  The vote mail, the announcement and the GitHub release link that page at the tag, and
+  `complete` builds the text of the GitHub release from it.
+- In the next commit, `prepare` moves the page to `docs/en/changes/changes-$VERSION.md`, the
+  changelog of that one version. It lists the version under Changelog in `docs/menu.yml`, right
+  after Current Version, so the versions read newest first. It writes a new `changes.md` for the
+  next version, with its heading and the note. `prepare` moves the page with `git mv` in this one
+  commit, so `git log --follow` traces the page back through the move.
+
 ## Before each release
 
 1. Close every issue in the milestone, or move what is unfinished to the next one.
-2. Make sure the changelog is complete. The version has had its own page,
-   `docs/en/changes/changes-$VERSION.md`, since its development started, and Current Version in
-   the menu points at it.
+2. Make sure the changelog is complete. It is `docs/en/changes/changes.md`, and its heading names
+   `$VERSION`.
 3. Make sure this page is right. The vote mail links this page as it is in the tag, so a change
    made after `prepare` does not reach the voters.
 4. `make check` passes on `main`.
@@ -113,30 +137,54 @@ tools/release.sh prepare
 ```
 
 It asks for the version to release and the version development moves to, or takes them as
-arguments. On a branch `release/$VERSION` cut from `main`, it then does these steps in order:
+arguments. It offers the version the heading of `docs/en/changes/changes.md` names. On a branch
+`release/$VERSION` cut from `main`, it then does these steps in order:
 
 1. Checks for git, make, Go, awk, sed, grep and sort, and for gh unless `--no-push` is given.
    Refuses a dirty tree, an existing tag or branch, and a next version that does not come after
-   this one.
+   this one. Refuses too when `changes.md` does not name `$VERSION` in its heading or has no
+   in-development note, when `changes-$VERSION.md` or `changes-$NEXT.md` exists, and when Current
+   Version in `docs/menu.yml` does not point at `/en/changes/changes`.
 2. Checks the license headers and runs `make check`. `--skip-check` leaves out `make check`.
-3. Removes the in-development note from the version's changelog page, lists the version under
-   Changelog and in `CHANGES.md`, and writes the release notes to
-   `docs/en/changes/release-notes-$VERSION.md`. It commits "Prepare the $VERSION candidate" and
-   puts the annotated tag `v$VERSION` on that commit, so the tag carries the finished changelog and
-   the notes. The tag's message is `Apache SkyWalking AI Sessionizer $VERSION`. Neither calls the
-   tag a release, because the tag is the candidate.
-4. Opens the next version in a second commit: its changelog page with the in-development note,
-   Current Version pointed at it, and its entry in `CHANGES.md` and on the welcome page.
+3. Removes the in-development note from `docs/en/changes/changes.md`, and leaves the page at its
+   path and the menu and the welcome page as they are. It commits "Prepare the $VERSION candidate"
+   and puts the annotated tag `v$VERSION` on that commit. So the tag holds the finished changelog
+   at `changes.md`, where the menu and the welcome page of the tag link it. The tag's message is
+   `Apache SkyWalking AI Sessionizer $VERSION`. Neither calls the tag a release, because the tag
+   is the candidate.
+4. In a second commit, "Open $NEXT", moves `docs/en/changes/changes.md` to
+   `docs/en/changes/changes-$VERSION.md` with `git mv`, and lists the version under Changelog in
+   `docs/menu.yml`, right after Current Version. It writes a new `docs/en/changes/changes.md` for
+   `$NEXT`, with the heading `# Changes in $NEXT` and the in-development note. Current Version and
+   the welcome page link `changes.md` already, so they stay as they are.
 5. Pushes the branch and the tag, and opens the pull request "Prepare the $VERSION candidate and
    open $NEXT" against `main`. The pull request names `candidate` as the next step.
 
-The release notes are the changelog page, then a section "Where to get it". It says that the Apache
-release is the source package, linked from the [SkyWalking downloads
-page](https://skywalking.apache.org/downloads/). It says that the files attached to the GitHub
-release are the same signed packages, each with its `.asc` and `.sha512`, which verify against
-`https://downloads.apache.org/skywalking/KEYS`. It links the build from the source package, the
-documentation and the changelog of the tag. `complete` publishes these notes as they are in the
-tag, so a change made after `prepare` does not reach the GitHub release.
+By hand, the two commits are:
+
+```sh
+git checkout -b release/$VERSION
+# Remove the in-development note from docs/en/changes/changes.md.
+git commit -am "Prepare the $VERSION candidate"
+git tag -a v$VERSION -m "Apache SkyWalking AI Sessionizer $VERSION"
+git mv docs/en/changes/changes.md docs/en/changes/changes-$VERSION.md
+# List $VERSION in docs/menu.yml. Write docs/en/changes/changes.md for $NEXT, with its heading
+# and the in-development note.
+git add docs/menu.yml docs/en/changes/changes.md
+git commit -m "Open $NEXT"
+```
+
+The second commit lists the version right after Current Version, so the Changelog of
+`docs/menu.yml` starts:
+
+```yaml
+    - name: Changelog
+      catalog:
+        - name: Current Version
+          path: /en/changes/changes
+        - name: $VERSION
+          path: /en/changes/changes-$VERSION
+```
 
 `--dry-run` prints the plan and writes nothing. It installs nothing either. It runs
 `make license-check` only when `bin/license-eye` is there, and `make check` only when
@@ -159,10 +207,11 @@ asking for the passphrase, run `export GPG_TTY=$(tty)` first.
 
 It does these steps in order, and stops at the first one that fails.
 
-1. **Check the tools and the tag.** `v$VERSION` must be on origin and carry
-   `docs/en/changes/release-notes-$VERSION.md`, which only `prepare` writes. A local tag of the
-   same name must be the same object as the one on origin. When there is no local tag, it fetches
-   the tag.
+1. **Check the tools and the tag.** `v$VERSION` must be on origin. Its
+   `docs/en/changes/changes.md` must name `$VERSION` in its heading and carry no in-development
+   note, as `prepare` leaves it in the commit it tags. The vote mail links that page. A local tag
+   of the same name must be the same object as the one on origin. When there is no local tag, it
+   fetches the tag.
 2. **Name the packages.** They are the ones the Makefile in the tag builds: the source package,
    and one binary package for each entry in its `PLATFORMS`. The tag is read, never the working
    tree, so a platform added later is never demanded of an older version. It also finds the
@@ -324,7 +373,7 @@ Hi the SkyWalking Community:
 This is a call for vote to release Apache SkyWalking AI Sessionizer version $VERSION.
 
 Release notes:
- * https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes-$VERSION.md
+ * https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes.md
 
 Release Candidate:
  * https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer/$VERSION
@@ -402,6 +451,15 @@ for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "
 
    The clone warns that `refs/tags/v$VERSION` is not a commit, which is expected for an annotated
    tag.
+
+   The tag is on the commit that finished the changelog. So the source package holds
+   `docs/en/changes/changes.md`, the page the vote mail links, with `$VERSION` in its heading and
+   without the in-development note:
+
+   ```sh
+   p=apache-skywalking-ai-sessionizer-$VERSION-src/docs/en/changes/changes.md
+   [ "$(head -1 $p)" = "# Changes in $VERSION" ] && ! grep -q '^> In development' $p && echo "the changelog is final"
+   ```
 
 5. The source package carries no compiled file and no font file. Both commands print nothing:
 
@@ -642,15 +700,21 @@ takes has not been measured. Until then, `complete` refuses, so run it again lat
    what `https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/` serves: the `.sha512`
    file, the package's own sha512, and the `.asc`. Every file is checked before anything is
    created, because creating the GitHub release starts CI's image job.
-3. It creates the GitHub release from the notes stored in the tag: tag `v$VERSION`, title
-   `$VERSION`, not a draft, not a prerelease. By hand:
+3. It builds the text of the GitHub release and prints it. The text is
+   `docs/en/changes/changes.md` as the tag holds it, without its heading, because the release has
+   its own title. The section "Where to get it", shown below, follows it. The text is
+   built from the tag each time and is not stored in the repository, so a change made on `main`
+   after `prepare` does not reach it. `--dry-run` stops after printing it.
+4. It creates the GitHub release with that text: tag `v$VERSION`, title `$VERSION`, not a draft,
+   not a prerelease. By hand:
 
    ```sh
-   git show v$VERSION:docs/en/changes/release-notes-$VERSION.md > notes.md
+   git show v$VERSION:docs/en/changes/changes.md | tail -n +2 > notes.md
+   # Add the section "Where to get it" below to the end of notes.md.
    gh release create v$VERSION --verify-tag --title $VERSION --notes-file notes.md
    ```
 
-4. It uploads the voted packages, each with its `.asc` and `.sha512`. That is 21 files for six
+5. It uploads the voted packages, each with its `.asc` and `.sha512`. That is 21 files for six
    platforms. It never replaces a file already on the release:
 
    ```sh
@@ -658,8 +722,22 @@ takes has not been measured. Until then, `complete` refuses, so run it again lat
    ```
 
    When the upload stops part way, run that command again with `--clobber`.
-5. It says that the Homebrew formula and the winget manifests can be submitted now, once the PMC
+6. It says that the Homebrew formula and the winget manifests can be submitted now, once the PMC
    has agreed to each channel, because both download from this GitHub release.
+
+The section "Where to get it" sends a reader to the Apache release and to the signatures, as the
+[ASF release policy](https://www.apache.org/legal/release-policy.html) asks. It also links the
+documentation and the changelog of the tag:
+
+```markdown
+#### Where to get it
+
+- The Apache release of $VERSION is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The files attached to this GitHub release are the same signed packages, each with its `.asc` signature and `.sha512` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/install.md#verify-a-package) describes.
+- To build from the source package, see [Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/install.md#build-from-the-source-package).
+- Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/README.md
+- Full changelog: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes.md
+```
 
 The GitHub release is a convenience, a page on GitHub carrying the same bytes as the release
 directory. CI never attaches the packages it builds, because they are not the voted, signed files.
@@ -765,7 +843,7 @@ SkyWalking AI Sessionizer: conversation-level observability for long-lived AI ag
 SkyWalking: APM (application performance monitor) tool for distributed systems, especially designed for microservices, cloud native and container-based architectures.
 
 Download Links: https://skywalking.apache.org/downloads/
-Release Notes: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes-$VERSION.md
+Release Notes: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes.md
 Website: https://skywalking.apache.org/
 Documents: https://skywalking.apache.org/docs/skywalking-ai-sessionizer/v$VERSION/readme/
 

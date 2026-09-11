@@ -335,7 +335,7 @@ fill > "$out_dir/scoop/skywalking-ai-sessionizer.json" <<'EOF'
     "notes": [
         "The Claude Code plugin is in $dir\\claude-code-plugin.",
         "Point Claude Code at it with: claude --plugin-dir \"$dir\\claude-code-plugin\"",
-        "Claude Code has not yet run the plugin's hooks on Windows, so the command line in hooks/hooks.json has not run there. CI starts the packaged plugin on Windows and gives it each hook event on standard input, outside Claude Code. See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
+        "Claude Code has not yet run the plugin's hooks on Windows, so the command line in hooks/hooks.json has not run there. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code. It runs the packaged plugin with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
     ],
     "checkver": {
         "url": "https://downloads.apache.org/skywalking/ai-sessionizer/?C=N;O=D;V=1",
@@ -418,8 +418,8 @@ Tags:
 - claude-code
 - observability
 - skywalking
-ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/changes/changes-@VERSION@.md
-InstallationNotes: The Claude Code plugin is the claude-code-plugin folder beside asz.exe in the package's install folder. Claude Code has not yet run the plugin's hooks on Windows, so the command line in hooks/hooks.json has not run there. CI starts the packaged plugin on Windows and gives it each hook event on standard input, outside Claude Code. See https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/setup/claude-code-plugin.md
+ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/changes/changes.md
+InstallationNotes: The Claude Code plugin is the claude-code-plugin folder beside asz.exe in the package's install folder. Claude Code has not yet run the plugin's hooks on Windows, so the command line in hooks/hooks.json has not run there. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code. It runs the packaged plugin with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/setup/claude-code-plugin.md
 Documentations:
 - DocumentLabel: Documentation
   DocumentUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/README.md
