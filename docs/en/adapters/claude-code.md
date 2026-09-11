@@ -98,8 +98,10 @@ Two further rules:
 - **Pruning is real and not atomic.** Claude Code deletes transcripts. Of 345 session ids in its
   prompt history, `history.jsonl`, 330 had no surviving transcript. In the first pass, 12 of 41
   session directories had no main transcript while their whole `subagents/` tree survived. That is a
-  normal state, not corruption. When a source disappears, its cursor moves to `source_gone` and the
-  files already landed stay, so the storage root outlives the source. Separately, 32 of 61 main
+  normal state, not corruption. When a source disappears, the files already landed stay, so the
+  storage root outlives the source. A later pass sets its cursor to `source_gone`, whether
+  discovery still finds the session or not, except in the cases
+  [Pruned sources](../formats/storage-root.md#pruned-sources) describes. Separately, 32 of 61 main
   transcripts had no subagent directory at all, which is a session that started no agent.
 
 ### How each source is read

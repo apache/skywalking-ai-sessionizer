@@ -447,7 +447,10 @@ func verifyDiffers(a, b, session string) []string {
 	if err != nil {
 		return []string{"the root rebuilt from the wire does not verify: " + err.Error()}
 	}
-	if sa.Problems != sb.Problems {
+	// A cursor stays in the storage root and never travels, so the root
+	// rebuilt from the wire cannot show an end gap. Every other stream
+	// problem is in the landed files, and must be the same.
+	if sa.Problems-sa.EndGaps != sb.Problems-sb.EndGaps {
 		out = append(out, fmt.Sprintf("the root rebuilt from the wire has %d stream problem(s) %v, the root pushed has %d %v", sb.Problems, sb.Details(), sa.Problems, sa.Details()))
 	}
 	ca, err := verify.Chain(storage.NewZone(a), session, nil)

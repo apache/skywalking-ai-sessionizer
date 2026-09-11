@@ -93,6 +93,14 @@ type Properties struct {
 	// by its marker's policy, and nothing is made or sent again afterwards.
 	// A session with no marker stays.
 	RemovedAfterSent *bool `yaml:"removed_after_sent"`
+	// PrunedSourcesGone says what collection does when Claude Code prunes
+	// the session's files, on a copy of the finished root: the cursor of
+	// every file that went moves from active to source_gone, nothing lands,
+	// the landed files and the chain stay as they were, and asz verify counts
+	// as many problems as before. When the files come back, their cursors
+	// return to their original states. Conflicts stay unchanged throughout.
+	// Runtime formats only.
+	PrunedSourcesGone *bool `yaml:"pruned_sources_gone"`
 }
 
 // On reports whether a property is enabled.

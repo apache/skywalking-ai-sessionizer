@@ -1,0 +1,41 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# The first and the last landed file of a stream deleted from the storage
+# root. The main stream lands one file at each checkpoint, so it has three.
+# The first goes after the second checkpoint and the last after the final
+# one. The records left over still run on from each other with no gap, so
+# only the ends show the loss. The expectation file says what asz verify
+# must report at each end.
+#
+# The helper in the last part lands after the main stream, so the main
+# stream's last file is not the session's last landed file. A removal keeps
+# a session whose head round reaches past its last landed file, and this
+# scenario is about verify, not about that rule.
+title: the ends of a stream lost
+steps:
+  - input: read the configuration
+  - call: {text: Reading it., tool: {name: Read, input: {path: asz.yaml}, result: "storage:\n  root: ./data"}}
+    checkpoint: first
+  - input: check the port
+  - call: {text: Checking the port., tool: {name: Bash, input: {command: lsof -i :8787}, result: asz 8787 LISTEN}}
+    checkpoint: second
+  - input: thanks
+  - call:
+      text: Asking the helper to close up.
+      agent: {name: helper, prompt: close up, steps: [{call: {text: Closed.}}]}
+  - call: {text: You are welcome.}

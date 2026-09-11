@@ -574,8 +574,9 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 }
 
 // verifyChains walks every conversation chain in the zone, and binds each
-// round to the landed files it consumed: a file a round names that is gone
-// is reported here, since the stream checks see only what exists.
+// round to the landed files it consumed. A file a round names that is gone
+// is reported here, by round and sequence. The stream checks may show the
+// same loss as a gap, but only the chain names the file.
 func verifyChains(root, want string) (chains, rounds, problems int, err error) {
 	base := filepath.Join(root, "_conversations")
 	items, rerr := os.ReadDir(base)

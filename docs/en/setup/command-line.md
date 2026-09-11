@@ -403,10 +403,35 @@ all landed data is contiguous and matches its digests
 
 Contiguous means that, in every stream, the landed records continue the source's line numbers and
 byte offsets with no gap. Each record carries the line it came from, `ord`, the byte it started at,
-`off`, and its size, `bytes`. The next new record must be on the next line and must start at
-`off + bytes + 1`, the one being the newline the source had. That proves every source byte up to
-the cursor is accounted for, without the source. A skipped line is listed as an `ord gap`, and
-bytes no record accounts for as a `byte gap`, each with its file and row. The check then goes on.
+`off`, and its size, `bytes`. The first record must be line 1 and must start at byte 0. Each next
+new record must be on the next line and must start at `off + bytes + 1`, the one being the newline
+the source had. Where the stream has an [append cursor](../formats/storage-root.md#append-cursors),
+the records must reach the line and the byte the cursor says the collector read to. Together that
+proves every source byte up to the cursor is accounted for, without the source. A skipped line is
+listed as an `ord gap` and bytes no record accounts for as a `byte gap`, each with its file and
+row. Records that stop before the cursor are listed as an `end gap`, with the cursor's position and
+theirs. The check then goes on.
+
+So in a stream with an append cursor, a lost landed file shows, whether it was the stream's first,
+a middle or the last, and whether or not a round consumed it. A root that was never parsed, or
+whose rounds were removed, fails on such a loss too. There are two exceptions, and in both only a
+round that consumed the file shows the loss. A lost file leaves no gap when another landed file
+holds the same records, as after an interrupted pass. A cursor stays in the storage root and never
+travels, so in a root rebuilt from a push the check stops at the last landed record, and a lost
+last file leaves no gap there.
+
+Which streams have an append cursor depends on what landed them. `claude-code-local` gives one to a
+transcript and a workflow journal, and `claude-code-changes` to the plugin's change records.
+`claude-code-local` reads a child agent's sidecar, a workflow manifest and a workflow script whole,
+with a snapshot cursor. So in a root it collected, a lost file of one of them is found only by the
+round chain, and a root with no rounds does not show it. A scenario `sd` build gives each of them
+an append cursor that counts records, so there such a loss is an end gap too.
+
+A cursor behind the records is what an interrupted pass leaves, and is not a problem. Measured on
+2026-09-11 on one machine's storage root of 60 sessions, all 6,080 streams began at line 1 and
+byte 0, and none of the 2,995 append cursors was ahead of its landed records. So on that root,
+neither the rule for the first record nor the rule for the cursor reported a problem that was not
+there.
 
 A landed file's last line carries a digest of every line before it, so reading the file catches
 one that was edited or cut short. Such a file ends the check with an error that names it.

@@ -268,15 +268,30 @@ asz scenario check FILE [--format claude-code|sd|all] [--out DIR] [--at TIME] [-
 
 A checkpoint may also say what a person deleted from the storage root. `lose` names landed files
 by what they hold, a stream or a run and a kind, since the two formats land the same files in a
-different order, and the runner deletes them after the checkpoint's parse, once a round has bound
-to them. Every check from there on runs over the damaged root: the structure survives, because it
-lives in the rounds, the text of the lost file is gone, the document says `incomplete` and names
-the round and the sequence, `asz verify` reports the same, and the session goes on into later
-rounds. Three properties cannot hold on such a root and are set off with a reason: a re-cut root
-holds only what is on disk, a source line of the lost file has no landed record, and re-deriving
-from the landed files changes the fold. `tests/scenarios/lost-file.yaml` is the example, and its
-loss travels over the wire like anything else: the root rebuilt from the push reports exactly what
-the pushed root reports.
+different order. `nth` picks one file of that kind, counting from one in the order the files
+landed, among those still there. The default is the first. The runner deletes them after the
+checkpoint's parse, once a round has bound to them. Every check from there on runs over the damaged
+root. The structure survives, because it lives in the rounds, and the text of the lost file is
+gone. The document says `incomplete` and names the round and the sequence, and the session goes on
+into later rounds.
+
+`asz verify` reports the round and the sequence too. For a stream read line by line, such as a
+transcript, it also reports the gap the lost file leaves in the stream. That is an `ord gap` and a
+`byte gap` when the stream's first or a middle file goes, and an `end gap` when its last or only
+file goes, since the stream's cursor says more was read. So `lost-file.yaml`, which loses a
+helper's only transcript file, counts two problems where the document counts one.
+`lost-ends.yaml` loses the first and then the last file of a stream. A `claude-code` build shows a
+lost sidecar of a child agent, manifest or script only in the chain, because the adapter reads each
+of them whole and tracks it by a digest, not a position. An `sd` build gives each of them an append
+cursor that counts records, so there the same loss is an end gap as well. A checkpoint has one
+`verify` count for both formats, so a scenario that loses such a file can pass in one format only.
+
+Three properties cannot hold on such a root and are set off with a reason: a re-cut root holds
+only what is on disk, a source line of the lost file has no landed record, and re-deriving from the
+landed files changes the fold. `tests/scenarios/lost-file.yaml` is the example, and its loss
+travels over the wire like anything else. The root rebuilt from the push reports every problem the
+pushed root reports except an end gap, because a cursor stays in the storage root and never
+travels.
 
 For each format, and at each checkpoint in order, `check` builds through the checkpoint, collects
 when the format needs it, parses, and compares the fold with the expectation file beside the
@@ -305,7 +320,7 @@ checkpoints:
   helped:
     lose: [{stream: checker, kind: transcript}]   # deleted from the root after this checkpoint's parse
     view: {state: incomplete, problems: 1}
-    verify: {problems: 1}
+    verify: {problems: 2}                 # a round's missing file and the checker's end gap
 properties:                               # all on unless set false
   reproducible: true
   fold_equals_parse: true
@@ -317,6 +332,7 @@ properties:                               # all on unless set false
   recollect_idempotent: true              # runtime formats only
   every_line_a_record: true               # runtime formats only
   discovery_ignores_noise: true           # runtime formats only
+  pruned_sources_gone: true               # runtime formats only
   cross_format: true
   records_match: true
   push_follows_the_wire: true
@@ -334,10 +350,12 @@ writable; the landed files and rounds are self-sufficient without index and stat
 round's header says what the fold holds; a parse with no new evidence writes nothing; every landed
 record carries only the fields the format states a purpose for; a repack under the smallest budget
 keeps every record and the whole structure; and, for a runtime format, a second collect lands
-nothing, every source line becomes one landed record, and discovery passes over the noise the
-writer plants beside the session. Across formats, the folds must agree, and so must the landed
-records themselves, field by field: the runtime's adapter and the sd writer must land the same
-evidence from the same scenario, which is what makes a scenario a conformance test for an adapter.
+nothing, every source line becomes one landed record, discovery passes over the noise the writer
+plants beside the session, and a pass after Claude Code prunes the session's files sets their
+active cursors to `source_gone` and lands nothing. Across formats, the folds must agree, and so must
+the landed records themselves, field by field: the runtime's adapter and the sd writer must land
+the same evidence from the same scenario, which is what makes a scenario a conformance test for an
+adapter.
 
 The document is checked too: at the end of every scenario, `view_covers_the_session` holds the
 `asz.view` document to the whole session: every round, verified; every landed file with its digest
@@ -366,6 +384,18 @@ retention of 24 hours keeps the session one second before its last record is 24 
 removes it at that moment. An sd build is never marked. `removed-after-sent.yaml` holds every kind
 of file a removal deletes, and the tests in `tests/chain` stop its removal at every point it
 reaches.
+
+Pruning is checked too. `pruned_sources_gone` works on a copy of the finished root. It deletes the
+session's main transcript, then every other file of the session that the Claude Code adapter finds,
+and then puts them all back with the bytes they had. When the session has other files, the first
+step leaves it for discovery to find and the second does not, so both ways a pass finds a pruned
+file's cursor are checked. After each step, one pass of both adapters runs, as a newly started
+process would. A deleted file's active cursor must then say `source_gone`, and every other cursor
+must say what it said before, with no cursor added or removed. A cursor that already said
+`conflict` stays that way. Once the files are back, every cursor must say again what it said before.
+After every step the pass must land nothing and meet no new conflict or error, every landed file
+must keep its digest, a parse must write no round, and `asz verify` must count as many problems as
+it counted before.
 
 The project's own tests are scenarios under `tests/scenarios/`, one property of assembly each,
 run in both formats by `go test ./tests/`.

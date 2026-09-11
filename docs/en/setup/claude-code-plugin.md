@@ -259,18 +259,22 @@ It never stops the tool.
 {"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin", "args": ["hook"], "timeout": 60}
 ```
 
-When a hook has `args`, Claude Code starts the binary itself, with no shell, on every platform. It
-puts the plugin's directory in place of `${CLAUDE_PLUGIN_ROOT}` as plain text, so a space, an
-apostrophe or a `$` in that path does no harm. The Claude Code
-[hooks reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form) calls this the
-exec form.
+The Claude Code [hooks reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
+says that when a hook has `args`, Claude Code starts `command` directly, with `args` as its
+arguments and no shell, and that no shell splits the command into words on any platform. It also
+says the plugin's directory replaces `${CLAUDE_PLUGIN_ROOT}` as plain text that no shell reads, so
+a space, an apostrophe or a `$` in that path passes through unchanged. Claude Code 2.1.260 ran the
+hooks in this form on macOS. It has not run them on Windows.
 
 The plugin used to give one command line and no `args`:
-`"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin" hook`. Claude Code runs such a line in a shell. On
-Windows without Git Bash, that shell is PowerShell. PowerShell does not run a quoted path followed
-by a word unless the call operator `&` comes first, and Claude Code 2.1.260 does not add it.
-PowerShell 7.5.3 refused the line with `Unexpected token 'hook' in expression or statement`, so no
-hook started.
+`"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin" hook`. The hooks reference says Claude Code runs
+such a line in a shell, and that on Windows without Git Bash the shell is PowerShell. PowerShell's
+own documentation, in `about_Operators`, says a quoted path is shown as a string, not run, unless
+the call operator `&` comes first. The Claude Code 2.1.260 program, read on macOS, puts the line
+between a short preamble and a suffix that sets the exit status, and adds no `&`. On macOS,
+PowerShell 7.5.3 refused the line with `Unexpected token 'hook' in expression or statement`, both
+alone and inside that preamble and suffix, and the binary did not start. With `&` in front, it
+started. Neither Claude Code on Windows nor Windows PowerShell 5.1 was tried.
 
 A Claude Code that does not know `args` may drop it and run the binary with no argument. The binary
 would then print its usage text and exit 2, and exit status 2 from a `PreToolUse` hook blocks the
@@ -305,7 +309,7 @@ a message id or a request id.
 The plugin itself was run inside Claude Code on macOS with a shell command, an edit and a
 subagent. asz collected and showed the result.
 
-On 2026-09-11, Claude Code 2.1.260 on macOS ran the hooks in exec form, in a session whose one
+On 2026-09-11, Claude Code 2.1.260 on macOS ran the hooks with `args`, in a session whose one
 shell command wrote a file. The command ran, and the plugin's record named the file as created. The
 session had its own configuration directory. Its model was a local program that answers as the
 Messages API does, so no request left the machine. The same session with `args` removed from every
@@ -325,11 +329,14 @@ the plugin wrote its record on Windows. The script now requires the record in
 `output/<session-id>/main.jsonl` to name the file as created, and CI's unit tests now run the
 plugin's own tests on each system. Neither has run on Windows yet.
 
-Claude Code itself has not run the hooks on Windows. The exec form involves no shell, so whether
-Git Bash is installed no longer matters. One thing is still unknown. The Windows packages hold
-`bin\asz-claude-plugin.exe`, and `hooks/hooks.json` names `bin/asz-claude-plugin`. The Claude Code
-documentation says only that on Windows the command must resolve to a real executable, such as a
-`.exe`. To find out, on Windows x86-64 or ARM 64:
+Claude Code itself has not run the hooks on Windows. The hooks reference says a hook with `args`
+uses no shell and ignores `shell`, so whether Git Bash is installed should not matter. That has
+not been tried. It is also unknown whether the binary starts at all. The Windows packages hold
+`bin\asz-claude-plugin.exe`, and `hooks/hooks.json` names `bin/asz-claude-plugin`. The hooks
+reference says that on Windows, `command` must resolve to a real executable, such as a `.exe`. It
+does not say whether a path without `.exe` resolves to one.
+
+To find out, on Windows x86-64 or ARM 64:
 
 1. Unpack the package for the machine, and start Claude Code with
    `claude --plugin-dir <package>\claude-code-plugin`.

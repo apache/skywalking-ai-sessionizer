@@ -31,8 +31,10 @@
 package sessiondata
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 )
 
 // Schema is the format version, carried in every file's header.
@@ -134,12 +136,57 @@ type Part struct {
 	Failed *bool `json:"failed,omitempty"`
 	// Media is the type of an image or document, e.g. "image/png".
 	Media string `json:"media,omitempty"`
+	// Encoding says how Data holds an unknown part's bytes. Empty means Data
+	// is the bytes as one JSON string, the form every unknown part had before
+	// this field existed. EncodingBase64 means Data is one JSON string of the
+	// bytes in standard base64. See SetRaw.
+	Encoding string `json:"encoding,omitempty"`
 
 	// State says how much of the original is here: available, truncated,
 	// redacted, omitted or unavailable. A reader is always told.
 	State string `json:"state,omitempty"`
 	// Bytes is the size of the original, even when this part holds less of it.
 	Bytes int `json:"bytes,omitempty"`
+}
+
+// EncodingBase64 is the Encoding of an unknown part whose bytes are not valid
+// UTF-8.
+const EncodingBase64 = "base64"
+
+// SetRaw keeps b whole in the part's Data, as an unknown part carries its
+// bytes, and sets Encoding to match.
+//
+// Valid UTF-8 goes in as one JSON string, the form every unknown part had
+// before Encoding existed, so a reader of those files reads it the same way.
+// A JSON string cannot hold bytes that are not valid UTF-8: the encoder
+// writes U+FFFD in their place and the byte is gone. So when b is not valid
+// UTF-8, all of it goes in as base64 instead, marked by Encoding. A write cut
+// short and joined to the next line, or a script saved in another encoding,
+// can bring such bytes to an adapter.
+func (p *Part) SetRaw(b []byte) {
+	s, enc := string(b), ""
+	if !utf8.Valid(b) {
+		s, enc = base64.StdEncoding.EncodeToString(b), EncodingBase64
+	}
+	p.Data, _ = json.Marshal(s)
+	p.Encoding = enc
+}
+
+// Raw returns the bytes an unknown part keeps, read by the rule SetRaw
+// writes. A part landed before Encoding existed has none, and reads as the
+// bytes of its string.
+func (p *Part) Raw() ([]byte, error) {
+	var s string
+	if err := json.Unmarshal(p.Data, &s); err != nil {
+		return nil, fmt.Errorf("sessiondata: an unknown part's data is not one JSON string: %w", err)
+	}
+	switch p.Encoding {
+	case "":
+		return []byte(s), nil
+	case EncodingBase64:
+		return base64.StdEncoding.DecodeString(s)
+	}
+	return nil, fmt.Errorf("sessiondata: unknown part encoding %q", p.Encoding)
 }
 
 // Header is the first line of a .sd file.

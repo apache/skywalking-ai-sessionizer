@@ -127,9 +127,15 @@ the flag only on a `journal` record. Nothing removes the parent's copy, so it st
 of the call that started the child.
 
 `asz verify` checks `ord`, `off` and `bytes` without the source. In each stream or run, across its
-files of one kind, `ord` must run 1, 2, 3 with no gap, and each record must start at the byte after
-the previous record's line ends. A skipped line would otherwise show only as a shorter
-conversation. A repeated record is not a gap (see [Landed files](storage-root.md#landed-files)).
+files of one kind, `ord` must run 1, 2, 3 with no gap, starting at 1. The first record must start
+at byte 0, and each record after it at the byte after the previous record's line ends. Where the
+stream has an append cursor, the records must reach the line and the byte the cursor names (see
+[Append cursors](storage-root.md#append-cursors)). A skipped line, or a lost file of a source that
+is a stream of lines, would otherwise show only as a shorter conversation. The Claude Code
+adapter's `agent_meta`, `workflow_manifest` and `workflow_script` files are each one document with
+a snapshot cursor, so a lost one is found only by the round chain (see
+[Retention](storage-root.md#retention)). A repeated record is not a gap (see
+[Landed files](storage-root.md#landed-files)).
 
 ### Addressing a record
 
@@ -172,7 +178,7 @@ reads every landed file this way.
 | `result` | what a call returned | `of`, `failed`, and `text`, `data` or both |
 | `media` | an image or a document | `media`, `data` |
 | `data` | structure that is not prose: a record the runtime keeps for itself, a manifest | `data` |
-| `unknown` | content the dialect could not describe | the raw bytes as one JSON string in `data`, and the reason in `text` |
+| `unknown` | content the dialect could not describe | the bytes in `data` as one JSON string, the bytes themselves or their base64 when `encoding` is `base64`, and the reason in `text` |
 
 Every part carries `state` and `bytes`. `state` is one of `available`, `truncated`, `redacted`,
 `omitted` or `unavailable`, and `bytes` is the size of the original even when the part holds less.
@@ -193,6 +199,23 @@ An `unknown` part's `text` is not content. It is the dialect's reason for not de
 such as `the record is not valid JSON` or `block type "x" is not one this dialect describes`. Its
 `state` is `available`, because every byte is kept, and `bytes` is their size. A reader that shows
 `text` as the message would show the reason in its place.
+
+An `unknown` part's `data` is always one JSON string, and it holds the bytes in one of two forms.
+When the bytes are valid UTF-8, the string is the bytes themselves, and the part has no `encoding`.
+A JSON string cannot hold bytes that are not valid UTF-8: Go's JSON encoder writes U+FFFD in their
+place, and the byte is lost. So when any byte is not valid UTF-8, the string is all of the bytes in
+standard base64, and `encoding` is `base64`. `encoding` has no other value, and no other kind of
+part carries it. A reader that does not know `encoding` still reads one string, and shows base64
+text where the bytes were not text. `Part.Raw` in `pkg/sessiondata` applies the rule.
+
+Every `unknown` part landed before `encoding` existed is one string with no `encoding`, and reads as
+it always did. Where its bytes were not valid UTF-8, that string holds U+FFFD in their place.
+Claude Code and the asz plugin write UTF-8, but such bytes can still reach an adapter. A write cut
+short and joined to the next line is one way, and a workflow script saved in another encoding is
+another. Measured on 2026-09-11 on one machine's storage root of 60 sessions, 151 of its 408,439
+parts were `unknown`: 150 workflow scripts and one block of a type the dialect did not describe.
+None of them held U+FFFD. So none had lost a byte, and all of them keep the form without
+`encoding`.
 
 Media is kept inline. A `media` part's `data` is the base64 text the runtime wrote, as one JSON
 string. `media` is its media type, and `bytes` is the length of the base64 text. There is no

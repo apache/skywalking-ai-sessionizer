@@ -314,6 +314,13 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 				on   *bool
 				fn   func() ([]string, error)
 			}{"discovery_ignores_noise", ex.Properties.DiscoveryIgnoresNoise, func() ([]string, error) { return discoveryIgnoresNoise(out, session) }},
+			struct {
+				name string
+				on   *bool
+				fn   func() ([]string, error)
+			}{"pruned_sources_gone", ex.Properties.PrunedSourcesGone, func() ([]string, error) {
+				return prunedSourcesGone(out, session, ex.Parse.MaxRoundBytes)
+			}},
 		)
 	}
 	for _, c := range checks {

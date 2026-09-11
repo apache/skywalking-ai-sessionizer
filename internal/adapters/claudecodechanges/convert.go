@@ -59,10 +59,12 @@ func Convert(ord, off uint64, payload []byte) *sessiondata.Record {
 	return rec
 }
 
+// unknownPart keeps a line the adapter could not read, every byte of it.
+// SetRaw is what keeps a byte that is not valid UTF-8, which a plain JSON
+// string would replace. A write cut short and joined to the next line is
+// one way such a byte reaches this adapter.
 func unknownPart(b []byte, why string) sessiondata.Part {
-	data, _ := json.Marshal(string(b))
-	return sessiondata.Part{
-		Kind: sessiondata.PartUnknown, Data: data,
-		Text: why, State: model.ContentAvailable, Bytes: len(b),
-	}
+	p := sessiondata.Part{Kind: sessiondata.PartUnknown, Text: why, State: model.ContentAvailable, Bytes: len(b)}
+	p.SetRaw(b)
+	return p
 }

@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
@@ -38,6 +39,11 @@ type Collector struct {
 	Zone       *storage.Zone
 	MaxDelta   int64
 	Now        func() time.Time
+
+	// checked holds the sessions discovery did not find whose cursors a pass
+	// has already checked for files that are gone. See markLostSessions.
+	mu      sync.Mutex
+	checked map[string]bool
 }
 
 // pass carries the state of one session's collection.
@@ -68,8 +74,11 @@ type Stats struct {
 	SourcesLanded int
 	Records       int
 	Bytes         int64
-	SourcesGone   int
-	Conflicts     int
+	// SourcesGone counts the sources this pass found gone: a file discovery
+	// listed that was gone when the pass came to read it, and a cursor the
+	// pass set to source_gone because its file is no longer there.
+	SourcesGone int
+	Conflicts   int
 	// Busy counts sessions skipped because another collector holds their lock.
 	Busy int
 	// Pending counts sources that still had data when the per-pass drain limit
@@ -112,13 +121,28 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	// An unreadable source directory hides sources; recording it as an error
 	// keeps the pass from reporting a clean, complete-looking result.
 	st.Errors = append(st.Errors, warnings...)
+	found := make(map[string]bool, len(sessions))
 	for _, s := range sessions {
+		found[s.ID] = true
+		// Discovery found it, so a later pass that does not find it checks
+		// it again.
+		c.setChecked(s.ID, false)
 		if filter != nil && !filter(s) {
 			continue
 		}
 		st.Sessions++
 		if err := c.collectSession(s, st); err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+		}
+	}
+	// An unreadable project directory hides files the way pruning does. A
+	// pass whose discovery reported one does not check the sessions
+	// discovery did not find. Discovery reports no unreadable directory
+	// inside a session, so markIfGone moves a cursor only when its file is
+	// known not to exist.
+	if len(warnings) == 0 {
+		if err := c.markLostSessions(found, filter, st); err != nil {
+			st.Errors = append(st.Errors, err)
 		}
 	}
 	return st, nil
@@ -241,6 +265,14 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 		}
 	}
 
+	// A file of this session that discovery did not list is gone, or hidden
+	// by a directory discovery could not read. markPruned sets the cursor of
+	// a file that is gone to source_gone. Nothing lands, so the index is not
+	// touched.
+	if err := c.markPruned(s.ID, claimed, st, now); err != nil {
+		st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+	}
+
 	// A recovered index must be persisted even when no source landed this pass;
 	// otherwise the rebuild is discarded and repeats on every round forever.
 	if changed || reindexed {
@@ -307,6 +339,18 @@ func (c *Collector) collectSource(src Source, p *pass) (landed, more bool, err e
 	if cur.State == storage.CursorConflict {
 		p.st.Conflicts++
 		return false, false, nil // a conflict is sticky until resolved
+	}
+	// Discovery found this file, so it is not gone, whatever its cursor last
+	// said: a file restored from a backup, or a session found again. The
+	// cursor is corrected now, because a pass that lands nothing does not
+	// always save the cursor. The checks below still run, so an older,
+	// shorter copy of a transcript or a journal becomes a conflict in this
+	// same pass.
+	if cur.State == storage.CursorSourceGone {
+		cur.State = storage.CursorActive
+		if err := cur.Save(cursorPath, p.now); err != nil {
+			return false, false, err
+		}
 	}
 
 	if src.Kind.Append() {

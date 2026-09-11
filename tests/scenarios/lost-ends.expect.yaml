@@ -1,0 +1,54 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# At the second checkpoint the main stream's first landed file goes. Its
+# records were lines 1 onwards, starting at byte 0, so the first record
+# left is not line 1 and does not start at byte 0. That is an ord gap and a
+# byte gap. The chain also names the file round 1 consumed, so asz verify
+# reports three problems. The stream check finds its two without any round,
+# so it reports them in a root never parsed too, or in one whose rounds
+# were removed.
+#
+# At the final checkpoint the main stream's last landed file goes. The
+# stream's cursor still names the last line landed, and the records left
+# now stop short of it. That is an end gap, one problem, and the chain
+# names the file round 3 consumed. With the three problems from before,
+# asz verify reports five. The document counts only the chain's problems.
+checkpoints:
+  first:
+    rounds: 1
+    talks_on: {main: 1}
+    view: {state: verified, problems: 0}
+    verify: {problems: 0}
+  second:
+    rounds: 2
+    talks_on: {main: 2}
+    lose: [{stream: main, kind: transcript, nth: 1}]
+    view: {state: incomplete, problems: 1, rounds: 2}
+    verify: {problems: 3}
+  final:
+    rounds: 3
+    talks_on: {main: 3}
+    lose: [{stream: main, kind: transcript, nth: 2}]
+    view: {state: incomplete, problems: 2, rounds: 3}
+    verify: {problems: 5}
+properties:
+  repack_keeps_structure: false   # a re-cut root holds only what is on disk
+  every_line_a_record: false      # the lost files' source lines have no landed record
+  bundle: false                   # re-deriving from the landed files changes the fold
+push:
+  kinds: [transcript, agent_meta, round]

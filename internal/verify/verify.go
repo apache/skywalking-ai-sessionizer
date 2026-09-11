@@ -17,10 +17,10 @@
 
 // Package verify checks that landed data is internally consistent.
 //
-// The checks here deliberately need only the landed files. Claude Code prunes
-// transcripts - the great majority of session ids in its own prompt history
-// have none - so any check that requires the original source is a check that
-// usually cannot run.
+// The checks here deliberately need only the storage root: the landed files,
+// and a stream's cursor where it has one. Claude Code prunes transcripts. The
+// great majority of session ids in its own prompt history have none, so a
+// check that requires the original source usually cannot run.
 package verify
 
 import (
@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -48,6 +49,31 @@ func (g Gap) String() string {
 	return fmt.Sprintf("%s row %d: expected %d, got %d", filepath.Base(g.File), g.Row, g.Expected, g.Got)
 }
 
+// EndGap says a stream's landed records stop before the point its cursor says
+// the collector read to. Those lines were read, and no landed file holds them.
+type EndGap struct {
+	Cursor string
+	// Ord and Offset are where the cursor says reading stopped: the last line
+	// read, and the byte after it.
+	Ord, Offset uint64
+	// LastOrd and Covered are where the landed records stop.
+	LastOrd, Covered uint64
+}
+
+func (g EndGap) String() string {
+	// The cursor's file name is the same in every stream, so the stream's
+	// directory names which one it is.
+	name := filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(filepath.Dir(g.Cursor))),
+		filepath.Base(filepath.Dir(g.Cursor)), filepath.Base(g.Cursor)))
+	// A cursor that counts records and not bytes, as the mock's does, has no
+	// byte to compare.
+	if g.Offset == 0 {
+		return fmt.Sprintf("%s: read to line %d, the landed records end at line %d", name, g.Ord, g.LastOrd)
+	}
+	return fmt.Sprintf("%s: read to line %d and byte %d, the landed records end at line %d and byte %d",
+		name, g.Ord, g.Offset, g.LastOrd, g.Covered)
+}
+
 // StreamReport is the result of checking one stream or run directory.
 type StreamReport struct {
 	Dir     string
@@ -61,6 +87,9 @@ type StreamReport struct {
 	OrdGaps  []Gap // a source line was skipped
 	ByteGaps []Gap // a source byte range is unaccounted for
 	ShaBad   []Gap // a payload does not match its recorded digest
+	// End is set when the landed records stop before where the stream's
+	// cursor says the collector read to.
+	End *EndGap
 
 	// Relanded counts records that repeat a range already landed.
 	//
@@ -74,19 +103,24 @@ type StreamReport struct {
 
 // OK reports whether the stream is contiguous and intact.
 func (r *StreamReport) OK() bool {
-	return len(r.OrdGaps) == 0 && len(r.ByteGaps) == 0 && len(r.ShaBad) == 0
+	return len(r.OrdGaps) == 0 && len(r.ByteGaps) == 0 && len(r.ShaBad) == 0 && r.End == nil
 }
 
 // Stream checks one stream or run directory for a given landed kind.
 //
-// It asserts three properties, all provable from the landed files alone:
+// It asserts four properties, all provable from the storage root alone:
 //
-//   - ORD CONTIGUITY: source line numbers run 1, 2, 3 ... with no gap. A gap
-//     means the tailer skipped a line, which is otherwise invisible: no error,
-//     no conflict, just a slightly shorter conversation.
-//   - BYTE CONTIGUITY: off[n] + len(payload[n]) + 1 == off[n+1], the +1 being
-//     the newline the source had. This proves every byte of the source prefix
-//     is accounted for, without needing the source.
+//   - ORD CONTIGUITY: source line numbers run 1, 2, 3 ... with no gap, and the
+//     first is 1. A gap means the tailer skipped a line, or a landed file was
+//     lost, which is otherwise invisible: no error, no conflict, just a
+//     slightly shorter conversation.
+//   - BYTE CONTIGUITY: the first record starts at byte 0, and
+//     off[n] + len(payload[n]) + 1 == off[n+1], the +1 being the newline the
+//     source had. This proves every byte of the source prefix is accounted
+//     for, without needing the source.
+//   - THE CURSOR: where the stream has an append cursor, the landed records
+//     reach the line and the byte it says the collector read to. Without this
+//     a lost last file looks like a stream that simply ends there.
 //   - INTEGRITY: each file's own closing digest covers every line before it, so
 //     a file edited or cut short after it was written is caught. Reading is what
 //     performs that check, so a failure here surfaces as a read error rather
@@ -96,18 +130,28 @@ func (r *StreamReport) OK() bool {
 // record whose position is at or before one already seen - is what an
 // interrupted pass leaves behind, because the collector lands data before it
 // commits the cursor. Only going FORWARDS past unaccounted bytes is data loss.
+// For the same reason a cursor BEHIND the landed records is not a problem.
 func Stream(dir, kind string) (*StreamReport, error) {
+	// The cursor is read before the files are listed. The collector lands a
+	// file before it saves the cursor, so every record this cursor counts is
+	// already on disk when it is read. A collector running beside the check
+	// then cannot make the cursor look ahead of the files.
+	cursorPath := filepath.Join(dir, kind+".cursor")
+	cur, err := storage.LoadCursor(cursorPath, storage.CursorAppend, "")
+	if err != nil {
+		return nil, err
+	}
 	files, err := landedFiles(dir, kind)
 	if err != nil {
 		return nil, err
 	}
 	rep := &StreamReport{Dir: dir, Files: len(files)}
-	if len(files) == 0 {
-		return rep, nil
-	}
 
-	var prevOrd uint64
-	var prevEnd uint64
+	// Every source starts at line 1 and byte 0, so the first record is held to
+	// that position exactly as a later record is held to the end of the one
+	// before it. Starting from whatever the first record said would accept a
+	// stream whose first landed file is lost.
+	var prevOrd, prevEnd uint64
 	first := true
 
 	for _, path := range files {
@@ -133,8 +177,6 @@ func Stream(dir, kind string) (*StreamReport, error) {
 
 			if first {
 				rep.FirstOrd = rec.Ord
-				prevOrd = rec.Ord - 1
-				prevEnd = rec.Off
 				first = false
 			}
 			if rec.Ord <= prevOrd {
@@ -164,6 +206,15 @@ func Stream(dir, kind string) (*StreamReport, error) {
 		f.Close()
 	}
 	rep.BytesCovered = prevEnd
+
+	// A snapshot cursor tracks a digest, not lines, and a stream with no cursor
+	// has nothing to say where reading stopped. Only an append cursor ahead of
+	// the records is a loss. One loss at the end is one problem, whether the
+	// cursor counts lines, bytes or both.
+	if cur.Kind == storage.CursorAppend && (cur.Ord > rep.LastOrd || cur.Offset > rep.BytesCovered) {
+		rep.End = &EndGap{Cursor: cursorPath, Ord: cur.Ord, Offset: cur.Offset,
+			LastOrd: rep.LastOrd, Covered: rep.BytesCovered}
+	}
 	return rep, nil
 }
 

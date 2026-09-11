@@ -105,8 +105,19 @@ func LandedDigests(z *storage.Zone, session string) (map[uint64]string, error) {
 // before, each starting where the round before ended, and each bound to
 // landed files that are still on disk and still digest to what the round
 // consumed. A landed file that a round consumed and that is gone is
-// reported here and nowhere else: the stream checks see only what exists,
-// and a stream whose one file is gone has nothing left to check.
+// reported here, by round and sequence. The stream checks may report the
+// same loss as a gap, but only the chain names the lost file. Some losses
+// leave no gap at all, and only the chain reports them:
+//
+//   - A file whose records another landed file also holds, as an
+//     interrupted pass can leave.
+//   - A stream's last file in a root rebuilt from a push. A cursor never
+//     travels, so nothing there says more was read.
+//   - In a root the Claude Code adapter collected, a child agent's sidecar,
+//     a workflow manifest or a workflow script. The adapter reads each of
+//     them whole and keeps a digest, not a position. A scenario sd build
+//     gives each of them an append cursor instead, and there the stream
+//     checks report the loss as an end gap.
 //
 // digests may be passed by a caller that has read the landed files already;
 // nil means read them, for the session the first round names.

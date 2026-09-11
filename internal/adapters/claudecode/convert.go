@@ -336,12 +336,13 @@ func attachmentContent(payload []byte) (string, json.RawMessage) {
 	return "", d.Attachment
 }
 
-// rawPart keeps bytes the dialect could not describe.
+// rawPart keeps bytes the dialect could not describe, every one of them.
+// SetRaw is what keeps a byte that is not valid UTF-8, which a plain JSON
+// string would replace.
 func rawPart(b []byte, why string) sessiondata.Part {
-	return sessiondata.Part{
-		Kind: sessiondata.PartUnknown, Data: mustJSON(string(b)),
-		Text: why, State: model.ContentAvailable, Bytes: len(b),
-	}
+	p := sessiondata.Part{Kind: sessiondata.PartUnknown, Text: why, State: model.ContentAvailable, Bytes: len(b)}
+	p.SetRaw(b)
+	return p
 }
 
 func mustJSON(v any) json.RawMessage {

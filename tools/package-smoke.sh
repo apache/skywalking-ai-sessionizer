@@ -75,11 +75,11 @@ sum="$pkg.sha512"
 # whichever file the sidecar names, so a sidecar that named another file
 # passed without the package being read. The BSD sha512sum on macOS also
 # passed an empty sidecar, and one with no well-formed line. So the sidecar
-# must hold one line, a sha512 and this package's name, as make checksums
-# writes it.
+# must hold one line that is not blank, a sha512 and this package's name,
+# as make checksums writes it.
 lines=$(tr -d '\r' <"$sum" | grep -v '^[[:space:]]*$' || true)
 n=$(printf '%s\n' "$lines" | grep -c . || true)
-[ "$n" = 1 ] || fail "$sum must hold one line, a sha512 and a name. It holds $n."
+[ "$n" = 1 ] || fail "$sum must hold one line that is not blank, a sha512 and a name. It holds $n."
 read -r listed name extra <<EOF
 $lines
 EOF

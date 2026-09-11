@@ -20,10 +20,11 @@
 # The helper's transcript is deleted after round 1 bound to it. The
 # structure is unchanged, since it lives in the round: the helper's talk,
 # its output and the relations that start and end its stream are all still
-# there. The document says incomplete and names round 1 and the sequence,
-# asz verify reports the same one problem, and the session goes on: round 2
-# is a whole delta over the files that exist, and the count of problems
-# stays one.
+# there. The document says incomplete and names round 1 and the sequence.
+# asz verify reports that problem and one more: the helper's cursor says
+# its transcript was read, and no landed file holds those lines, an end
+# gap. The session goes on: round 2 is a whole delta over the files that
+# exist, and the count of problems stays the same.
 checkpoints:
   helped:
     rounds: 1
@@ -32,7 +33,7 @@ checkpoints:
     relations: {starts: 1, reports: 1, ends_with: 1}
     lose: [{stream: helper, kind: transcript}]
     view: {state: incomplete, problems: 1, talks: 2, files: 3, rounds: 1}
-    verify: {problems: 1}
+    verify: {problems: 2}
   final:
     rounds: 2
     written: true
@@ -42,7 +43,7 @@ checkpoints:
     relations: {starts: 1, reports: 1, ends_with: 1}
     unresolved: {open: 0, resolved: 0}
     view: {state: incomplete, problems: 1, talks: 3, files: 5, rounds: 2}
-    verify: {problems: 1}
+    verify: {problems: 2}
 properties:
   repack_keeps_structure: false   # a re-cut root holds only what is on disk
   every_line_a_record: false      # the lost file's source lines have no landed record

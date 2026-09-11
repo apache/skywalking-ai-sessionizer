@@ -146,10 +146,9 @@ state         active
 
 Every pass takes each append source through the same steps:
 
-1. The file is gone. The cursor becomes `source_gone`, and the landed files stay. This is normal:
-   Claude Code prunes its transcripts, and the landed files outlive them. A session a scenario
-   build marked is the one exception. Once all of it is sent, a pipeline removes its source first
-   and then the whole session directory, as [Retention](#retention) describes.
+1. The file is gone, though discovery listed it a moment before. The cursor becomes
+   `source_gone`, and the landed files stay. A file pruned before the pass began is not listed at
+   all, and [Pruned sources](#pruned-sources) says how a pass finds its cursor.
 2. The file is shorter than `offset`. It was cut short, and the source is a `conflict`.
 3. The size equals `offset` and the identity is unchanged. Nothing is new, and nothing more is
    read. A change is judged by the size, never by `mtime`, so clock skew and timestamp granularity
@@ -178,8 +177,9 @@ failure: when the inode alone decided, every source collected on a host was a co
 same root was collected inside a container.
 
 A change of `dev` alone is never noticed. `dev` is saved with the cursor and never read back.
-When nothing lands and `ino` is unchanged, the cursor is not saved, so the `dev` it holds can be
-out of date.
+When nothing lands and `ino` is unchanged, `dev` is not refreshed, so the `dev` a cursor holds can
+be out of date. Such a pass saves the cursor only when its `state` changes, and it saves the old
+`dev`.
 
 The window is 1 MiB rather than the whole consumed prefix, because the whole prefix would be read
 again on every pass that finds new data. In the same root, the largest transcript has 62,230,163
@@ -213,6 +213,55 @@ can hold several manifest files, one per version. This kind exists for the workf
 rewritten as its run goes on, and its final version carries the run's `status`, `durationMs`,
 `totalTokens` and `result`. A sidecar uses the same cursor. In the same root, each of 2,782 child
 streams holds one sidecar version, and each of 153 runs holds one manifest version.
+
+### Pruned sources
+
+Claude Code prunes its own files. It often deletes a session's main transcript while the session's
+other files stay for a while, and in the end it deletes them all. Discovery lists only what is on
+disk, so a pass never takes a pruned file through the steps above. Its cursor is found another way
+and set to `source_gone`. The landed files stay, so the storage root outlives the source. In the
+same root, discovery no longer found 8 of the 60 sessions, which held 415 cursors of Claude Code
+files between them. It also no longer found 1 file of a session it did find.
+
+- A session discovery still finds: after its sources, the pass reads the session's other cursors,
+  and sets `source_gone` on each whose file is no longer there.
+- A session discovery no longer finds: the pass lists the storage root and checks each such
+  session the same way. Discovery no longer finds a session when none of its files is left, or
+  when every file left is in a directory it could not read.
+
+Either way, the pass holds the session's lock, and it leaves alone a session the adapter's
+`include` and `exclude` keep out. A collector checks a session of the second kind once, and again
+only after discovery has found it in between. When another process holds the session's lock, or
+the check fails, a later pass checks it again. Claude Code prunes by age, so a long-lived root
+holds more such sessions every week, and reading all their cursors on every pass would cost more
+every week too.
+
+Only a cursor that says `active` moves, and only when the file it names does not exist. A
+`conflict` stays until a person looks at it. A cursor that names a path this adapter does not
+produce, as the cursors of a scenario `sd` build do, is left alone.
+
+Discovery reports a project directory it cannot read, and a pass that met one checks no session of
+the second kind, because an unreadable directory hides files the way pruning does. Discovery does
+not report a directory it cannot read inside a session, such as `subagents/`, so such a directory
+does not stop the check. Checking a file in such a directory gives a permission error, not a
+missing file, so its cursor is left as it is.
+
+When discovery lists a file whose cursor says `source_gone`, restored from a backup for instance,
+the pass sets the cursor back to `active` and saves it before it reads the file. An append source
+then goes through the steps above like any other. So an older copy, shorter than `offset`, becomes
+a `conflict` in the same pass. For a copy that still holds every byte that was read, collection
+goes on from `offset`. A file in a session the adapter's `include` and `exclude` keep out is not
+read, so its cursor stays `source_gone`.
+
+The plugin's change records are not Claude Code's files, and none of this applies to them. The
+plugin removes an output file itself once it has not been written to for `retention.ttl`, 30 days
+by default (see [Retention](../setup/claude-code-plugin.md#retention)). Their adapter sets
+`source_gone` only on a file that goes while a pass reads it, so the cursor of a file the plugin
+removed is left as it was.
+
+A session a scenario build marked is the one case where asz deletes a source itself. Once all of
+the session is sent, a pipeline removes its source first and then the whole session directory, as
+[Retention](#retention) describes.
 
 ## The index
 
@@ -291,10 +340,26 @@ the same digest.
 
 Remove a session directory whole, never only some of its landed files. A round names records by
 landed sequence and row, so a round whose files are gone points at records nobody can read.
-`asz verify` reports each such round with each missing sequence, and exits non-zero. The
-[asz.view](asz-view.md) document is still served. Its `summary.state` is `incomplete`, and
-`summary.problems` has one line for each missing file in each round. A node that stood on a missing
-record has no text and no content state.
+`asz verify` reports each such round with each missing sequence, and exits non-zero. For a stream
+with an append cursor, it also reports the gap a lost file leaves in the stream. A lost first or
+middle file leaves a gap in the lines and bytes of the records left. A lost last or only file
+leaves the records short of the position the cursor holds, an `end gap`. So such a loss fails a
+root with no rounds too, with two exceptions, where only a round that consumed the file shows it. A
+lost file leaves no gap when another landed file holds the same records, as after an interrupted
+pass. A cursor never travels, so in a root rebuilt from a push, a lost last file leaves no gap.
+
+Which streams have an append cursor depends on what landed them. `claude-code-local` gives one to a
+transcript and a workflow journal, and `claude-code-changes` to the plugin's change records.
+`claude-code-local` reads a child agent's sidecar, a workflow manifest and a workflow script whole,
+with a snapshot cursor. So in a root it collected, a lost file of one of them is found only by the
+round chain, and a root with no rounds does not show it. A scenario `sd` build gives each of them
+an append cursor that counts records, so there such a loss is an end gap too.
+
+The [asz.view](asz-view.md) document is still served while the conversation has rounds. When a
+round names a missing file, `summary.state` is `incomplete`, and `summary.problems` has one line
+for each missing file in each round. A node that stood on a missing record has no text and no
+content state. With no rounds there is no document. `asz conversation` refuses the conversation
+with a `no rounds` error, and so does the request for the document behind the page.
 
 ### A scenario root
 

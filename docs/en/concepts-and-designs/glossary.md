@@ -141,8 +141,10 @@ later agreeing observation.
 parts, and its identifiers take role names. It does not keep the source bytes. It keeps where they
 were and what they were: the line number counting from 1, the byte offset, their size, and a
 digest, the first 12 hexadecimal characters of their SHA-256. Content the dialect cannot describe
-keeps its bytes verbatim in an `unknown` part, so nothing is guessed or dropped. A reader is handed
-parts, so it never meets a runtime's shape. The digest still ties each record to its source.
+keeps every one of its bytes in an `unknown` part, so nothing is guessed or dropped. When those
+bytes are not valid UTF-8, all of them are kept as base64 (see
+[Parts](../formats/session-data.md#parts)). A reader is handed parts, so it never meets a
+runtime's shape. The digest still ties each record to its source.
 Write-once and read-only: temporary file, fsync, `chmod 0444`, rename. Never appended to.
 *Not:* a copy of the source record.
 

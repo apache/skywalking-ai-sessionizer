@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
@@ -183,6 +184,78 @@ func TestSourceGoneIsNotAnError(t *testing.T) {
 	}
 	if !kept {
 		t.Error("landed data must outlive its pruned source")
+	}
+	// The whole session is gone, so discovery no longer finds it, and its
+	// cursor says so all the same.
+	cur, err := storage.LoadCursor(filepath.Join(zone, tSess, "streams", "main", "transcript.cursor"), storage.CursorAppend, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.State != storage.CursorSourceGone || st.SourcesGone != 1 {
+		t.Errorf("a pruned source's cursor says %s and the pass counted %d gone, want source_gone and 1", cur.State, st.SourcesGone)
+	}
+}
+
+// TestLostSessionIsCheckedOncePerCollector. A session discovery no longer
+// finds is checked for pruned files once by a collector, and again only
+// after discovery has found it in between. A scenario cannot show this: the
+// runner starts a new collector for every pass.
+func TestLostSessionIsCheckedOncePerCollector(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	body := "{\"uuid\":\"m1\"}\n"
+	mk(t, main, body)
+	cursorPath := filepath.Join(zone, tSess, "streams", "main", "transcript.cursor")
+	state := func() string {
+		t.Helper()
+		cur, err := storage.LoadCursor(cursorPath, storage.CursorAppend, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cur.State
+	}
+	setActive := func() {
+		t.Helper()
+		cur, err := storage.LoadCursor(cursorPath, storage.CursorAppend, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cur.State = storage.CursorActive
+		if err := cur.Save(cursorPath, time.Date(2026, 9, 11, 0, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	col := claudecode.New(src, storage.NewZone(zone), 0)
+	pass := func() {
+		t.Helper()
+		st, err := col.CollectAll(nil)
+		if err != nil || len(st.Errors) != 0 {
+			t.Fatalf("pass: %v %v", err, st.Errors)
+		}
+	}
+	pass()
+	if err := os.Remove(main); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	if got := state(); got != storage.CursorSourceGone {
+		t.Fatalf("after the prune the cursor says %s", got)
+	}
+	// Set back by hand, it stays: this collector has checked the session.
+	setActive()
+	pass()
+	if got := state(); got != storage.CursorActive {
+		t.Fatalf("the same collector checked the session again: the cursor says %s", got)
+	}
+	// Found again, then gone again, it is checked again.
+	mk(t, main, body)
+	pass()
+	if err := os.Remove(main); err != nil {
+		t.Fatal(err)
+	}
+	pass()
+	if got := state(); got != storage.CursorSourceGone {
+		t.Fatalf("a session found and lost again was not checked again: the cursor says %s", got)
 	}
 }
 

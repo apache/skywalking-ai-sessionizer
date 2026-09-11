@@ -31,6 +31,12 @@ type SessionReport struct {
 	Streams  []*StreamReport
 	Records  int
 	Problems int
+	// EndGaps counts the streams whose landed records stop before where
+	// their cursor says the collector read to. They are counted in Problems
+	// too. A cursor stays in the storage root and never travels with the
+	// landed files, so a root rebuilt from those files alone can show every
+	// other problem and never this one.
+	EndGaps int
 	// Relanded counts records an interrupted pass caused to be landed twice.
 	// It is reported so it is visible, not because it is wrong.
 	Relanded int
@@ -49,13 +55,19 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			if err != nil {
 				return err
 			}
-			if sr.Files == 0 {
+			// A stream with no landed file of this kind is still checked when
+			// its cursor says something was read: every file of it is lost.
+			if sr.Files == 0 && sr.End == nil {
 				continue
 			}
 			rep.Streams = append(rep.Streams, sr)
 			rep.Records += sr.Records
 			rep.Relanded += sr.Relanded
 			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps) + len(sr.ShaBad)
+			if sr.End != nil {
+				rep.Problems++
+				rep.EndGaps++
+			}
 		}
 		return nil
 	}
@@ -99,6 +111,9 @@ func (r *SessionReport) Details() []string {
 		}
 		for _, g := range s.ShaBad {
 			out = append(out, fmt.Sprintf("digest   %s row %d", filepath.Base(g.File), g.Row))
+		}
+		if s.End != nil {
+			out = append(out, fmt.Sprintf("end gap  %s", *s.End))
 		}
 	}
 	return out
