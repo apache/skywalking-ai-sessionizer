@@ -144,15 +144,16 @@ jobs:
         run: make conversation-view-check
 
   # Builds every platform on every run so a broken cross-compile is caught
-  # at once, and keeps the packages as an artifact. When a release is
-  # released on GitHub, after the vote where there is one, the packages and
-  # their checksums are attached to it: that is where people download them
-  # until the project distributes through dist.apache.org.
+  # at once, and keeps the packages as an artifact. They are never attached
+  # to a GitHub release, because they are not the voted, signed files.
+  # tools/release.sh complete attaches those, once each matches the file
+  # downloads.apache.org serves.
   binaries:
     name: Binaries
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    # The packages job names the artifact by this version.
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -175,13 +176,19 @@ jobs:
           esac
           echo "version=$v" >> "$GITHUB_OUTPUT"
       # Every platform is cross-compiled from one runner: Go needs no
-      # emulation and no C toolchain for this, so one job proves all five.
+      # emulation and no C toolchain for this, so one job proves them all.
       - name: Build every platform
         run: make binaries checksums VERSION=${{ steps.v.outputs.version }}
+      # A tag from before the Claude Code plugin, run by hand, builds no
+      # plugin. A tree that has the plugin must still run its binary.
       - name: Smoke test
         run: |
           dist/build/linux-amd64/asz version
-          dist/build/linux-amd64/claude-code-plugin/bin/asz-claude-plugin version
+          if [ -d plugins/claude-code ]; then
+            dist/build/linux-amd64/claude-code-plugin/bin/asz-claude-plugin version
+          else
+            echo "::notice::this tree has no Claude Code plugin, so no plugin binary was run"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ steps.v.outputs.version }}
@@ -190,12 +197,66 @@ jobs:
             dist/*.zip
             dist/*.sha512
           if-no-files-found: error
-      - name: Attach to the GitHub release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+
+  # Each binary package is run on its own platform, as a person would run
+  # it. The binaries job cross-compiles every platform on one Linux runner.
+  # That proves the build and nothing about the platform: a macOS or a
+  # Windows binary is first started here, and so is any binary taken out of
+  # its archive.
+  packages:
+    name: Package ${{ matrix.platform }}
+    needs: binaries
+    runs-on: ${{ matrix.runner }}
+    # A run takes about a minute. If Git Bash never returns from waiting on a
+    # native Windows process, the job fails here instead of holding a runner
+    # for GitHub's default of six hours.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-amd64, runner: ubuntu-latest, ext: tgz }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, ext: tgz }
+          - { platform: darwin-arm64, runner: macos-latest, ext: tgz }
+          # GitHub's last Intel macOS image, offered until August 2027.
+          # After that, darwin-amd64 is cross-compiled and never started.
+          - { platform: darwin-amd64, runner: macos-15-intel, ext: tgz }
+          - { platform: windows-amd64, runner: windows-latest, ext: zip }
+          - { platform: windows-arm64, runner: windows-11-arm, ext: zip }
+    steps:
+      # The script and the scenarios it runs come from the tree, at the ref
+      # the binaries job built. Nothing is built here.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries-${{ needs.binaries.outputs.version }}
+          path: dist
+      # Run by hand for a tag older than this job, the tag may have no
+      # tools/package-smoke.sh, or build no package for this platform. 0.1.0
+      # and 0.2.0 have neither the script nor windows/arm64. Such an entry
+      # says so and passes. A platform the tag's Makefile lists must still
+      # have its package, so a package the binaries job lost fails here.
+      - name: Run the package
+        shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
-        run: gh release upload "$TAG" dist/*.tgz dist/*.zip dist/*.sha512 --clobber
+          VERSION: ${{ needs.binaries.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          if [ ! -f tools/package-smoke.sh ]; then
+            echo "::notice::this tag has no tools/package-smoke.sh, so its $PLATFORM package is not run"
+            exit 0
+          fi
+          platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
+          case " $platforms " in
+            *" ${PLATFORM%-*}/${PLATFORM#*-} "*) ;;
+            *)
+              echo "::notice::the Makefile of this tag builds no package for $PLATFORM, so there is nothing to run"
+              exit 0 ;;
+          esac
+          tools/package-smoke.sh "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
 
   lint:
     name: Lint
@@ -294,7 +355,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, lint, docker, binaries, collector, conversation-view]
+    needs: [license, build, lint, docker, binaries, packages, collector, conversation-view]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed
