@@ -69,7 +69,8 @@ It holds the landed digest, counted call ids, series windows and exact protobuf 
 as base64 in JSON. The receipt is published before the request enters `_metrics/`, so a retry
 after an interrupted progress save uses the same accounting even if new fragments have arrived.
 Receipts are local collection state and are not sent as session data. `metrics.state` also keeps
-the first pass's look-back for deferred files until their derivation completes.
+the first pass's look-back for each session that pass did not finish, whether a file waited for
+its grace or an error stopped the session, until every file of the session is derived.
 
 ## Landed files
 
@@ -303,6 +304,13 @@ follow the head is refused. The next round is written to a temporary file, made 
 synced before an atomic operation installs its final name without replacing an existing file.
 An interrupted write leaves no partial round for a reader to fold. Tests in `tests/chain` cover
 an interrupted writer and four parsers running at once.
+
+The atomic operation is `renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with
+`RENAME_EXCL` on macOS, and `MoveFileEx` without replacement on Windows. A filesystem without an
+exclusive rename uses a hard link, which has the same guarantees. exFAT on macOS has neither: on a
+disk image, both calls returned "operation not supported". There asz creates an empty file with
+`O_EXCL`, which still refuses an existing round, then renames the complete round over it. Between
+those two calls, with no write between them, a reader or a crash can see an empty round file.
 
 Parse takes the lock before it reads the index. A parser that read the index first could hold an
 old one while a scenario removal took the session away, and then publish a round over evidence

@@ -55,7 +55,6 @@ def main():
     repository = "apache/skywalking-ai-sessionizer"
     base = "repos/" + repository
     tag = "v" + version
-    marker = f"<!-- asz-ci-binaries run_id={run_id} run_attempt={attempt} commit={commit} -->"
     package_dir = Path(directory).resolve()
     pairs = platforms.split()
     allowed = {os_name + "/" + arch for os_name in ("darwin", "linux", "windows") for arch in ("amd64", "arm64")}
@@ -126,6 +125,11 @@ def main():
                 {asset.get("name") for asset in release["assets"]} == set(names), "the prerelease asset set changed")
         require(asset_identity(release["assets"]) == identities, "an uploaded asset was replaced during verification")
         check_tag()
+        # ci-binaries.sh recomputes this from the release and refuses a
+        # mismatch, so the marker names exactly the files verified here.
+        lines = sorted(f"{name} {asset_id} {size} {checksum}" for name, asset_id, checksum, size in identities)
+        fingerprint = hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
+        marker = f"<!-- asz-ci-binaries run_id={run_id} run_attempt={attempt} commit={commit} assets={fingerprint} -->"
         notes = scratch / "notes.md"
         notes.write_text((release.get("body") or "").rstrip() + "\n\n" + marker + "\n", encoding="utf-8")
         subprocess.run(["gh", "release", "edit", tag, "--repo", repository, "--notes-file", str(notes)], check=True)

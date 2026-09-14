@@ -217,7 +217,8 @@ After the prepare pull request has merged, wait for the prerelease's CI run to f
 successfully. It builds all six binary packages and runs each on a runner of its own platform.
 Only after all checks pass does CI attach the six archives and six `.sha512` files to the
 prerelease. It verifies the uploaded bytes and adds a readiness marker to the prerelease notes.
-This run publishes no container image.
+The marker names the run, its attempt, the commit, and a SHA-256 fingerprint of the verified
+assets: each file's name, asset ID, size and GitHub digest. This run publishes no container image.
 
 ```sh
 GPG_USER=<key id, fingerprint or email> tools/release.sh candidate $VERSION
@@ -225,7 +226,9 @@ GPG_USER=<key id, fingerprint or email> tools/release.sh candidate $VERSION
 
 The binary archives uploaded to SVN always come from that GitHub prerelease. `candidate` reads
 its readiness marker and verifies the successful uploader run for the exact release tag and
-commit. To require a specific uploader run:
+commit. The run must be the prerelease's `release` event. Every asset must be uploaded by
+`github-actions[bot]` while that run ran, and the assets must match the marker's fingerprint.
+Files a person uploads, or uploads again, are refused. To require a specific uploader run:
 
 ```sh
 tools/release.sh candidate $VERSION --ci-run <run id>

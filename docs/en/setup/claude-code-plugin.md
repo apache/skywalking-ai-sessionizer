@@ -214,6 +214,13 @@ are scanned because filters or hooks can write outside `.git/`. Go package loadi
 module files, so `go list` and `go doc` are scanned. Unknown forms, including compound `for` and
 `case` syntax, also scan.
 
+A variable assignment at the start of a segment scans too, as in `GIT_EXTERNAL_DIFF=./tool git diff`,
+because a variable such as `GIT_EXTERNAL_DIFF`, `GIT_CONFIG_*` or `LD_PRELOAD` can run another
+program. A bare assignment scans as well: it changes a variable the shell may already export. Only
+these variables leave a segment read-only, since they change how output is formatted: `LANG`,
+`LANGUAGE`, `LC_ALL`, `LC_COLLATE`, `LC_CTYPE`, `LC_MESSAGES`, `LC_NUMERIC`, `LC_TIME`, `TZ`,
+`TERM`, `COLUMNS`, `LINES`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE` and `FORCE_COLOR`.
+
 The previous `readonly-v1` classified 69.3% of the corpus above as read-only. The skip rate of
 `readonly-v2` has not been measured. The fixture
 `plugins/claude-code/internal/readonly/testdata/commands.txt` holds the same 93 real commands,

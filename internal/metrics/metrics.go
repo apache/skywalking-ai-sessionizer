@@ -199,6 +199,15 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		}
 	}
 	for _, session := range sessions {
+		// A session the first pass did not finish keeps that pass's look-back
+		// until it is finished. It is kept per session, not per file: a file
+		// the pass never reached, after an error, must not export the old
+		// history the first pass was asked to leave out. Files that land
+		// later hold newer records, which the look-back does not remove.
+		if !since.IsZero() {
+			state.PendingSince[session] = since
+		}
+		sessionSince := state.PendingSince[session]
 		files, err := storage.LandedFiles(d.Zone, session)
 		if err != nil {
 			st.Errors = append(st.Errors, err)
@@ -213,15 +222,8 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			if state.Derived[rel] != "" {
 				continue
 			}
-			// A first-pass file keeps its original look-back while waiting.
-			// Otherwise retrying after the grace would export old history
-			// that the first pass was asked to leave out.
-			if !since.IsZero() {
-				state.PendingSince[rel] = since
-			}
-			fileSince := state.PendingSince[rel]
 			receiptPath := filepath.Join(d.Zone.SessionDir(session), "metrics", fmt.Sprintf("%06d.json", lf.Seq))
-			receipt, deferred, err := d.deriveReceipt(receiptPath, lf, files[i+1:], fileSince, ss, grace)
+			receipt, deferred, err := d.deriveReceipt(receiptPath, lf, files[i+1:], sessionSince, ss, grace)
 			if err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
 				pending = true
@@ -259,11 +261,12 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			// request on disk, so a failed write is derived again.
 			receipt.commit(ss)
 			state.Derived[rel] = receipt.Digest
-			delete(state.PendingSince, rel)
 			st.Files++
 		}
 		if pending {
 			st.PendingSessions = append(st.PendingSessions, session)
+		} else {
+			delete(state.PendingSince, session)
 		}
 	}
 	if err := state.save(filepath.Join(spool.Dir(), StateFile), d.Now()); err != nil {
@@ -605,9 +608,9 @@ type state struct {
 	UpdatedAt string                   `json:"updated_at"`
 	Derived   map[string]string        `json:"derived"`
 	Sessions  map[string]*sessionState `json:"sessions"`
-	// PendingSince retains the first pass's look-back for files waiting
-	// for their continuation, including across a restart.
-	PendingSince map[string]time.Time `json:"pending_since,omitempty"`
+	// PendingSince retains the first pass's look-back, by session, for each
+	// session that pass did not finish, including across a restart.
+	PendingSince map[string]time.Time `json:"pending_session_since,omitempty"`
 }
 
 type sessionState struct {

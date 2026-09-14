@@ -231,6 +231,17 @@ func TestCompletePromotesOnlyAfterUploadingAndVerifyingEveryAsset(t *testing.T) 
 	}
 }
 
+// A broken entry elsewhere in KEYS must not stop promotion. Each package's
+// signature is still verified against the keys that did import.
+func TestCompleteToleratesAnUnimportableKeysEntry(t *testing.T) {
+	f := newFixture(t)
+	t.Setenv("RELEASE_COMPLETE_IMPORT_STATUS", "2")
+	if output, err := f.run(); err != nil {
+		t.Fatalf("complete with a partial KEYS import: %v\n%s", err, output)
+	}
+	f.requirePublished()
+}
+
 func TestCompleteCanPromoteMatchingRecoveryDraft(t *testing.T) {
 	f := newFixture(t)
 	f.setState(releaseState{Exists: true, Draft: true})
@@ -465,6 +476,8 @@ if tool == "gpg":
     assert "--batch" in args and "--homedir" in args, args
     if "--import" in args:
         assert Path(args[args.index("--import") + 1]).read_text() == "fixture release key", args
+        # gpg exits 2 when any one KEYS entry fails, even when the others import.
+        sys.exit(int(os.environ.get("RELEASE_COMPLETE_IMPORT_STATUS", "0")))
     elif "--verify" in args:
         assert "--status-fd" in args and args[args.index("--status-fd") + 1] == "1", args
         signature, package = map(Path, args[-2:])

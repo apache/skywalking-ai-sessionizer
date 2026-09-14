@@ -41,7 +41,10 @@ on:
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event.action || 'run' }}
+  # A release is published and later promoted on the same tag, and neither run
+  # may cancel the other. A pull request keeps one group for all its updates,
+  # so a new push still cancels the run it replaces.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event_name == 'release' && github.event.action || 'run' }}
   cancel-in-progress: true
 
 permissions:
@@ -407,9 +410,13 @@ jobs:
                   ;;
                 *)
                   # Candidate tags do not affect which approved release is latest.
-                  highest=$(gh api --method GET --paginate "repos/$GITHUB_REPOSITORY/releases" \
-                    --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-                    | sed -nE '/^v[0-9]+\.[0-9]+\.[0-9]+$/p' | sort -Vr | head -1)
+                  # The list is read on its own line: set -e stops the step
+                  # when gh fails, where the end of a pipeline would hide it
+                  # and publish the release without latest.
+                  released=$(gh api --method GET --paginate "repos/$GITHUB_REPOSITORY/releases" \
+                    --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
+                  highest=$(printf '%s\n' "$released" | sed -nE '/^v[0-9]+\.[0-9]+\.[0-9]+$/p' | sort -Vr | head -1)
+                  [ -n "$highest" ] || { echo "::error::no published release found for the latest tag"; exit 1; }
                   if [ "v$version" = "$highest" ]; then tags="$tags,$image:latest"; fi ;;
               esac ;;
           esac

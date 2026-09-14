@@ -1176,8 +1176,10 @@ if [ "$cmd" = complete ]; then
   if [ "$dry_run" = false ]; then
     mkdir -m 700 "$keyring"
     curl -fsSL "$keys_url" -o "$tmp/KEYS" || fail "cannot download $keys_url"
-    gpg --batch --quiet --homedir "$keyring" --import "$tmp/KEYS" >/dev/null 2>&1 \
-      || fail "cannot import SkyWalking KEYS for release verification"
+    # gpg exits 2 when any one entry of KEYS cannot be imported, even when the
+    # key that signed did import. candidate reads KEYS the same way. Each
+    # package below still needs a valid signature from an imported key.
+    gpg --batch --quiet --homedir "$keyring" --import "$tmp/KEYS" >/dev/null 2>&1 || true
   fi
 
   step "The voted packages"
@@ -1328,12 +1330,19 @@ tag="v$version"
 branch="release/$version"
 page="$changes_dir/changes-$version.md"
 if [ "$no_push" = false ]; then
-  if previous=$(gh release view "$tag" --repo apache/skywalking-ai-sessionizer --json isPrerelease --jq '.isPrerelease' 2>/dev/null); then
+  if previous=$(gh release view "$tag" --repo apache/skywalking-ai-sessionizer --json isPrerelease --jq '.isPrerelease' 2>&1); then
     if [ "$previous" = true ]; then
       fail "a GitHub prerelease for $tag already exists. If it was rejected, remove it explicitly before preparing another candidate: gh release delete $tag --repo apache/skywalking-ai-sessionizer. The script never deletes a prerelease or moves its tag"
     fi
     fail "the GitHub release $tag already exists and is not a prerelease"
   fi
+  # Only a missing release lets prepare go on. Any other failure, such as gh
+  # not logged in or no network, would otherwise show up only after the
+  # branch and the tag are pushed.
+  case "$previous" in
+    *"release not found"*) ;;
+    *) fail "cannot check whether the GitHub release $tag exists: $previous" ;;
+  esac
 fi
 ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null || fail "tag $tag already exists"
 ! git rev-parse -q --verify "refs/heads/$branch" >/dev/null || fail "branch $branch already exists"

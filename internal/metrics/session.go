@@ -164,6 +164,10 @@ func Forget(z *storage.Zone, sessions []string, now time.Time) error {
 			delete(s.Sessions, id)
 			changed = true
 		}
+		if _, ok := s.PendingSince[id]; ok && !left {
+			delete(s.PendingSince, id)
+			changed = true
+		}
 	}
 	if !changed {
 		return nil

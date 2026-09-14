@@ -73,6 +73,15 @@ var keywordStart = map[string]bool{"if": true, "while": true, "until": true, "el
 var keywordOnly = map[string]bool{"done": true, "fi": true, "esac": true, ";;": true, "}": true, ")": true, "{": true, "(": true}
 
 var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// inertVariables change only how a program formats what it prints. Any other
+// variable may choose a program the command runs, as GIT_EXTERNAL_DIFF,
+// GIT_CONFIG_* and LD_PRELOAD do, so its assignment is scanned.
+var inertVariables = map[string]bool{
+	"LANG": true, "LANGUAGE": true, "LC_ALL": true, "LC_COLLATE": true, "LC_CTYPE": true, "LC_MESSAGES": true,
+	"LC_NUMERIC": true, "LC_TIME": true, "TZ": true, "TERM": true, "COLUMNS": true, "LINES": true,
+	"NO_COLOR": true, "CLICOLOR": true, "CLICOLOR_FORCE": true, "FORCE_COLOR": true,
+}
 var devNull = regexp.MustCompile(`^>{1,2}\|?\s*/dev/null`)
 var dupOut = regexp.MustCompile(`^>>?&(\d+|-)`)
 var dupIn = regexp.MustCompile(`^<&(\d+|-)`)
@@ -237,6 +246,12 @@ func segmentReadOnly(seg string) bool {
 		w = w[1:]
 	}
 	for len(w) > 0 && assignment.MatchString(w[0]) {
+		// A bare assignment matters too: it updates a variable the shell
+		// already exports to every later command.
+		name, _, _ := strings.Cut(w[0], "=")
+		if !inertVariables[name] {
+			return false
+		}
 		w = w[1:]
 	}
 	if len(w) == 0 {

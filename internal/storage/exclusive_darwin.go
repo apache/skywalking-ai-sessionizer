@@ -19,8 +19,18 @@
 
 package storage
 
-import "golang.org/x/sys/unix"
+import (
+	"errors"
 
+	"golang.org/x/sys/unix"
+)
+
+// RENAME_EXCL works on APFS, HFS+ and FAT. Measured on a disk image, exFAT
+// returns ENOTSUP, and a storage root there must still publish rounds.
 func installExclusive(from, to string) error {
-	return unix.RenamexNp(from, to, unix.RENAME_EXCL)
+	err := unix.RenamexNp(from, to, unix.RENAME_EXCL)
+	if !errors.Is(err, unix.ENOTSUP) {
+		return err
+	}
+	return installLinked(from, to)
 }

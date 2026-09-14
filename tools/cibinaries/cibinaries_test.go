@@ -30,6 +30,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -53,6 +54,7 @@ type fixture struct {
 	workflow       map[string]any
 	ref            map[string]any
 	release        map[string]any
+	finalRelease   map[string]any
 	members        []member
 	assetOverrides map[string]any
 }
@@ -70,14 +72,15 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{t: t, dir: t.TempDir()}
 	repo := map[string]any{"full_name": repository, "id": 100}
 	f.run = map[string]any{"id": 123, "repository": repo, "head_repository": repo,
-		"head_branch": "v" + version, "head_sha": commit, "event": "workflow_dispatch",
+		"head_branch": "v" + version, "head_sha": commit, "event": "release",
+		"run_started_at": "2026-09-14T10:00:00Z", "updated_at": "2026-09-14T10:30:00Z",
 		"status": "completed", "conclusion": "success", "workflow_id": 101, "run_attempt": 1,
 		"path": ".github/workflows/ci.yaml@refs/tags/v" + version}
 	f.workflow = map[string]any{"id": 101, "name": "CI", "path": ".github/workflows/ci.yaml"}
 	f.ref = map[string]any{"object": map[string]any{"type": "commit", "sha": commit}}
 	f.release = map[string]any{"id": 456, "tag_name": "v" + version, "name": version,
 		"draft": false, "prerelease": true,
-		"body": "Developer testing only. <!-- asz-ci-binaries run_id=123 run_attempt=1 commit=" + commit + " -->"}
+		"body": "Developer testing only. <!-- asz-ci-binaries run_id=123 run_attempt=1 commit=" + commit + " assets=ASSETS -->"}
 	for _, platform := range strings.Fields(platforms) {
 		ext := "tgz"
 		if strings.HasPrefix(platform, "windows/") {
@@ -175,24 +178,43 @@ func (f *fixture) json(name string, value any) {
 func (f *fixture) write() {
 	f.t.Helper()
 	assets := []map[string]any{}
+	var lines []string
 	for i, m := range f.members {
 		id := 1000 + i
 		if err := os.WriteFile(filepath.Join(f.dir, fmt.Sprintf("asset-%d", id)), m.data, 0o600); err != nil {
 			f.t.Fatal(err)
 		}
 		asset := map[string]any{"id": id, "name": m.name, "state": "uploaded", "size": len(m.data),
-			"digest": fmt.Sprintf("sha256:%x", sha256.Sum256(m.data))}
+			"digest": fmt.Sprintf("sha256:%x", sha256.Sum256(m.data)), "created_at": "2026-09-14T10:20:00Z",
+			"uploader": map[string]any{"login": "github-actions[bot]", "type": "Bot"}}
 		if i == 0 {
 			for k, v := range f.assetOverrides {
 				asset[k] = v
 			}
 		}
 		assets = append(assets, asset)
+		lines = append(lines, fmt.Sprintf("%s %d %d %s", m.name, id, len(m.data), asset["digest"]))
+	}
+	// The marker names the asset set the way ci-upload-binaries.sh records it.
+	sort.Strings(lines)
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(lines, "\n")+"\n")))
+	withAssets := func(source map[string]any) map[string]any {
+		out := make(map[string]any)
+		for k, v := range source {
+			out[k] = v
+		}
+		if body, ok := out["body"].(string); ok {
+			out["body"] = strings.ReplaceAll(body, "ASSETS", fingerprint)
+		}
+		return out
+	}
+	if f.finalRelease != nil {
+		f.json("final-release.json", withAssets(f.finalRelease))
 	}
 	f.json("run.json", f.run)
 	f.json("workflow.json", f.workflow)
 	f.json("ref.json", f.ref)
-	f.json("release.json", f.release)
+	f.json("release.json", withAssets(f.release))
 	f.json("assets.json", []any{assets})
 }
 
@@ -263,8 +285,21 @@ func TestUnverifiedCIBinariesLeaveNoPackages(t *testing.T) {
 		{"wrong-tag", "does not point", func(f *fixture) { f.ref["object"].(map[string]any)["sha"] = strings.Repeat("c", 40) }},
 		{"failed-run", "completed and successful", func(f *fixture) { f.run["conclusion"] = "failure" }},
 		{"wrong-commit", "release tag at COMMIT", func(f *fixture) { f.run["head_sha"] = strings.Repeat("c", 40) }},
-		{"main-run", "--ref v0.3.0", func(f *fixture) { f.run["head_branch"] = "main" }},
+		{"main-run", "release tag at COMMIT", func(f *fixture) { f.run["head_branch"] = "main" }},
 		{"pull-request", "not a prerelease build", func(f *fixture) { f.run["event"] = "pull_request" }},
+		{"manual-run", "not a prerelease build", func(f *fixture) { f.run["event"] = "workflow_dispatch" }},
+		{"run-without-times", "no start or update time", func(f *fixture) { delete(f.run, "run_started_at") }},
+		{"asset-by-person", "not uploaded by CI", func(f *fixture) {
+			f.assetOverrides = map[string]any{"uploader": map[string]any{"login": "someone", "type": "User"}}
+		}},
+		{"asset-before-run", "during the CI run", func(f *fixture) { f.assetOverrides = map[string]any{"created_at": "2026-09-14T09:59:59Z"} }},
+		{"asset-after-run", "during the CI run", func(f *fixture) { f.assetOverrides = map[string]any{"created_at": "2026-09-14T10:30:01Z"} }},
+		{"marker-other-assets", "not the files CI verified", func(f *fixture) {
+			f.release["body"] = strings.ReplaceAll(f.release["body"].(string), "ASSETS", strings.Repeat("0", 64))
+		}},
+		{"asset-uploaded-again", "not the files CI verified", func(f *fixture) {
+			f.release["body"] = strings.ReplaceAll(f.release["body"].(string), "ASSETS", fmt.Sprintf("%x", sha256.Sum256([]byte("an earlier upload\n"))))
+		}},
 		{"fork", "not a fork", func(f *fixture) { f.run["head_repository"] = map[string]any{"full_name": "person/fork", "id": 999} }},
 		{"wrong-workflow", "not the repository's CI", func(f *fixture) { f.run["workflow_id"] = 999 }},
 		{"release-missing-marker", "not ready", func(f *fixture) { f.release["body"] = "CI is still building" }},
@@ -300,7 +335,7 @@ func TestUnverifiedCIBinariesLeaveNoPackages(t *testing.T) {
 				other[k] = v
 			}
 			other["id"] = 789
-			f.json("final-release.json", other)
+			f.finalRelease = other
 		}},
 	}
 	for _, tc := range cases {

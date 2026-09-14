@@ -220,8 +220,10 @@ ran in the same minute or a child's file landed later, in which case it follows 
 point. No point of a series is ever thrown away for another. The first derivation over a root
 with history is bounded by `metrics_lookback`, 24 hours unless set, and by the newest request the
 receiver adapter landed, so switching the flag on sends neither a year of tokens nor what the
-runtime's exporter already sent. A first-pass file deferred by the grace keeps that look-back
-across retries and restarts. Every later new file is derived whole. Before a request enters the
+runtime's exporter already sent. A session the first pass did not finish keeps that look-back
+across retries and restarts, whether a file waited for its grace or an error stopped the session
+before its later files. Once every file of the session is derived, a later new file is derived
+whole. Before a request enters the
 spool, an immutable receipt under the session's `metrics/` records its exact bytes and the calls
 it counted. If saving progress fails, the retry uses that receipt even when more source fragments
 have arrived, so its accounting still matches the request already written.

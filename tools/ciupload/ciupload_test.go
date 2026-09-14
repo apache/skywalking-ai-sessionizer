@@ -21,6 +21,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -138,7 +140,17 @@ else: sys.exit(8)
 			if err := json.Unmarshal(state, &release); err != nil {
 				t.Fatal(err)
 			}
-			ready := strings.Contains(release["body"].(string), "<!-- asz-ci-binaries run_id=123 run_attempt=2 commit="+strings.Repeat("a", 40)+" -->")
+			// The marker must name the uploaded files the way ci-binaries.sh
+			// recomputes them from the release.
+			number := func(v any) int64 { n, _ := v.(float64); return int64(n) }
+			var lines []string
+			for _, item := range release["assets"].([]any) {
+				asset := item.(map[string]any)
+				lines = append(lines, fmt.Sprintf("%s %d %d %s", asset["name"], number(asset["id"]), number(asset["size"]), asset["digest"]))
+			}
+			sort.Strings(lines)
+			fingerprint := sha256.Sum256([]byte(strings.Join(lines, "\n") + "\n"))
+			ready := strings.Contains(release["body"].(string), fmt.Sprintf("<!-- asz-ci-binaries run_id=123 run_attempt=2 commit=%s assets=%x -->", strings.Repeat("a", 40), fingerprint))
 			writes, _ := os.ReadFile(filepath.Join(dir, "writes"))
 			if mode == "complete" {
 				if err != nil || !ready {

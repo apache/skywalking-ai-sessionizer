@@ -151,6 +151,47 @@ func TestDeferredHistoryKeepsItsLookbackAcrossRestart(t *testing.T) {
 	}
 }
 
+// An error stops the session before the pass reaches its later files. Those
+// files were never deferred, but they still belong to the first pass.
+func TestFirstPassErrorKeepsTheLookbackForUnreachedFiles(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	land(t, z, "s1", "main", 1, []call{{id: "recent", model: "m", at: base, frags: 1, in: 4, out: 60}})
+	land(t, z, "s1", "main", 2, []call{{id: "old", model: "m", at: base.Add(-48 * time.Hour), frags: 1, in: 100, out: 100}})
+	receipts := filepath.Join(z.SessionDir("s1"), "metrics")
+	if err := os.MkdirAll(receipts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(receipts, "000001.json")
+	if err := os.WriteFile(broken, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := deriver(z, base.Add(time.Hour), metrics.Options{Lookback: 24 * time.Hour, Grace: -1})
+	st, err := d.Pass(nil)
+	if err != nil || len(st.Errors) != 1 || len(st.PendingSessions) != 1 {
+		t.Fatalf("the first pass must stop at the unreadable receipt: %v %+v", err, st)
+	}
+	if err := os.Remove(broken); err != nil {
+		t.Fatal(err)
+	}
+	st, err = d.Pass(nil)
+	if err != nil || len(st.Errors) > 0 || st.Files != 2 || len(st.PendingSessions) != 0 {
+		t.Fatalf("the retry must derive both files: %v %+v", err, st)
+	}
+	got, _ := points(t, z)
+	if n := total(got["main/output/m#s1"]); n != 60 {
+		t.Fatalf("a file the first pass never reached bypassed its look-back: got %v output tokens, want 60", n)
+	}
+	// Once the session is finished, a new file is derived whole again.
+	land(t, z, "s1", "main", 3, []call{{id: "next", model: "m", at: base.Add(-30 * time.Hour), frags: 1, in: 1, out: 7}})
+	if _, err := d.Pass(nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = points(t, z)
+	if n := total(got["main/output/m#s1"]); n != 67 {
+		t.Fatalf("a finished session kept its first pass look-back: got %v output tokens, want 67", n)
+	}
+}
+
 // The spool can survive a failed state save, then a continuation can land
 // before retry. The existing request and its counted calls must stay paired.
 func TestStateWriteFailurePreservesCallAccountingAcrossContinuation(t *testing.T) {

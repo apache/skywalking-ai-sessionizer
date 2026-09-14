@@ -264,7 +264,9 @@ func (s *Server) List() ([]string, error) {
 		if !d.IsDir() {
 			continue
 		}
-		if rounds, rerr := os.ReadDir(filepath.Join(base, d.Name(), "rounds")); rerr == nil && len(rounds) > 0 {
+		// A writer killed during its first round leaves only a temporary
+		// file, so an entry in the directory is not yet a round.
+		if rounds, rerr := sessionflow.OpenChain(s.zone.Root(), d.Name()).List(); rerr == nil && len(rounds) > 0 {
 			out = append(out, d.Name())
 		}
 	}

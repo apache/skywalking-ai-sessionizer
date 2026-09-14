@@ -92,14 +92,22 @@ def release_identity(release, tag, version, commit):
             release.get("tag_name") == tag and release.get("name") == version and
             release.get("draft") is False and release.get("prerelease") is True,
             "the GitHub release must be the public developer prerelease for " + tag)
-    markers = re.findall(r"<!-- asz-ci-binaries run_id=([1-9][0-9]*) run_attempt=([1-9][0-9]*) commit=([0-9a-f]{40}) -->",
+    markers = re.findall(r"<!-- asz-ci-binaries run_id=([1-9][0-9]*) run_attempt=([1-9][0-9]*) commit=([0-9a-f]{40}) assets=([0-9a-f]{64}) -->",
                          release.get("body") or "")
     require(len(markers) == 1 and markers[0][2] == commit,
             "the prerelease is not ready: wait for CI to upload and verify all binary assets")
     return release["id"], markers[0]
 
 
-def release_assets(base, release_id, expected):
+# ci-upload-binaries.sh writes the same fingerprint into the readiness marker
+# after it has verified the uploaded bytes. A marker copied from another run,
+# or files uploaded again by hand, then no longer match.
+def asset_fingerprint(assets):
+    lines = sorted(f"{name} {asset_id} {size} {checksum}" for name, (asset_id, size, checksum) in assets.items())
+    return hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
+
+
+def release_assets(base, release_id, expected, run=None):
     pages = api(base + f"/releases/{release_id}/assets?per_page=100", pages=True)
     require(isinstance(pages, list) and all(isinstance(page, list) for page in pages),
             "invalid release asset page response")
@@ -113,6 +121,16 @@ def release_assets(base, release_id, expected):
                 "the release asset is not fully uploaded: " + asset["name"])
         require(re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or ""),
                 "the release asset has no SHA-256 digest from GitHub: " + asset["name"])
+        # A person with write access uploads as themselves. The workflow token
+        # uploads as this bot, and only while the run named by the marker ran.
+        uploader = asset.get("uploader") or {}
+        require(uploader.get("login") == "github-actions[bot]" and uploader.get("type") == "Bot",
+                "the release asset was not uploaded by CI: " + asset["name"])
+        if run is not None:
+            created = asset.get("created_at") or ""
+            require(re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", created) and
+                    run["run_started_at"] <= created <= run["updated_at"],
+                    "the release asset was not uploaded during the CI run: " + asset["name"])
     return {asset["name"]: (asset["id"], asset["size"], asset["digest"]) for asset in assets}
 
 
@@ -140,7 +158,7 @@ def main():
     require(tag_commit(base, tag) == commit, f"{tag} does not point at COMMIT in {repository}")
     release_endpoint = base + "/releases/tags/" + tag
     identity = release_identity(api(release_endpoint), tag, version, commit)
-    release_id, (build_run, build_attempt, _) = identity
+    release_id, (build_run, build_attempt, _, build_assets) = identity
     require(automatic or run_id == build_run,
             "--ci-run must name the CI run that uploaded this prerelease: " + build_run)
     run_id = build_run
@@ -161,12 +179,20 @@ def main():
             "the CI run must be completed and successful")
     require(run["run_attempt"] == int(build_attempt), "the CI run attempt differs from the prerelease's build")
     require(run.get("head_sha") == commit and run.get("head_branch") == tag,
-            "the CI run must run on the release tag at COMMIT; dispatch it with --ref " + tag)
-    require(run.get("event") in ("workflow_dispatch", "release"), "the CI run is not a prerelease build")
+            "the CI run must run on the release tag at COMMIT: " + tag)
+    # Only publishing the prerelease starts the job that uploads. A manual run
+    # of the workflow never attaches files, so it cannot vouch for them.
+    require(run.get("event") == "release", "the CI run is not a prerelease build")
     require(run.get("workflow_id") == workflow.get("id") and
             run.get("path", "").split("@", 1)[0] == workflow["path"],
             "the run is not the repository's CI workflow")
-    assets = release_assets(base, release_id, expected)
+    time_format = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
+    require(re.fullmatch(time_format, run.get("run_started_at") or "") and
+            re.fullmatch(time_format, run.get("updated_at") or ""),
+            "the CI run has no start or update time")
+    assets = release_assets(base, release_id, expected, run)
+    require(asset_fingerprint(assets) == build_assets,
+            "the prerelease assets are not the files CI verified; remove the prerelease explicitly and recreate it for a new CI run")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".ci-binaries-", dir=output.parent) as scratch:
         scratch = Path(scratch)

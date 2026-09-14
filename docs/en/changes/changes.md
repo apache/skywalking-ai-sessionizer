@@ -5,19 +5,25 @@
 ## Reliability
 
 - A round is published only after its temporary file is complete, read-only and synced. An
-  interrupted write no longer leaves a truncated `.sf` file that stops every later parse.
+  interrupted write no longer leaves a truncated `.sf` file that stops every later parse. A
+  storage root on exFAT on macOS, which has neither an exclusive rename nor hard links, still
+  publishes rounds and receipts. The conversation list skips a conversation whose only round
+  file is the temporary file of an interrupted write.
 - `asz repack` refuses a populated destination before writing. Its session reservation and
   file publication also refuse existing data, so repeating a repack cannot invalidate a chain.
 - `asz show` locates the current `.sd` files through the shared filename parser.
 - Named adapters inherit their own defaults, while explicit `false` and empty exclusions stay
-  as written. Omitting `enabled` no longer disables a local adapter by mistake.
+  as written. Omitting `enabled` no longer disables a local adapter by mistake. An adapter entry
+  without `exclude` now inherits `/private/tmp/**`, so it no longer collects those sessions.
 - Token derivation follows calls across any number of landed files and leaves unfinished calls
   eligible for later completion. Deferred sessions are retried while other sessions keep growing.
   Immutable receipts keep requests and their accounting together across an interrupted progress
-  save, even when new fragments arrive before retry. Deferred history retains its look-back.
+  save, even when new fragments arrive before retry. A session the first pass did not finish,
+  because a file waited for its grace or an error stopped it, retains that pass's look-back.
 - The Claude Code plugin applies roots, exclusions and content limits to subagent edits and their
   manifest updates. Its `readonly-v2` policy scans executable wrappers and writing command modes
-  that the earlier policy skipped, so concurrent writes retain their actual tool windows.
+  that the earlier policy skipped, so concurrent writes retain their actual tool windows. A
+  variable assignment before a command scans too, unless it only sets locale or display output.
 - Local tar packaging disables AppleDouble metadata. Source and binary archive checks reject
   `._*`, `.DS_Store` and `__MACOSX` entries, including the entries macOS tar hides by default.
 
@@ -273,8 +279,12 @@
   `CHANGES.md` used to describe.
 - CI attaches the six binary archives and their checksums to the GitHub prerelease only after all
   checks pass. The local download verifies the tag, CI run, release identity and asset checksums.
+  The readiness marker carries a fingerprint of the assets CI verified. `candidate` accepts only
+  the prerelease's `release` run, and only assets that `github-actions[bot]` uploaded during it.
   A replacement candidate requires explicitly removing the rejected prerelease first.
 - `complete` recovers the approved packages from SVN and checks them against Apache downloads.
+  A KEYS entry that gpg cannot import no longer stops it, as it never stopped `candidate`; each
+  package still needs a valid signature from an imported key.
   Existing GitHub binaries and checksums must match and are never uploaded again. It uploads only
   missing source files and signatures, verifies the full asset set, and promotes the prerelease.
   It can resume an interrupted upload without the original CI artifacts or local `dist` directory.

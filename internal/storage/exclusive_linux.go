@@ -21,7 +21,6 @@ package storage
 
 import (
 	"errors"
-	"os"
 
 	"golang.org/x/sys/unix"
 )
@@ -33,9 +32,5 @@ func installExclusive(from, to string) error {
 	if !errors.Is(err, unix.ENOSYS) && !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.EOPNOTSUPP) {
 		return err
 	}
-	if err := os.Link(from, to); err != nil {
-		return err
-	}
-	_ = os.Remove(from)
-	return nil
+	return installLinked(from, to)
 }

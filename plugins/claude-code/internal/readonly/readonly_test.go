@@ -80,11 +80,23 @@ func TestWritingModesAlwaysScan(t *testing.T) {
 		`xargs sort`, `xargs -I{} env {} < commands`,
 		`echo changed >/dev/null-output`, `echo changed >=output`, `{ cp source target; }`,
 		`case x in x) cp source target;; esac`, `echo "unfinished`,
+		`GIT_EXTERNAL_DIFF=./rewrite git diff`, `LD_PRELOAD=./rewrite.so cat input`,
+		`GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.external GIT_CONFIG_VALUE_0=./rewrite git diff`,
+		`GIT_EXTERNAL_DIFF=./rewrite; git diff`,
 	} {
 		t.Run(command, func(t *testing.T) {
 			if readonly.IsReadOnly(command) {
 				t.Fatal("a writing mode was classified read-only")
 			}
 		})
+	}
+}
+
+// A locale or display setting leaves a read-only command read-only.
+func TestInertVariablesKeepReadOnly(t *testing.T) {
+	for _, command := range []string{`LC_ALL=C sort input`, `NO_COLOR=1 TERM=dumb git log --oneline -3`} {
+		if !readonly.IsReadOnly(command) {
+			t.Errorf("an inert variable forced a scan: %s", command)
+		}
 	}
 }
