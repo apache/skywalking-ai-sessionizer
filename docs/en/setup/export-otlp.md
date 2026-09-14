@@ -198,16 +198,18 @@ files and 365,825 records written by Claude Code 2.1.220 to 2.1.251. It is 14.5%
 child streams and 0.02% of those on main transcripts, as
 [Provider calls](../adapters/claude-code.md#provider-calls) reports.
 
-A call cut at a landed file boundary is read on into the next file of its stream only when the
-file's last record is a fragment of that call. The reading stops at the first record of the next
-file that is not a fragment of the call. A tool result carries no call id, and in the same corpus a
-call's own tool results sit between its fragments on 24% of multi-fragment calls. So a call cut
-next to one of its own tool results is read short. On a child stream only the last fragment says
-the call finished, so such a call is left out of the metric. On a main transcript every fragment
-repeats the final usage, so the call still counts in full, in the minute of the last fragment read.
+A call cut at a landed file boundary is read through following transcript files of its stream
+when the file's last record is a fragment of that call. There is no one-file limit. Metadata and
+change files do not interrupt the reading; the first unrelated transcript record does. A tool
+result carries no call id, and in the same corpus a call's own tool results sit between its
+fragments on 24% of multi-fragment calls. Such a result ends the read-ahead. An unfinished child
+call remains eligible when its final fragment arrives later. On a main transcript every fragment
+repeats the final usage, so the call counts in full, in the minute of the last fragment read.
 
 Under a watching collector, a file whose last record is a fragment of a call not yet counted waits
-a short grace for the next file of its stream, then is derived with what it has. A file that ends
+a short grace for the next file of its stream, then is derived with what it has. When a continuation
+is found, its last file starts the grace. A deferred session is retried even while other sessions
+keep changing. An unfinished call is not marked counted when the grace expires. A file that ends
 with a tool result does not wait. A single pass, the backfill over history that already exists,
 derives with what is there and never waits. A call is never counted twice, however many files its
 records reach, and a record the runtime re-emitted before a context reset is the same call again.
@@ -218,9 +220,11 @@ ran in the same minute or a child's file landed later, in which case it follows 
 point. No point of a series is ever thrown away for another. The first derivation over a root
 with history is bounded by `metrics_lookback`, 24 hours unless set, and by the newest request the
 receiver adapter landed, so switching the flag on sends neither a year of tokens nor what the
-runtime's exporter already sent. Every later pass derives each new file whole. A pass is
-deterministic and its requests are named after their landed files, so a pass cut short is run
-again to the same bytes and nothing is counted twice.
+runtime's exporter already sent. A first-pass file deferred by the grace keeps that look-back
+across retries and restarts. Every later new file is derived whole. Before a request enters the
+spool, an immutable receipt under the session's `metrics/` records its exact bytes and the calls
+it counted. If saving progress fails, the retry uses that receipt even when more source fragments
+have arrived, so its accounting still matches the request already written.
 
 The other source of the same family is the runtime's exporter itself: the `claude-code-otlp`
 adapter receives what Claude Code sends and lands each metrics request in the same spool, bytes as

@@ -62,3 +62,29 @@ func TestFixture(t *testing.T) {
 		t.Fatalf("only %d cases read from the fixture", n)
 	}
 }
+
+func TestWritingModesAlwaysScan(t *testing.T) {
+	for _, command := range []string{
+		`env cp source.txt target.txt`, `env -S 'python3 write.py'`, `env FOO=bar sh -c 'touch changed'`,
+		`sort -o target.txt target.txt`, `sort --output=target.txt source.txt`, `sort -uotarget.txt source.txt`,
+		`sort --compress-program=./compress input`, `uniq input output`, `xxd -r input output`, `file -C -m magic`,
+		`tree -o output`, `rg --pre ./rewrite needle`, `rg --hostname-bin=./rewrite needle`,
+		`find . -fprint0 output`,
+		`sed 'w changed' input`, `sed -n '1p' -e 'w changed' input`, `sed -f script input`,
+		`awk 'BEGIN { print "changed" > "output" }'`, `awk 'BEGIN { system ("touch changed") }'`,
+		`awk -f script input`, `awk 'BEGIN { print "changed" | "tee output" }'`,
+		`git config --file settings user.name changed`, `git diff --output=patch`,
+		`git -c diff.external=./rewrite diff`, `git grep --open-files-in-pager=./rewrite needle`,
+		`git cat-file --filters HEAD:file`, `git branch -vv new-branch`, `git fetch`, `git add -A`,
+		`go env -w GOOS=linux`, `go list -mod=mod ./...`, `go doc example.com/module`,
+		`xargs sort`, `xargs -I{} env {} < commands`,
+		`echo changed >/dev/null-output`, `echo changed >=output`, `{ cp source target; }`,
+		`case x in x) cp source target;; esac`, `echo "unfinished`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			if readonly.IsReadOnly(command) {
+				t.Fatal("a writing mode was classified read-only")
+			}
+		})
+	}
+}

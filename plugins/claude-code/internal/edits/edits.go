@@ -29,7 +29,10 @@
 package edits
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +82,9 @@ type Context struct {
 	ToolName string
 	Time     string
 	Root     string
+	// FilePath is the absolute path the caller checked against its scope.
+	FilePath string
+	SizeCap  int64
 }
 
 // Record builds the change record from the response. ok is false when the
@@ -95,8 +101,12 @@ func Record(ctx Context, raw json.RawMessage) (*changes.Record, bool) {
 	if resp.FilePath == "" {
 		return nil, false
 	}
+	if ctx.FilePath != "" {
+		resp.FilePath = ctx.FilePath
+	}
 	created := resp.OriginalFile == nil
 	var before, after []byte
+	var diskAfter *changes.Endpoint
 	if !created {
 		before = []byte(*resp.OriginalFile)
 	}
@@ -112,11 +122,29 @@ func Record(ctx Context, raw json.RawMessage) (*changes.Record, bool) {
 	default:
 		// The patch alone: what the file became is read back from disk,
 		// which is the file the tool just wrote.
-		if data, err := os.ReadFile(resp.FilePath); err == nil {
-			after = data
+		if f, err := os.Open(resp.FilePath); err == nil {
+			if info, err := f.Stat(); err == nil && info.Mode().IsRegular() {
+				var reader io.Reader = f
+				if ctx.SizeCap > 0 {
+					reader = io.LimitReader(f, ctx.SizeCap+1)
+				}
+				data, err := io.ReadAll(reader)
+				if err == nil && ctx.SizeCap > 0 && int64(len(data)) > ctx.SizeCap {
+					// Bound the kept prefix even if the file grew after stat.
+					// The rest contributes only to its size and digest.
+					h := sha256.New()
+					h.Write(data)
+					if n, err := io.Copy(h, f); err == nil {
+						diskAfter = &changes.Endpoint{Present: true, Bytes: changes.Int64(n + int64(len(data))), SHA256: hex.EncodeToString(h.Sum(nil))}
+					}
+				} else if err == nil {
+					after = data
+				}
+			}
+			_ = f.Close()
 		}
 	}
-	if len(resp.StructuredPatch) == 0 && after == nil {
+	if len(resp.StructuredPatch) == 0 && after == nil && diskAfter == nil {
 		return nil, false
 	}
 	fc := changes.FileChange{
@@ -137,8 +165,30 @@ func Record(ctx Context, raw json.RawMessage) (*changes.Record, bool) {
 	if after == nil {
 		fc.After = changes.Endpoint{Present: true}
 	}
+	if diskAfter != nil {
+		fc.After = *diskAfter
+	}
 	add, del := 0, 0
-	if len(resp.StructuredPatch) > 0 {
+	tooLarge := ctx.SizeCap > 0 && (int64(len(before)) > ctx.SizeCap || int64(len(after)) > ctx.SizeCap ||
+		(fc.After.Bytes != nil && *fc.After.Bytes > ctx.SizeCap))
+	// A runtime patch can carry content even when one full endpoint is
+	// unavailable. Apply the cap to the patch too before retaining it.
+	var patchBytes int64
+	patchText := true
+	for _, h := range resp.StructuredPatch {
+		for _, line := range h.Lines {
+			patchBytes += int64(len(line))
+			patchText = patchText && changes.IsText([]byte(line))
+		}
+	}
+	if ctx.SizeCap > 0 && patchBytes > ctx.SizeCap {
+		tooLarge = true
+	}
+	if tooLarge {
+		fc.Diff = changes.DiffTooLarge
+	} else if !changes.IsText(before) || !changes.IsText(after) || !patchText {
+		fc.Diff = changes.DiffBinary
+	} else if len(resp.StructuredPatch) > 0 {
 		for _, h := range resp.StructuredPatch {
 			fc.Hunks = append(fc.Hunks, changes.Hunk{OldStart: h.OldStart, OldLines: h.OldLines, NewStart: h.NewStart, NewLines: h.NewLines, Lines: h.Lines})
 			for _, l := range h.Lines {

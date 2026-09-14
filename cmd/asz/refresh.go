@@ -106,6 +106,10 @@ type refresher struct {
 	// derivation takes them beside what moved, because a session that no
 	// longer lands anything would otherwise never be derived again.
 	derive map[string]bool
+	// deferred holds real and scenario sessions whose metrics need another
+	// pass. It is independent of removal: a completed real session can
+	// still be waiting for its last file's grace while another stays busy.
+	deferred map[string]bool
 }
 
 // newRefresher wires the local adapters into one pipeline, or returns nil
@@ -400,17 +404,27 @@ func (r *refresher) pass() error {
 	}
 	if r.deriver != nil && cs != nil {
 		// The first pass derives history once. A later pass derives what
-		// either adapter moved, what waited on a lock, and what the removal
-		// found not derived yet. The last is how a file the deriver held for
-		// its grace is derived while a feed lands something on every pass.
+		// either adapter moved, what waited on a lock, and what either the
+		// deriver or removal left for another pass.
 		var scope []string
 		if !r.full {
-			scope = deriveScope(changed, r.derive)
+			scope = deriveScope(changed, r.derive, r.deferred)
 		}
 		if ms, derr := r.deriver.Pass(scope); derr != nil {
 			errs = append(errs, derr)
+			// A failed state save leaves the whole pass to be retried.
+			if r.deferred == nil {
+				r.deferred = map[string]bool{}
+			}
+			for _, id := range sessions {
+				r.deferred[id] = true
+			}
 		} else {
 			errs = append(errs, ms.Errors...)
+			r.deferred = map[string]bool{}
+			for _, id := range ms.PendingSessions {
+				r.deferred[id] = true
+			}
 		}
 	}
 	rounds := 0
@@ -503,6 +517,7 @@ func (r *refresher) pass() error {
 				r.srv.Forget(id)
 			}
 			delete(r.retry, id)
+			delete(r.deferred, id)
 		}
 		r.derive = map[string]bool{}
 		for _, id := range res.DeriveNext {
@@ -576,16 +591,17 @@ func (r *refresher) setStatus(st view.Status) {
 	}
 }
 
-// deriveScope is what a later pass derives: the sessions that moved, and the
-// ones the removal carried. It is nil when both are empty, and a nil scope
-// derives every session, as a pass where nothing moved always has.
-func deriveScope(changed, carried map[string]bool) []string {
+// deriveScope combines the sessions that moved with those waiting for
+// another derivation. Empty means every session, as on a quiet pass.
+func deriveScope(groups ...map[string]bool) []string {
 	var out []string
-	for id := range changed {
-		out = append(out, id)
-	}
-	for id := range carried {
-		if !changed[id] {
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for id := range group {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			out = append(out, id)
 		}
 	}

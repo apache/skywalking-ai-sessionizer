@@ -16,25 +16,26 @@ The image is a Linux image. On Windows, Docker Desktop runs it as a Linux contai
 image and the same commands work there. Without Docker, use the Windows binary package that
 [Install](install.md#binary-package) describes.
 
-The image is a convenience, not part of the Apache release, and how it is published for a released
-version is not settled yet. Today the GitHub release of a version publishes it, as the tags below
-say.
+The image is a convenience built from the approved release tag. Promoting the GitHub prerelease
+after the Apache vote and distribution publication starts its build, as the tags below describe.
 
 ## Tags
 
 | Tag | Points at | Moves |
 | --- | --- | --- |
 | `<version>`, such as `0.2.0` | the image built from the git tag `v<version>` | only when a run started by hand publishes that tag again |
-| `latest` | the highest version tag | when the GitHub release of that tag is created, or a run started by hand publishes it |
+| `latest` | the highest full published release version | when the GitHub prerelease is promoted after the Apache vote, or an explicit image retry publishes it |
 | `main` | the development head | on each push to `main` |
 | `<commit id>` | one commit, by its complete 40-character id | only when a run started by hand publishes a tag on that commit again |
 
 The tags `0.1` and `0.2` remain from an earlier workflow, and no new `MAJOR.MINOR` tag is made,
 because a reader who pulls one cannot tell which version answered.
 
-A git tag `v*` names a release candidate, and pushing one publishes nothing. The GitHub release of
-a version is created after the Apache vote has passed, and creating it publishes the image under
-that version. A draft or a prerelease on GitHub publishes nothing. A version with a suffix, such as
+A git tag `v*` names a release candidate. Its GitHub prerelease holds CI binaries for developer
+testing and local SVN staging. After the Apache vote passes and the approved files reach Apache
+downloads, promoting it to a full GitHub release publishes the image under that version.
+A draft or a prerelease publishes no container image. A manual image retry requires an existing
+full GitHub release. A version with a suffix, such as
 `0.2.0-rc1`, is published under its own version tag and under its commit id, because CI tags every
 build with its commit id. It moves no floating tag, so `latest` stays where it is.
 
@@ -78,9 +79,9 @@ adapters:
       - /private/tmp/**
 ```
 
-A file that lists `adapters` replaces the whole list, so the exclude has to be repeated or Claude
-Code's own helper sessions under `/private/tmp` are collected too. Measured on one machine: 44
-sessions with the exclude, 64 without.
+A file that lists `adapters` replaces the whole adapter list. Each named adapter retains its
+default values for omitted fields, including its exclusions. An explicit `exclude` list replaces
+those defaults. Measured on one machine: 44 sessions with the exclude, 64 without.
 
 ```sh
 docker run --rm -p 8787:8787 \

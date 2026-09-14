@@ -20,24 +20,28 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
-  # A tag is a release candidate and publishes nothing. The GitHub release
-  # is created after the Apache vote has passed, so it is the event that
-  # publishes the image under its version. released, not published: a draft
-  # or a prerelease must not publish either.
+  # The prerelease is for developer review; its successful CI run attaches
+  # binaries for the release manager. Only the approved full release starts
+  # the release image job.
   release:
-    types: [released]
-  # By hand: publish a release that predates this workflow, or retry a
-  # publish that failed.
+    types: [published, released]
+  # Run diagnostics on a tag. Image publication is a separate opt-in
+  # for retrying a version whose GitHub release is already public.
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to publish, for example v0.1.0'
+        description: 'Tag selected in the workflow ref, for example v0.3.0'
         required: true
+      publish_image:
+        description: 'Retry image publication for an existing official release'
+        type: boolean
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event.action || 'run' }}
   cancel-in-progress: true
 
 permissions:
@@ -50,6 +54,7 @@ permissions:
 jobs:
   license:
     name: License
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +73,7 @@ jobs:
 
   build:
     name: Build and Test
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -125,6 +131,7 @@ jobs:
   # builds and tests it there.
   source-package:
     name: Source package
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -147,6 +154,7 @@ jobs:
   # into a root that verifies. Ubuntu only, because it needs docker.
   collector:
     name: Collector
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -165,6 +173,7 @@ jobs:
   # committed copy differs, so the copy cannot drift from its source.
   conversation-view:
     name: Conversation view
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -177,13 +186,13 @@ jobs:
       - name: Build the renderer from the pinned Horizon commit and compare
         run: make conversation-view-check
 
-  # Builds every platform on every run so a broken cross-compile is caught
-  # at once, and keeps the packages as an artifact. They are never attached
-  # to a GitHub release, because they are not the voted, signed files.
-  # tools/release.sh complete attaches those, once each matches the file
-  # downloads.apache.org serves.
+  # Builds every platform on diagnostic and prerelease runs so a broken
+  # cross-compile is caught early. The artifact passes the packages to smoke
+  # tests and, for a published prerelease, to candidate-assets. Official
+  # promotion reuses those bytes after their signatures and source are added.
   binaries:
     name: Binaries
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ubuntu-latest
     # The packages job names the artifact by this version.
     outputs:
@@ -191,7 +200,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
+      - name: Check the requested tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          test "$GITHUB_REF" = "refs/tags/$INPUT_TAG" || {
+            echo "Select the same tag as the workflow ref and the tag input."
+            exit 1
+          }
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27'
@@ -239,6 +257,7 @@ jobs:
   # its archive.
   packages:
     name: Package ${{ matrix.platform }}
+    if: github.event_name != 'release' || github.event.release.prerelease
     needs: binaries
     runs-on: ${{ matrix.runner }}
     # A run takes about a minute. If Git Bash never returns from waiting on a
@@ -262,7 +281,7 @@ jobs:
       # the binaries job built. Nothing is built here.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: binaries-${{ needs.binaries.outputs.version }}
@@ -294,6 +313,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event_name != 'release' || github.event.release.prerelease
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -304,11 +324,35 @@ jobs:
       - name: Lint
         run: make lint
 
-  # The container image. A pull request builds it. A push to main, the
-  # released event of a GitHub release, or a run started by hand builds it
-  # for both platforms and publishes it to GHCR under this repository's name.
+  candidate-assets:
+    name: Prerelease binaries
+    if: github.event_name == 'release' && github.event.action == 'published' && github.event.release.prerelease
+    needs: [license, build, source-package, lint, binaries, packages, collector, conversation-view]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries-${{ needs.binaries.outputs.version }}
+          path: dist
+      - name: Attach the tested packages to the prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.binaries.outputs.version }}
+          RELEASE_ID: ${{ github.event.release.id }}
+        run: |
+          platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
+          bash tools/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RELEASE_ID" dist "$platforms"
+
+  # Candidate tags build and test their packages without publishing an image.
+  # A manual image retry requires an existing public GitHub release.
   docker:
     name: Docker
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'release' && github.event.action == 'released') || (github.event_name == 'workflow_dispatch' && inputs.publish_image)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -318,11 +362,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # A promotion by hand builds the tag it names. Every other event
-          # builds the ref that triggered it. Tags are needed to decide
-          # whether a promoted version is the newest release.
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
-          fetch-depth: 0
+          # Bind the build to the run's commit, even if a tag moves later.
+          ref: ${{ github.sha }}
+      - name: Check a manual image retry
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test "$GITHUB_REF" = "refs/tags/$INPUT_TAG"
+          test "$(gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '(.isDraft == false) and (.isPrerelease == false)')" = true
       - name: Set up buildx
         run: docker buildx create --use --name asz
       - name: Image tags
@@ -330,6 +379,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eu
           image=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
@@ -356,7 +406,10 @@ jobs:
                   # A pre-release such as 0.2.0-rc1 moves no floating tag.
                   ;;
                 *)
-                  highest=$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-' | head -1)
+                  # Candidate tags do not affect which approved release is latest.
+                  highest=$(gh api --method GET --paginate "repos/$GITHUB_REPOSITORY/releases" \
+                    --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+                    | sed -nE '/^v[0-9]+\.[0-9]+\.[0-9]+$/p' | sort -Vr | head -1)
                   if [ "v$version" = "$highest" ]; then tags="$tags,$image:latest"; fi ;;
               esac ;;
           esac
@@ -389,7 +442,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, source-package, lint, docker, binaries, packages, collector, conversation-view]
+    needs: [license, build, source-package, lint, docker, binaries, packages, collector, conversation-view, candidate-assets]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

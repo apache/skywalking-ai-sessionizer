@@ -175,6 +175,30 @@ type Adapter struct {
 	Collector Collector `yaml:"collector"`
 }
 
+// UnmarshalYAML starts each named adapter with its own defaults. Decoding
+// over those values preserves an explicit false or empty exclusion list.
+func (a *Adapter) UnmarshalYAML(node *yaml.Node) error {
+	var name struct {
+		Name string `yaml:"name"`
+	}
+	if err := node.Decode(&name); err != nil {
+		return err
+	}
+	type plain Adapter
+	value := plain{Name: name.Name, Enabled: true}
+	for _, def := range Default().Adapters {
+		if def.Name == name.Name {
+			value = plain(def)
+			break
+		}
+	}
+	if err := node.Decode(&value); err != nil {
+		return err
+	}
+	*a = Adapter(value)
+	return nil
+}
+
 // Collector controls collection cadence for one adapter.
 type Collector struct {
 	// Mode is "watch" (poll continuously) or "once" (single pass, then exit).
@@ -266,8 +290,8 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	// Decode over a zero value so unset fields stay distinguishable from
-	// zero-valued ones, then fill gaps from the defaults.
+	// Adapters decode over their named defaults. The other sections fill
+	// their gaps below; pointers preserve explicit false export switches.
 	var loaded Config
 	if err := yaml.Unmarshal(data, &loaded); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)

@@ -42,13 +42,17 @@ adapter.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `name` | | `claude-code-local`, `claude-code-changes` or `claude-code-otlp` |
-| `enabled` | `true` | A disabled adapter is skipped by every command. |
+| `enabled` | `true` for local and changes; `false` for the receiver | A disabled adapter is skipped by every command. |
 | `source_root` | empty | Where Claude Code keeps its files. Empty resolves it the way Claude Code does: `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME/claude`, then `~/.claude`, each followed by `projects`. Set it only to collect from a copy or a mounted directory. |
 | `include` | empty | Session filters, see below. Empty means every session is a candidate. |
 | `exclude` | `/private/tmp/**` | Session filters, see below. |
 | `metrics` | `false` | Derive the runtime's own metric family from the landed files, `claude_code.token.usage` in phase one, name for name with the runtime's exporter. See [Metrics](export-otlp.md#metrics). |
 | `listen` | none | On `claude-code-otlp` only: the address the runtime's exporter is pointed at, such as `127.0.0.1:4317`, serving gRPC and HTTP with protobuf on the one port. |
 | `metrics_lookback` | `24h` | How far back the first derivation over a root reaches. A duration such as `24h`, or a number of days such as `7d`. `0` or `none` derives everything. Later passes derive every new file whole. |
+
+Each named adapter inherits its own defaults for omitted fields. An explicit `enabled: false`
+disables it, and `exclude: []` clears the default exclusions. Naming only some adapters replaces
+the default adapter list; it does not add the other adapters back.
 
 ### Session filters
 

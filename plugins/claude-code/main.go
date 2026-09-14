@@ -245,7 +245,7 @@ func (p *plugin) captureID(r *scan.Root) string {
 func (p *plugin) policy() *changes.Policy {
 	pol := &changes.Policy{Exclusions: p.rules.Set, Expanded: p.rules.Expanded}
 	if p.st.ReadOnly.On() {
-		pol.ReadOnly = readonly.ReadonlyV1
+		pol.ReadOnly = readonly.ReadonlyV2
 	}
 	return pol
 }
@@ -422,6 +422,10 @@ func (p *plugin) editedFile() string {
 // window open at the same time sees the change as shared with the edit
 // rather than as its own.
 func (p *plugin) touch(root, file string) error {
+	_, file, observed := p.editScope(file)
+	if !observed {
+		return nil
+	}
 	r, err := scan.Open(p.dataDir, root)
 	if err != nil {
 		return err
@@ -476,18 +480,69 @@ func (p *plugin) closeStale(r *scan.Root, reg *capture.Registry) {
 // own response.
 func (p *plugin) edit() error {
 	in := p.in
-	root := ""
-	if roots := p.roots(); len(roots) > 0 {
-		root = roots[0]
+	root, file, ok := p.editScope(p.editedFile())
+	if !ok {
+		return nil
 	}
 	rec, ok := edits.Record(edits.Context{
 		ID: in.ToolUseID, Session: in.SessionID, Stream: in.Stream(), Tool: in.ToolUseID,
 		ToolName: in.ToolName, Time: p.now.UTC().Format(time.RFC3339Nano), Root: root,
+		FilePath: file, SizeCap: p.st.SizeCap,
 	}, in.ToolResponse)
 	if !ok {
 		return nil // nothing the response could say; a failed edit
 	}
+	rec.Policy = p.policy()
 	return output.Append(p.dataDir, rec)
+}
+
+// editScope applies the same root, directory and link boundaries as a scan
+// before an editing response can retain any of the file's content.
+func (p *plugin) editScope(file string) (string, string, bool) {
+	if file == "" {
+		return "", "", false
+	}
+	if !filepath.IsAbs(file) {
+		if p.in.Cwd == "" {
+			return "", "", false
+		}
+		file = filepath.Join(p.in.Cwd, file)
+	}
+	file = filepath.Clean(file)
+	for _, workspace := range p.roots() {
+		root, err := filepath.Abs(workspace)
+		if err != nil {
+			continue
+		}
+		if info, err := os.Lstat(root); err != nil || !info.IsDir() {
+			continue
+		}
+		rel, err := filepath.Rel(root, file)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		allowed := true
+		parts := strings.Split(rel, string(filepath.Separator))
+		for i := range parts {
+			prefix := filepath.Join(parts[:i+1]...)
+			path := filepath.Join(root, prefix)
+			if i < len(parts)-1 && p.rules.Prune(filepath.ToSlash(prefix), path) {
+				allowed = false
+				break
+			}
+			if info, err := os.Lstat(path); err == nil && (info.Mode()&os.ModeSymlink != 0 || (i == len(parts)-1 && !info.Mode().IsRegular())) {
+				allowed = false
+				break
+			} else if err != nil && !os.IsNotExist(err) {
+				allowed = false
+				break
+			}
+		}
+		if allowed {
+			return root, file, true
+		}
+	}
+	return "", "", false
 }
 
 // maintain applies the two retention rules: output files past their TTL
@@ -542,7 +597,7 @@ func status() error {
 	fmt.Printf("data directory : %s\n", dataDir)
 	fmt.Printf("roots          : %s\n", orDefault(strings.Join(st.Roots, ", "), "the session's project directory"))
 	fmt.Printf("scope tools    : %s\n", strings.Join(st.Tools.Scope, ", "))
-	fmt.Printf("read-only skip : %v (%s)\n", st.ReadOnly.On(), readonly.ReadonlyV1)
+	fmt.Printf("read-only skip : %v (%s)\n", st.ReadOnly.On(), readonly.ReadonlyV2)
 	fmt.Printf("retention      : snapshot bytes %s idle, output %s\n", st.Retention.Idle, st.Retention.TTL)
 	fmt.Printf("scan cap       : %s; file size cap %d bytes\n", st.ScanTimeout, st.SizeCap)
 	fmt.Printf("exclusions     : %s, %d rules\n", rules.Set, len(rules.Expanded))

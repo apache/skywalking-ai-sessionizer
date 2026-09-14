@@ -187,8 +187,9 @@ Re-cuts every landed file of the storage root, or of one session, into `DEST` so
 exceeds the configured `max_delta_bytes`, then assembles `DEST`'s chains. Every record keeps its
 bytes and its order; the cursors come along so collection can continue into `DEST`; the index and
 the chains are rebuilt there, because a round addresses records by file and line and the old
-references name positions that no longer exist. `DEST` must be a different directory: a landed file
-is never rewritten in place. One row per session:
+references name positions that no longer exist. `DEST` must be a new or empty directory. A populated
+destination is refused before any session is written, because its chains bind to the original
+landed files. If a repack is interrupted, retry into another empty directory. One row per session:
 
 ```text
 SESSION                               FILES IN  FILES OUT  RECORDS  BYTES

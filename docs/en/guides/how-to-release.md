@@ -2,7 +2,7 @@
 
 This guide is for the release manager, and for anyone checking a release candidate before voting.
 Apache SkyWalking AI Sessionizer follows the Apache release process. The SkyWalking PMC votes on a
-candidate, and only after the vote passes is anything published as a release.
+candidate, and only after the vote passes is anything published as an official release.
 
 `tools/release.sh` runs the stages, one command for each. None of them pushes to `main`. For every
 stage this page shows the command, says what it does, and lists the svn commands it runs, so a
@@ -10,9 +10,10 @@ release manager can finish a stage by hand when the script stops.
 
 ## What counts as a release
 
-A release is the PMC vote, the signed packages in the release directory on dist.apache.org, and
-the announcement on the website and the announce list. Nothing else is. Until the announcement, a
-version is not an official release, whatever GitHub shows.
+An official Apache release has the PMC's approval. Its signed packages are published through
+Apache's distribution channel. The website and announcement then direct users to that release.
+A GitHub release alone cannot provide that approval. See the
+[ASF release policy](https://www.apache.org/legal/release-policy.html).
 
 - **The source package** is what the PMC votes on. It is the Apache release.
 - **The binary packages** are the convenience binaries of the vote. They are built from the tagged
@@ -20,11 +21,12 @@ version is not an official release, whatever GitHub shows.
   directory, and voters check them too.
 - **A git tag** is a candidate. `prepare` pushes it before the vote, so a tag alone says nothing
   about whether a version was released.
-- **The GitHub release** is a convenience. From 0.3.0 on, it is created after the release, and it
-  carries the voted packages.
-- **The container image** is a convenience, and how it is published for a release is still
-  pending. Today, creating the GitHub release starts CI's image job. Nothing in the release waits
-  for it.
+- **The GitHub prerelease** holds CI-built binaries for developer review before the vote. It is
+  explicitly marked as a development candidate, not an official Apache release. After the vote
+  and SVN publication, the same page receives the voted source package and signatures and is
+  promoted to a full GitHub release. All its packages then match the Apache distribution.
+- **The container image** is a convenience. Publishing the complete GitHub release starts CI's
+  image job. Candidate tag builds and default manual CI runs publish no image.
 - **The Homebrew, Scoop and winget manifests** are conveniences, submitted after the release.
 
 0.3.0 is the first version to go through this process. 0.1.0 and 0.2.0 were published on GitHub
@@ -36,7 +38,7 @@ GitHub releases as pre-releases, or to remove their packages, is for the PMC to 
 
 | Stage | Run by | What it leaves |
 | --- | --- | --- |
-| [1. Prepare](#1-prepare) | the release manager | the tag `v$VERSION` on GitHub, and a pull request |
+| [1. Prepare](#1-prepare) | the release manager | the tag `v$VERSION`, a GitHub prerelease for CI binaries, and a pull request |
 | [2. Candidate](#2-candidate) | the release manager | the signed candidate in the dev area of dist.apache.org, and the vote mail |
 | [3. The vote](#3-the-vote) | the PMC | the votes on the dev list, over at least 72 hours |
 | [4. Vote result](#4-vote-result) | the release manager | the result mail |
@@ -55,8 +57,9 @@ Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
   `docs/en/changes/changes-X.Y.Z.md` in the checkout. `prepare` makes that page in the commit
   after the tag, and `main` holds it once the prepare pull request has merged.
 - `candidate`, `vote-result` and `publish` write their files under `dist/$VERSION/` in the
-  checkout, and `complete` reads the voted packages from there. `prepare` writes nothing there.
-  Git ignores `dist/`.
+  checkout. `complete` recovers the voted files from the SVN release directory; retained local
+  files are optional and must agree when present. `prepare` writes nothing there. Git ignores
+  `dist/`.
 - `--dry-run` prints what the stage would do. It makes no commit and no push, changes nothing on
   dist.apache.org or GitHub, and writes no file in `dist/`. `candidate`, `publish` and `complete`
   read the tag to make the plan. So, like a real run, they fetch `v$VERSION` from origin into the
@@ -84,12 +87,12 @@ Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
    svn commit -m "Add the key of <your name>" KEYS
    ```
 
-   `candidate` refuses to build with a key that is not in KEYS, because every voter checks the
+   `candidate` refuses to sign with a key that is not in KEYS, because every voter checks the
    signatures against that file. It also refuses a key that has expired or is revoked in KEYS, a
    key that is not RSA of at least 2048 bits, and a key that has no user ID with an apache.org
    address. gpg reads the expiry of a key from KEYS, not from your machine. So when you extend
    your key, have a PMC member commit the renewed public key to KEYS before the next candidate.
-2. **The tools.** git, Go 1.27 or later, make, gpg, shasum, tar, zip, unzip, file, curl, svn, and
+2. **The tools.** git, Go 1.27 or later, make, Python 3, gpg, shasum, tar, gzip, zip, unzip, file, curl, svn, and
    gh logged in to an account that can write to the repository. `prepare`, `candidate`, `publish`
    and `complete` check for the tools they use before they change anything, and name any that is
    missing. `vote-result` checks for none, because it needs only standard tools such as sed and
@@ -146,7 +149,7 @@ arguments. It offers the version the heading of `docs/en/changes/changes.md` nam
 `release/$VERSION` cut from `main`, it then does these steps in order:
 
 1. Checks for git, make, Go, awk, sed, grep and sort, and for gh unless `--no-push` is given.
-   Refuses a dirty tree, an existing tag or branch, and a next version that does not come after
+   Refuses a dirty tree, an existing tag, branch or GitHub release, and a next version that does not come after
    this one. Refuses too when `changes.md` does not name `$VERSION` in its heading or has no
    in-development note, when `changes-$VERSION.md` or `changes-$NEXT.md` exists, and when Current
    Version in `docs/menu.yml` does not point at `/en/changes/changes`.
@@ -162,8 +165,10 @@ arguments. It offers the version the heading of `docs/en/changes/changes.md` nam
    `docs/menu.yml`, right after Current Version. It writes a new `docs/en/changes/changes.md` for
    `$NEXT`, with the heading `# Changes in $NEXT` and the in-development note. Current Version and
    the welcome page link `changes.md` already, so they stay as they are.
-5. Pushes the branch and the tag, and opens the pull request "Prepare the $VERSION candidate and
-   open $NEXT" against `main`. The pull request names `candidate` as the next step.
+5. Pushes the branch and the tag, creates a GitHub prerelease titled `$VERSION` with a development
+   candidate warning, and opens the pull request "Prepare the $VERSION candidate and open $NEXT"
+   against `main`. The prerelease is not marked latest. Its published event starts CI, which
+   attaches binaries and checksums only after all checks and platform smoke tests pass.
 
 By hand, the two commits are:
 
@@ -194,67 +199,100 @@ The second commit lists the version right after Current Version, so the Changelo
 `--dry-run` prints the plan and writes nothing. It installs nothing either. It runs
 `make license-check` only when `bin/license-eye` is there, and `make check` only when
 `bin/license-eye` and `bin/golangci-lint` are there. Otherwise it lists the check it left out.
-`--no-push` stops after the commits and prints the push and pull request commands. `prepare` runs
+`--no-push` stops after the commits and prints the push, prerelease and pull request commands. `prepare` runs
 no svn command.
 
-Review and merge the pull request. From here the tag is on GitHub, as a candidate.
+Review and merge the pull request. The tag and prerelease are candidates for developer review.
+Neither triggers an official release image or announcement. The scripts never delete a
+prerelease or replace its binary assets automatically; remove a rejected prerelease explicitly
+before preparing its replacement, as described below.
 
 ## 2. Candidate
 
-After the prepare pull request has merged:
+`make release VERSION=$VERSION` runs this same preparation with `--no-upload`, writing the signed
+packages under `dist/$VERSION/`. `CI_RUN=<id>` selects a run for that make target. To upload to
+SVN and start a vote, use `tools/release.sh candidate` as shown below.
+
+After the prepare pull request has merged, wait for the prerelease's CI run to finish
+successfully. It builds all six binary packages and runs each on a runner of its own platform.
+Only after all checks pass does CI attach the six archives and six `.sha512` files to the
+prerelease. It verifies the uploaded bytes and adds a readiness marker to the prerelease notes.
+This run publishes no container image.
 
 ```sh
 GPG_USER=<key id, fingerprint or email> tools/release.sh candidate $VERSION
 ```
 
+The binary archives uploaded to SVN always come from that GitHub prerelease. `candidate` reads
+its readiness marker and verifies the successful uploader run for the exact release tag and
+commit. To require a specific uploader run:
+
+```sh
+tools/release.sh candidate $VERSION --ci-run <run id>
+```
+
+A successful run on `main`, a tag push or a manual diagnostic run does not make a prerelease
+ready. The prerelease's published event is the only run that attaches its candidate assets. If
+that run failed or its candidate was rejected, review the failure, explicitly remove the
+incomplete prerelease, then recreate it to start a new run:
+
+```sh
+gh release delete v$VERSION --repo apache/skywalking-ai-sessionizer
+gh release create v$VERSION --repo apache/skywalking-ai-sessionizer --verify-tag \
+  --prerelease --latest=false --title "$VERSION" \
+  --notes "Development candidate for community review. This is not an official Apache release. CI will attach unsigned binary archives and checksums after all checks pass. Remove this prerelease before preparing a replacement."
+```
+
+Deleting the prerelease does not delete the tag. A source change also requires the tag change
+agreed by the community; see [When the vote fails](#when-the-vote-fails). Wait for the replacement
+prerelease's CI run before calling `candidate`. The scripts do not overwrite existing candidate
+assets or reuse an old readiness marker.
+
 `GPG_USER` picks the signing key. When it is empty, gpg's default key signs. If gpg fails without
 asking for the passphrase, run `export GPG_TTY=$(tty)` first.
 
-It does these steps in order, and stops at the first one that fails.
+The command takes these steps and stops at the first failure:
 
-1. **Check the tools and the tag.** `v$VERSION` must be on origin. Its
-   `docs/en/changes/changes.md` must name `$VERSION` in its heading and carry no in-development
-   note, as `prepare` leaves it in the commit it tags. The vote mail links that page. A local tag
-   of the same name must be the same object as the one on origin. When there is no local tag, it
-   fetches that one tag from origin, in a dry run too, and says so.
-2. **Name the packages.** They are the ones the Makefile in the tag builds: the source package,
-   and one binary package for each entry in its `PLATFORMS`. The tag is read, never the working
-   tree, so a platform added later is never demanded of an older version. It also finds the
-   package for this machine, which step 8 runs. `uname` gives the system and the processor:
-   macOS, Linux, or Windows under Git Bash or MSYS2, on x86-64 or ARM 64. When `PLATFORMS` has
-   that platform, the tag must carry `tools/package-smoke.sh`. The `machine` line of the output
-   names the package, or says that no package is built for this machine.
-3. **Look for fonts in the source package.** It lists what `git archive` of the tag holds, which
-   is what the source package will hold, and refuses a font file: `.woff`, `.woff2`, `.ttf`,
-   `.otf` or `.eot`. Fonts come under licenses such as the SIL Open Font License, which the ASF
-   puts in [Category B](https://www.apache.org/legal/resolved.html), and a Category B work must
-   not be in a source release. The two fonts of the conversation renderer are marked
-   `export-ignore` in `.gitattributes`, so `git archive` leaves them out, and they are in the
-   binary packages only. `--dry-run` runs this step too.
-4. **Check the candidate directory.** With `--no-upload`, see the paragraph after these steps.
+1. **Check the tools and tag.** It needs git, gh, Python 3, gpg, shasum, tar, gzip, unzip, file,
+   curl and sh, plus svn when uploading. The tag must exist on origin, agree with any local tag,
+   and hold the finished changelog at `docs/en/changes/changes.md`. A missing local tag is
+   fetched. The packages are the source package and the platforms in the tag's Makefile.
+   `git archive` must contain no fonts; `.gitattributes` excludes the two OFL fonts and local
+   metadata files such as `._*`, `.DS_Store` and `__MACOSX`.
+2. **Check the candidate directory.** It lists the dev and release roots, then the project's
+   version directories when they exist:
 
    ```sh
    svn ls https://dist.apache.org/repos/dist/dev/skywalking
    svn ls https://dist.apache.org/repos/dist/release/skywalking
-   svn ls https://dist.apache.org/repos/dist/release/skywalking/ai-sessionizer   # when it exists
-   svn ls https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer       # when it exists
+   svn ls https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer
+   svn ls https://dist.apache.org/repos/dist/release/skywalking/ai-sessionizer
    ```
 
-   It refuses when `$VERSION` is in the release directory already. It also refuses when a
-   candidate of `$VERSION` was uploaded before, and prints the command that removes that
-   candidate:
+   It refuses an already released version or an uploaded candidate. To replace a withdrawn
+   candidate, first remove it, then call a new vote on the replacement:
 
    ```sh
    svn rm -m "Remove the Apache SkyWalking AI Sessionizer $VERSION candidate for a new one" \
      https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer/$VERSION
    ```
 
-5. **Check the signing key.** It signs a scratch file with the key, and reads from gpg's status
+3. **Download and verify prerelease binaries.** `tools/ci-binaries.sh` requires the expected
+   public prerelease and its readiness marker. The marker must identify a completed, successful
+   run and attempt of this repository's CI workflow, from the Apache repository, on `v$VERSION`
+   at the release commit. A fork, branch run, failed run or wrong commit is refused. It accepts
+   exactly the expected archives and their `.sha512` files, downloads each GitHub release asset
+   by its ID, checks GitHub's SHA-256 digest and verifies every package's SHA-512 checksum.
+   `tools/package-check.sh` also rejects AppleDouble `._*` files, `.DS_Store` and `__MACOSX`
+   entries inside each package. The helper rechecks the tag, release and CI run after downloading.
+   It does not depend on Actions artifact retention. There is no local binary build fallback.
+   If the prerelease is not ready, the command stops before signing.
+4. **Check the signing key.** It signs a scratch file with the key, and reads from gpg's status
    output the key that signed and its primary key. It downloads KEYS from
    `https://dist.apache.org/repos/dist/release/skywalking/KEYS`, imports it into an empty scratch
    keyring, and refuses when:
    - the primary key is not there. A voter checks every signature against KEYS, so a key missing
-     there is found before the build, not during the vote.
+     there is found before the packages are signed, not during the vote.
    - gpg marks the primary key, or the subkey that signs, as expired or revoked in that keyring.
      Every voter's gpg reads the same KEYS, and would warn about it. The
      [ASF release signing guide](https://infra.apache.org/release-signing.html) counts a signature
@@ -272,64 +310,31 @@ It does these steps in order, and stops at the first one that fails.
      fewer than 4096 bits gets a warning, because the ASF asks a new key to be 4096 bits.
    - no user ID of the key, as KEYS holds it, has an apache.org address. A revoked or expired user
      ID does not count.
-6. **Build from a fresh clone of the tag.** It never builds from the working tree, so the packages
-   hold exactly what the tag holds. By hand:
+5. **Create the source package and copy the CI packages.** Only the source archive is made
+   locally, directly from the immutable release commit:
 
    ```sh
-   git init dist/$VERSION/build
-   git -C dist/$VERSION/build remote add origin <the origin URL of this checkout>
-   git -C dist/$VERSION/build fetch --depth 1 origin refs/tags/v$VERSION:refs/tags/v$VERSION
-   git -C dist/$VERSION/build checkout v$VERSION
-   (cd dist/$VERSION/build && make release VERSION=$VERSION GPG_USER=<key>)
-   mv dist/$VERSION/build/dist/*.tgz* dist/$VERSION/build/dist/*.zip* dist/$VERSION/
+   git archive --format=tar --prefix=apache-skywalking-ai-sessionizer-$VERSION-src/ <release commit> \
+     | gzip -n > dist/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz
    ```
 
-   `make release` refuses to run unless the tag is checked out, and the tree has no change and no
-   file that git does not track, ignored files included. Only its build output may be there, in
-   `dist/`, `bin/` and `plugins/claude-code/bin/`. An untracked Go file would be compiled into the
-   binaries. `asz` embeds every file in `internal/view/conversation-view/` whose name does not
-   start with `.` or `_`. The binary packages take the plugin's `.claude-plugin/` and `hooks/` and
-   `dist-material/licenses/` whole, so an ignored `.DS_Store` there would be packaged. The source
-   package, made from the tag, holds none of them. The binaries are built with `GOWORK=off` and
-   `GOFLAGS=-mod=readonly`, so a `go.work` in the tree or in a directory above it does not change
-   what they are built from.
-   `make release` also refuses when git tracks a file of a type `COMPILED_TYPES` in the Makefile
-   names, or with a name `COMPILED_FILES` names, because an Apache source release must not carry
-   compiled code. `COMPILED_FILES` is for the compiled files `file` cannot tell by type: the
-   `file` 5.41 that ships with macOS reports a WebAssembly module and a Python `.pyc` file as
-   `application/octet-stream`. It removes packages left in `dist/` by an earlier build, so none is
-   signed with these.
-   Then it builds the packages [described below](#what-make-release-builds). Right after
-   `git archive`, it lists the source package and stops when a font file is in it. It looks for
-   the file types step 3 looks for, which `FONT_FILES` in the Makefile names. It removes that
-   source package before any checksum or signature is made, so it cannot be uploaded by hand.
-7. **Verify the candidate** in `dist/$VERSION/`.
-   - Every package is there with its `.asc` and `.sha512`, and no other package is.
-   - `shasum -a 512 -c` passes for each package.
-   - gpg, reading the KEYS keyring, reports a good signature by the checked key for each package.
-     It does not report the key that signed, or the signature, as expired or revoked: no
-     `EXPKEYSIG`, `REVKEYSIG` or `EXPSIG` line. gpg exits 0 for a key that has expired in KEYS
-     too, so its exit status is not enough.
-   - The source package holds `LICENSE` and `NOTICE` at its top level, and nothing outside its top
-     directory. It holds no font file. `file` finds no file of a type `COMPILED_TYPES` in the
-     tag's Makefile names, and no file has a name `COMPILED_FILES` there names.
-   - Each binary package holds `asz`, `claude-code-plugin/bin/asz-claude-plugin`,
-     `claude-code-plugin/.claude-plugin/`, `claude-code-plugin/hooks/`, `LICENSE`, `NOTICE` and
-     `licenses/`. On Windows the two binaries end in `.exe`.
-8. **Run the package for this machine** with `tools/package-smoke.sh`, the check a voter runs in
-   item 9 of the [check list for voters](#check-list-for-voters). `make release` cross-compiles
-   every platform on this machine, and a binary that was never started proves nothing about its
-   platform. The script and its scenarios come from the clone of the tag, never from the working
-   tree, because a scenario newer than the tag may need what the tag's binary does not have. By
-   hand:
-
-   ```sh
-   bash dist/$VERSION/build/tools/package-smoke.sh dist/$VERSION/<package for this machine> $VERSION
-   ```
-
-   When the check fails, `candidate` stops, so nothing is uploaded and no vote mail is written.
-   When no package is built for this machine, it says so and goes on.
-9. **Upload** from a scratch working copy. `--no-upload` skips this step. By hand:
+   This archives committed files, subject to the tag's `.gitattributes`, without filesystem
+   metadata from the release manager's checkout. The verified CI binary archives and checksums
+   are copied unchanged into `dist/$VERSION/`. They are never unpacked and repacked for release.
+   `ci-provenance.txt` records the prerelease, CI run, asset digests and commit for the vote mail. It stays
+   local; only the release packages, their signatures and checksums go to SVN.
+6. **Verify before signing.** All expected archives must exist and pass the metadata checker and
+   their SHA-512 checksums. The source archive must have one top directory with `LICENSE` and
+   `NOTICE`, no font file and no compiled file named by the tag's Makefile. Each binary package
+   must contain both binaries, the plugin manifest and hooks, `LICENSE`, `NOTICE` and
+   `licenses/`. The command then signs every verified archive and verifies each signature
+   against the SkyWalking KEYS keyring. The CI binary checksums remain unchanged.
+7. **Run the package for this machine again.** The command unpacks the source archive in a
+   temporary directory and runs its `tools/package-smoke.sh` on the signed CI package for the
+   release manager's platform. The script and scenarios therefore come from the candidate
+   source. A failed check stops the upload. A host outside the release platforms is reported and
+   skips this additional local check; CI has already run all six packages.
+8. **Upload the exact signed files.** `--no-upload` skips this step. By hand:
 
    ```sh
    svn checkout --depth empty https://dist.apache.org/repos/dist/dev/skywalking dev
@@ -341,61 +346,40 @@ It does these steps in order, and stops at the first one that fails.
    svn commit -m "Add the Apache SkyWalking AI Sessionizer $VERSION release candidate"
    ```
 
-10. **Write the vote mail** to `dist/$VERSION/vote.txt`, with every link and checksum filled in,
-    the fingerprint of the signing key, and the notes for voters, and print it.
+9. **Write the vote mail** to `dist/$VERSION/vote.txt`, including the checksums, signing key,
+   CI run and asset provenance. The vote approves these exact bytes. `publish` moves them
+   within SVN, and `complete` checks the GitHub binaries against them before adding source and signatures.
 
-`--no-upload` builds, verifies and runs the package for this machine, and uploads nothing. It
-writes the mail to `dist/$VERSION/vote-preview.txt`, never to `vote.txt`, because its checksums
-are those of a build that is not a candidate. It refuses when `dist/$VERSION/vote.txt` is there,
-because a candidate was uploaded from this checkout. When svn is installed, it also lists the dev
-area and the release directory, and refuses when a candidate of `$VERSION` is there or `$VERSION`
-is released already. A new build would replace the uploaded or voted files in `dist/$VERSION/`,
-and its signatures at least would differ from them.
+`--no-upload` downloads and verifies the CI binaries, creates the source archive, signs and tests
+the packages, and writes `vote-preview.txt`. It uploads nothing. It refuses when `vote.txt`
+shows that a candidate was uploaded from this checkout, or when SVN shows the version in the
+dev or release directory. A repeated run must never silently replace the files being voted on.
 
-`--dry-run` builds, runs and uploads nothing, and writes nothing into `dist/$VERSION/`. It still
-fetches a missing tag, as step 1 says. It still checks the signing key as step 5 does: it signs a
-scratch file, so gpg may ask for the passphrase, and it reads svn and KEYS. The scratch file, its
-signature and the KEYS keyring are in a temporary directory that it removes. Its plan names the
-package it would run on this machine.
+`--dry-run` creates no package, downloads no prerelease asset, runs no package and uploads nothing.
+It fetches a missing tag, checks SVN and the signing key, and prints the CI selection it would
+make. The signing check uses a scratch file and keyring, so gpg may ask for the passphrase. It
+writes nothing into `dist/$VERSION/`. The plan does not claim that prerelease assets were verified.
 
-Running `candidate` again rebuilds everything in `dist/$VERSION/` from the tag. After an upload it
-refuses, as step 4 says.
+### What the packages contain
 
-### What make release builds
+- The source package is `apache-skywalking-ai-sessionizer-$VERSION-src.tgz`. It contains the
+  tagged source under `apache-skywalking-ai-sessionizer-$VERSION-src/`, with the fonts and local
+  metadata excluded by `.gitattributes`. A build from it uses system fonts.
+- Each binary package is `apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>.tgz`, or
+  `.zip` for Windows. It contains `asz`, the complete `claude-code-plugin/`, and the binary
+  distribution's `LICENSE`, `NOTICE` and `licenses/`. Both binaries end in `.exe` on Windows.
+  These packages include the renderer's two OFL fonts and their license texts.
+- Every archive has a `.sha512` checksum and an ASCII-armored detached `.asc` signature.
 
-`make release VERSION=$VERSION`, with the tag checked out, writes into `dist/`:
+The tag's `PLATFORMS` names macOS, Linux and Windows, each on x86-64 and ARM 64. CI cross-compiles
+without cgo on Linux with its configured Go toolchain and packages with GNU tar, gzip and zip.
+It uses `GOWORK=off` and `GOFLAGS=-mod=readonly`. Both binaries report `$VERSION` and the Go
+version used to build them. The run must pass the whole CI workflow, including package smoke
+tests on all six platforms, before its archives are eligible for the candidate.
 
-- `apache-skywalking-ai-sessionizer-$VERSION-src.tgz`, the source package. It is `git archive` of
-  the tag, so it holds what is committed, under one directory,
-  `apache-skywalking-ai-sessionizer-$VERSION-src/`, less what `.gitattributes` marks
-  `export-ignore`. That leaves out the two fonts of the conversation renderer, which are under the
-  SIL Open Font License, a Category B license. A build from the source package draws the page with
-  system fonts.
-- `apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>.tgz`, or `.zip` for Windows, one
-  binary package for each platform. Each holds `asz` (`asz.exe` on Windows), `claude-code-plugin/`
-  with the Claude Code plugin's `.claude-plugin/`, `hooks/` and `bin/asz-claude-plugin`, and the
-  `LICENSE`, `NOTICE` and `licenses/` of a binary distribution, generated into `dist-material/`.
-  They name the modules built into the two binaries on the six platforms, and no module that
-  only tests need. The binaries embed the two fonts, which `dist-material/LICENSE` names.
-- A `.sha512` checksum and an `.asc` signature beside every package. `GPG_USER` picks the key.
-  The first package that cannot be checksummed or signed stops the release.
-
-The platforms are the `PLATFORMS` list in the Makefile: macOS on Apple silicon and Intel, Linux on
-x86-64 and ARM 64, and Windows on x86-64 and ARM 64. That is seven packages with the source
-package. Every platform is cross-compiled from the release manager's machine without cgo, with the
-Go on the release manager's `PATH`. It must be at least the version `go.mod` declares. With an
-older Go, the go command stops, or downloads that version and builds with it, as `GOTOOLCHAIN`
-decides. `asz version` and the plugin's `version` print the Go version that built them, so a voter
-can see which one the release manager used.
-
-Two builds of the tag give the same bytes when they use the same Go, the same tar and the same
-gzip. Go records the tag in each binary as the module's version, so a build of the same commit made
-before it was tagged differs. Every file in a binary package gets the time of the tag's
-commit and the same modes, the entries are stored in one sorted order with owner and group 0, and
-neither gzip nor zip stores a time or a local user of its own. So no package records who built it
-or when. GNU tar and bsdtar write their headers differently, and GNU gzip and Apple's gzip compress
-differently. So a package CI builds, with GNU tar and GNU gzip, differs from one built on macOS,
-with bsdtar and Apple's gzip. The signatures still differ from one signing to the next.
+`make binaries` remains useful for local build checks. Those archives are not the release
+candidate. GNU and macOS archive tools can produce different bytes even from the same files, so
+`candidate` always uses the unchanged CI archives. Neither signing nor promotion repacks them.
 
 ## 3. The vote
 
@@ -436,6 +420,10 @@ Guide to build the release from source:
  * https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/guides/how-to-release.md
 
 Notes for voters:
+ * The binary archives are the unchanged packages downloaded from the GitHub prerelease after its successful CI run. The release manager created only the source archive locally and signed every archive.
+ * CI run: https://github.com/apache/skywalking-ai-sessionizer/actions/runs/<run id>
+ * Prerelease: https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v$VERSION, commit <release commit>
+ * Asset: <asset id>, sha256:<asset digest>, <package name>
  * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. `make conversation-view-check`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
  * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.
 
@@ -580,13 +568,15 @@ The script has no stage for a failed vote. Reply on the vote thread to say what 
 comes next depends on where the problem is.
 
 - **In the packages, not in the tagged source.** For example, a signature by the wrong key, or a
-  file missing from the upload. Remove the candidate with the `svn rm` command from step 4 of
+  file missing from the upload. Remove the candidate with the `svn rm` command from step 2 of
   [Candidate](#2-candidate), remove `dist/$VERSION/`, run `candidate` again, and call a new vote.
-  It builds from the same tag.
+  It takes the same verified CI binaries and recreates the source archive from the same tag.
 - **In the source.** The tag has to change, and the script does not change a tag. `prepare`
   refuses a version whose tag exists. Fix the problem on `main`, and agree on the dev list how to
   go on: a new tag for the same version, or the next version. Either way, remove the old candidate
-  with `svn rm`.
+  with `svn rm`, and explicitly remove the rejected GitHub prerelease before preparing the new
+  one. Do not replace its binary assets in place. The new prerelease must run CI and receive a
+  new readiness marker before its binaries can be signed for the next vote.
 
 ## 4. Vote result
 
@@ -707,8 +697,8 @@ It does these steps in order.
    svn export --force <candidate directory>/<file> dist/$VERSION/<file>
    ```
 
-4. **Move the candidate to the release directory.** The move publishes the voted packages. With
-   the vote and the announcement, it makes the release:
+4. **Move the candidate to the release directory.** The move publishes the packages approved by
+   the vote:
 
    ```sh
    # only on the first release, while the directory does not exist
@@ -751,35 +741,37 @@ tools/release.sh complete $VERSION
 downloads.apache.org serves the release directory a short while after the move. How long that
 takes has not been measured. Until then, `complete` refuses, so run it again later.
 
-1. It checks the tag, and refuses when the GitHub release exists already.
-2. For every package, `dist/$VERSION/` must hold it with its `.asc` and `.sha512`. Each must match
-   what `https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/` serves: the `.sha512`
-   file, the package's own sha512, and the `.asc`. Every file is checked before anything is
-   created, because creating the GitHub release starts CI's image job.
-3. It builds the text of the GitHub release and prints it. The text is
-   `docs/en/changes/changes.md` as the tag holds it, without its heading, because the release has
-   its own title. The section "Where to get it", shown below, follows it. The text is
-   built from the tag each time and is not stored in the repository, so a change made on `main`
-   after `prepare` does not reach it. `--dry-run` stops after printing it.
-4. It creates the GitHub release with that text: tag `v$VERSION`, title `$VERSION`, not a draft,
-   not a prerelease. By hand:
+1. It checks the tag and the existing GitHub prerelease. Its tag and title must match this
+   version. An already full release or a missing prerelease is refused. A matching recovery
+   draft is also supported; the command never creates a replacement release.
+2. It exports every voted package, `.asc` and `.sha512` from the canonical SVN release directory
+   into a fresh temporary directory, verifies the archive checksums and signatures against
+   SkyWalking KEYS, and checks that the signatures and checksums served by
+   `https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/` match SVN. Existing local
+   copies must agree, but `dist/$VERSION/` need not exist. No CI download or retained build
+   artifact is needed at this stage. These checks happen before any GitHub write.
+3. It builds the release text from the tag's `docs/en/changes/changes.md`, without that page's
+   heading, followed by "Where to get it" below. The text is printed. `--dry-run` prints the
+   plan without creating, uploading or publishing anything.
+4. The prerelease must already hold every binary archive and its `.sha512` file, unchanged from
+   the SVN vote. They are downloaded and compared with SVN and are never uploaded again. An
+   unexpected asset, missing binary or different content stops the command with instructions
+   for manual recovery from SVN. It adds only missing source files and signatures, preserving
+   existing matching files so an interrupted completion can be resumed.
+5. It checks that GitHub holds exactly the expected files, downloads them and compares every
+   byte to the voted files from SVN. It rechecks the release identity and type before promoting
+   the same prerelease to a full release:
 
    ```sh
-   git show v$VERSION:docs/en/changes/changes.md | tail -n +2 > notes.md
-   # Add the section "Where to get it" below to the end of notes.md.
-   gh release create v$VERSION --verify-tag --title $VERSION --notes-file notes.md
+   gh release edit v$VERSION --repo apache/skywalking-ai-sessionizer --draft=false --prerelease=false
    ```
 
-5. It uploads the voted packages, each with its `.asc` and `.sha512`. That is 21 files for six
-   platforms. It never replaces a file already on the release:
-
-   ```sh
-   gh release upload v$VERSION dist/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-*
-   ```
-
-   When the upload stops part way, run that command again with `--clobber`.
-6. It says that the Homebrew formula and the winget manifests can be submitted now, once the PMC
-   has agreed to each channel, because both download from this GitHub release.
+   The `released` event and image publication happen at this point, after all packages,
+   signatures and checksums are present. If an upload or verification fails, the release stays
+   a prerelease (or recovery draft). Run `tools/release.sh complete $VERSION` again to verify
+   existing assets and resume.
+6. The Homebrew and winget manifests can now be submitted, once the PMC has agreed to each
+   channel, because their download URLs refer to the complete public GitHub release.
 
 The section "Where to get it" sends a reader to the Apache release and to the signatures, as the
 [ASF release policy](https://www.apache.org/legal/release-policy.html) asks. It also links the
@@ -796,15 +788,23 @@ documentation and the changelog of the tag:
 ```
 
 The GitHub release is a convenience, a page on GitHub carrying the same bytes as the release
-directory. CI never attaches the packages it builds, because they are not the voted, signed files.
-Its `binaries` job still builds every platform on every run, so a broken cross-compile shows at
-once, and keeps the packages only as a workflow artifact. Its `packages` job then runs each of
-those packages with `tools/package-smoke.sh`, on a runner of the package's own platform.
+directory. CI first uploads unsigned binaries and checksums to the prerelease; the release
+manager downloads those bytes, signs them locally and stages them with the source archive for
+the SVN vote. `complete` verifies the existing binaries against the published SVN files, adds
+the source and signatures, then promotes that prerelease. CI also retains diagnostic workflow
+artifacts, but neither candidate preparation nor completion depends on them. The `binaries`
+job builds every platform on diagnostic and prerelease runs, and `packages` runs each with
+`tools/package-smoke.sh` on a runner of its own platform.
 
-The released event starts CI's `docker` job. Today that job publishes the container image to the
-GitHub container registry under `$VERSION`, and under `latest` when it is the highest version tag.
-The image is a convenience, and how it is published for a release is still pending. Nothing in the
-release waits for it. If the job fails, start the CI workflow by hand with the tag as its input.
+The released event starts CI's `docker` job. That job publishes the container image to the
+GitHub container registry under `$VERSION`, and under `latest` when it is the highest version
+among full published GitHub releases. Newer candidate tags and prereleases do not affect `latest`.
+The image is a convenience built from the released source. The source and binary archive
+release does not wait for the image job. If the image job fails, retry it on the release tag with `publish_image=true`:
+
+```sh
+gh workflow run ci.yaml --repo apache/skywalking-ai-sessionizer --ref v$VERSION -f tag=v$VERSION -f publish_image=true
+```
 
 ## 7. The website
 

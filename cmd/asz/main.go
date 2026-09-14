@@ -639,7 +639,7 @@ func cmdShow(cfg *config.Config, _ config.Adapter, _ bool) error {
 				kind = "tool_result"
 			}
 			fmt.Printf("── %s  block %d of record  stream=%s\n", kind, b.Ord, ix.Strings.String(e.Stream))
-			if err := printEntry(z, ix, session, e); err != nil {
+			if err := printEntry(z, session, e); err != nil {
 				return err
 			}
 		}
@@ -650,20 +650,13 @@ func cmdShow(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if !found {
 		return fmt.Errorf("id %q not found in the index for %s", want, session)
 	}
-	return printEntry(z, ix, session, e)
+	return printEntry(z, session, e)
 }
 
 // printEntry locates one indexed record on disk and prints it.
-func printEntry(z *storage.Zone, ix *index.Index, session string, e *index.Entry) error {
-	stream := ix.Strings.String(e.Stream)
-	run := ix.Strings.String(e.Run)
-	dir := z.StreamDir(session, stream)
-	if run != "" {
-		dir = z.RunDir(session, run)
-	}
-
+func printEntry(z *storage.Zone, session string, e *index.Entry) error {
 	// seq selects the landed file; row selects the line within it.
-	path, err := landedPathForSeq(dir, e.Seq)
+	path, err := landedPathForSeq(z, session, e.Seq)
 	if err != nil {
 		return err
 	}
@@ -722,18 +715,19 @@ func printEntry(z *storage.Zone, ix *index.Index, session string, e *index.Entry
 }
 
 // landedPathForSeq finds the landed file carrying a sequence.
-func landedPathForSeq(dir string, seq uint32) (string, error) {
-	items, err := os.ReadDir(dir)
+func landedPathForSeq(z *storage.Zone, session string, seq uint32) (string, error) {
+	// The sequence is unique across the session. An indexed Run groups
+	// model calls; it is not the workflow directory that holds a file.
+	files, err := storage.LandedFiles(z, session)
 	if err != nil {
 		return "", err
 	}
-	suffix := fmt.Sprintf("-%06d.jsonl", seq)
-	for _, it := range items {
-		if strings.HasSuffix(it.Name(), suffix) {
-			return filepath.Join(dir, it.Name()), nil
+	for _, file := range files {
+		if file.Seq == uint64(seq) {
+			return file.Path, nil
 		}
 	}
-	return "", fmt.Errorf("no landed file with seq %d in %s", seq, dir)
+	return "", fmt.Errorf("no landed file with seq %d in %s", seq, z.SessionDir(session))
 }
 
 // cmdCollect is the pipeline, on the collector's interval: land what is new

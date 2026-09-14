@@ -10,6 +10,8 @@ session.
   <session-id>/
     session.state                        next_seq, liveness (always unknown), last scan
     .lock                                one collector per session
+    metrics/                             immutable decisions of local metric derivation
+      000001.json                        exact request and accounting for landed file 1
     streams/
       main/
         transcript.cursor                how far the source has been read
@@ -61,6 +63,13 @@ wrote. [Retention](#retention) says what they are for.
 
 `liveness` in `session.state` is always `unknown`. asz has no check for whether a session is
 still running.
+
+When local metrics are enabled, each derived file gets a receipt under its session's `metrics/`.
+It holds the landed digest, counted call ids, series windows and exact protobuf request, encoded
+as base64 in JSON. The receipt is published before the request enters `_metrics/`, so a retry
+after an interrupted progress save uses the same accounting even if new fragments have arrived.
+Receipts are local collection state and are not sent as session data. `metrics.state` also keeps
+the first pass's look-back for deferred files until their derivation completes.
 
 ## Landed files
 
@@ -290,9 +299,10 @@ Publishing a round reads the head and then writes the next round. `.lock` lets o
 at a time. Without it, two parsers could both read round N and both write a round N+1. The digest
 is part of the file name, so the two files would not collide, and the chain would fork with no
 error. A second parser gets a lock error and writes nothing. Under the lock, a round that does not
-follow the head is refused, and a round file is created only when no file of that name exists, then
-made read-only. A test in `tests/chain` runs four parsers at once on one session and requires
-exactly one round.
+follow the head is refused. The next round is written to a temporary file, made read-only and
+synced before an atomic operation installs its final name without replacing an existing file.
+An interrupted write leaves no partial round for a reader to fold. Tests in `tests/chain` cover
+an interrupted writer and four parsers running at once.
 
 Parse takes the lock before it reads the index. A parser that read the index first could hold an
 old one while a scenario removal took the session away, and then publish a round over evidence

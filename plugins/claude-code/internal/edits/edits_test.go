@@ -19,6 +19,8 @@ package edits_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
@@ -112,5 +114,39 @@ func TestAResponseWithoutAFileIsNoRecord(t *testing.T) {
 	}
 	if _, ok := edits.Record(edits.Context{}, nil); ok {
 		t.Fatal("nothing made a record")
+	}
+}
+
+func TestSizeCapCoversOriginalContentAndPatchOnlyDiskReads(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "large.txt")
+	content := []byte("large file content\n")
+	if err := os.WriteFile(file, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		response map[string]any
+	}{
+		{"original", map[string]any{"filePath": file, "originalFile": string(content), "content": "x"}},
+		{"disk", map[string]any{"filePath": file, "structuredPatch": []any{map[string]any{"lines": []string{"+x"}}}}},
+		{"patch", map[string]any{"filePath": file, "content": "x", "structuredPatch": []any{map[string]any{"lines": []string{"+large patch content"}}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, _ := json.Marshal(tc.response)
+			rec, ok := edits.Record(edits.Context{SizeCap: 4}, raw)
+			if !ok {
+				t.Fatal("the metadata was lost with the large content")
+			}
+			change := rec.Changes[0]
+			if change.Diff != changes.DiffTooLarge || len(change.Hunks) != 0 || change.Additions != nil || change.Deletions != nil {
+				t.Fatalf("large content retained in the patch: %+v", change)
+			}
+			if tc.name == "disk" {
+				want := changes.EndpointOf(content, true)
+				if change.After.Bytes == nil || *change.After.Bytes != *want.Bytes || change.After.SHA256 != want.SHA256 {
+					t.Fatalf("streamed endpoint: %+v, want %+v", change.After, want)
+				}
+			}
+		})
 	}
 }

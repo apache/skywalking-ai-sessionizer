@@ -155,38 +155,31 @@ func WriteAtomic(path string, perm os.FileMode, fn func(io.Writer) error) (err e
 // ErrExists means a no-replace write found its target already present.
 var ErrExists = errors.New("storage: target already exists")
 
-// WriteExclusive creates a file that must not already exist.
+// WriteExclusive publishes a complete file without replacing an existing one.
 //
-// The exclusion is done by the kernel, with O_EXCL, and not by checking first.
-// A check followed by a write has a window between the two: two writers both
-// see nothing there, and both proceed. That is tolerable for a landed file,
-// whose sequence makes a collision a bug to surface elsewhere. It is not
-// tolerable for a published artifact in a digest chain, where replacing one
-// invalidates every artifact that names it.
-//
-// The file is written in place rather than renamed into position, because a
-// rename is what would reintroduce the replacement. It is fsynced and made
-// read-only before it is visible under its final name in the directory listing
-// - it is created empty, so a reader that catches it mid-write sees a short
-// file, which Read rejects for having no commit frame.
+// A round's name advances the chain head, so even an interrupted writer must
+// never leave a partial file at that name. Write and sync a temporary file
+// first, then let the kernel install it only if the destination is absent.
+// A crash before that operation leaves only a temporary file, which readers
+// ignore. A crash after it leaves the complete, read-only round.
 func WriteExclusive(path string, perm os.FileMode, fn func(io.Writer) error) (err error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		if os.IsExist(err) {
-			return fmt.Errorf("%w: %s", ErrExists, path)
-		}
 		return err
 	}
+	tmpName := f.Name()
 	defer func() {
-		if err != nil {
-			f.Close()
-			os.Remove(path)
-		}
+		_ = f.Close()
+		_ = os.Remove(tmpName)
 	}()
 	if err = fn(f); err != nil {
+		return err
+	}
+	if err = f.Chmod(perm); err != nil {
 		return err
 	}
 	if err = f.Sync(); err != nil {
@@ -195,15 +188,10 @@ func WriteExclusive(path string, perm os.FileMode, fn func(io.Writer) error) (er
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = os.Chmod(path, perm); err != nil {
+	if err = RenameExclusive(tmpName, path); err != nil {
 		return err
 	}
-	d, derr := os.Open(filepath.Dir(path))
-	if derr != nil {
-		return nil // the file is written; durability of the entry is best effort
-	}
-	defer d.Close()
-	_ = d.Sync()
+	syncDir(dir)
 	return nil
 }
 

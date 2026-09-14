@@ -103,7 +103,7 @@ func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
 	return out, nil
 }
 
-// landedNameRe matches "<kind>-<stamp>-<seq>.jsonl".
+// landedNameRe matches "<kind>-<stamp>-<seq>.sd".
 var landedNameRe = regexp.MustCompile(`-(\d{6,})\.sd$`)
 
 // LandedFileSeq extracts the sequence from a landed filename.

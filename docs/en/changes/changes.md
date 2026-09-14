@@ -2,6 +2,25 @@
 
 > In development, not yet released. `tools/release.sh prepare 0.3.0` removes this note.
 
+## Reliability
+
+- A round is published only after its temporary file is complete, read-only and synced. An
+  interrupted write no longer leaves a truncated `.sf` file that stops every later parse.
+- `asz repack` refuses a populated destination before writing. Its session reservation and
+  file publication also refuse existing data, so repeating a repack cannot invalidate a chain.
+- `asz show` locates the current `.sd` files through the shared filename parser.
+- Named adapters inherit their own defaults, while explicit `false` and empty exclusions stay
+  as written. Omitting `enabled` no longer disables a local adapter by mistake.
+- Token derivation follows calls across any number of landed files and leaves unfinished calls
+  eligible for later completion. Deferred sessions are retried while other sessions keep growing.
+  Immutable receipts keep requests and their accounting together across an interrupted progress
+  save, even when new fragments arrive before retry. Deferred history retains its look-back.
+- The Claude Code plugin applies roots, exclusions and content limits to subagent edits and their
+  manifest updates. Its `readonly-v2` policy scans executable wrappers and writing command modes
+  that the earlier policy skipped, so concurrent writes retain their actual tool windows.
+- Local tar packaging disables AppleDouble metadata. Source and binary archive checks reject
+  `._*`, `.DS_Store` and `__MACOSX` entries, including the entries macOS tar hides by default.
+
 ## Collection
 
 - A landed record keeps the provider model a call ran on, as `model`, the name the runtime wrote
@@ -177,14 +196,14 @@
 ## Release
 
 - `tools/release.sh` runs the Apache release in five stages, each started by hand. `prepare` tags
-  the candidate and opens the pull request, as before. Its tag message, its commit and its pull
+  the candidate, creates its GitHub prerelease and opens the pull request. Its tag message, its commit and its pull
   request no longer call the candidate a release, and it checks for the tools it uses first.
-  `candidate` builds the packages from a fresh clone of the tag, signs them, verifies them against
-  the KEYS file the way a voter does, uploads them to the dev area of dist.apache.org and writes
+  `candidate` downloads the verified CI binaries from that prerelease, archives the tagged source
+  locally, signs every package, verifies them against KEYS, uploads them to the dev area of dist.apache.org and writes
   the vote mail. `vote-result` counts the votes, refuses a vote that did not pass, and writes the
   result mail. `publish`, run by a PMC member, moves the voted packages to the release directory
-  and writes the announcement, the website entries and the install manifests. `complete` creates
-  the GitHub release. [How to Release](../guides/how-to-release.md) walks through each stage and
+  and writes the announcement, the website entries and the install manifests. `complete` promotes
+  the same GitHub prerelease. [How to Release](../guides/how-to-release.md) walks through each stage and
   the svn commands it runs.
 - `candidate` refuses a signing key that is not RSA of at least 2048 bits, as the ASF requires,
   or that has no apache.org user ID, and a source package that would hold a font file, since
@@ -252,10 +271,13 @@
   `release-notes-VERSION.md` file `prepare` used to store.
   [How to Release](../guides/how-to-release.md#the-changelog) describes the layout, which the root
   `CHANGES.md` used to describe.
-- `complete` uploads the voted packages to the GitHub release, each with its signature and
-  checksum, after checking each against the file downloads.apache.org serves. CI no longer
-  attaches the packages it builds, because they are not the signed files the vote approved. It
-  still builds every platform on every run, and keeps the packages as a workflow artifact.
+- CI attaches the six binary archives and their checksums to the GitHub prerelease only after all
+  checks pass. The local download verifies the tag, CI run, release identity and asset checksums.
+  A replacement candidate requires explicitly removing the rejected prerelease first.
+- `complete` recovers the approved packages from SVN and checks them against Apache downloads.
+  Existing GitHub binaries and checksums must match and are never uploaded again. It uploads only
+  missing source files and signatures, verifies the full asset set, and promotes the prerelease.
+  It can resume an interrupted upload without the original CI artifacts or local `dist` directory.
 - Windows on ARM 64 joins the platforms, so a version ships six binary packages beside the source
   package.
 - `tools/install-manifests.sh` writes a Homebrew formula, a Scoop manifest and the winget
@@ -268,29 +290,20 @@
   The winget manifests download from the GitHub release too, because the archive slows down and
   bans heavy use. Each package must match the voted `.sha512` beside it.
   [Install](../setup/install.md) lists every way to get asz.
-- `make release` refuses to build when git tracks a compiled file, because an Apache source release
-  must not carry compiled code, and `candidate` refuses the same file types. It also refuses a tree
-  with any change or untracked file, and removes packages an earlier build left in `dist/`.
-  `GPG_USER` picks the key it signs with.
-- `make release` also refuses a file git does not track when `.gitignore` ignores it. The build
-  uses such files, and the source package, made from the tag, holds none of them. `asz` embeds
-  every file in `internal/view/conversation-view/` whose name does not start with `.` or `_`, and
-  a binary package copies the plugin's `.claude-plugin/` and `hooks/` and
-  `dist-material/licenses/` whole. Only the build output, in `dist/`, `bin/` and
-  `plugins/claude-code/bin/`, may be there. The binaries are built with `GOWORK=off` and
-  `GOFLAGS=-mod=readonly`, so a `go.work` cannot change what they are built from. The compiled
-  files it refuses now include static libraries, Go object files and archives, Java archives and
-  Python byte code. `COMPILED_FILES` in the Makefile names by extension the ones `file` cannot
-  tell by type: the `file` 5.41 that ships with macOS reports a WebAssembly module and a `.pyc`
-  as `application/octet-stream`. `candidate` refuses the same files in the source package, and
-  the voters' check list finds them too.
+- `make release` delegates to `candidate --no-upload`, preparing signed files locally from the
+  verified GitHub binaries and tagged source. `GPG_USER` picks the signing key. Local binaries
+  from `make binaries` are for diagnostics; candidate staging never falls back to them.
+- Binary builds use `GOWORK=off` and `GOFLAGS=-mod=readonly`, so local workspace settings cannot
+  change their dependencies. `candidate` checks the source archive for compiled files by content
+  type and extension, including static libraries, Go objects, Java archives and Python byte code.
+  The voters' checklist checks them too.
 - `make checksums` stops at the first package it cannot checksum, removes that `.sha512`, and
   checks each `.sha512` right after writing it. Before, a failed checksum left an empty
   `.sha512`, and `make release` went on to sign every package.
 - The source package holds no font file. The two fonts of the conversation renderer are under the
   SIL Open Font License, which the ASF puts in Category B, and the ASF does not allow a Category B
   work in a source release. `.gitattributes` marks them `export-ignore`, so `git archive` leaves
-  them out, and `make release` stops and removes a source package that holds a font file anyway.
+  them out, and candidate preparation refuses a source package that holds a font file anyway.
   The binaries in the binary packages embed the fonts, and `dist-material/LICENSE` names them. A
   build from the source package draws the page with system fonts.
 - `make conversation-view-check` passes in an unpacked source package. That package leaves out

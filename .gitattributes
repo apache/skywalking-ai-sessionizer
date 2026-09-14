@@ -21,6 +21,12 @@
 # bytes, and a checkout that rewrote line endings would change every one.
 * text=auto eol=lf
 
+# Source archives contain project files, never macOS filesystem metadata.
+**/._* export-ignore
+**/.DS_Store export-ignore
+**/__MACOSX export-ignore
+**/__MACOSX/** export-ignore
+
 # The fixture corpus reproduces another program's files byte for byte and is
 # never to be touched by git.
 tests/adapter/claudecode/local/claudecode-files/** -text
