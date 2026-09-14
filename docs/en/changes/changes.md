@@ -1,7 +1,5 @@
 # Changes in 0.3.0
 
-> In development, not yet released. `tools/release.sh prepare 0.3.0` removes this note.
-
 ## Reliability
 
 - A round is published only after its temporary file is complete, read-only and synced. An
