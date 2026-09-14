@@ -45,12 +45,17 @@ type receipt struct {
 	Skipped bool                 `json:"skipped,omitempty"`
 }
 
+// commit applies the receipt to the session's state. It only adds counted
+// calls and only moves a series forward, so receipts applied again, or in
+// another order after an interrupted pass, give the same state.
 func (r *receipt) commit(ss *sessionState) {
 	for _, id := range r.Counted {
 		ss.Calls[id] = true
 	}
 	for k, t := range r.LastEnd {
-		ss.Series[k] = t.UnixNano()
+		if end := t.UnixNano(); end > ss.Series[k] {
+			ss.Series[k] = end
+		}
 	}
 }
 
@@ -89,6 +94,9 @@ func (d *Deriver) deriveReceipt(path string, lf storage.LandedFile, following []
 		// Another deriver settled this file first. Its decision is the one
 		// that may already have reached the spool, so both writers must use it.
 		r, err = loadReceipt(path, lf)
+		if err == nil && r == nil {
+			err = fmt.Errorf("metrics: receipt %s is still being published; the file is derived again on a later pass", path)
+		}
 	}
 	return r, false, err
 }
@@ -100,6 +108,12 @@ func loadReceipt(path string, lf storage.LandedFile) (*receipt, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	// A receipt is never empty. An empty file is a reservation still being
+	// published, or one a crash left; storage takes the second away once it
+	// is old enough. Either way no decision was recorded.
+	if len(data) == 0 {
+		return nil, nil
 	}
 	var r receipt
 	if err := json.Unmarshal(data, &r); err != nil {

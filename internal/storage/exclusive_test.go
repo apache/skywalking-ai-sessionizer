@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
@@ -132,5 +133,60 @@ func TestConcurrentExclusiveWritersPreserveTheWinner(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("publication left %d files, want one", len(entries))
+	}
+}
+
+// An empty destination is how an abandoned reservation is recognized, so an
+// empty file is never published.
+func TestRenameExclusiveRefusesAnEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	from := filepath.Join(dir, ".tmp-empty")
+	if err := os.WriteFile(from, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	to := filepath.Join(dir, "round.sf")
+	if err := storage.RenameExclusive(from, to); err == nil {
+		t.Fatal("an empty file was published")
+	}
+	if _, err := os.Stat(to); !os.IsNotExist(err) {
+		t.Fatalf("the destination exists: %v", err)
+	}
+}
+
+// On a filesystem without an exclusive rename, a crash between the
+// reservation and the rename leaves an empty file under the final name. Once it is old enough it is taken for that crash's leftover
+// and replaced. A fresh one may still belong to a live writer and is refused.
+func TestRenameExclusiveReplacesOnlyAnAbandonedReservation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		age       time.Duration
+		published bool
+	}{
+		{"abandoned", 2 * time.Minute, true},
+		{"live", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			to := filepath.Join(dir, "000001.json")
+			if err := os.WriteFile(to, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-tc.age)
+			if err := os.Chtimes(to, old, old); err != nil {
+				t.Fatal(err)
+			}
+			from := filepath.Join(dir, ".tmp-receipt")
+			if err := os.WriteFile(from, []byte("receipt"), storage.PermLanded); err != nil {
+				t.Fatal(err)
+			}
+			err := storage.RenameExclusive(from, to)
+			body, _ := os.ReadFile(to)
+			if tc.published && (err != nil || string(body) != "receipt") {
+				t.Fatalf("abandoned reservation not replaced: %v, %q", err, body)
+			}
+			if !tc.published && (!errors.Is(err, storage.ErrExists) || len(body) != 0) {
+				t.Fatalf("a live reservation was replaced: %v, %q", err, body)
+			}
+		})
 	}
 }

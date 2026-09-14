@@ -20,6 +20,7 @@ package metrics_test
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -189,6 +190,92 @@ func TestFirstPassErrorKeepsTheLookbackForUnreachedFiles(t *testing.T) {
 	got, _ = points(t, z)
 	if n := total(got["main/output/m#s1"]); n != 67 {
 		t.Fatalf("a finished session kept its first pass look-back: got %v output tokens, want 67", n)
+	}
+}
+
+// On a filesystem without an exclusive rename, a crash can leave an empty
+// file under a receipt's name. No decision was recorded in it, so the file is
+// derived; an abandoned reservation is replaced, a fresh one waits a pass.
+func TestEmptyReceiptIsNotADecision(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		age     time.Duration
+		counted float64
+	}{
+		{"abandoned", 2 * time.Minute, 60},
+		{"live", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			z := storage.NewZone(t.TempDir())
+			land(t, z, "s1", "a1", 1, []call{{id: "done", model: "m", at: base, frags: 1, in: 4, out: 60}})
+			receipt := filepath.Join(z.SessionDir("s1"), "metrics", "000001.json")
+			if err := os.MkdirAll(filepath.Dir(receipt), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(receipt, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-tc.age)
+			if err := os.Chtimes(receipt, old, old); err != nil {
+				t.Fatal(err)
+			}
+			st, err := deriver(z, base.Add(time.Hour), metrics.Options{Grace: -1}).Pass(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _ := points(t, z)
+			if n := total(got["subagent/output/m#s1"]); n != tc.counted {
+				t.Fatalf("counted %v output tokens, want %v; stats=%+v", n, tc.counted, st)
+			}
+			if tc.counted == 0 && (len(st.Errors) != 1 || len(st.PendingSessions) != 1) {
+				t.Fatalf("a live reservation must leave the session for another pass: %+v", st)
+			}
+		})
+	}
+}
+
+// A pass published a receipt for a later file while an earlier file waited
+// for its grace, then failed to save its progress. On the retry the waiting
+// file must not take a window the receipt's request already holds, and
+// applying the receipt again must not move its series back.
+func TestReplayedReceiptKeepsSeriesWindowsApart(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	waiting := land(t, z, "s1", "a1", 1, []call{{id: "waiting", model: "m", at: base, frags: 1, in: 1, out: 10}})
+	aged(t, waiting, base)
+	settled := land(t, z, "s1", "a2", 2, []call{{id: "settled", model: "m", at: base, frags: 1, in: 1, out: 20}})
+	aged(t, settled, base.Add(-time.Hour))
+	statePath := filepath.Join(storage.NewSpool(z).Dir(), metrics.StateFile)
+	d := deriver(z, base.Add(time.Minute), metrics.Options{})
+	d.Now = func() time.Time {
+		// The state file's path becomes a directory, so the save fails.
+		if err := os.MkdirAll(statePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return base.Add(time.Minute)
+	}
+	st, err := d.Pass(nil)
+	if err == nil {
+		t.Fatalf("state save unexpectedly succeeded: %+v", st)
+	}
+	if err := os.Remove(statePath); err != nil {
+		t.Fatal(err)
+	}
+	later := land(t, z, "s1", "a3", 3, []call{{id: "later", model: "m", at: base, frags: 1, in: 1, out: 30}})
+	aged(t, later, base.Add(-time.Hour))
+	st, err = deriver(z, base.Add(time.Hour), metrics.Options{}).Pass(nil)
+	if err != nil || len(st.Errors) > 0 || len(st.PendingSessions) > 0 {
+		t.Fatalf("retry: %v %+v", err, st)
+	}
+	got, _ := points(t, z)
+	ps := got["subagent/output/m#s1"]
+	if total(ps) != 60 || len(ps) != 3 {
+		t.Fatalf("points = %+v, want three calls totalling 60 output tokens", ps)
+	}
+	sort.Slice(ps, func(i, j int) bool { return ps[i].start.Before(ps[j].start) })
+	for i := 1; i < len(ps); i++ {
+		if ps[i].start.Before(ps[i-1].end) {
+			t.Fatalf("windows overlap: %v-%v and %v-%v", ps[i-1].start, ps[i-1].end, ps[i].start, ps[i].end)
+		}
 	}
 }
 

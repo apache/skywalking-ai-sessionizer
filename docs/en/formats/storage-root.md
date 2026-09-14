@@ -312,6 +312,12 @@ disk image, both calls returned "operation not supported". There asz creates an 
 `O_EXCL`, which still refuses an existing round, then renames the complete round over it. Between
 those two calls, with no write between them, a reader or a crash can see an empty round file.
 
+No round or receipt is ever empty, so an empty file under such a name is a reservation. The chain
+does not count an empty round file, and the next publication removes one older than a minute. An
+empty receipt holds no decision, so its file is derived again, and a publication replaces a
+receipt reservation older than a minute. A younger one may belong to a writer still running, so
+the file waits for a later pass.
+
 Parse takes the lock before it reads the index. A parser that read the index first could hold an
 old one while a scenario removal took the session away, and then publish a round over evidence
 that is gone. A parse of a session with no landed file and no round publishes nothing, and creates

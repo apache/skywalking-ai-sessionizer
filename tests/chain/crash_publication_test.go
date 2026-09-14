@@ -109,3 +109,35 @@ func TestKilledRoundWriterDoesNotAdvanceTheChain(t *testing.T) {
 		t.Fatalf("chain after restart: %d rounds, %v", len(files), err)
 	}
 }
+
+// On a filesystem without an exclusive rename, a crash between the
+// reservation and the rename leaves an empty file under a round's name. It is
+// not part of the chain, and the next parse removes it and goes on.
+func TestAbandonedRoundReservationDoesNotStopTheChain(t *testing.T) {
+	s := newStage(t, growing)
+	s.through("one")
+	first := s.parse()
+	chain := sessionflow.OpenChain(s.zone.Root(), s.session)
+	empty := filepath.Join(chain.RoundsDir(), "r000002-000000000000.sf")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(empty, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if head, err := chain.Head(); err != nil || head != first.Number {
+		t.Fatalf("an empty reservation counted as a round: head %d, %v", head, err)
+	}
+	s.through("two")
+	next := s.parse()
+	if next.Number != first.Number+1 {
+		t.Fatalf("published round %d, want %d", next.Number, first.Number+1)
+	}
+	if files, err := chain.Verify(); err != nil || len(files) != 2 {
+		t.Fatalf("chain after the abandoned reservation: %d rounds, %v", len(files), err)
+	}
+	if _, err := os.Stat(empty); !os.IsNotExist(err) {
+		t.Fatalf("the abandoned reservation is still there: %v", err)
+	}
+}

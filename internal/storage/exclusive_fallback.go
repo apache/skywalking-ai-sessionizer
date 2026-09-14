@@ -46,6 +46,7 @@ func installLinked(from, to string) error {
 // destination, through O_EXCL on an empty reservation. The reservation is
 // then replaced by the complete file. Only between those two calls, with no
 // write or sync between them, can a reader or a crash see an empty file.
+// RenameExclusive takes away an empty file a crash left there.
 func installReserved(from, to string) error {
 	f, err := os.OpenFile(to, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {

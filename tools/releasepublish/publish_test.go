@@ -375,6 +375,32 @@ func TestPublishRefusesConflictingAttachmentsWithoutReplacingThem(t *testing.T) 
 	}
 }
 
+// CI's files are never uploaded, so they are compared only in the final
+// check of every byte. A binary replaced on GitHub under its own name must
+// stop the promotion, and a later run must find it too.
+func TestPublishRefusesAReplacedCIBinary(t *testing.T) {
+	binary := "apache-skywalking-ai-sessionizer-0.3.0-bin-linux-amd64.tgz"
+	t.Run("before-promotion", func(t *testing.T) {
+		f := newFixture(t)
+		f.write("gh/"+binary, []byte("rebuilt elsewhere\n"))
+		f.requireFailure("the GitHub release's " + binary + " differs")
+		if got := string(f.read("gh/" + binary)); got != "rebuilt elsewhere\n" {
+			t.Fatalf("the replaced binary was overwritten: %q", got)
+		}
+	})
+	t.Run("after-promotion", func(t *testing.T) {
+		f := newFixture(t)
+		if output, err := f.run(); err != nil {
+			t.Fatalf("publish: %v\n%s", err, output)
+		}
+		f.write("gh/"+binary, []byte("rebuilt elsewhere\n"))
+		output, err := f.run()
+		if err == nil || !strings.Contains(output, "the GitHub release's "+binary+" differs") {
+			t.Fatalf("a replaced binary on the promoted release passed: %v\n%s", err, output)
+		}
+	})
+}
+
 func TestPublishRefusesAReleaseReplacedDuringVerification(t *testing.T) {
 	f := newFixture(t)
 	f.setState(releaseState{Exists: true, Prerelease: true, Replace: true})

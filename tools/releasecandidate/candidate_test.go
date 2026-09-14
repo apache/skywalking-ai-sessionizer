@@ -285,6 +285,23 @@ func TestCandidateUploadsToSVNAndAttachesToThePrerelease(t *testing.T) {
 	}
 }
 
+// The prerelease must hold the very binaries candidate signed. One replaced
+// on GitHub after the download is found by the check of every byte, and no
+// vote mail is written.
+func TestCandidateRefusesAPrereleaseWhoseBinaryChanged(t *testing.T) {
+	f := candidateFixtureFor(t)
+	if err := os.WriteFile(filepath.Join(f.state, "gh", f.archive), []byte("rebuilt elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := f.stage(t)
+	if err == nil || !strings.Contains(string(output), "the GitHub release's "+f.archive+" differs") {
+		t.Fatalf("a changed prerelease binary passed: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(f.dir, "dist/0.3.0/vote.txt")); !os.IsNotExist(err) {
+		t.Fatal("a vote mail was written for a prerelease that differs from the candidate")
+	}
+}
+
 // An attachment that stops after the upload is finished by running candidate
 // again. The uploaded signatures are the ones the vote is about, so nothing
 // is signed or uploaded to svn a second time.

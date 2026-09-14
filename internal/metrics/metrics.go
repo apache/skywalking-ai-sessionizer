@@ -215,6 +215,23 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			continue
 		}
 		ss := state.session(session)
+		receiptPath := func(lf storage.LandedFile) string {
+			return filepath.Join(d.Zone.SessionDir(session), "metrics", fmt.Sprintf("%06d.json", lf.Seq))
+		}
+		// A pass whose progress was not saved may have published receipts for
+		// files after one that waited for its grace. Their requests are in the
+		// spool already. Apply them before any file is derived again, so the
+		// waiting file's windows follow theirs, as after a saved pass. A receipt
+		// that cannot be read is reported when the loop reaches its file.
+		for _, lf := range files {
+			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
+			if state.Derived[filepath.ToSlash(rel)] != "" {
+				continue
+			}
+			if r, err := loadReceipt(receiptPath(lf), lf); err == nil && r != nil {
+				r.commit(ss)
+			}
+		}
 		pending := false
 		for i, lf := range files {
 			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
@@ -222,7 +239,7 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			if state.Derived[rel] != "" {
 				continue
 			}
-			receiptPath := filepath.Join(d.Zone.SessionDir(session), "metrics", fmt.Sprintf("%06d.json", lf.Seq))
+			receiptPath := receiptPath(lf)
 			receipt, deferred, err := d.deriveReceipt(receiptPath, lf, files[i+1:], sessionSince, ss, grace)
 			if err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))

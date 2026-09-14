@@ -226,7 +226,10 @@ before its later files. Once every file of the session is derived, a later new f
 whole. Before a request enters the
 spool, an immutable receipt under the session's `metrics/` records its exact bytes and the calls
 it counted. If saving progress fails, the retry uses that receipt even when more source fragments
-have arrived, so its accounting still matches the request already written.
+have arrived, so its accounting still matches the request already written. The retry applies every
+such receipt before it derives any file again, and a receipt only moves a series forward. So a file
+that waited for its grace in the failed pass takes a window after the ones already in the spool,
+and no two windows of a series overlap.
 
 The other source of the same family is the runtime's exporter itself: the `claude-code-otlp`
 adapter receives what Claude Code sends and lands each metrics request in the same spool, bytes as

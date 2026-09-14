@@ -7,7 +7,8 @@
 - A round is published only after its temporary file is complete, read-only and synced. An
   interrupted write no longer leaves a truncated `.sf` file that stops every later parse. A
   storage root on exFAT on macOS, which has neither an exclusive rename nor hard links, still
-  publishes rounds and receipts. The conversation list skips a conversation whose only round
+  publishes rounds and receipts. An empty file a crash leaves there under a round's or a receipt's
+  name is not counted, and is replaced once it is a minute old. The conversation list skips a conversation whose only round
   file is the temporary file of an interrupted write.
 - `asz repack` refuses a populated destination before writing. Its session reservation and
   file publication also refuse existing data, so repeating a repack cannot invalidate a chain.
@@ -18,8 +19,10 @@
 - Token derivation follows calls across any number of landed files and leaves unfinished calls
   eligible for later completion. Deferred sessions are retried while other sessions keep growing.
   Immutable receipts keep requests and their accounting together across an interrupted progress
-  save, even when new fragments arrive before retry. A session the first pass did not finish,
-  because a file waited for its grace or an error stopped it, retains that pass's look-back.
+  save, even when new fragments arrive before retry. The retry applies those receipts before it
+  derives a file that waited for its grace, and a receipt only moves a series forward, so no two
+  windows of a series overlap. A session the first pass did not finish, because a file waited for
+  its grace or an error stopped it, retains that pass's look-back.
 - The Claude Code plugin applies roots, exclusions and content limits to subagent edits and their
   manifest updates. Its `readonly-v2` policy scans executable wrappers and writing command modes
   that the earlier policy skipped, so concurrent writes retain their actual tool windows. A
