@@ -31,75 +31,60 @@
 #       its tag. Then, in a second commit, move changes.md to
 #       changes-VERSION.md, list VERSION under Changelog in docs/menu.yml,
 #       and write a new changes.md for NEXT. Push the branch and the tag,
-#       create a GitHub prerelease for developer review, and raise the pull
-#       request against main. CI attaches the binary archives to the prerelease.
-#       Both versions are asked
-#       for when not given, and the heading of changes.md gives the offered
-#       VERSION. A dry run installs no tool: a check whose tool is not in
-#       bin/ yet is listed, not run.
+#       and raise the pull request against main. CI on the tag push builds
+#       and tests every package, then creates the GitHub prerelease and
+#       attaches the binary archives with their .sha512 files. Nothing here
+#       waits for it. Both versions are asked for when not given, and the
+#       heading of changes.md gives the offered VERSION. A dry run installs
+#       no tool: a check whose tool is not in bin/ yet is listed, not run.
 #
 #   tools/release.sh candidate [VERSION] [--ci-run RUN_ID] [--dry-run] [--no-upload]
-#       After the prepare pull request has merged and prerelease CI succeeds:
-#       download its exact binary archives from GitHub, archive the tagged source locally,
-#       sign and verify it in dist/VERSION, run the binary package for this machine
-#       with the tag's tools/package-smoke.sh, upload the candidate to the
-#       dev area of dist.apache.org for the vote, and write the vote mail to
-#       dist/VERSION/vote.txt. The signing key must be RSA of at least 2048
-#       bits, carry an apache.org user ID, and be in the SkyWalking KEYS
-#       file. GPG_USER picks the key; empty means gpg's default key.
-#       --ci-run checks the uploader run named by the prerelease's readiness
-#       marker. Without it, use that marker's run. Never rebuild binaries here.
-#       APACHE_ID, when set, is the name svn logs in with. --no-upload
-#       prepares, verifies and runs the package, uploads nothing, and writes
-#       the mail to dist/VERSION/vote-preview.txt. It refuses once a
-#       candidate of VERSION is uploaded.
-#
-#   tools/release.sh vote-result [VERSION] --binding "Name, Name, Name"
-#           [--non-binding "Name, ..."] [--against "Name, ..."]
-#           [--non-binding-against "Name, ..."] [--abstain "Name, ..."]
-#           [--thread URL] [--dry-run]
-#       After the vote has been open for 72 hours. --binding names the PMC
-#       members who voted +1, --non-binding the other +1 voters, --against
-#       the PMC members who voted -1, --non-binding-against the other -1
-#       voters, and --abstain everyone who voted +0. --thread is the link
-#       of the vote thread on lists.apache.org. Every vote is listed in the
-#       mail; only binding votes decide. Refuse unless the vote passed: at
-#       least three binding +1 votes, and more binding +1 than binding -1
-#       votes. Write the result mail to dist/VERSION/result.txt.
+#       After CI has attached the binaries to the prerelease: download those
+#       exact archives, archive the tagged source locally, sign and verify
+#       every package in dist/VERSION, run the binary package for this
+#       machine with the tag's tools/package-smoke.sh, upload the candidate
+#       to the dev area of dist.apache.org, attach the source package, its
+#       .sha512 and every .asc to the GitHub prerelease, and write the vote
+#       mail to dist/VERSION/vote.txt. The signing key must be RSA of at
+#       least 2048 bits, carry an apache.org user ID, and be in the
+#       SkyWalking KEYS file. GPG_USER picks the key; empty means gpg's
+#       default key. --ci-run checks the uploader run named by the
+#       prerelease's readiness marker. Without it, use that marker's run.
+#       Never rebuild binaries here. APACHE_ID, when set, is the name svn
+#       logs in with. When the candidate is on dist.apache.org already and
+#       this checkout's dist/VERSION holds the same files, candidate signs
+#       and uploads nothing again: it attaches what the prerelease is
+#       missing and writes the vote mail. --no-upload prepares, verifies
+#       and runs the package, uploads nothing, and writes the mail to
+#       dist/VERSION/vote-preview.txt. It refuses once a candidate of
+#       VERSION is uploaded.
 #
 #   tools/release.sh publish [VERSION] [--dry-run] [--remove-old]
-#       Run by a PMC member after the vote passed. Move the candidate from
-#       the dev area to the release directory of dist.apache.org. The move
-#       publishes the voted packages. With the vote and the announcement,
-#       it makes the release. Then write the announcement, the website
-#       entries and the install manifests into dist/VERSION, and print what
-#       is left to do. --remove-old removes older versions from the release
-#       directory, and archive.apache.org keeps them. It is refused in the
-#       run that moves: run publish again with it once the website links
-#       the older versions from the archive.
+#       Run by a PMC member after the vote passed. Verify the candidate's
+#       signatures against KEYS and move it from the dev area to the release
+#       directory of dist.apache.org. The move publishes the voted packages.
+#       With the vote and the announcement, it makes the release. Then check
+#       that the GitHub prerelease holds exactly the voted files, attach any
+#       that are missing, and promote it to a full release; CI publishes the
+#       image when the released event fires. Then write the announcement,
+#       the website entries and the install manifests into dist/VERSION,
+#       and print what is left to do. A run after the move skips the move
+#       and runs every later step again. --remove-old removes older versions
+#       from the release directory, and archive.apache.org keeps them. It is
+#       refused in the run that moves: run publish again with it once the
+#       website links the older versions from the archive.
 #
-#   tools/release.sh complete [VERSION] [--dry-run]
-#       Recover the voted files from the SVN release directory and verify
-#       their signatures, checksums and availability on downloads.apache.org.
-#       Require the existing prerelease's binaries and checksums to match,
-#       add the source archive and signatures, and verify the complete asset
-#       set before promoting the same prerelease to a full GitHub release.
-#       No local dist files or retained CI artifacts are required. Its text
-#       comes from the tag's docs/en/changes/changes.md, followed by where to
-#       get the version. CI publishes the image when the released event
-#       fires, and nothing here waits for it.
-#
-# When VERSION is not given, candidate, vote-result, publish and complete
-# offer the newest version with a page docs/en/changes/changes-X.Y.Z.md.
-# prepare gives a version that page in the commit after the tag, and main
-# holds it once the prepare pull request has merged.
+# When VERSION is not given, candidate and publish offer the newest version
+# with a page docs/en/changes/changes-X.Y.Z.md. prepare gives a version that
+# page in the commit after the tag, and main holds it once the prepare pull
+# request has merged.
 #
 # --dry-run prints what the stage would do. It makes no commit and no push,
 # changes nothing on dist.apache.org or GitHub, and writes no file in dist/.
-# candidate, publish and complete read the tag to make the plan, so, like a
-# real run, they fetch vVERSION from origin into this repository when it
-# does not have the tag. A candidate dry run also signs a scratch file and
-# imports KEYS, in a temporary directory that it removes.
+# candidate and publish read the tag to make the plan, so, like a real run,
+# they fetch vVERSION from origin into this repository when it does not have
+# the tag. A candidate dry run also signs a scratch file and imports KEYS, in
+# a temporary directory that it removes.
 
 set -euo pipefail
 
@@ -110,9 +95,7 @@ cmd="${1:-}"
 case "$cmd" in
   prepare)     options="--dry-run --skip-check --no-push" ;;
   candidate)   options="--dry-run --no-upload --ci-run" ;;
-  vote-result) options="--dry-run --binding --non-binding --against --non-binding-against --abstain --thread" ;;
   publish)     options="--dry-run --remove-old" ;;
-  complete)    options="--dry-run" ;;
   -h|--help|"") usage; exit 0 ;;
   *) echo "unknown command: $cmd" >&2; usage >&2; exit 2 ;;
 esac
@@ -126,12 +109,6 @@ no_push=false
 no_upload=false
 ci_run=auto
 remove_old=false
-binding=""
-non_binding=""
-against=""
-non_binding_against=""
-abstain=""
-thread=""
 while [ $# -gt 0 ]; do
   arg="$1"
   shift
@@ -151,33 +128,20 @@ while [ $# -gt 0 ]; do
       esac ;;
   esac
   case "$arg" in
-    --binding|--non-binding|--against|--non-binding-against|--abstain|--thread|--ci-run)
-      needs="the names of the voters, separated by commas"
-      if [ "$arg" = --thread ]; then needs="the link of the vote thread"; fi
-      if [ "$arg" = --ci-run ]; then needs="the numeric ID of a successful CI run for the release tag"; fi
+    --ci-run)
+      needs="the numeric ID of a successful CI run for the release tag"
       # The next argument is taken only when no = was given, and never when
-      # it is an option: "--non-binding= --dry-run" once made --dry-run a
-      # voter's name and wrote the mail.
+      # it is an option: "--ci-run= --dry-run" must not read --dry-run as
+      # the run.
       if [ "$given" = false ]; then
         case "${1:-}" in ""|-*) echo "$arg needs $needs" >&2; exit 2 ;; esac
         value="$1"
         shift
       fi
       [ -n "$value" ] || { echo "$arg needs $needs" >&2; exit 2; }
-      case "$arg" in
-        --ci-run)
-          [ "$ci_run" = auto ] || { echo "--ci-run is given twice" >&2; exit 2; }
-          [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "--ci-run needs a positive integer" >&2; exit 2; }
-          ci_run="$value" ;;
-        --binding) binding="${binding:+$binding, }$value" ;;
-        --non-binding) non_binding="${non_binding:+$non_binding, }$value" ;;
-        --against) against="${against:+$against, }$value" ;;
-        --non-binding-against) non_binding_against="${non_binding_against:+$non_binding_against, }$value" ;;
-        --abstain) abstain="${abstain:+$abstain, }$value" ;;
-        --thread)
-          [ -z "$thread" ] || { echo "--thread is given twice" >&2; exit 2; }
-          thread="$value" ;;
-      esac ;;
+      [ "$ci_run" = auto ] || { echo "--ci-run is given twice" >&2; exit 2; }
+      [[ "$value" =~ ^[1-9][0-9]*$ ]] || { echo "--ci-run needs a positive integer" >&2; exit 2; }
+      ci_run="$value" ;;
     -*)
       [ "$given" = false ] || { echo "$arg takes no value" >&2; exit 2; }
       case "$arg" in
@@ -339,7 +303,7 @@ svn_list() {
 # The tag must hold the finished changelog of the version at changes.md: its
 # heading names the version and the in-development note is gone. The docs
 # the website publishes from the tag link that page, the vote mail and the
-# announcement link it, and complete builds the text of the GitHub release
+# announcement link it, and publish builds the text of the GitHub release
 # from it. A tag prepare did not make fails here, before anything is built.
 fetch_tag() {
   local refs remote_id local_id tag_page
@@ -408,6 +372,82 @@ pick_version() { # pick_version PROMPT
   is_version "$version" || fail "'$version' is not of the form MAJOR.MINOR.PATCH"
   tag="v$version"
   out="dist/$version"
+}
+
+release_repo=apache/skywalking-ai-sessionizer
+
+# ci_names prints the files CI attaches to the prerelease: each binary
+# package and its .sha512. The release stages never upload these.
+ci_names() {
+  local t b
+  for t in $platforms; do
+    b=$(binary_package "$t")
+    printf '%s\n%s\n' "$b" "$b.sha512"
+  done
+}
+
+# release_names prints every file the GitHub release holds once candidate
+# has attached its part: each package with its .asc and .sha512.
+release_names() {
+  local p
+  for p in $packages; do printf '%s\n%s\n%s\n' "$p" "$p.asc" "$p.sha512"; done
+}
+
+# release_identity prints the GitHub release of the tag as "ID TAG DRAFT
+# PRERELEASE TITLE", separated by tabs.
+release_identity() {
+  gh release view "$tag" --repo "$release_repo" --json databaseId,tagName,isDraft,isPrerelease,name \
+    --jq '[.databaseId, .tagName, .isDraft, .isPrerelease, .name] | @tsv'
+}
+
+# sync_release_assets DIR HINT makes the GitHub release of the tag hold
+# exactly release_names, each byte for byte the file of that name in DIR.
+# CI's files must be there already. A signature or source file that is
+# there must be identical, and one that is missing is uploaded. Nothing is
+# ever replaced: a conflicting asset is reported for a person to remove.
+# HINT tells how to resume after a failure. It uses $scratch.
+sync_release_assets() {
+  local dir=$1 hint=$2 names existing f dup missing=()
+  names=$(release_names)
+  existing=$(gh release view "$tag" --repo "$release_repo" --json assets --jq '.assets[].name') \
+    || fail "cannot list the assets of the GitHub release $tag. $hint"
+  dup=$(printf '%s\n' "$existing" | LC_ALL=C sort | uniq -d)
+  [ -z "$dup" ] || fail "the GitHub release $tag holds more than one asset named $dup. Remove the extra one, then run again"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    has_line "$names" "$f" || fail "the GitHub release $tag holds an unexpected asset, $f. Check why it is there, remove it with 'gh release delete-asset $tag $f --repo $release_repo', then run again"
+  done <<< "$existing"
+  for f in $(ci_names); do
+    has_line "$existing" "$f" || fail "the GitHub release $tag has no $f. CI attaches each binary package and its .sha512, and the release stages never upload them"
+  done
+  rm -rf "$scratch/github"
+  mkdir -p "$scratch/github"
+  for f in $names; do
+    if ! has_line "$existing" "$f"; then
+      missing+=("$dir/$f")
+    elif ! has_line "$(ci_names)" "$f"; then
+      # A file attached by an earlier run must be the one in DIR. CI's own
+      # files are compared with the rest below, after a single download.
+      gh release download "$tag" --repo "$release_repo" --pattern "$f" --dir "$scratch/github/one" \
+        || fail "cannot download $f from the GitHub release $tag. $hint"
+      cmp -s "$dir/$f" "$scratch/github/one/$f" || fail "the GitHub release's $f differs from $dir/$f. Check why, remove it with 'gh release delete-asset $tag $f --repo $release_repo', then run again"
+    fi
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    gh release upload "$tag" --repo "$release_repo" "${missing[@]}" \
+      || fail "the upload to the GitHub release $tag stopped. $hint"
+    say "attached ${#missing[@]} files to the GitHub release $tag"
+  fi
+  existing=$(gh release view "$tag" --repo "$release_repo" --json assets --jq '.assets[].name') \
+    || fail "cannot list the assets of the GitHub release $tag. $hint"
+  [ "$(printf '%s\n' "$existing" | LC_ALL=C sort)" = "$(printf '%s\n' "$names" | LC_ALL=C sort)" ] \
+    || fail "the GitHub release $tag does not hold exactly the voted files. $hint"
+  gh release download "$tag" --repo "$release_repo" --dir "$scratch/github/all" \
+    || fail "cannot download the GitHub release $tag to verify it. $hint"
+  for f in $names; do
+    cmp -s "$dir/$f" "$scratch/github/all/$f" || fail "the GitHub release's $f differs from $dir/$f. Remove it with 'gh release delete-asset $tag $f --repo $release_repo', then run again"
+  done
+  say "ok  the GitHub release $tag holds exactly the $(printf '%s\n' "$names" | wc -l | tr -d ' ') voted files"
 }
 
 # --------------------------------------------------------------- candidate
@@ -481,6 +521,11 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   fi
 
   dev_has_dir=false
+  # resume is a candidate this checkout signed and uploaded, whose run
+  # stopped before the GitHub prerelease held it. Signing the same archive
+  # again gives another signature, and the vote is about the uploaded one,
+  # so such a run attaches and writes the mail without signing again.
+  resume=false
   if [ "$no_upload" = false ]; then
     step "The candidate directory"
     dev_root=$(svn_root "$dist_dev")
@@ -491,16 +536,34 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
     if has_line "$dev_root" ai-sessionizer; then
       dev_has_dir=true
       if has_line "$(svn_list "$dist_dev/ai-sessionizer")" "$version"; then
-        fail "$dev_dir exists, so a candidate of $version was uploaded before. To replace it with a new candidate, remove it first:
+        uploaded=$(svn_list "$dev_dir")
+        same=true
+        for p in $packages; do
+          for f in "$p" "$p.asc" "$p.sha512"; do
+            if ! has_line "$uploaded" "$f" || [ ! -f "$out/$f" ]; then same=false; fi
+          done
+        done
+        if [ "$same" = true ]; then
+          for p in $packages; do
+            [ "$(asf_svn cat "$dev_dir/$p.sha512")" = "$(cat "$out/$p.sha512")" ] || same=false
+            [ "$(asf_svn cat "$dev_dir/$p.asc")" = "$(cat "$out/$p.asc")" ] || same=false
+            (cd "$out" && shasum -a 512 --status -c "$p.sha512") || same=false
+          done
+        fi
+        [ "$same" = true ] || fail "$dev_dir exists, and $out does not hold the same files, so a candidate of $version was uploaded before, from another checkout or with other files. To replace it with a new candidate, remove it first:
   svn rm -m \"Remove the Apache SkyWalking AI Sessionizer $version candidate for a new one\" $dev_dir"
+        resume=true
+        say "$dev_dir holds the candidate that $out holds: it is signed and uploaded already"
+      else
+        say "$dist_dev/ai-sessionizer has no $version yet"
       fi
-      say "$dist_dev/ai-sessionizer has no $version yet"
     else
       say "$dist_dev/ai-sessionizer does not exist; the upload creates it, since this is the first candidate"
     fi
   fi
 
   work=$(mktemp -d)
+  scratch="$work"
   keyring="$work/keyring"
   cleanup() {
     # gpg can start helpers for the scratch keyring. Stop them with it.
@@ -516,7 +579,16 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
     say "dry run: no GitHub prerelease asset was downloaded or verified"
   else
     bash "$ci_helper" "$version" "$commit" "$ci_run" "$work/ci" "$platforms" | tee "$work/ci-check.txt" \
-      || fail "no verified CI binary packages are available. Wait for the GitHub prerelease's CI to finish. If the prerelease failed or was rejected, remove it explicitly and recreate it for a new CI run, as the release guide describes. --ci-run must match its successful uploader run"
+      || fail "no verified CI binary packages are available. Wait for the CI run of the $tag push to create the prerelease and attach the binaries. If a job failed, rerun it; if the prerelease is incomplete or was rejected, remove it explicitly first, as the release guide describes. --ci-run must match its successful uploader run"
+    if [ "$resume" = true ]; then
+      for t in $platforms; do
+        p=$(binary_package "$t")
+        for f in "$p" "$p.sha512"; do
+          cmp -s "$work/ci/$f" "$out/$f" || fail "$out/$f is not the file CI attached to the prerelease, so the uploaded candidate is not the one CI built. Remove $dev_dir and run candidate again"
+        done
+      done
+      say "ok  the uploaded binary packages are the ones CI attached"
+    fi
   fi
   step "The signing key"
   if [ -z "${GPG_TTY:-}" ] && [ -t 0 ]; then GPG_TTY=$(tty); export GPG_TTY; fi
@@ -603,130 +675,157 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   say "signer   : $fpr, RSA of $bits bits, in $keys_url as $(printf '%s\n' "$apache_uid" | sed -n 1p)"
 
   step "Package, verify, upload"
-  say "- copy the verified CI binary archives and their checksums unchanged into $out"
-  say "- git archive the source at $commit with its release prefix, compress with gzip -n, and reject archive metadata"
-  say "- sign each archive with $signer and preserve the CI checksums in $out:"
-  for p in $packages; do say "    $p"; done
-  say "- verify every package: its .asc and .sha512 are there, shasum -a 512 -c passes, and gpg, reading KEYS, reports a good signature and does not report the key that signed, or the signature, as expired or revoked"
-  say "- verify the source package holds LICENSE and NOTICE at its top level, no compiled file and no font file"
-  if [ -n "$host_pkg" ]; then
-    say "- run $host_pkg with $smoke from the source package, and stop if it fails"
-  else
-    say "- run no package: none is built for this machine"
-  fi
-  if [ "$no_upload" = true ]; then
-    say "- upload nothing (--no-upload)"
-    say "- write the vote mail to $out/vote-preview.txt and print it"
-  else
-    say "- svn checkout --depth empty $dist_dev"
-    if [ "$dev_has_dir" = false ]; then say "- create ai-sessionizer in it"; fi
-    say "- svn add ai-sessionizer/$version with every package, .asc and .sha512"
-    say "- svn commit -m \"Add the $project $version release candidate\""
+  if [ "$resume" = true ]; then
+    say "- sign and upload nothing: $dev_dir holds the candidate in $out"
+    say "- verify each signature in $out against KEYS as made by $fpr"
+    say "- attach to the GitHub prerelease $tag what it is missing of: the source package, its .sha512, and every .asc"
     say "- write the vote mail to $out/vote.txt and print it"
-  fi
-  if [ "$dry_run" = true ]; then say "dry run: nothing was built or uploaded, and nothing was written into $out. The scratch signature and the KEYS keyring were in a temporary directory, which is removed"; exit 0; fi
-
-  step "Assemble the candidate from CI and the tagged source"
-  # CI's archives are copied without unpacking or repacking. Local platform
-  # metadata and tool versions must never change the bytes the vote approves.
-  rm -f "$out/vote.txt" "$out/vote-preview.txt"
-  for p in $packages; do rm -f "$out/$p" "$out/$p.asc" "$out/$p.sha512"; done
-  mkdir -p "$out"
-  for t in $platforms; do
-    p=$(binary_package "$t")
-    cp "$work/ci/$p" "$work/ci/$p.sha512" "$out/"
-  done
-  grep '^ci-binaries:' "$work/ci-check.txt" > "$out/ci-provenance.txt"
-  src="$pkg-$version-src.tgz"
-  top="$pkg-$version-src"
-  git archive --format=tar --prefix="$top/" "$commit" | gzip -n > "$out/$src"
-  (cd "$out" && shasum -a 512 "$src" > "$src.sha512")
-
-  step "Verify the candidate in $out"
-  for p in $packages; do
-    for f in "$p" "$p.sha512"; do [ -f "$out/$f" ] || fail "$out/$f is missing"; done
-    sh "$package_check" "$out/$p" || fail "$p has forbidden archive metadata"
-  done
-  extra=""
-  for f in "$out"/*.tgz "$out"/*.zip; do
-    [ -f "$f" ] || continue
-    has_line "$packages" "${f##*/}" || extra="$extra ${f##*/}"
-  done
-  [ -z "$extra" ] || fail "$out holds packages the Makefile in $tag does not name:$extra"
-  for p in $packages; do
-    (cd "$out" && shasum -a 512 --status -c "$p.sha512") || fail "the sha512 of $p does not match $p.sha512"
-    say "ok  $p: sha512"
-  done
-  # Refuse compiled files before signing the source archive. file(1) is
-  # asked for every file type, using the list in the tag's Makefile.
-  listing=$(tar -tzf "$out/$src") || fail "cannot list $src"
-  for f in LICENSE NOTICE; do has_line "$listing" "$top/$f" || fail "$src has no $f at its top level"; done
-  stray=$(printf '%s\n' "$listing" | grep -v -e "^$top/" -e '^pax_global_header$' || true)
-  [ -z "$stray" ] || fail "$src has entries outside $top/: $stray"
-  fonts=$(printf '%s\n' "$listing" | grep -E "$font_files" || true)
-  [ -z "$fonts" ] || fail "$src holds font files, which are Category B works the ASF does not allow in a source release:
-$fonts"
-  mkdir "$work/src"
-  tar -xzf "$out/$src" -C "$work/src"
-  found=$(cd "$work/src" && find . -type f -print0 | xargs -0 file -N --mime-type | grep -E ": *$compiled\$" || true)
-  [ -z "$found" ] || fail "$src carries compiled files:
-$found"
-  # COMPILED_FILES names the compiled files file(1) cannot tell by type.
-  found=$(cd "$work/src" && find . -type f | grep -E "$compiled_files\$" || true)
-  [ -z "$found" ] || fail "$src carries files named as compiled files, which file(1) may not tell by type:
-$found"
-  say "ok  $src: LICENSE and NOTICE at the top, no compiled file, no font file"
-  # The same list a voter checks in every binary package.
-  for t in $platforms; do
-    b=$(binary_package "$t")
-    exe=""
-    if [ "${t%/*}" = windows ]; then exe=.exe; fi
-    case "$b" in
-      *.zip) listing=$(unzip -Z1 "$out/$b") || fail "cannot list $b" ;;
-      *) listing=$(tar -tzf "$out/$b") || fail "cannot list $b" ;;
-    esac
-    for f in "asz$exe" "claude-code-plugin/bin/asz-claude-plugin$exe" LICENSE NOTICE; do
-      has_line "$listing" "$f" || fail "$b has no $f"
-    done
-    for d in licenses/ claude-code-plugin/.claude-plugin/ claude-code-plugin/hooks/; do
-      has_prefix "$listing" "$d" || fail "$b has no $d"
-    done
-    say "ok  $b: asz$exe, the Claude Code plugin, LICENSE, NOTICE and licenses/"
-  done
-
-  step "Sign the verified archives"
-  for p in $packages; do
-    gpg --armor --detach-sign --yes --local-user "$signer" "$out/$p" || fail "gpg could not sign $p"
-    why=$(keys_verify "$keyring" "$fpr" "$out/$p.asc" "$out/$p")
-    [ -z "$why" ] || fail "the signature of $p does not verify cleanly against $keys_url as made by $fpr: $why"
-    say "ok  $p: a good signature by $fpr"
-  done
-
-  step "Run the package for this machine"
-  if [ -n "$host_pkg" ]; then
-    # bash runs the script whatever mode the source archive gave it.
-    bash "$work/src/$top/$smoke" "$out/$host_pkg" "$version" \
-      || fail "$host_pkg did not pass $smoke, run from the $tag source package. Its output is above. Nothing was uploaded, and no vote mail was written"
-    say "ok  $host_pkg runs on this machine"
+    if [ "$dry_run" = true ]; then say "dry run: nothing was attached or written. The scratch signature and the KEYS keyring were in a temporary directory, which is removed"; exit 0; fi
   else
-    say "no package of $version is built for this machine, $(uname -s) $(uname -m), so none was run here"
+    say "- copy the verified CI binary archives and their checksums unchanged into $out"
+    say "- git archive the source at $commit with its release prefix, compress with gzip -n, and reject archive metadata"
+    say "- sign each archive with $signer and preserve the CI checksums in $out:"
+    for p in $packages; do say "    $p"; done
+    say "- verify every package: its .asc and .sha512 are there, shasum -a 512 -c passes, and gpg, reading KEYS, reports a good signature and does not report the key that signed, or the signature, as expired or revoked"
+    say "- verify the source package holds LICENSE and NOTICE at its top level, no compiled file and no font file"
+    if [ -n "$host_pkg" ]; then
+      say "- run $host_pkg with $smoke from the source package, and stop if it fails"
+    else
+      say "- run no package: none is built for this machine"
+    fi
+    if [ "$no_upload" = true ]; then
+      say "- upload nothing (--no-upload)"
+      say "- write the vote mail to $out/vote-preview.txt and print it"
+    else
+      say "- svn checkout --depth empty $dist_dev"
+      if [ "$dev_has_dir" = false ]; then say "- create ai-sessionizer in it"; fi
+      say "- svn add ai-sessionizer/$version with every package, .asc and .sha512"
+      say "- svn commit -m \"Add the $project $version release candidate\""
+      say "- attach the source package, its .sha512 and every .asc to the GitHub prerelease $tag, beside CI's files"
+      say "- write the vote mail to $out/vote.txt and print it"
+    fi
+    if [ "$dry_run" = true ]; then say "dry run: nothing was built or uploaded, and nothing was written into $out. The scratch signature and the KEYS keyring were in a temporary directory, which is removed"; exit 0; fi
+  fi
+
+  if [ "$resume" = true ]; then
+    grep '^ci-binaries:' "$work/ci-check.txt" > "$out/ci-provenance.txt"
+    step "The uploaded signatures"
+    for p in $packages; do
+      why=$(keys_verify "$keyring" "$fpr" "$out/$p.asc" "$out/$p")
+      [ -z "$why" ] || fail "the signature of $p in $out does not verify cleanly against $keys_url as made by $fpr: $why. Sign with the key that signed the uploaded candidate, or remove $dev_dir and run candidate again"
+      say "ok  $p: a good signature by $fpr"
+    done
+  else
+    step "Assemble the candidate from CI and the tagged source"
+    # CI's archives are copied without unpacking or repacking. Local platform
+    # metadata and tool versions must never change the bytes the vote approves.
+    rm -f "$out/vote.txt" "$out/vote-preview.txt"
+    for p in $packages; do rm -f "$out/$p" "$out/$p.asc" "$out/$p.sha512"; done
+    mkdir -p "$out"
+    for t in $platforms; do
+      p=$(binary_package "$t")
+      cp "$work/ci/$p" "$work/ci/$p.sha512" "$out/"
+    done
+    grep '^ci-binaries:' "$work/ci-check.txt" > "$out/ci-provenance.txt"
+    src="$pkg-$version-src.tgz"
+    top="$pkg-$version-src"
+    git archive --format=tar --prefix="$top/" "$commit" | gzip -n > "$out/$src"
+    (cd "$out" && shasum -a 512 "$src" > "$src.sha512")
+
+    step "Verify the candidate in $out"
+    for p in $packages; do
+      for f in "$p" "$p.sha512"; do [ -f "$out/$f" ] || fail "$out/$f is missing"; done
+      sh "$package_check" "$out/$p" || fail "$p has forbidden archive metadata"
+    done
+    extra=""
+    for f in "$out"/*.tgz "$out"/*.zip; do
+      [ -f "$f" ] || continue
+      has_line "$packages" "${f##*/}" || extra="$extra ${f##*/}"
+    done
+    [ -z "$extra" ] || fail "$out holds packages the Makefile in $tag does not name:$extra"
+    for p in $packages; do
+      (cd "$out" && shasum -a 512 --status -c "$p.sha512") || fail "the sha512 of $p does not match $p.sha512"
+      say "ok  $p: sha512"
+    done
+    # Refuse compiled files before signing the source archive. file(1) is
+    # asked for every file type, using the list in the tag's Makefile.
+    listing=$(tar -tzf "$out/$src") || fail "cannot list $src"
+    for f in LICENSE NOTICE; do has_line "$listing" "$top/$f" || fail "$src has no $f at its top level"; done
+    stray=$(printf '%s\n' "$listing" | grep -v -e "^$top/" -e '^pax_global_header$' || true)
+    [ -z "$stray" ] || fail "$src has entries outside $top/: $stray"
+    fonts=$(printf '%s\n' "$listing" | grep -E "$font_files" || true)
+    [ -z "$fonts" ] || fail "$src holds font files, which are Category B works the ASF does not allow in a source release:
+$fonts"
+    mkdir "$work/src"
+    tar -xzf "$out/$src" -C "$work/src"
+    found=$(cd "$work/src" && find . -type f -print0 | xargs -0 file -N --mime-type | grep -E ": *$compiled\$" || true)
+    [ -z "$found" ] || fail "$src carries compiled files:
+$found"
+    # COMPILED_FILES names the compiled files file(1) cannot tell by type.
+    found=$(cd "$work/src" && find . -type f | grep -E "$compiled_files\$" || true)
+    [ -z "$found" ] || fail "$src carries files named as compiled files, which file(1) may not tell by type:
+$found"
+    say "ok  $src: LICENSE and NOTICE at the top, no compiled file, no font file"
+    # The same list a voter checks in every binary package.
+    for t in $platforms; do
+      b=$(binary_package "$t")
+      exe=""
+      if [ "${t%/*}" = windows ]; then exe=.exe; fi
+      case "$b" in
+        *.zip) listing=$(unzip -Z1 "$out/$b") || fail "cannot list $b" ;;
+        *) listing=$(tar -tzf "$out/$b") || fail "cannot list $b" ;;
+      esac
+      for f in "asz$exe" "claude-code-plugin/bin/asz-claude-plugin$exe" LICENSE NOTICE; do
+        has_line "$listing" "$f" || fail "$b has no $f"
+      done
+      for d in licenses/ claude-code-plugin/.claude-plugin/ claude-code-plugin/hooks/; do
+        has_prefix "$listing" "$d" || fail "$b has no $d"
+      done
+      say "ok  $b: asz$exe, the Claude Code plugin, LICENSE, NOTICE and licenses/"
+    done
+
+    step "Sign the verified archives"
+    for p in $packages; do
+      gpg --armor --detach-sign --yes --local-user "$signer" "$out/$p" || fail "gpg could not sign $p"
+      why=$(keys_verify "$keyring" "$fpr" "$out/$p.asc" "$out/$p")
+      [ -z "$why" ] || fail "the signature of $p does not verify cleanly against $keys_url as made by $fpr: $why"
+      say "ok  $p: a good signature by $fpr"
+    done
+
+    step "Run the package for this machine"
+    if [ -n "$host_pkg" ]; then
+      # bash runs the script whatever mode the source archive gave it.
+      bash "$work/src/$top/$smoke" "$out/$host_pkg" "$version" \
+        || fail "$host_pkg did not pass $smoke, run from the $tag source package. Its output is above. Nothing was uploaded, and no vote mail was written"
+      say "ok  $host_pkg runs on this machine"
+    else
+      say "no package of $version is built for this machine, $(uname -s) $(uname -m), so none was run here"
+    fi
+
+    if [ "$no_upload" = false ]; then
+      step "Upload to $dev_dir"
+      wc="$work/dev"
+      asf_svn checkout -q --depth empty "$dist_dev" "$wc"
+      if [ "$dev_has_dir" = true ]; then
+        asf_svn update -q --set-depth immediates "$wc/ai-sessionizer"
+        [ ! -e "$wc/ai-sessionizer/$version" ] || fail "$dev_dir appeared while this ran; see svn ls $dist_dev/ai-sessionizer"
+        add="ai-sessionizer/$version"
+      else
+        add="ai-sessionizer"
+      fi
+      mkdir -p "$wc/ai-sessionizer/$version"
+      for p in $packages; do cp "$out/$p" "$out/$p.asc" "$out/$p.sha512" "$wc/ai-sessionizer/$version/"; done
+      (cd "$wc" && asf_svn add -q "$add" && asf_svn commit -m "Add the $project $version release candidate")
+      say "uploaded $dev_dir"
+    fi
   fi
 
   if [ "$no_upload" = false ]; then
-    step "Upload to $dev_dir"
-    wc="$work/dev"
-    asf_svn checkout -q --depth empty "$dist_dev" "$wc"
-    if [ "$dev_has_dir" = true ]; then
-      asf_svn update -q --set-depth immediates "$wc/ai-sessionizer"
-      [ ! -e "$wc/ai-sessionizer/$version" ] || fail "$dev_dir appeared while this ran; see svn ls $dist_dev/ai-sessionizer"
-      add="ai-sessionizer/$version"
-    else
-      add="ai-sessionizer"
-    fi
-    mkdir -p "$wc/ai-sessionizer/$version"
-    for p in $packages; do cp "$out/$p" "$out/$p.asc" "$out/$p.sha512" "$wc/ai-sessionizer/$version/"; done
-    (cd "$wc" && asf_svn add -q "$add" && asf_svn commit -m "Add the $project $version release candidate")
-    say "uploaded $dev_dir"
+    step "Attach to the GitHub prerelease $tag"
+    # The prerelease then holds every file of the vote, so a voter can take
+    # the signatures from either place. dist.apache.org stays the one the
+    # vote is about.
+    sync_release_assets "$out" "The candidate is on $dev_dir. Run 'tools/release.sh candidate $version' again from this checkout: it signs and uploads nothing again, and attaches what is missing."
   fi
 
   step "The vote mail"
@@ -743,6 +842,7 @@ Release notes:
 
 Release Candidate:
  * $dev_dir
+ * The same files, on the GitHub prerelease: $github/releases/tag/$tag
  * sha512 checksums
 $(for p in $packages; do printf '   - %s\n' "$(cat "$out/$p.sha512")"; done)
 
@@ -760,7 +860,7 @@ Guide to build the release from source:
  * $github/blob/$tag/docs/en/guides/how-to-release.md
 
 Notes for voters:
- * The binary archives are the unchanged packages downloaded from the GitHub prerelease after its successful CI run, verified below. Only the source archive was created locally. The release manager signed every archive after checking its contents and checksums.
+ * The binary archives are the unchanged packages CI attached to the GitHub prerelease after all its checks passed on the tag push, verified below. Only the source archive was created locally. The release manager signed every archive after checking its contents and checksums, and attached the source archive and every signature to the same prerelease.
 $(sed 's/^ci-binaries:/ */' "$out/ci-provenance.txt")
  * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. \`make conversation-view-check\`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
  * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.
@@ -787,94 +887,11 @@ MAIL
   else
     say "Next:"
     say "  1. Check every link, then send $out/vote.txt to dev@skywalking.apache.org."
-    say "  2. After 72 hours, count the votes:"
-    say "     tools/release.sh vote-result $version --binding \"Name, Name, Name\" [--non-binding \"...\"] [--against \"...\"]"
+    say "  2. After at least 72 hours, count the votes. The vote passes with at least three"
+    say "     binding +1 votes and more binding +1 than binding -1 votes. Send the result to"
+    say "     dev@skywalking.apache.org, with the subject [RESULT][VOTE] and every vote listed."
+    say "  3. If it passed, a PMC member runs: tools/release.sh publish $version"
   fi
-  exit 0
-fi
-
-# ------------------------------------------------------------- vote-result
-if [ "$cmd" = vote-result ]; then
-  step "The version"
-  pick_version "Version the vote was for"
-  [ -n "$binding" ] || fail "--binding is required: the PMC members who voted +1, separated by commas"
-  if [ -n "$thread" ]; then
-    case "$thread" in https://*) ;; *) fail "--thread takes the https link of the vote thread, such as its page on lists.apache.org" ;; esac
-  fi
-  # Runs of spaces inside a name count as one, so "Ann  Lee" and "Ann Lee"
-  # are the same voter.
-  split_names() { printf '%s\n' "$1" | tr ',' '\n' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | grep -v '^$' || true; }
-  count_lines() { if [ -z "$1" ]; then echo 0; else printf '%s\n' "$1" | wc -l | tr -d ' '; fi; }
-  join_names() { printf '%s\n' "$1" | awk 'NR > 1 {printf ", "} {printf "%s", $0} END {print ""}'; }
-  plural() { if [ "$1" -eq 1 ]; then printf '%s %s' "$1" "$2"; else printf '%s %ss' "$1" "$2"; fi; }
-  yes_binding=$(split_names "$binding")
-  yes_other=$(split_names "$non_binding")
-  no_binding=$(split_names "$against")
-  no_other=$(split_names "$non_binding_against")
-  zero=$(split_names "$abstain")
-  # Names are compared without case. "Alice" as binding and "alice" as
-  # non-binding were once counted as two voters.
-  twice=$(printf '%s\n' "$yes_binding" "$yes_other" "$no_binding" "$no_other" "$zero" | grep -v '^$' | tr '[:upper:]' '[:lower:]' | sort | uniq -d || true)
-  [ -z "$twice" ] || fail "each voter counts once, and these are listed more than once, compared without case: $(join_names "$twice")"
-  n_yes=$(count_lines "$yes_binding")
-  n_other=$(count_lines "$yes_other")
-  n_no=$(count_lines "$no_binding")
-  n_no_other=$(count_lines "$no_other")
-  n_zero=$(count_lines "$zero")
-
-  step "The count"
-  say "binding +1     : $n_yes"
-  say "non-binding +1 : $n_other"
-  say "binding -1     : $n_no"
-  say "non-binding -1 : $n_no_other"
-  say "+0             : $n_zero"
-  # The Apache rule for a release: at least three binding +1 votes, and
-  # more binding +1 than binding -1 votes. Only PMC votes are binding. The
-  # other votes are listed in the mail, so a -1 that reports a real problem
-  # stays on record, but they do not change the result.
-  [ "$n_yes" -ge 3 ] || fail "the vote has not passed: it needs at least three binding +1 votes and has $n_yes"
-  [ "$n_yes" -gt "$n_no" ] || fail "the vote has not passed: it needs more binding +1 than binding -1 votes, and has $n_yes against $n_no"
-  say "the vote passed, provided it was open for at least 72 hours"
-  if [ -z "$thread" ]; then say "no --thread: the mail does not link the vote thread. Give its link on lists.apache.org with --thread to add it"; fi
-
-  step "The result mail"
-  result_mail() {
-    local parts=() counts="" i last
-    parts+=("$(plural "$n_yes" "+1 binding")")
-    if [ "$n_other" -gt 0 ]; then parts+=("$(plural "$n_other" "+1 non-binding")"); fi
-    if [ "$n_no" -gt 0 ]; then parts+=("$(plural "$n_no" "-1 binding")"); fi
-    if [ "$n_no_other" -gt 0 ]; then parts+=("$(plural "$n_no_other" "-1 non-binding")"); fi
-    if [ "$n_zero" -gt 0 ]; then parts+=("$n_zero +0"); fi
-    last=$(( ${#parts[@]} - 1 ))
-    for i in "${!parts[@]}"; do
-      if [ "$i" -eq 0 ]; then counts="${parts[0]}"
-      elif [ "$i" -eq "$last" ]; then counts="$counts and ${parts[$i]}"
-      else counts="$counts, ${parts[$i]}"; fi
-    done
-    printf 'Subject: [RESULT][VOTE] Release %s version %s\n\n' "$project" "$version"
-    printf '72 hours passed, we have got %s:\n\n' "$counts"
-    if [ -n "$thread" ]; then printf 'The vote thread: %s\n\n' "$thread"; fi
-    printf '+1 bindings:\n%s\n' "$yes_binding"
-    if [ -n "$yes_other" ]; then printf '\n+1 non-bindings:\n%s\n' "$yes_other"; fi
-    if [ -n "$no_binding" ]; then printf '\n-1 bindings:\n%s\n' "$no_binding"; fi
-    if [ -n "$no_other" ]; then printf '\n-1 non-bindings:\n%s\n' "$no_other"; fi
-    if [ -n "$zero" ]; then printf '\n+0:\n%s\n' "$zero"; fi
-    printf '\nThe binding votes, those of PMC members, decide the result: %s +1 and %s -1, so the vote passed.\n' "$n_yes" "$n_no"
-    printf '\nThank you for voting, I will continue the release process.\n'
-  }
-  if [ "$dry_run" = true ]; then
-    result_mail
-    say "----"
-    say "dry run: $out/result.txt was not written"
-    exit 0
-  fi
-  mkdir -p "$out"
-  result_mail > "$out/result.txt"
-  cat "$out/result.txt"
-  say "----"
-  say "Next:"
-  say "  1. Send $out/result.txt to dev@skywalking.apache.org."
-  say "  2. A PMC member runs: tools/release.sh publish $version"
   exit 0
 fi
 
@@ -884,7 +901,7 @@ if [ "$cmd" = publish ]; then
   pick_version "Version the vote passed for"
   # tar and awk are for tools/install-manifests.sh, which runs after the
   # move. Checked here, a missing one stops the run before anything moves.
-  need_tools git svn shasum tar awk
+  need_tools git svn shasum tar awk gh gpg curl cmp
   manifests=tools/install-manifests.sh
   # Checked before anything moves. The manifests are written after the
   # move, and a missing script there would stop the run half done.
@@ -895,6 +912,41 @@ if [ "$cmd" = publish ]; then
   dev_dir="$dist_dev/ai-sessionizer/$version"
   rel_parent="$dist_release/ai-sessionizer"
   rel_dir="$rel_parent/$version"
+  scratch=$(mktemp -d)
+  keyring="$scratch/keyring"
+  cleanup_publish() {
+    if command -v gpgconf >/dev/null 2>&1; then gpgconf --homedir "$keyring" --kill all >/dev/null 2>&1 || true; fi
+    rm -rf "$scratch"
+  }
+  trap cleanup_publish EXIT
+
+  step "The GitHub release"
+  # Read before anything moves: the release is promoted after the move, and
+  # a prerelease that is gone would stop publish half done.
+  release_info=$(release_identity) \
+    || fail "cannot read the GitHub release $tag. CI creates it as a prerelease on the tag push, and candidate attaches its signatures; publish promotes it"
+  IFS=$'\t' read -r release_id existing_tag is_draft is_prerelease existing_title <<< "$release_info"
+  [ -n "$release_id" ] && [ "$existing_tag" = "$tag" ] && [ "$existing_title" = "$version" ] && [ "$is_draft" = false ] \
+    || fail "the GitHub release $tag is not the prerelease CI created: its tag, its title or its draft state differs"
+  promoted=false
+  if [ "$is_prerelease" = false ]; then
+    promoted=true
+    say "$tag is a full GitHub release already: an earlier publish promoted it. Its files are checked again"
+  else
+    say "$tag is a GitHub prerelease, promoted after the move"
+  fi
+  # Only names are checked here. The bytes are compared after the voted
+  # files are fetched, but a missing CI file or a stray asset is found now.
+  release_assets=$(gh release view "$tag" --repo "$release_repo" --json assets --jq '.assets[].name') \
+    || fail "cannot list the assets of the GitHub release $tag"
+  for f in $(ci_names); do
+    has_line "$release_assets" "$f" || fail "the GitHub release $tag has no $f. CI attaches each binary package and its .sha512 on the tag push, and the release stages never upload them. Nothing was moved"
+  done
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    has_line "$(release_names)" "$f" || fail "the GitHub release $tag holds an unexpected asset, $f. Check why it is there and remove it with 'gh release delete-asset $tag $f --repo $release_repo'. Nothing was moved"
+  done <<< "$release_assets"
+  say "ok  it holds CI's binary packages and nothing but voted files"
 
   step "The candidate"
   svn_root "$dist_dev" >/dev/null
@@ -967,16 +1019,38 @@ if [ "$cmd" = publish ]; then
   elif [ -n "$old" ]; then
     say "- keep$old in $rel_parent. A later run with --remove-old removes them, once the website links them from the archive"
   fi
+  say "- verify each package's signature against KEYS, before any move"
+  say "- check that the GitHub release $tag holds CI's binary packages and .sha512 files as voted, attach the voted source package, .sha512 and .asc files it is missing, and check that it holds exactly the voted files"
+  if [ "$promoted" = false ]; then
+    say "- promote $tag to a full GitHub release, with the text of $dev_page in $tag; CI publishes the image on the released event"
+  fi
   say "- write the announcement to $out/announce.txt"
   say "- write the website entries to $out/website.txt"
   say "- $manifests $version $out $out/install"
-  if [ "$dry_run" = true ]; then say "dry run: no package was fetched, and nothing was moved, removed or written"; exit 0; fi
+  if [ "$dry_run" = true ]; then say "dry run: no package was fetched, and nothing was moved, removed, promoted or written"; exit 0; fi
 
   mkdir -p "$out"
   for p in $fetch; do
     for f in "$p" "$p.asc" "$p.sha512"; do asf_svn export -q --force "$from/$f" "$out/$f"; done
     (cd "$out" && shasum -a 512 --status -c "$p.sha512") || fail "$p fetched from $from does not match its sha512"
     say "fetched $p"
+  done
+
+  step "The signatures"
+  # A voter checked each signature against KEYS. It is checked once more
+  # before the move, since after it the files are the release.
+  mkdir -m 700 "$keyring"
+  curl -fsSL "$keys_url" -o "$scratch/KEYS" || fail "cannot download $keys_url"
+  # gpg exits 2 when any one entry of KEYS cannot be imported, even when the
+  # key that signed did import. Each package still needs a good signature.
+  gpg --batch --quiet --homedir "$keyring" --import "$scratch/KEYS" >/dev/null 2>&1 || true
+  for p in $packages; do
+    status=$(gpg --batch --homedir "$keyring" --status-fd 1 --verify "$out/$p.asc" "$out/$p" 2>/dev/null || true)
+    by=$(printf '%s\n' "$status" | awk '$2 == "VALIDSIG" && !f {f = ($12 != "" ? $12 : $3)} END {print f}')
+    [ -n "$by" ] || fail "$p has no valid signature by a key in $keys_url. Nothing was moved"
+    why=$(keys_verify "$keyring" "$by" "$out/$p.asc" "$out/$p")
+    [ -z "$why" ] || fail "the signature of $p does not verify cleanly against $keys_url: $why. Nothing was moved"
+    say "ok  $p: a good signature by $by"
   done
   if [ "$moved" = false ]; then
     if ! has_line "$release_root" ai-sessionizer; then
@@ -994,6 +1068,37 @@ if [ "$cmd" = publish ]; then
       asf_svn rm -m "Remove $project $v, superseded by $version" "$rel_parent/$v"
       say "removed $rel_parent/$v; it stays on https://archive.apache.org/dist/skywalking/ai-sessionizer/$v/"
     done
+  fi
+
+  step "Promote the GitHub release $tag"
+  # release_text prints the text of the GitHub release: the tag's
+  # changes.md without its heading, because the release has its own title,
+  # then where to get the version. It is built from the tag each time and
+  # stored nowhere, so a change made on main after prepare cannot reach it.
+  # It sends a reader to the Apache release and to the signatures, never to
+  # a git checkout, as the ASF release policy asks.
+  release_text() {
+    git show "$tag:$dev_page" | tail -n +2 | sed '1{/^$/d;}'
+    cat <<TEXT
+
+#### Where to get it
+
+- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The files attached to this GitHub release are the same signed packages, each with its \`.asc\` signature and \`.sha512\` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install]($github/blob/$tag/docs/en/setup/install.md#verify-a-package) describes.
+- To build from the source package, see [Install]($github/blob/$tag/docs/en/setup/install.md#build-from-the-source-package).
+- Documentation: $github/blob/$tag/docs/README.md
+- Full changelog: $github/blob/$tag/docs/en/changes/changes.md
+TEXT
+  }
+  resume_hint="The move is done. Run 'tools/release.sh publish $version' again: it skips the move and resumes here."
+  sync_release_assets "$out" "$resume_hint"
+  if [ "$promoted" = false ]; then
+    release_text > "$scratch/notes.md"
+    current_info=$(release_identity) || fail "cannot read the GitHub release $tag again before promoting it. $resume_hint"
+    [ "$current_info" = "$release_info" ] || fail "the GitHub release $tag changed while publish was checking it, so it was not promoted. Find out why, then run publish again"
+    gh release edit "$tag" --repo "$release_repo" --draft=false --prerelease=false --title "$version" --notes-file "$scratch/notes.md" \
+      || fail "cannot promote the GitHub release $tag. $resume_hint"
+    say "promoted $tag to a full GitHub release. CI publishes the image on the released event"
   fi
 
   announce_mail() {
@@ -1126,177 +1231,22 @@ YAML
 
   say "----"
   say "Next, in this order:"
-  say "  1. tools/release.sh complete $version"
-  say "     It adds missing source files and signatures, verifies the existing binaries,"
-  say "     and promotes the prerelease once downloads.apache.org serves the voted files."
-  say "  2. At least one hour after the move, as the ASF release policy asks, open a pull"
+  say "  1. At least one hour after the move, as the ASF release policy asks, open a pull"
   say "     request on apache/skywalking-website with $out/website.txt: the downloads entry"
   say "     in data/releases.yml and the $tag documentation in data/docs.yml."
-  say "  3. Once the website lists $version, and at least one hour after the move, send"
+  say "  2. Once the website lists $version, and at least one hour after the move, send"
   say "     $out/announce.txt to dev@skywalking.apache.org and announce@apache.org, as plain"
   say "     text from your apache.org address. Sign it with your release key if your mail"
   say "     program can; the ASF recommends it."
-  say "  4. Submit the install manifests in $out/install, once the PMC has agreed on"
+  say "  3. Submit the install manifests in $out/install, once the PMC has agreed on"
   say "     dev@skywalking.apache.org to each channel. $out/install/README.md says where each"
   say "     one goes. The Homebrew formula and the winget files download from the GitHub"
-  say "     release, so both wait for step 1."
+  say "     release, which is promoted now."
   if [ -n "$old" ] && [ "$remove_old" = false ]; then
-    say "  5. Later, once the website pull request that points$old at archive.apache.org"
+    say "  4. Later, once the website pull request that points$old at archive.apache.org"
     say "     has merged, and the Scoop bucket names $version:"
     say "     tools/release.sh publish $version --remove-old"
   fi
-  exit 0
-fi
-
-# ---------------------------------------------------------------- complete
-if [ "$cmd" = complete ]; then
-  step "The version"
-  pick_version "Version to release on GitHub"
-  need_tools git gh curl shasum cmp svn gpg
-  fetch_tag
-  release_repo=apache/skywalking-ai-sessionizer
-  release_info=$(gh release view "$tag" --repo "$release_repo" --json databaseId,tagName,isDraft,isPrerelease,name --jq '[.databaseId, .tagName, .isDraft, .isPrerelease, .name] | @tsv') \
-    || fail "cannot read the GitHub prerelease $tag; restore the prerelease or a matching recovery draft before running complete"
-  IFS=$'\t' read -r release_id existing_tag is_draft is_prerelease existing_title <<< "$release_info"
-  [ -n "$release_id" ] && [ "$existing_tag" = "$tag" ] && [ "$existing_title" = "$version" ] \
-    || fail "the existing GitHub release does not match the expected tag and title"
-  [ "$is_draft" = true ] || [ "$is_prerelease" = true ] \
-    || fail "the GitHub release $tag is already an official release"
-  platforms=$(tag_platforms)
-  packages=$(expected_packages)
-  canonical="$dist_release/ai-sessionizer/$version"
-  tmp=$(mktemp -d)
-  keyring="$tmp/keyring"
-  cleanup_complete() {
-    if command -v gpgconf >/dev/null 2>&1; then gpgconf --homedir "$keyring" --kill all >/dev/null 2>&1 || true; fi
-    rm -rf "$tmp"
-  }
-  trap cleanup_complete EXIT
-  mkdir -p "$tmp/released"
-  if [ "$dry_run" = false ]; then
-    mkdir -m 700 "$keyring"
-    curl -fsSL "$keys_url" -o "$tmp/KEYS" || fail "cannot download $keys_url"
-    # gpg exits 2 when any one entry of KEYS cannot be imported, even when the
-    # key that signed did import. candidate reads KEYS the same way. Each
-    # package below still needs a valid signature from an imported key.
-    gpg --batch --quiet --homedir "$keyring" --import "$tmp/KEYS" >/dev/null 2>&1 || true
-  fi
-
-  step "The voted packages"
-  # The Apache release directory is the authority after the vote. CI artifacts
-  # may expire and the release manager may use a different machine, so complete
-  # always reads the published files into temporary storage. Local copies are
-  # optional; a conflict is reported without changing them.
-  assets=()
-  asset_names=""
-  for p in $packages; do
-    voted_sum=$(asf_svn cat "$canonical/$p.sha512") || fail "cannot read the approved checksum at $canonical/$p.sha512; run publish first"
-    voted_sig=$(asf_svn cat "$canonical/$p.asc") || fail "cannot read the approved signature at $canonical/$p.asc"
-    served=$(curl -fsSL "$downloads/$version/$p.sha512") || fail "$downloads/$version/$p.sha512 is not served yet. downloads.apache.org serves the release directory a short while after publish; run complete again then"
-    [ "$served" = "$voted_sum" ] || fail "the downloaded checksum of $p differs from the Apache release directory"
-    served=$(curl -fsSL "$downloads/$version/$p.asc") || fail "cannot read $downloads/$version/$p.asc"
-    [ "$served" = "$voted_sig" ] || fail "the downloaded signature of $p differs from the Apache release directory"
-    if [ "$dry_run" = true ]; then
-      say "- fetch $p and its sidecars from $canonical, verify its checksum and signature, and compare any local copies"
-    else
-      for f in "$p" "$p.asc" "$p.sha512"; do
-        asf_svn export -q "$canonical/$f" "$tmp/released/$f" || fail "cannot fetch the approved file $canonical/$f"
-        if [ -e "$out/$f" ]; then
-          cmp -s "$out/$f" "$tmp/released/$f" || fail "$out/$f differs from the Apache release; move the conflicting local file aside and rerun complete. Nothing local was overwritten"
-        fi
-      done
-      [ "$(cat "$tmp/released/$p.sha512")" = "$voted_sum" ] && [ "$(cat "$tmp/released/$p.asc")" = "$voted_sig" ] \
-        || fail "the Apache release changed while $p was fetched"
-      sum=$(shasum -a 512 "$tmp/released/$p")
-      [ "${sum%%[[:space:]]*}" = "${voted_sum%%[[:space:]]*}" ] || fail "the approved package $p does not match its checksum"
-      status=$(gpg --batch --homedir "$keyring" --status-fd 1 --verify "$tmp/released/$p.asc" "$tmp/released/$p" 2>/dev/null || true)
-      by=$(printf '%s\n' "$status" | awk '$2 == "VALIDSIG" && !f {f = ($12 != "" ? $12 : $3)} END {print f}')
-      [ -n "$by" ] || fail "the approved package $p has no valid signature against SkyWalking KEYS"
-      why=$(keys_verify "$keyring" "$by" "$tmp/released/$p.asc" "$tmp/released/$p")
-      [ -z "$why" ] || fail "the approved package $p does not verify against SkyWalking KEYS: $why"
-    fi
-    say "ok  $p, with its .asc and .sha512"
-    assets+=("$tmp/released/$p" "$tmp/released/$p.asc" "$tmp/released/$p.sha512")
-    for f in "$p" "$p.asc" "$p.sha512"; do asset_names="${asset_names:+$asset_names
-}$f"; done
-  done
-
-  step "The release"
-  # release_text prints the text of the GitHub release: the tag's
-  # changes.md without its heading, because the release has its own title,
-  # then where to get the version. It is built from the tag each time and
-  # stored nowhere, so a change made on main after prepare cannot reach it.
-  # It sends a reader to the Apache release and to the signatures, never to
-  # a git checkout, as the ASF release policy asks.
-  release_text() {
-    git show "$tag:$dev_page" | tail -n +2 | sed '1{/^$/d;}'
-    cat <<TEXT
-
-#### Where to get it
-
-- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
-- The files attached to this GitHub release are the same signed packages, each with its \`.asc\` signature and \`.sha512\` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install]($github/blob/$tag/docs/en/setup/install.md#verify-a-package) describes.
-- To build from the source package, see [Install]($github/blob/$tag/docs/en/setup/install.md#build-from-the-source-package).
-- Documentation: $github/blob/$tag/docs/README.md
-- Full changelog: $github/blob/$tag/docs/en/changes/changes.md
-TEXT
-  }
-  text=$(release_text)
-  say "tag      : $tag"
-  say "title    : $version"
-  say "text     : $dev_page as $tag holds it, then where to get $version"
-  say "assets   : ${#assets[@]} files, the voted packages with their .asc and .sha512"
-  say "---- the text of the release"
-  printf '%s\n' "$text"
-  say "----"
-  existing_assets=$(gh release view "$tag" --repo "$release_repo" --json assets --jq '.assets[].name') || fail "cannot list the prerelease's assets"
-  while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    has_line "$asset_names" "$f" || fail "the GitHub release holds an unexpected asset: $f. Remove it manually after checking why it is present, then rerun complete"
-  done <<< "$existing_assets"
-  duplicate_assets=$(printf '%s\n' "$existing_assets" | LC_ALL=C sort | uniq -d)
-  [ -z "$duplicate_assets" ] || fail "the GitHub release has duplicate asset names: $duplicate_assets. Remove the conflicting assets manually, then rerun complete"
-  for platform in $platforms; do
-    p=$(binary_package "$platform")
-    for f in "$p" "$p.sha512"; do
-      has_line "$existing_assets" "$f" || fail "the GitHub release is missing CI's binary asset $f. Restore that exact voted file manually from $canonical/$f, then rerun complete; binary packages are never uploaded by complete"
-    done
-  done
-  say "promote  : verify existing assets, upload missing voted files, then make the release official"
-  if [ "$dry_run" = true ]; then say "dry run: nothing uploaded or promoted"; exit 0; fi
-  printf '%s\n' "$text" > "$tmp/notes.md"
-  # CI's existing binaries must match what was voted on. An interrupted upload
-  # keeps the prerelease or recovery draft, so retrying can verify those files
-  # and finish attaching the voted source and signatures before promotion.
-  missing=()
-  for asset in "${assets[@]}"; do
-    f=${asset##*/}
-    if has_line "$existing_assets" "$f"; then
-      gh release download "$tag" --repo "$release_repo" --pattern "$f" --dir "$tmp/existing" \
-        || fail "cannot download $f from the GitHub release; rerun complete to resume"
-      cmp -s "$asset" "$tmp/existing/$f" || fail "the GitHub release's $f differs from the voted file. Remove the conflicting asset manually after checking why it differs, restore the exact file from $canonical/$f, then rerun complete"
-    else
-      missing+=("$asset")
-    fi
-  done
-  if [ "${#missing[@]}" -gt 0 ]; then
-    gh release upload "$tag" --repo "$release_repo" "${missing[@]}" \
-      || fail "the upload stopped; the release was not promoted. Rerun complete $version to verify existing files and resume"
-  fi
-  uploaded=$(gh release view "$tag" --repo "$release_repo" --json assets --jq '.assets[].name') || fail "cannot list uploaded assets"
-  [ "$(printf '%s\n' "$uploaded" | LC_ALL=C sort)" = "$(printf '%s\n' "$asset_names" | LC_ALL=C sort)" ] \
-    || fail "the GitHub release does not hold exactly the voted asset set; it was not promoted"
-  gh release download "$tag" --repo "$release_repo" --dir "$tmp/uploaded" \
-    || fail "cannot verify uploaded assets; rerun complete to resume"
-  for asset in "${assets[@]}"; do
-    cmp -s "$asset" "$tmp/uploaded/${asset##*/}" || fail "uploaded ${asset##*/} differs from the voted file; the release was not promoted. Remove the conflicting asset manually, then rerun complete"
-  done
-  current_release_info=$(gh release view "$tag" --repo "$release_repo" --json databaseId,tagName,isDraft,isPrerelease,name --jq '[.databaseId, .tagName, .isDraft, .isPrerelease, .name] | @tsv') \
-    || fail "cannot recheck the GitHub release before promotion"
-  [ "$current_release_info" = "$release_info" ] || fail "the GitHub release changed while complete was verifying it; it was not promoted"
-  gh release edit "$tag" --repo "$release_repo" --draft=false --prerelease=false --title "$version" --notes-file "$tmp/notes.md"
-  say "published the GitHub release with ${#assets[@]} verified voted files. CI can now publish the image on the released event."
-  say "The Homebrew formula and the winget manifests in $out/install download from this GitHub release. Both can be submitted now, once the PMC has agreed to each channel."
   exit 0
 fi
 
@@ -1330,9 +1280,11 @@ tag="v$version"
 branch="release/$version"
 page="$changes_dir/changes-$version.md"
 if [ "$no_push" = false ]; then
-  if previous=$(gh release view "$tag" --repo apache/skywalking-ai-sessionizer --json isPrerelease --jq '.isPrerelease' 2>&1); then
+  # CI creates the prerelease when the tag is pushed. One that exists now
+  # belongs to an earlier candidate, which must be removed explicitly.
+  if previous=$(gh release view "$tag" --repo "$release_repo" --json isPrerelease --jq '.isPrerelease' 2>&1); then
     if [ "$previous" = true ]; then
-      fail "a GitHub prerelease for $tag already exists. If it was rejected, remove it explicitly before preparing another candidate: gh release delete $tag --repo apache/skywalking-ai-sessionizer. The script never deletes a prerelease or moves its tag"
+      fail "a GitHub prerelease for $tag already exists. If its candidate was rejected, remove it and its tag explicitly before preparing another candidate: gh release delete $tag --repo $release_repo --cleanup-tag. The script never deletes a prerelease or moves a tag"
     fi
     fail "the GitHub release $tag already exists and is not a prerelease"
   fi
@@ -1427,32 +1379,26 @@ Current Version and the welcome page still link changes.md."
 fi
 
 step "Push and pull request"
-say "- create the GitHub prerelease $tag for developer review; CI attaches its binary archives after all checks pass"
+say "- git push the branch $branch and the tag $tag"
+say "- open the pull request against $from"
+say "- CI on the $tag push then builds and tests every package, creates the GitHub prerelease $tag, and attaches the binary archives with their .sha512 files. Nothing here waits for it"
 if [ "$dry_run" = true ]; then say "dry run: nothing was written, pushed or opened"; exit 0; fi
 if [ "$no_push" = true ]; then
   cat <<NEXT
 not pushed. When ready:
   git push -u origin $branch
   git push origin $tag
-  gh release create $tag --repo apache/skywalking-ai-sessionizer --verify-tag --prerelease --latest=false --title $version --notes "Development candidate for review by the SkyWalking community. Not an official Apache release. CI will attach unsigned binary archives for the release manager to sign and stage on dist.apache.org for the PMC vote."
   gh pr create --base $from --head $branch --title "Prepare the $version candidate and open $next"
-then, once the pull request has merged and prerelease CI has attached the binaries, prepare and upload the candidate:
+The CI run of the tag push creates the GitHub prerelease $tag and attaches the binaries.
+Once it has, and the pull request has merged, sign and upload the candidate:
   tools/release.sh candidate $version
 NEXT
   exit 0
 fi
 git push -u origin "$branch"
 git push origin "$tag"
-notes=$(mktemp)
-trap 'rm -f "$notes"' EXIT
-cat > "$notes" <<NOTES
-Development candidate for review by the SkyWalking community. This is not an official Apache release.
-
-CI will attach unsigned binary archives and SHA-512 checksums after all checks pass. The release manager downloads those exact archives, signs them, creates the source archive locally, and stages the candidate on dist.apache.org for the PMC vote.
-
-If this candidate is rejected, remove this prerelease before preparing its replacement. Do not replace its binary archives in place.
-NOTES
-gh release create "$tag" --repo apache/skywalking-ai-sessionizer --verify-tag --prerelease --latest=false --title "$version" --notes-file "$notes"
 gh pr create --base "$from" --head "$branch" --title "Prepare the $version candidate and open $next" \
-  --body "The first commit removes the in-development note from the $version changelog, docs/en/changes/changes.md. Tag $tag is on it, and is the candidate for the vote. The second commit moves the changelog to changes-$version.md, lists $version under Changelog, and opens $next in a new changes.md. After merging and successful prerelease CI, run \`tools/release.sh candidate $version\` to download its binaries, sign and upload the candidate for the vote."
-say "pushed $branch and $tag; prerelease and pull request opened. After the pull request merges and prerelease CI attaches the binaries: tools/release.sh candidate $version"
+  --body "The first commit removes the in-development note from the $version changelog, docs/en/changes/changes.md. Tag $tag is on it, and is the candidate for the vote. The second commit moves the changelog to changes-$version.md, lists $version under Changelog, and opens $next in a new changes.md. The CI run of the $tag push creates the GitHub prerelease and attaches the binaries. After that and this merge, run \`tools/release.sh candidate $version\` to sign the candidate, upload it for the vote and attach its signatures to the prerelease."
+say "pushed $branch and $tag, and opened the pull request."
+say "Next: wait for the CI run of the $tag push to create the GitHub prerelease $tag with the binaries,"
+say "and for the pull request to merge. Then: tools/release.sh candidate $version"

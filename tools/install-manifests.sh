@@ -176,15 +176,15 @@ winget_schema=1.12.0
 # this one. The archive keeps every version, but winget runs in scripts and
 # on shared CI runners, the heavy use the archive slows down and bans. So
 # the url is the asset of the GitHub release, an ASF managed platform, whose
-# url never moves. tools/release.sh complete attaches each file there only
-# after checking it against downloads.apache.org, so it is the voted file,
-# and the winget files wait for complete.
+# url never moves. tools/release.sh publish promotes that release only
+# after checking each file there against the release directory, so it is
+# the voted file, and the winget files wait for publish.
 #
 # Homebrew: one url per platform. The formula lives in a tap. A tap installs
 # the version its formula names until someone replaces the formula, and it
 # keeps its older formulae in git history. A url on the download site stops
 # working when the version leaves it. So the url is the asset of the GitHub
-# release, as for winget, and the formula waits for complete too. Its
+# release, as for winget, and the formula waits for publish too. Its
 # mirror is archive.apache.org, which also keeps every version. Homebrew
 # tries a mirror only when the url fails, so everyday installs do not reach
 # the archive.
@@ -443,8 +443,8 @@ create.
 
 **Submit a file only after @VERSION@ is on the download site,**
 <https://downloads.apache.org/skywalking/ai-sessionizer/@VERSION@/>. The Homebrew formula and the
-winget files also wait for the GitHub release of v@VERSION@, which `tools/release.sh complete`
-creates and fills: <https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v@VERSION@>.
+winget files also wait for the GitHub release of v@VERSION@, which `tools/release.sh publish`
+promotes: <https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v@VERSION@>.
 The Homebrew formula names the archive,
 <https://archive.apache.org/dist/skywalking/ai-sessionizer/@VERSION@/>, as its mirror, and the
 archive can show a new version later than the download site does. A manifest that names a file
@@ -471,8 +471,8 @@ slows down and then bans heavy use.
   holds, as long as the bucket moves on before the old version is removed.
 - microsoft/winget-pkgs keeps the manifest of every version, and `winget install --version` can
   still ask for an old one. winget also runs in scripts and on shared CI machines, the heavy use
-  the archive stops. The GitHub release keeps its URL, and `tools/release.sh complete` uploads
-  each file there only after checking it against the download site.
+  the archive stops. The GitHub release keeps its URL, and `tools/release.sh publish` promotes it
+  only after checking each file there against the release directory.
 
 ## Check the download sites first
 

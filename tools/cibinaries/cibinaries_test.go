@@ -48,14 +48,16 @@ type member struct {
 }
 
 type fixture struct {
-	t              *testing.T
-	dir            string
-	run            map[string]any
-	workflow       map[string]any
-	ref            map[string]any
-	release        map[string]any
-	finalRelease   map[string]any
-	members        []member
+	t            *testing.T
+	dir          string
+	run          map[string]any
+	workflow     map[string]any
+	ref          map[string]any
+	release      map[string]any
+	finalRelease map[string]any
+	members      []member
+	// signed are files candidate attached beside CI's, uploaded by a person.
+	signed         []member
 	assetOverrides map[string]any
 }
 
@@ -72,7 +74,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{t: t, dir: t.TempDir()}
 	repo := map[string]any{"full_name": repository, "id": 100}
 	f.run = map[string]any{"id": 123, "repository": repo, "head_repository": repo,
-		"head_branch": "v" + version, "head_sha": commit, "event": "release",
+		"head_branch": "v" + version, "head_sha": commit, "event": "push",
 		"run_started_at": "2026-09-14T10:00:00Z", "updated_at": "2026-09-14T10:30:00Z",
 		"status": "completed", "conclusion": "success", "workflow_id": 101, "run_attempt": 1,
 		"path": ".github/workflows/ci.yaml@refs/tags/v" + version}
@@ -195,6 +197,11 @@ func (f *fixture) write() {
 		assets = append(assets, asset)
 		lines = append(lines, fmt.Sprintf("%s %d %d %s", m.name, id, len(m.data), asset["digest"]))
 	}
+	for i, m := range f.signed {
+		assets = append(assets, map[string]any{"id": 2000 + i, "name": m.name, "state": "uploaded", "size": len(m.data),
+			"digest": fmt.Sprintf("sha256:%x", sha256.Sum256(m.data)), "created_at": "2026-09-15T08:00:00Z",
+			"uploader": map[string]any{"login": "release-manager", "type": "User"}})
+	}
 	// The marker names the asset set the way ci-upload-binaries.sh records it.
 	sort.Strings(lines)
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(lines, "\n")+"\n")))
@@ -252,6 +259,28 @@ func TestCIBinariesUsePrereleaseBuildRun(t *testing.T) {
 	}
 }
 
+// A candidate that stopped after attaching its signatures is run again. The
+// prerelease then holds the source package and the signatures too, uploaded
+// by the release manager, and only CI's files are downloaded and checked.
+func TestCIBinariesAcceptTheCandidatesOwnAttachments(t *testing.T) {
+	f := newFixture(t)
+	source := "apache-skywalking-ai-sessionizer-" + version + "-src.tgz"
+	f.signed = []member{{name: source, data: []byte("source")}, {name: source + ".sha512", data: []byte("sum")}, {name: source + ".asc", data: []byte("sig")}}
+	for _, m := range f.members {
+		if !strings.HasSuffix(m.name, ".sha512") {
+			f.signed = append(f.signed, member{name: m.name + ".asc", data: []byte("sig")})
+		}
+	}
+	output, err := f.execute()
+	if err != nil || !strings.Contains(output, "verified 6 packages") {
+		t.Fatalf("prerelease with the candidate's attachments rejected: %v\n%s", err, output)
+	}
+	entries, err := os.ReadDir(filepath.Join(f.dir, "output"))
+	if err != nil || len(entries) != len(f.members) {
+		t.Fatalf("installed %d files, want only CI's %d: %v", len(entries), len(f.members), err)
+	}
+}
+
 func TestVerifiedCIBinariesAreInstalledUnchanged(t *testing.T) {
 	for _, annotated := range []bool{false, true} {
 		t.Run(fmt.Sprintf("annotated=%v", annotated), func(t *testing.T) {
@@ -286,8 +315,9 @@ func TestUnverifiedCIBinariesLeaveNoPackages(t *testing.T) {
 		{"failed-run", "completed and successful", func(f *fixture) { f.run["conclusion"] = "failure" }},
 		{"wrong-commit", "release tag at COMMIT", func(f *fixture) { f.run["head_sha"] = strings.Repeat("c", 40) }},
 		{"main-run", "release tag at COMMIT", func(f *fixture) { f.run["head_branch"] = "main" }},
-		{"pull-request", "not a prerelease build", func(f *fixture) { f.run["event"] = "pull_request" }},
-		{"manual-run", "not a prerelease build", func(f *fixture) { f.run["event"] = "workflow_dispatch" }},
+		{"pull-request", "not the build of the tag push", func(f *fixture) { f.run["event"] = "pull_request" }},
+		{"manual-run", "not the build of the tag push", func(f *fixture) { f.run["event"] = "workflow_dispatch" }},
+		{"release-event", "not the build of the tag push", func(f *fixture) { f.run["event"] = "release" }},
 		{"run-without-times", "no start or update time", func(f *fixture) { delete(f.run, "run_started_at") }},
 		{"asset-by-person", "not uploaded by CI", func(f *fixture) {
 			f.assetOverrides = map[string]any{"uploader": map[string]any{"login": "someone", "type": "User"}}
@@ -319,6 +349,7 @@ func TestUnverifiedCIBinariesLeaveNoPackages(t *testing.T) {
 		{"traversal", "exactly the expected", func(f *fixture) { f.members[0].name = "../escaped" }},
 		{"nul-suffix", "exactly the expected", func(f *fixture) { f.members[0].name += "\x00../escaped" }},
 		{"extra-member", "exactly the expected", func(f *fixture) { f.members = append(f.members, member{name: "unexpected", data: []byte("x")}) }},
+		{"extra-signed-name", "exactly the expected", func(f *fixture) { f.signed = []member{{name: "unexpected.asc", data: []byte("x")}} }},
 		{"package-checksum", "SHA-512 mismatch", func(f *fixture) { f.members[0].data = []byte("changed package") }},
 		{"checksum-name", "invalid checksum document", func(f *fixture) { f.members[1].data = []byte(strings.Repeat("0", 128) + "  ../other\n") }},
 		{"package-metadata", "contains macOS metadata", func(f *fixture) {

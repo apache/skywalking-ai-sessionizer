@@ -107,14 +107,18 @@ def asset_fingerprint(assets):
     return hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
 
 
-def release_assets(base, release_id, expected, run=None):
+def release_assets(base, release_id, expected, signed, run=None):
     pages = api(base + f"/releases/{release_id}/assets?per_page=100", pages=True)
     require(isinstance(pages, list) and all(isinstance(page, list) for page in pages),
             "invalid release asset page response")
-    assets = [asset for page in pages for asset in page]
-    require(len(assets) == len(expected) and {asset.get("name") for asset in assets} == expected,
-            "the prerelease must contain exactly the expected packages and their .sha512 files; wait for CI or remove the rejected prerelease before another candidate")
-    require(len({asset.get("id") for asset in assets}) == len(assets), "duplicate release asset IDs")
+    every = [asset for page in pages for asset in page]
+    names = [asset.get("name") for asset in every]
+    # candidate attaches the source package and the signatures beside CI's
+    # files, so a later run of candidate finds them. Nothing else may be there.
+    require(len(names) == len(set(names)) and expected <= set(names) and set(names) <= expected | signed,
+            "the prerelease must contain exactly the expected packages and their .sha512 files, and at most the candidate's source package and signatures; wait for CI or remove the rejected prerelease before another candidate")
+    assets = [asset for asset in every if asset.get("name") in expected]
+    require(len({asset.get("id") for asset in every}) == len(every), "duplicate release asset IDs")
     for asset in assets:
         require(type(asset.get("id")) is int and asset["id"] > 0 and asset.get("state") == "uploaded" and
                 type(asset.get("size")) is int and asset["size"] > 0,
@@ -150,6 +154,8 @@ def main():
         extension = "zip" if os_name == "windows" else "tgz"
         packages.append(f"apache-skywalking-ai-sessionizer-{version}-bin-{os_name}-{arch}.{extension}")
     expected = set(packages + [name + ".sha512" for name in packages])
+    source = f"apache-skywalking-ai-sessionizer-{version}-src.tgz"
+    signed = {source, source + ".sha512"} | {name + ".asc" for name in packages + [source]}
     output = Path(directory).absolute()
     empty_destination(output)
     repository = "apache/skywalking-ai-sessionizer"
@@ -180,9 +186,10 @@ def main():
     require(run["run_attempt"] == int(build_attempt), "the CI run attempt differs from the prerelease's build")
     require(run.get("head_sha") == commit and run.get("head_branch") == tag,
             "the CI run must run on the release tag at COMMIT: " + tag)
-    # Only publishing the prerelease starts the job that uploads. A manual run
-    # of the workflow never attaches files, so it cannot vouch for them.
-    require(run.get("event") == "release", "the CI run is not a prerelease build")
+    # Only the push of the tag starts the job that creates the prerelease and
+    # uploads. A manual run of the workflow never attaches files, so it
+    # cannot vouch for them.
+    require(run.get("event") == "push", "the CI run is not the build of the tag push")
     require(run.get("workflow_id") == workflow.get("id") and
             run.get("path", "").split("@", 1)[0] == workflow["path"],
             "the run is not the repository's CI workflow")
@@ -190,7 +197,7 @@ def main():
     require(re.fullmatch(time_format, run.get("run_started_at") or "") and
             re.fullmatch(time_format, run.get("updated_at") or ""),
             "the CI run has no start or update time")
-    assets = release_assets(base, release_id, expected, run)
+    assets = release_assets(base, release_id, expected, signed, run)
     require(asset_fingerprint(assets) == build_assets,
             "the prerelease assets are not the files CI verified; remove the prerelease explicitly and recreate it for a new CI run")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -214,7 +221,7 @@ def main():
         subprocess.run(["sh", package_check] + [str(staging / name) for name in packages], check=True)
         require(tag_commit(base, tag) == commit, "the release tag moved while downloading the assets")
         require(release_identity(api(release_endpoint), tag, version, commit) == identity and
-                release_assets(base, release_id, expected) == assets,
+                release_assets(base, release_id, expected, signed) == assets,
                 "the GitHub prerelease changed while downloading the assets")
         latest = api(base + "/actions/runs/" + run_id)
         require(latest.get("status") == "completed" and latest.get("conclusion") == "success" and

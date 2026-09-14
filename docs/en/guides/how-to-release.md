@@ -4,9 +4,10 @@ This guide is for the release manager, and for anyone checking a release candida
 Apache SkyWalking AI Sessionizer follows the Apache release process. The SkyWalking PMC votes on a
 candidate, and only after the vote passes is anything published as an official release.
 
-`tools/release.sh` runs the stages, one command for each. None of them pushes to `main`. For every
-stage this page shows the command, says what it does, and lists the svn commands it runs, so a
-release manager can finish a stage by hand when the script stops.
+A release takes three commands of `tools/release.sh`: `prepare`, `candidate` and `publish`. The
+vote comes between the last two. None of them pushes to `main`. For every command this page shows
+what it does, and lists the svn commands it runs, so a release manager can finish a step by hand
+when the script stops.
 
 ## What counts as a release
 
@@ -21,12 +22,13 @@ A GitHub release alone cannot provide that approval. See the
   directory, and voters check them too.
 - **A git tag** is a candidate. `prepare` pushes it before the vote, so a tag alone says nothing
   about whether a version was released.
-- **The GitHub prerelease** holds CI-built binaries for developer review before the vote. It is
-  explicitly marked as a development candidate, not an official Apache release. After the vote
-  and SVN publication, the same page receives the voted source package and signatures and is
-  promoted to a full GitHub release. All its packages then match the Apache distribution.
-- **The container image** is a convenience. Publishing the complete GitHub release starts CI's
-  image job. Candidate tag builds and default manual CI runs publish no image.
+- **The GitHub prerelease** is created by CI on the tag push, with the binaries CI built and
+  tested. It is marked as a development candidate, not an official Apache release. `candidate`
+  attaches the source package and every signature to it, so it holds the same files as the
+  candidate directory. After the vote and the move to the release directory, `publish` promotes it
+  to a full GitHub release.
+- **The container image** is a convenience. The promotion of the GitHub release starts CI's image
+  job. A tag push and a default manual CI run publish no image.
 - **The Homebrew, Scoop and winget manifests** are conveniences, submitted after the release.
 
 0.3.0 is the first version to go through this process. 0.1.0 and 0.2.0 were published on GitHub
@@ -34,40 +36,38 @@ before it, as full GitHub releases carrying binary packages that CI built. No vo
 them, their packages are not signed, and they are not Apache releases. Whether to mark those two
 GitHub releases as pre-releases, or to remove their packages, is for the PMC to decide.
 
-## The stages
+## The steps
 
-| Stage | Run by | What it leaves |
+| Step | Run by | What it leaves |
 | --- | --- | --- |
-| [1. Prepare](#1-prepare) | the release manager | the tag `v$VERSION`, a GitHub prerelease for CI binaries, and a pull request |
-| [2. Candidate](#2-candidate) | the release manager | the signed candidate in the dev area of dist.apache.org, and the vote mail |
-| [3. The vote](#3-the-vote) | the PMC | the votes on the dev list, over at least 72 hours |
-| [4. Vote result](#4-vote-result) | the release manager | the result mail |
-| [5. Publish](#5-publish) | a PMC member | the voted packages in the release directory, and the files the later stages use |
-| [6. Complete](#6-complete) | the release manager | the GitHub release, carrying the voted packages |
-| [7. The website](#7-the-website) | the release manager | the downloads entry and the documentation of the version |
-| [8. The announcement](#8-the-announcement) | the release manager | the mail to the dev and announce lists |
-| [9. Install manifests](#9-install-manifests) | the release manager, once the PMC agrees to each channel | the Homebrew, Scoop and winget manifests, each submitted |
+| [1. Prepare](#1-prepare) | the release manager | the tag `v$VERSION` and a pull request. CI on the tag push then creates the GitHub prerelease with the binaries |
+| [2. Candidate](#2-candidate) | the release manager | the signed candidate in the dev area of dist.apache.org, its source package and signatures on the GitHub prerelease, and the vote mail |
+| [The vote](#the-vote) | the PMC, then the release manager | the votes on the dev list, over at least 72 hours, and the result mail |
+| [3. Publish](#3-publish) | a PMC member | the voted packages in the release directory, the promoted GitHub release, and the files the later steps use |
+| [The website](#the-website) | the release manager | the downloads entry and the documentation of the version |
+| [The announcement](#the-announcement) | the release manager | the mail to the dev and announce lists |
+| [Install manifests](#install-manifests) | the release manager, once the PMC agrees to each channel | the Homebrew, Scoop and winget manifests, each submitted |
 | [Later: remove old versions](#later-remove-old-versions) | a PMC member | the release directory without the versions the new one replaces |
 
-Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
+Between step 1 and step 2, the release manager waits for CI by hand. Nothing in the script waits.
+What the three commands share:
 
 - Each takes the version as its first argument, or asks for it. `prepare` offers the version the
-  heading of `docs/en/changes/changes.md` names. `candidate`, `vote-result`, `publish` and
-  `complete` offer the newest version `prepare` has finished, read from the newest
-  `docs/en/changes/changes-X.Y.Z.md` in the checkout. `prepare` makes that page in the commit
-  after the tag, and `main` holds it once the prepare pull request has merged.
-- `candidate`, `vote-result` and `publish` write their files under `dist/$VERSION/` in the
-  checkout. `complete` recovers the voted files from the SVN release directory; retained local
-  files are optional and must agree when present. `prepare` writes nothing there. Git ignores
-  `dist/`.
-- `--dry-run` prints what the stage would do. It makes no commit and no push, changes nothing on
-  dist.apache.org or GitHub, and writes no file in `dist/`. `candidate`, `publish` and `complete`
-  read the tag to make the plan. So, like a real run, they fetch `v$VERSION` from origin into the
-  local repository when it does not have the tag. They fetch that one tag and no other.
-- An option that belongs to another stage is refused, never ignored.
+  heading of `docs/en/changes/changes.md` names. `candidate` and `publish` offer the newest version
+  `prepare` has finished, read from the newest `docs/en/changes/changes-X.Y.Z.md` in the checkout.
+  `prepare` makes that page in the commit after the tag, and `main` holds it once the prepare pull
+  request has merged.
+- `candidate` and `publish` write their files under `dist/$VERSION/` in the checkout. `publish`
+  fetches the voted files from dist.apache.org when they are not there. `prepare` writes nothing
+  there. Git ignores `dist/`.
+- `--dry-run` prints what the command would do. It makes no commit and no push, changes nothing on
+  dist.apache.org or GitHub, and writes no file in `dist/`. `candidate` and `publish` read the tag
+  to make the plan. So, like a real run, they fetch `v$VERSION` from origin into the local
+  repository when it does not have the tag. They fetch that one tag and no other.
+- An option that belongs to another command is refused, never ignored.
 - When `APACHE_ID` is set, every svn command runs as `svn --username "$APACHE_ID"`. Set it when
   your local user name is not your Apache ID.
-- `tools/release.sh --help` prints every stage and its options.
+- `tools/release.sh --help` prints every command and its options.
 
 ## Before the first release
 
@@ -93,10 +93,9 @@ Stages 1, 2, 4, 5 and 6 are commands of `tools/release.sh`. What they share:
    address. gpg reads the expiry of a key from KEYS, not from your machine. So when you extend
    your key, have a PMC member commit the renewed public key to KEYS before the next candidate.
 2. **The tools.** git, Go 1.27 or later, make, Python 3, gpg, shasum, tar, gzip, zip, unzip, file, curl, svn, and
-   gh logged in to an account that can write to the repository. `prepare`, `candidate`, `publish`
-   and `complete` check for the tools they use before they change anything, and name any that is
-   missing. `vote-result` checks for none, because it needs only standard tools such as sed and
-   sort. `prepare` needs gh only when it pushes.
+   gh logged in to an account that can write to the repository. `prepare`, `candidate` and
+   `publish` check for the tools they use before they change anything, and name any that is
+   missing. `prepare` needs gh only when it pushes.
 3. **svn access.** Uploading a candidate needs write access to the dev area,
    `https://dist.apache.org/repos/dist/dev/skywalking`. Moving it to the release directory needs a
    PMC member.
@@ -121,7 +120,7 @@ name in a later commit.
 - In the commit it tags, `prepare` only removes the note. So the tag and the source package hold
   the finished changelog at `changes.md`, where the menu and the welcome page of the tag link it.
   The vote mail, the announcement and the GitHub release link that page at the tag, and
-  `complete` builds the text of the GitHub release from it.
+  `publish` builds the text of the GitHub release from it.
 - In the next commit, `prepare` moves the page to `docs/en/changes/changes-$VERSION.md`, the
   changelog of that one version. It lists the version under Changelog in `docs/menu.yml`, right
   after Current Version, so the versions read newest first. It writes a new `changes.md` for the
@@ -165,10 +164,10 @@ arguments. It offers the version the heading of `docs/en/changes/changes.md` nam
    `docs/menu.yml`, right after Current Version. It writes a new `docs/en/changes/changes.md` for
    `$NEXT`, with the heading `# Changes in $NEXT` and the in-development note. Current Version and
    the welcome page link `changes.md` already, so they stay as they are.
-5. Pushes the branch and the tag, creates a GitHub prerelease titled `$VERSION` with a development
-   candidate warning, and opens the pull request "Prepare the $VERSION candidate and open $NEXT"
-   against `main`. The prerelease is not marked latest. Its published event starts CI, which
-   attaches binaries and checksums only after all checks and platform smoke tests pass.
+5. Pushes the branch and the tag, and opens the pull request "Prepare the $VERSION candidate and
+   open $NEXT" against `main`. It creates no GitHub release. A GitHub release of `v$VERSION` that
+   exists already belongs to an earlier candidate, and `prepare` refuses to go on, as it does when
+   gh cannot check.
 
 By hand, the two commits are:
 
@@ -199,57 +198,46 @@ The second commit lists the version right after Current Version, so the Changelo
 `--dry-run` prints the plan and writes nothing. It installs nothing either. It runs
 `make license-check` only when `bin/license-eye` is there, and `make check` only when
 `bin/license-eye` and `bin/golangci-lint` are there. Otherwise it lists the check it left out.
-`--no-push` stops after the commits and prints the push, prerelease and pull request commands. `prepare` runs
+`--no-push` stops after the commits and prints the push and pull request commands. `prepare` runs
 no svn command.
 
-Review and merge the pull request. The tag and prerelease are candidates for developer review.
-Neither triggers an official release image or announcement. The scripts never delete a
-prerelease or replace its binary assets automatically; remove a rejected prerelease explicitly
-before preparing its replacement, as described below.
+The push of the tag starts CI. It builds and tests everything: the suite on three systems, the
+source package, all six binary packages, and each package on a runner of its own platform. Only
+when every job has passed does its `Prerelease binaries` job create the GitHub prerelease titled
+`$VERSION`, not marked latest, and attach the six archives and their six `.sha512` files. The
+prerelease is created with the workflow token, so it starts no other CI run, and no image is
+published. The job downloads what it uploaded, compares every byte, and adds a readiness marker to
+the prerelease notes. The marker names the run, its attempt, the commit, and a SHA-256 fingerprint
+of the verified files: each file's name, asset ID, size and GitHub digest.
+
+Wait for that run by hand, and review and merge the pull request. Both are needed before step 2.
+If a job of the run fails for a reason outside the source, such as a runner problem, rerun the
+failed jobs. The upload job reuses an empty prerelease an earlier attempt created, and refuses one
+that holds any file. The scripts never delete a prerelease or replace its files. Remove a
+prerelease that is incomplete or rejected explicitly before preparing its replacement, as
+[When the vote fails](#when-the-vote-fails) describes.
 
 ## 2. Candidate
 
-`make release VERSION=$VERSION` runs this same preparation with `--no-upload`, writing the signed
-packages under `dist/$VERSION/`. `CI_RUN=<id>` selects a run for that make target. To upload to
-SVN and start a vote, use `tools/release.sh candidate` as shown below.
-
-After the prepare pull request has merged, wait for the prerelease's CI run to finish
-successfully. It builds all six binary packages and runs each on a runner of its own platform.
-Only after all checks pass does CI attach the six archives and six `.sha512` files to the
-prerelease. It verifies the uploaded bytes and adds a readiness marker to the prerelease notes.
-The marker names the run, its attempt, the commit, and a SHA-256 fingerprint of the verified
-assets: each file's name, asset ID, size and GitHub digest. This run publishes no container image.
+Once CI has created the prerelease with the binaries, and the prepare pull request has merged:
 
 ```sh
 GPG_USER=<key id, fingerprint or email> tools/release.sh candidate $VERSION
 ```
 
-The binary archives uploaded to SVN always come from that GitHub prerelease. `candidate` reads
-its readiness marker and verifies the successful uploader run for the exact release tag and
-commit. The run must be the prerelease's `release` event. Every asset must be uploaded by
-`github-actions[bot]` while that run ran, and the assets must match the marker's fingerprint.
-Files a person uploads, or uploads again, are refused. To require a specific uploader run:
+`make release VERSION=$VERSION` runs the same command with `--no-upload`, writing the signed
+packages under `dist/$VERSION/`. `CI_RUN=<id>` selects a run for that make target.
+
+The binary archives uploaded to SVN always come from the GitHub prerelease. `candidate` reads its
+readiness marker and verifies the successful uploader run for the exact release tag and commit.
+The run must be the push of the tag. Every binary archive and `.sha512` file must be uploaded by
+`github-actions[bot]` while that run ran, and they must match the marker's fingerprint. Files a
+person uploads, or uploads again, are refused. A manual run of the workflow never attaches files,
+so it cannot make a prerelease ready. To require a specific uploader run:
 
 ```sh
 tools/release.sh candidate $VERSION --ci-run <run id>
 ```
-
-A successful run on `main`, a tag push or a manual diagnostic run does not make a prerelease
-ready. The prerelease's published event is the only run that attaches its candidate assets. If
-that run failed or its candidate was rejected, review the failure, explicitly remove the
-incomplete prerelease, then recreate it to start a new run:
-
-```sh
-gh release delete v$VERSION --repo apache/skywalking-ai-sessionizer
-gh release create v$VERSION --repo apache/skywalking-ai-sessionizer --verify-tag \
-  --prerelease --latest=false --title "$VERSION" \
-  --notes "Development candidate for community review. This is not an official Apache release. CI will attach unsigned binary archives and checksums after all checks pass. Remove this prerelease before preparing a replacement."
-```
-
-Deleting the prerelease does not delete the tag. A source change also requires the tag change
-agreed by the community; see [When the vote fails](#when-the-vote-fails). Wait for the replacement
-prerelease's CI run before calling `candidate`. The scripts do not overwrite existing candidate
-assets or reuse an old readiness marker.
 
 `GPG_USER` picks the signing key. When it is empty, gpg's default key signs. If gpg fails without
 asking for the passphrase, run `export GPG_TTY=$(tty)` first.
@@ -272,8 +260,15 @@ The command takes these steps and stops at the first failure:
    svn ls https://dist.apache.org/repos/dist/release/skywalking/ai-sessionizer
    ```
 
-   It refuses an already released version or an uploaded candidate. To replace a withdrawn
-   candidate, first remove it, then call a new vote on the replacement:
+   It refuses an already released version. A candidate of `$VERSION` in the dev area is refused
+   too, unless `dist/$VERSION/` in this checkout holds the same files: every package with the same
+   `.asc` and `.sha512`, and a package that matches its `.sha512`. That is a run that uploaded and
+   then stopped before the GitHub prerelease held the candidate. Signing the same archive again
+   gives another signature, and the vote is about the uploaded one, so such a run signs and
+   uploads nothing again. It checks the uploaded signatures against KEYS, checks that the uploaded
+   binaries are the ones CI attached, attaches what the prerelease is missing, and writes the vote
+   mail. To replace a withdrawn candidate, first remove it, then call a new vote on the
+   replacement:
 
    ```sh
    svn rm -m "Remove the Apache SkyWalking AI Sessionizer $VERSION candidate for a new one" \
@@ -282,10 +277,12 @@ The command takes these steps and stops at the first failure:
 
 3. **Download and verify prerelease binaries.** `tools/ci-binaries.sh` requires the expected
    public prerelease and its readiness marker. The marker must identify a completed, successful
-   run and attempt of this repository's CI workflow, from the Apache repository, on `v$VERSION`
-   at the release commit. A fork, branch run, failed run or wrong commit is refused. It accepts
-   exactly the expected archives and their `.sha512` files, downloads each GitHub release asset
-   by its ID, checks GitHub's SHA-256 digest and verifies every package's SHA-512 checksum.
+   run and attempt of this repository's CI workflow, from the Apache repository, for the push of
+   `v$VERSION` at the release commit. A fork, a branch run, a manual run, a failed run or a wrong
+   commit is refused. The prerelease must hold every expected archive and its `.sha512` file, and
+   nothing else except the source package and signatures an earlier run of `candidate` attached.
+   It downloads each of CI's files by its asset ID, checks GitHub's SHA-256 digest and verifies
+   every package's SHA-512 checksum.
    `tools/package-check.sh` also rejects AppleDouble `._*` files, `.DS_Store` and `__MACOSX`
    entries inside each package. The helper rechecks the tag, release and CI run after downloading.
    It does not depend on Actions artifact retention. There is no local binary build fallback.
@@ -349,9 +346,22 @@ The command takes these steps and stops at the first failure:
    svn commit -m "Add the Apache SkyWalking AI Sessionizer $VERSION release candidate"
    ```
 
-9. **Write the vote mail** to `dist/$VERSION/vote.txt`, including the checksums, signing key,
-   CI run and asset provenance. The vote approves these exact bytes. `publish` moves them
-   within SVN, and `complete` checks the GitHub binaries against them before adding source and signatures.
+9. **Attach to the GitHub prerelease.** `--no-upload` skips this step. It attaches the source
+   package, its `.sha512` and every `.asc`, beside CI's files, which it never uploads. A file that
+   is there already must have the same bytes, and a conflicting one is reported for a person to
+   remove; nothing is replaced. It then checks that the prerelease holds exactly the voted files,
+   downloads them all and compares every byte. If the upload stops, the candidate is on SVN
+   already. Run `candidate` again from the same checkout, as step 2 describes. By hand:
+
+   ```sh
+   cd <checkout>/dist/$VERSION
+   gh release upload v$VERSION --repo apache/skywalking-ai-sessionizer \
+     apache-skywalking-ai-sessionizer-$VERSION-src.tgz apache-skywalking-ai-sessionizer-$VERSION-src.tgz.sha512 *.asc
+   ```
+
+10. **Write the vote mail** to `dist/$VERSION/vote.txt`, including the checksums, signing key,
+    CI run and asset provenance. The vote approves these exact bytes. `publish` moves them within
+    SVN, and checks the GitHub release against them before promoting it.
 
 `--no-upload` downloads and verifies the CI binaries, creates the source archive, signs and tests
 the packages, and writes `vote-preview.txt`. It uploads nothing. It refuses when `vote.txt`
@@ -384,7 +394,7 @@ tests on all six platforms, before its archives are eligible for the candidate.
 candidate. GNU and macOS archive tools can produce different bytes even from the same files, so
 `candidate` always uses the unchanged CI archives. Neither signing nor promotion repacks them.
 
-## 3. The vote
+## The vote
 
 Check every link in `dist/$VERSION/vote.txt`, then send it to `dev@skywalking.apache.org`. By hand,
 the mail is:
@@ -400,6 +410,7 @@ Release notes:
 
 Release Candidate:
  * https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer/$VERSION
+ * The same files, on the GitHub prerelease: https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v$VERSION
  * sha512 checksums
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-src.tgz
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz
@@ -423,7 +434,7 @@ Guide to build the release from source:
  * https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/guides/how-to-release.md
 
 Notes for voters:
- * The binary archives are the unchanged packages downloaded from the GitHub prerelease after its successful CI run. The release manager created only the source archive locally and signed every archive.
+ * The binary archives are the unchanged packages CI attached to the GitHub prerelease after all its checks passed on the tag push, verified below. Only the source archive was created locally. The release manager signed every archive after checking its contents and checksums, and attached the source archive and every signature to the same prerelease.
  * CI run: https://github.com/apache/skywalking-ai-sessionizer/actions/runs/<run id>
  * Prerelease: https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v$VERSION, commit <release commit>
  * Asset: <asset id>, sha256:<asset digest>, <package name>
@@ -444,7 +455,8 @@ Each checksum line is the content of the package's `.sha512` file. The fingerpri
 
 The vote stays open for at least 72 hours. Only the votes of PMC members are binding. Anyone else
 is welcome to vote, and those votes count as non-binding. The vote passes with at least three
-binding +1 votes, and more binding +1 votes than binding -1 votes.
+binding +1 votes, and more binding +1 votes than binding -1 votes. No command counts the votes.
+[The result](#the-result) shows the mail that closes the vote.
 
 ### Check list for voters
 
@@ -565,58 +577,11 @@ for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "
    own platform, on every CI run. If you use Claude Code, the unpacked `asz` can also be tried on
    your own conversations: `asz sources`, `asz collect -once`, `asz parse`, `asz verify`.
 
-### When the vote fails
+### The result
 
-The script has no stage for a failed vote. Reply on the vote thread to say what was found. What
-comes next depends on where the problem is.
-
-- **In the packages, not in the tagged source.** For example, a signature by the wrong key, or a
-  file missing from the upload. Remove the candidate with the `svn rm` command from step 2 of
-  [Candidate](#2-candidate), remove `dist/$VERSION/`, run `candidate` again, and call a new vote.
-  It takes the same verified CI binaries and recreates the source archive from the same tag.
-- **In the source.** The tag has to change, and the script does not change a tag. `prepare`
-  refuses a version whose tag exists. Fix the problem on `main`, and agree on the dev list how to
-  go on: a new tag for the same version, or the next version. Either way, remove the old candidate
-  with `svn rm`, and explicitly remove the rejected GitHub prerelease before preparing the new
-  one. Do not replace its binary assets in place. The new prerelease must run CI and receive a
-  new readiness marker before its binaries can be signed for the next vote.
-
-## 4. Vote result
-
-After the vote has been open for at least 72 hours, and has passed:
-
-```sh
-tools/release.sh vote-result $VERSION \
-  --binding "Name, Name, Name" \
-  --non-binding "Name, Name" \
-  --against "Name" \
-  --non-binding-against "Name" \
-  --abstain "Name" \
-  --thread "https://lists.apache.org/thread/<id>"
-```
-
-`--binding` names the PMC members who voted +1, and `--non-binding` everyone else who voted +1.
-`--against` names the PMC members who voted -1, and `--non-binding-against` everyone else who voted
--1. `--abstain` names everyone who voted +0. Names are separated by commas. Each of these options
-can also be written as `--binding=...`, and can be given more than once. `--thread` is the link of
-the vote thread on lists.apache.org, and the mail carries it. Without it the mail has no link, and
-the stage says so.
-
-It refuses when:
-
-- a name is listed twice, in one list or across them. Names are compared without case, and a run
-  of spaces inside a name counts as one space.
-- an option has no value, such as an empty `--binding=`, or `--binding` followed by another
-  option.
-- there are fewer than three binding +1 votes.
-- the binding +1 votes are not more than the binding -1 votes.
-
-Every vote is listed in the mail, so a non-binding -1 that reports a real problem stays on record.
-Only binding votes decide the result. It trusts that the vote was open for 72 hours. It writes the
-result mail to `dist/$VERSION/result.txt` and prints it. `--dry-run` prints the mail and writes
-nothing. It runs no svn command.
-
-Send the mail to `dev@skywalking.apache.org`. By hand, it is:
+After the vote has been open for at least 72 hours, count it by hand. Each voter counts once. List
+every vote in the mail, so a non-binding -1 that reports a real problem stays on record. Only
+binding votes decide the result. Send the result to `dev@skywalking.apache.org`:
 
 ```text
 Subject: [RESULT][VOTE] Release Apache SkyWalking AI Sessionizer version $VERSION
@@ -649,12 +614,41 @@ The binding votes, those of PMC members, decide the result: 4 +1 and 1 -1, so th
 Thank you for voting, I will continue the release process.
 ```
 
-A list with no names is left out, and so is its count in the first line. The thread line is left
-out without `--thread`.
+Leave out a list with no names, and its count in the first line.
 
-## 5. Publish
+### When the vote fails
 
-A PMC member runs this stage, because only PMC members can write to the release directory. It
+The script has no step for a failed vote. Reply on the vote thread to say what was found. What
+comes next depends on where the problem is.
+
+- **In the packages, not in the tagged source.** For example, a signature by the wrong key, or a
+  file missing from the upload. Remove the candidate with the `svn rm` command from step 2 of
+  [Candidate](#2-candidate), remove the source package and signatures it attached to the GitHub
+  prerelease, remove `dist/$VERSION/`, run `candidate` again, and call a new vote. It takes the same
+  verified CI binaries and recreates the source archive from the same tag:
+
+  ```sh
+  for f in apache-skywalking-ai-sessionizer-$VERSION-src.tgz apache-skywalking-ai-sessionizer-$VERSION-src.tgz.sha512 \
+      $(gh release view v$VERSION --repo apache/skywalking-ai-sessionizer --json assets --jq '.assets[].name | select(endswith(".asc"))'); do
+    gh release delete-asset v$VERSION "$f" --repo apache/skywalking-ai-sessionizer --yes
+  done
+  ```
+
+- **In the source.** The tag has to change, and the script does not change a tag. `prepare`
+  refuses a version whose tag or GitHub release exists. Fix the problem on `main`, and agree on the
+  dev list how to go on: a new tag for the same version, or the next version. Either way, remove
+  the old candidate with `svn rm`. For a new tag of the same version, remove the GitHub prerelease
+  and the tag explicitly, on GitHub and in your checkout, before `prepare`. Its push starts a new
+  CI run, which creates a new prerelease with a new readiness marker:
+
+  ```sh
+  gh release delete v$VERSION --repo apache/skywalking-ai-sessionizer --cleanup-tag --yes
+  git tag -d v$VERSION
+  ```
+
+## 3. Publish
+
+A PMC member runs this step, because only PMC members can write to the release directory. It
 need not be the release manager. On a machine without the candidate, `publish` fetches the voted
 files from dist.apache.org.
 
@@ -664,10 +658,15 @@ tools/release.sh publish $VERSION
 
 It does these steps in order.
 
-1. **Check** for git, svn, shasum, tar and awk, and that `tools/install-manifests.sh` exists,
-   before anything moves. The script needs tar and awk, and it runs after the move. Then check the
-   tag, as `candidate` does.
-2. **Find the candidate:**
+1. **Check** for git, svn, shasum, tar, awk, gh, gpg, curl and cmp, and that
+   `tools/install-manifests.sh` exists, before anything moves. The script needs tar and awk, and it
+   runs after the move. Then check the tag, as `candidate` does.
+2. **Check the GitHub release.** It must be the release of `v$VERSION`, titled `$VERSION`, and not
+   a draft. It must hold every binary archive and `.sha512` file CI attached, and no file that is
+   not one of the voted files. A missing prerelease, a missing CI file or a stray file stops the
+   command before anything moves. A full release is accepted too: an earlier `publish` promoted
+   it, and its files are checked again.
+3. **Find the candidate:**
 
    ```sh
    svn ls https://dist.apache.org/repos/dist/dev/skywalking
@@ -681,7 +680,7 @@ It does these steps in order.
    move and does the steps after it again. Either way, every package with its `.asc` and `.sha512`
    must be there. `--remove-old` is refused unless the move is done already, as
    [Later: remove old versions](#later-remove-old-versions) says.
-3. **Hold the local files to the voted ones.** The GitHub release and the install manifests are
+4. **Hold the local files to the voted ones.** The GitHub release and the install manifests are
    made from `dist/$VERSION/`, so each file there must be the one voted on. A package built again
    has other bytes, and a package signed again has another signature. For each package already in
    `dist/$VERSION/` with its `.asc` and `.sha512`, it reads the voted checksum and signature:
@@ -700,7 +699,10 @@ It does these steps in order.
    svn export --force <candidate directory>/<file> dist/$VERSION/<file>
    ```
 
-4. **Move the candidate to the release directory.** The move publishes the packages approved by
+5. **Verify the signatures.** It imports KEYS into an empty scratch keyring. Each package must have
+   a good signature by a key in KEYS, which gpg does not report as expired or revoked. Otherwise
+   nothing moves.
+6. **Move the candidate to the release directory.** The move publishes the packages approved by
    the vote:
 
    ```sh
@@ -716,65 +718,40 @@ It does these steps in order.
    with `--remove-old`, it removes the older versions next, as
    [Later: remove old versions](#later-remove-old-versions) describes. Otherwise it names the
    older versions it kept.
-5. **Write the files for the later stages** into `dist/$VERSION/`:
+7. **Promote the GitHub release.** It attaches any voted source package, `.sha512` or `.asc` file
+   the release is missing. It never uploads CI's files, and never replaces a file: one that differs
+   from the voted file is reported for a person to remove. It checks that the release holds exactly
+   the voted files, downloads them all and compares every byte with the files from the release
+   directory. It reads the release again, and stops if it changed. Then it promotes the prerelease:
+
+   ```sh
+   gh release edit v$VERSION --repo apache/skywalking-ai-sessionizer --draft=false --prerelease=false \
+     --title $VERSION --notes-file <text>
+   ```
+
+   The text is the tag's `docs/en/changes/changes.md` without its heading, followed by "Where to
+   get it" below. If this step stops, the move is still done. Run `publish` again: it skips the move
+   and resumes here. A release promoted already is not promoted again.
+8. **Write the files for the later steps** into `dist/$VERSION/`:
    - `announce.txt`, the announcement mail.
    - `website.txt`, the entries for the website. They carry the day of the move, as svn records
      it in UTC, so a later run of `publish` writes the same date.
    - `install/`, the install manifests. It removes the old `install/` first, then runs
      `tools/install-manifests.sh $VERSION dist/$VERSION dist/$VERSION/install`. If that script
-     fails, the move is still done. Fix the script and run `publish` again: it skips the move and
-     writes `install/` from scratch. To run the script by hand instead, remove
+     fails, the move and the promotion are still done. Fix the script and run `publish` again: it
+     skips the move and writes `install/` from scratch. To run the script by hand instead, remove
      `dist/$VERSION/install` first, because the script refuses a directory that is not empty.
-6. **Print the next steps**, which are the stages below, in order. They wait at least one hour
+9. **Print the next steps**, which are the sections below, in order. They wait at least one hour
    after the move before the website change and the announcement, as the
-   [ASF release policy](https://www.apache.org/legal/release-policy.html) asks. The step for the
-   install manifests says that the Homebrew formula and the winget files wait for `complete`,
-   because both download from the GitHub release. When older versions are in the release
-   directory, the last step is the later run with `--remove-old`.
+   [ASF release policy](https://www.apache.org/legal/release-policy.html) asks. When older versions
+   are in the release directory, the last step is the later run with `--remove-old`.
 
-`--dry-run` reads svn and prints the plan. It fetches no package, and moves, removes and writes
-nothing. Like a real run, it fetches a missing tag, as `candidate` does.
+The promotion checks the files against the release directory on dist.apache.org, which is the
+authority after the vote, not against downloads.apache.org. downloads.apache.org serves the
+release directory a short while after the move, and that check would stop almost every first run.
 
-## 6. Complete
-
-```sh
-tools/release.sh complete $VERSION
-```
-
-downloads.apache.org serves the release directory a short while after the move. How long that
-takes has not been measured. Until then, `complete` refuses, so run it again later.
-
-1. It checks the tag and the existing GitHub prerelease. Its tag and title must match this
-   version. An already full release or a missing prerelease is refused. A matching recovery
-   draft is also supported; the command never creates a replacement release.
-2. It exports every voted package, `.asc` and `.sha512` from the canonical SVN release directory
-   into a fresh temporary directory, verifies the archive checksums and signatures against
-   SkyWalking KEYS, and checks that the signatures and checksums served by
-   `https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/` match SVN. Existing local
-   copies must agree, but `dist/$VERSION/` need not exist. No CI download or retained build
-   artifact is needed at this stage. These checks happen before any GitHub write.
-3. It builds the release text from the tag's `docs/en/changes/changes.md`, without that page's
-   heading, followed by "Where to get it" below. The text is printed. `--dry-run` prints the
-   plan without creating, uploading or publishing anything.
-4. The prerelease must already hold every binary archive and its `.sha512` file, unchanged from
-   the SVN vote. They are downloaded and compared with SVN and are never uploaded again. An
-   unexpected asset, missing binary or different content stops the command with instructions
-   for manual recovery from SVN. It adds only missing source files and signatures, preserving
-   existing matching files so an interrupted completion can be resumed.
-5. It checks that GitHub holds exactly the expected files, downloads them and compares every
-   byte to the voted files from SVN. It rechecks the release identity and type before promoting
-   the same prerelease to a full release:
-
-   ```sh
-   gh release edit v$VERSION --repo apache/skywalking-ai-sessionizer --draft=false --prerelease=false
-   ```
-
-   The `released` event and image publication happen at this point, after all packages,
-   signatures and checksums are present. If an upload or verification fails, the release stays
-   a prerelease (or recovery draft). Run `tools/release.sh complete $VERSION` again to verify
-   existing assets and resume.
-6. The Homebrew and winget manifests can now be submitted, once the PMC has agreed to each
-   channel, because their download URLs refer to the complete public GitHub release.
+`--dry-run` reads svn and GitHub and prints the plan. It fetches no package, and moves, removes,
+promotes and writes nothing. Like a real run, it fetches a missing tag, as `candidate` does.
 
 The section "Where to get it" sends a reader to the Apache release and to the signatures, as the
 [ASF release policy](https://www.apache.org/legal/release-policy.html) asks. It also links the
@@ -791,13 +768,13 @@ documentation and the changelog of the tag:
 ```
 
 The GitHub release is a convenience, a page on GitHub carrying the same bytes as the release
-directory. CI first uploads unsigned binaries and checksums to the prerelease; the release
-manager downloads those bytes, signs them locally and stages them with the source archive for
-the SVN vote. `complete` verifies the existing binaries against the published SVN files, adds
-the source and signatures, then promotes that prerelease. CI also retains diagnostic workflow
-artifacts, but neither candidate preparation nor completion depends on them. The `binaries`
-job builds every platform on diagnostic and prerelease runs, and `packages` runs each with
-`tools/package-smoke.sh` on a runner of its own platform.
+directory. CI creates it on the tag push with unsigned binaries and checksums. The release manager
+downloads those bytes, signs them locally, stages them with the source archive for the SVN vote,
+and attaches the source archive and signatures to the same page. `publish` checks every file
+against the release directory, then promotes that prerelease. CI also retains diagnostic workflow
+artifacts, but no step depends on them. The `binaries` job builds every platform on every run but
+the promotion, and `packages` runs each with `tools/package-smoke.sh` on a runner of its own
+platform.
 
 The released event starts CI's `docker` job. That job publishes the container image to the
 GitHub container registry under `$VERSION`, and under `latest` when it is the highest version
@@ -809,7 +786,7 @@ release does not wait for the image job. If the image job fails, retry it on the
 gh workflow run ci.yaml --repo apache/skywalking-ai-sessionizer --ref v$VERSION -f tag=v$VERSION -f publish_image=true
 ```
 
-## 7. The website
+## The website
 
 Wait at least one hour after the move, as the
 [ASF release policy](https://www.apache.org/legal/release-policy.html) asks before a download page
@@ -881,7 +858,7 @@ and the release packages. It can go in the same pull request.
 Wait until the website is deployed and its downloads page lists the version before the
 announcement. The mail links the downloads page and the documentation.
 
-## 8. The announcement
+## The announcement
 
 At least one hour after the move, as the
 [ASF release policy](https://www.apache.org/legal/release-policy.html) asks, and once the
@@ -913,7 +890,7 @@ Resources:
 The Apache SkyWalking Team
 ```
 
-## 9. Install manifests
+## Install manifests
 
 **Before the first submission to each package manager, the PMC agrees to it on
 dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
@@ -939,7 +916,7 @@ Homebrew/homebrew-core takes a formula only when it builds from source or instal
 the same on every platform, and this formula installs a binary built for each platform.
 
 Submit each file only after the version is on the download site. The Homebrew formula and the
-winget files also wait for [Complete](#6-complete), because they download from the GitHub release.
+winget files download from the GitHub release, which [Publish](#3-publish) promotes.
 That URL keeps working after a newer version replaces this one on the download site.
 archive.apache.org keeps every version too, but it slows down and then bans heavy use, and winget
 runs in scripts and on shared CI machines. The Homebrew formula names the archive as its mirror,

@@ -201,16 +201,19 @@
 
 ## Release
 
-- `tools/release.sh` runs the Apache release in five stages, each started by hand. `prepare` tags
-  the candidate, creates its GitHub prerelease and opens the pull request. Its tag message, its commit and its pull
-  request no longer call the candidate a release, and it checks for the tools it uses first.
-  `candidate` downloads the verified CI binaries from that prerelease, archives the tagged source
-  locally, signs every package, verifies them against KEYS, uploads them to the dev area of dist.apache.org and writes
-  the vote mail. `vote-result` counts the votes, refuses a vote that did not pass, and writes the
-  result mail. `publish`, run by a PMC member, moves the voted packages to the release directory
-  and writes the announcement, the website entries and the install manifests. `complete` promotes
-  the same GitHub prerelease. [How to Release](../guides/how-to-release.md) walks through each stage and
-  the svn commands it runs.
+- `tools/release.sh` runs the Apache release in three commands, each started by hand. `prepare`
+  tags the candidate, pushes the tag and opens the pull request. Its tag message, its commit and
+  its pull request no longer call the candidate a release, and it checks for the tools it uses
+  first. CI on the tag push creates the GitHub prerelease with the binaries, and the release
+  manager waits for it by hand. `candidate` downloads the verified CI binaries from that
+  prerelease, archives the tagged source locally, signs every package, verifies them against KEYS,
+  uploads them to the dev area of dist.apache.org, attaches the source package and every signature
+  to the prerelease, and writes the vote mail. After the vote, `publish`, run by a PMC member,
+  verifies the signatures, moves the voted packages to the release directory, promotes the same
+  GitHub prerelease, and writes the announcement, the website entries and the install manifests.
+  The release manager counts the votes and writes the result mail by hand.
+  [How to Release](../guides/how-to-release.md) walks through each command and the svn commands it
+  runs.
 - `candidate` refuses a signing key that is not RSA of at least 2048 bits, as the ASF requires,
   or that has no apache.org user ID, and a source package that would hold a font file, since
   fonts are Category B works the ASF keeps out of source releases. The vote mail names the signing
@@ -226,7 +229,7 @@
   longer counts as that address. Reading the KEYS listing no longer stops `candidate` when more
   than a pipe buffer of it follows the signing key. The voters' check list and
   [Install](../setup/install.md) say what gpg must not print.
-- `--dry-run` is described as it behaves. `candidate`, `publish` and `complete` read the tag to
+- `--dry-run` is described as it behaves. `candidate` and `publish` read the tag to
   make their plan, so a dry run fetches `v$VERSION` from origin when the local repository does not
   have it, as a real run does. They fetch that one tag and no other, and say so. A `candidate`
   dry run signs its scratch file and reads KEYS in a temporary directory, which it removes.
@@ -256,9 +259,8 @@
   font, and runs `go build` and `go test` there. The unit tests of the `build` job now also run
   the tests of the command and of the plugin, the plugin's hook from end to end included, on
   Linux, macOS and Windows. No CI job ran those tests before.
-- The result mail lists every vote, +0 and non-binding -1 included, and `--thread` links the vote
-  thread. Only binding votes decide. Names are compared without case, and an empty list option is
-  refused rather than taking the next option as a name.
+- The release guide shows the result mail, which lists every vote, +0 and non-binding -1 included,
+  and links the vote thread. Only binding votes decide.
 - `publish` also holds each local signature to the voted one, dates the website entries by the day
   of the move, and refuses `--remove-old` in the run that moves: older versions leave the release
   directory in a later run, once the website links them from the archive. The announcement is
@@ -272,22 +274,28 @@
   menu and the welcome page of the tag link it. The website publishes the docs of each version
   from its tag. In the next commit, `prepare` moves the page to `changes-VERSION.md`, lists the
   version under Changelog, and writes a new `changes.md` for the next version. The vote mail, the
-  announcement, the GitHub release and the winget manifest link the tag's `changes.md`. `complete`
+  announcement, the GitHub release and the winget manifest link the tag's `changes.md`. `publish`
   builds the text of the GitHub release from that page when it runs, in place of the
   `release-notes-VERSION.md` file `prepare` used to store.
   [How to Release](../guides/how-to-release.md#the-changelog) describes the layout, which the root
   `CHANGES.md` used to describe.
-- CI attaches the six binary archives and their checksums to the GitHub prerelease only after all
-  checks pass. The local download verifies the tag, CI run, release identity and asset checksums.
-  The readiness marker carries a fingerprint of the assets CI verified. `candidate` accepts only
-  the prerelease's `release` run, and only assets that `github-actions[bot]` uploaded during it.
-  A replacement candidate requires explicitly removing the rejected prerelease first.
-- `complete` recovers the approved packages from SVN and checks them against Apache downloads.
-  A KEYS entry that gpg cannot import no longer stops it, as it never stopped `candidate`; each
-  package still needs a valid signature from an imported key.
-  Existing GitHub binaries and checksums must match and are never uploaded again. It uploads only
-  missing source files and signatures, verifies the full asset set, and promotes the prerelease.
-  It can resume an interrupted upload without the original CI artifacts or local `dist` directory.
+- On the push of a release tag, CI creates the GitHub prerelease and attaches the six binary
+  archives and their checksums, only after all checks pass. It reuses an empty prerelease an
+  earlier attempt of the run created, and refuses any other. The local download verifies the tag,
+  CI run, release identity and asset checksums. The readiness marker carries a fingerprint of the
+  assets CI verified. `candidate` accepts only the run of the tag push, and only binaries that
+  `github-actions[bot]` uploaded during it. A replacement candidate requires explicitly removing
+  the rejected prerelease and its tag first.
+- `candidate` attaches the source package, its checksum and every signature to the prerelease
+  after the SVN upload, and never replaces a file there. If that stops, running `candidate` again
+  from the same checkout finishes it without signing or uploading again.
+- `publish` checks the GitHub release before anything moves, verifies every signature against
+  KEYS, and after the move checks each file of the release against the release directory and
+  promotes it. A KEYS entry that gpg cannot import does not stop it, as it never stopped
+  `candidate`; each package still needs a valid signature from an imported key. Existing GitHub
+  binaries and checksums must match and are never uploaded again. It attaches only missing source
+  files and signatures, verifies the full asset set, and promotes the prerelease. A run after the
+  move resumes there without the original CI artifacts or a local `dist` directory.
 - Windows on ARM 64 joins the platforms, so a version ships six binary packages beside the source
   package.
 - `tools/install-manifests.sh` writes a Homebrew formula, a Scoop manifest and the winget

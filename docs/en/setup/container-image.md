@@ -31,9 +31,10 @@ after the Apache vote and distribution publication starts its build, as the tags
 The tags `0.1` and `0.2` remain from an earlier workflow, and no new `MAJOR.MINOR` tag is made,
 because a reader who pulls one cannot tell which version answered.
 
-A git tag `v*` names a release candidate. Its GitHub prerelease holds CI binaries for developer
-testing and local SVN staging. After the Apache vote passes and the approved files reach Apache
-downloads, promoting it to a full GitHub release publishes the image under that version.
+A git tag `v*` names a release candidate. CI on its push creates a GitHub prerelease holding the
+binaries it built, for developer testing and local SVN staging. After the Apache vote passes,
+`tools/release.sh publish` moves the approved files to the Apache release directory and promotes the
+prerelease to a full GitHub release, which publishes the image under that version.
 A draft or a prerelease publishes no container image. A manual image retry requires an existing
 full GitHub release. A version with a suffix, such as
 `0.2.0-rc1`, is published under its own version tag and under its commit id, because CI tags every

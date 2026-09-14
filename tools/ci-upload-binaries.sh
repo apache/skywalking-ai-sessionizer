@@ -16,11 +16,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# CI calls this only after the entire prerelease build and all package tests pass.
-# Files already attached to a candidate are never replaced. A failed or rejected
-# candidate must be removed explicitly before its replacement is prepared.
+# CI calls this on a release tag push, only after the entire build and all
+# package tests pass. It creates the GitHub prerelease of the tag, or reuses
+# an empty one an earlier attempt of the run created, then attaches the
+# packages. Files already attached to a candidate are never replaced. A
+# failed or rejected candidate must be removed explicitly before its
+# replacement is prepared.
 set -euo pipefail
-[ "$#" -eq 7 ] || { echo 'usage: ci-upload-binaries.sh VERSION COMMIT RUN_ID RUN_ATTEMPT RELEASE_ID PKG_DIR "OS/ARCH ..."' >&2; exit 2; }
+[ "$#" -eq 6 ] || { echo 'usage: ci-upload-binaries.sh VERSION COMMIT RUN_ID RUN_ATTEMPT PKG_DIR "OS/ARCH ..."' >&2; exit 2; }
 script_dir=$(cd "$(dirname "$0")" && pwd)
 python3 - "$@" "$script_dir/package-check.sh" <<'PY'
 import hashlib
@@ -39,6 +42,16 @@ def api(endpoint):
     result = subprocess.run(["gh", "api", "--method", "GET", endpoint], check=True, stdout=subprocess.PIPE)
     return json.loads(result.stdout)
 
+def release_by_tag(endpoint):
+    # Only a missing release reads as none. Any other failure stops the run.
+    result = subprocess.run(["gh", "api", "--method", "GET", endpoint], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        if b"HTTP 404" in result.stderr:
+            return None
+        sys.stderr.buffer.write(result.stderr)
+        raise subprocess.CalledProcessError(result.returncode, result.args)
+    return json.loads(result.stdout)
+
 def digest(path, algorithm="sha512"):
     result = hashlib.new(algorithm)
     with path.open("rb") as source:
@@ -47,11 +60,11 @@ def digest(path, algorithm="sha512"):
     return result.hexdigest()
 
 def main():
-    version, commit, run_id, attempt, release_id, directory, platforms, checker = sys.argv[1:]
+    version, commit, run_id, attempt, directory, platforms, checker = sys.argv[1:]
     require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version), "invalid version")
     require(re.fullmatch(r"[0-9a-f]{40}", commit), "invalid commit")
-    for identifier in (run_id, attempt, release_id):
-        require(re.fullmatch(r"[1-9][0-9]*", identifier), "invalid run, attempt or release ID")
+    for identifier in (run_id, attempt):
+        require(re.fullmatch(r"[1-9][0-9]*", identifier), "invalid run or attempt ID")
     repository = "apache/skywalking-ai-sessionizer"
     base = "repos/" + repository
     tag = "v" + version
@@ -74,11 +87,17 @@ def main():
         require(match and digest(package_dir / name) == match[1].lower(), "invalid checksum for " + name)
     subprocess.run(["sh", checker] + [str(package_dir / name) for name in packages], check=True)
 
+    def prerelease_identity(release):
+        return (type(release.get("id")) is int and release["id"] > 0 and release.get("tag_name") == tag and
+                release.get("name") == version and release.get("prerelease") is True and
+                release.get("draft") is False)
+
+    release_id = None
+
     def current_release():
         release = api(base + "/releases/tags/" + tag)
-        require(release.get("id") == int(release_id) and release.get("tag_name") == tag and
-                release.get("name") == version and release.get("prerelease") is True and
-                release.get("draft") is False, "the prerelease was removed, replaced or changed")
+        require(release.get("id") == release_id and prerelease_identity(release),
+                "the prerelease was removed, replaced or changed")
         return release
 
     def check_tag():
@@ -91,10 +110,29 @@ def main():
             obj = api(base + "/git/tags/" + sha)["object"]
         require(obj.get("type") == "commit" and obj.get("sha") == commit, "the release tag moved away from this CI commit")
 
-    release = current_release()
+    check_tag()
+    release = release_by_tag(base + "/releases/tags/" + tag)
+    if release is None:
+        with tempfile.TemporaryDirectory(prefix="asz-ci-create-") as scratch:
+            notes = Path(scratch) / "notes.md"
+            notes.write_text(
+                "Development candidate for review by the SkyWalking community. This is not an official Apache release.\n\n"
+                "CI attached these unsigned binary archives and SHA-512 checksums after all checks passed on the tag push. "
+                "The release manager downloads those exact archives, signs them, creates the source archive locally, "
+                "stages the candidate on dist.apache.org for the PMC vote, and attaches the source archive and every signature here.\n\n"
+                "If this candidate is rejected, remove this prerelease and its tag before preparing its replacement. "
+                "Do not replace its files in place.\n", encoding="utf-8")
+            subprocess.run(["gh", "release", "create", tag, "--repo", repository, "--verify-tag", "--prerelease",
+                            "--latest=false", "--title", version, "--notes-file", str(notes)], check=True)
+        release = release_by_tag(base + "/releases/tags/" + tag)
+        require(release is not None, "the prerelease was not created")
+    # An earlier attempt of this run may have created the prerelease and
+    # stopped before attaching anything. Such an empty prerelease is reused.
+    require(prerelease_identity(release), "the GitHub release of " + tag + " is not a public prerelease titled " + version +
+            "; remove it explicitly before preparing another candidate")
     require(not release.get("assets") and "<!-- asz-ci-binaries" not in (release.get("body") or ""),
             "the prerelease already has assets or a readiness marker; remove the rejected prerelease explicitly before preparing another candidate")
-    check_tag()
+    release_id = release["id"]
     subprocess.run(["gh", "release", "upload", tag, "--repo", repository] +
                    [str(package_dir / name) for name in names], check=True)
     release = current_release()

@@ -43,7 +43,7 @@ func TestPrereleaseIsReadyOnlyAfterEveryUploadedByteIsVerified(t *testing.T) {
 			t.Skipf("CI upload fixture needs %s", name)
 		}
 	}
-	for _, mode := range []string{"complete", "existing", "corrupt-download", "moved-tag", "swapped-assets"} {
+	for _, mode := range []string{"complete", "reuse-empty", "existing", "official", "api-failure", "corrupt-download", "moved-tag", "swapped-assets"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
@@ -78,19 +78,26 @@ func TestPrereleaseIsReadyOnlyAfterEveryUploadedByteIsVerified(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(packages, name+".sha512"), []byte(sum), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			// CI creates the prerelease on the tag push. An empty one left by an
+			// earlier attempt of the run is reused; any other is refused.
 			release := map[string]any{"id": 789, "tag_name": "v0.3.0", "name": "0.3.0", "draft": false, "prerelease": true, "body": "Developer review only. Not an Apache release.", "assets": []any{}}
-			if mode == "existing" {
+			switch mode {
+			case "existing":
 				release["assets"] = []any{map[string]any{"name": "old-asset"}}
+			case "official":
+				release["prerelease"] = false
 			}
-			state, _ := json.Marshal(release)
-			if err := os.WriteFile(filepath.Join(dir, "release.json"), state, 0o644); err != nil {
-				t.Fatal(err)
+			if mode != "complete" && mode != "api-failure" {
+				state, _ := json.Marshal(release)
+				if err := os.WriteFile(filepath.Join(dir, "release.json"), state, 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			stub := `#!/usr/bin/env python3
 import hashlib, json, os, pathlib, shutil, sys
 root=pathlib.Path(os.environ["CI_UPLOAD_FIXTURE"])
 state=root/"release.json"
-r=json.loads(state.read_text())
+r=json.loads(state.read_text()) if state.exists() else None
 a=sys.argv[1:]
 mode=os.environ["CI_UPLOAD_MODE"]
 def save(): state.write_text(json.dumps(r))
@@ -104,8 +111,19 @@ if a[0]=="api":
         count_path.write_text(str(count+1))
         sha=("b" if mode=="moved-tag" and count else "a")*40
         print(json.dumps({"object":{"type":"commit","sha":sha}}))
-    elif "/releases/tags/" in endpoint: print(json.dumps(r))
+    elif "/releases/tags/" in endpoint:
+        if mode=="api-failure":
+            sys.stderr.write("gh: Server Error (HTTP 502)\n"); sys.exit(1)
+        if r is None:
+            sys.stderr.write("gh: Not Found (HTTP 404)\n"); sys.exit(1)
+        print(json.dumps(r))
     else: sys.exit(9)
+elif a[:2]==["release","create"]:
+    assert r is None, "created over an existing release"
+    assert a[2]=="v0.3.0" and "--verify-tag" in a and "--prerelease" in a and a[a.index("--title")+1]=="0.3.0", a
+    log("create")
+    r={"id":789,"tag_name":"v0.3.0","name":"0.3.0","draft":False,"prerelease":True,"body":pathlib.Path(a[a.index("--notes-file")+1]).read_text(),"assets":[]}
+    save()
 elif a[:2]==["release","upload"]:
     log("upload")
     for name in a[5:]:
@@ -130,15 +148,16 @@ else: sys.exit(8)
 			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(stub), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "../ci-upload-binaries.sh", "0.3.0", strings.Repeat("a", 40), "123", "2", "789", packages, "linux/amd64")
+			cmd := exec.Command("bash", "../ci-upload-binaries.sh", "0.3.0", strings.Repeat("a", 40), "123", "2", packages, "linux/amd64")
 			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "CI_UPLOAD_FIXTURE="+dir, "CI_UPLOAD_MODE="+mode)
 			output, err := cmd.CombinedOutput()
-			state, readErr := os.ReadFile(filepath.Join(dir, "release.json"))
-			if readErr != nil {
+			if state, readErr := os.ReadFile(filepath.Join(dir, "release.json")); readErr == nil {
+				release = nil
+				if err := json.Unmarshal(state, &release); err != nil {
+					t.Fatal(err)
+				}
+			} else if !os.IsNotExist(readErr) {
 				t.Fatal(readErr)
-			}
-			if err := json.Unmarshal(state, &release); err != nil {
-				t.Fatal(err)
 			}
 			// The marker must name the uploaded files the way ci-binaries.sh
 			// recomputes them from the release.
@@ -152,11 +171,15 @@ else: sys.exit(8)
 			fingerprint := sha256.Sum256([]byte(strings.Join(lines, "\n") + "\n"))
 			ready := strings.Contains(release["body"].(string), fmt.Sprintf("<!-- asz-ci-binaries run_id=123 run_attempt=2 commit=%s assets=%x -->", strings.Repeat("a", 40), fingerprint))
 			writes, _ := os.ReadFile(filepath.Join(dir, "writes"))
-			if mode == "complete" {
+			if mode == "complete" || mode == "reuse-empty" {
 				if err != nil || !ready {
 					t.Fatalf("upload: %s\n%v; ready=%v", output, err, ready)
 				}
-				if string(writes) != "upload\ndownload\nready\n" {
+				order := "upload\ndownload\nready\n"
+				if mode == "complete" {
+					order = "create\n" + order
+				}
+				if string(writes) != order {
 					t.Fatalf("publication order: %q", writes)
 				}
 				got, err := os.ReadFile(filepath.Join(remote, name))
@@ -170,8 +193,8 @@ else: sys.exit(8)
 				if err == nil || ready {
 					t.Fatalf("unsafe upload accepted: %s\n%v; ready=%v", output, err, ready)
 				}
-				if mode == "existing" && len(writes) > 0 {
-					t.Fatalf("existing candidate was modified: %s", writes)
+				if (mode == "existing" || mode == "official" || mode == "api-failure") && len(writes) > 0 {
+					t.Fatalf("%s release was modified: %s", mode, writes)
 				}
 				if strings.Contains(string(writes), "ready") {
 					t.Fatal("failed candidate was marked ready")

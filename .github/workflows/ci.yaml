@@ -23,11 +23,12 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
-  # The prerelease is for developer review; its successful CI run attaches
-  # binaries for the release manager. Only the approved full release starts
+  # A release tag push builds and tests everything, then creates the GitHub
+  # prerelease and attaches the binaries for the release manager. Only the
+  # promotion of that prerelease to a full release, after the vote, starts
   # the release image job.
   release:
-    types: [published, released]
+    types: [released]
   # Run diagnostics on a tag. Image publication is a separate opt-in
   # for retrying a version whose GitHub release is already public.
   workflow_dispatch:
@@ -41,10 +42,10 @@ on:
         default: false
 
 concurrency:
-  # A release is published and later promoted on the same tag, and neither run
-  # may cancel the other. A pull request keeps one group for all its updates,
-  # so a new push still cancels the run it replaces.
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event_name == 'release' && github.event.action || 'run' }}
+  # The push of a release tag and the later promotion of its release share a
+  # ref, and neither run may cancel the other. A pull request keeps one group
+  # for all its updates, so a new push still cancels the run it replaces.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
@@ -57,7 +58,7 @@ permissions:
 jobs:
   license:
     name: License
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,7 +77,7 @@ jobs:
 
   build:
     name: Build and Test
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -134,7 +135,7 @@ jobs:
   # builds and tests it there.
   source-package:
     name: Source package
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -157,7 +158,7 @@ jobs:
   # into a root that verifies. Ubuntu only, because it needs docker.
   collector:
     name: Collector
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +177,7 @@ jobs:
   # committed copy differs, so the copy cannot drift from its source.
   conversation-view:
     name: Conversation view
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -189,13 +190,13 @@ jobs:
       - name: Build the renderer from the pinned Horizon commit and compare
         run: make conversation-view-check
 
-  # Builds every platform on diagnostic and prerelease runs so a broken
+  # Builds every platform on every run but the promotion, so a broken
   # cross-compile is caught early. The artifact passes the packages to smoke
-  # tests and, for a published prerelease, to candidate-assets. Official
-  # promotion reuses those bytes after their signatures and source are added.
+  # tests and, on a release tag push, to candidate-assets. Official promotion
+  # reuses those bytes after their signatures and source are added.
   binaries:
     name: Binaries
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     # The packages job names the artifact by this version.
     outputs:
@@ -260,7 +261,7 @@ jobs:
   # its archive.
   packages:
     name: Package ${{ matrix.platform }}
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     needs: binaries
     runs-on: ${{ matrix.runner }}
     # A run takes about a minute. If Git Bash never returns from waiting on a
@@ -316,7 +317,7 @@ jobs:
 
   lint:
     name: Lint
-    if: github.event_name != 'release' || github.event.release.prerelease
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -327,9 +328,10 @@ jobs:
       - name: Lint
         run: make lint
 
+  # Created with the workflow token, the prerelease starts no other run.
   candidate-assets:
     name: Prerelease binaries
-    if: github.event_name == 'release' && github.event.action == 'published' && github.event.release.prerelease
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [license, build, source-package, lint, binaries, packages, collector, conversation-view]
     runs-on: ubuntu-latest
     permissions:
@@ -342,14 +344,13 @@ jobs:
         with:
           name: binaries-${{ needs.binaries.outputs.version }}
           path: dist
-      - name: Attach the tested packages to the prerelease
+      - name: Create the prerelease and attach the tested packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.binaries.outputs.version }}
-          RELEASE_ID: ${{ github.event.release.id }}
         run: |
           platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
-          bash tools/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$RELEASE_ID" dist "$platforms"
+          bash tools/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" dist "$platforms"
 
   # Candidate tags build and test their packages without publishing an image.
   # A manual image retry requires an existing public GitHub release.
