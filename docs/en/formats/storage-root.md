@@ -10,6 +10,8 @@ session.
   <session-id>/
     session.state                        next_seq, liveness (always unknown), last scan
     .lock                                one collector per session
+    metrics/                             immutable decisions of local metric derivation
+      000001.json                        exact request and accounting for landed file 1
     streams/
       main/
         transcript.cursor                how far the source has been read
@@ -61,6 +63,14 @@ wrote. [Retention](#retention) says what they are for.
 
 `liveness` in `session.state` is always `unknown`. asz has no check for whether a session is
 still running.
+
+When local metrics are enabled, each derived file gets a receipt under its session's `metrics/`.
+It holds the landed digest, counted call ids, series windows and exact protobuf request, encoded
+as base64 in JSON. The receipt is published before the request enters `_metrics/`, so a retry
+after an interrupted progress save uses the same accounting even if new fragments have arrived.
+Receipts are local collection state and are not sent as session data. `metrics.state` also keeps
+the first pass's look-back for each session that pass did not finish, whether a file waited for
+its grace or an error stopped the session, until every file of the session is derived.
 
 ## Landed files
 
@@ -290,9 +300,23 @@ Publishing a round reads the head and then writes the next round. `.lock` lets o
 at a time. Without it, two parsers could both read round N and both write a round N+1. The digest
 is part of the file name, so the two files would not collide, and the chain would fork with no
 error. A second parser gets a lock error and writes nothing. Under the lock, a round that does not
-follow the head is refused, and a round file is created only when no file of that name exists, then
-made read-only. A test in `tests/chain` runs four parsers at once on one session and requires
-exactly one round.
+follow the head is refused. The next round is written to a temporary file, made read-only and
+synced before an atomic operation installs its final name without replacing an existing file.
+An interrupted write leaves no partial round for a reader to fold. Tests in `tests/chain` cover
+an interrupted writer and four parsers running at once.
+
+The atomic operation is `renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with
+`RENAME_EXCL` on macOS, and `MoveFileEx` without replacement on Windows. A filesystem without an
+exclusive rename uses a hard link, which has the same guarantees. exFAT on macOS has neither: on a
+disk image, both calls returned "operation not supported". There asz creates an empty file with
+`O_EXCL`, which still refuses an existing round, then renames the complete round over it. Between
+those two calls, with no write between them, a reader or a crash can see an empty round file.
+
+No round or receipt is ever empty, so an empty file under such a name is a reservation. The chain
+does not count an empty round file, and the next publication removes one older than a minute. An
+empty receipt holds no decision, so its file is derived again, and a publication replaces a
+receipt reservation older than a minute. A younger one may belong to a writer still running, so
+the file waits for a later pass.
 
 Parse takes the lock before it reads the index. A parser that read the index first could hold an
 old one while a scenario removal took the session away, and then publish a round over evidence

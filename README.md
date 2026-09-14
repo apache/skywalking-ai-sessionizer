@@ -119,13 +119,14 @@ docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
 | Tag | Points at |
 | --- | --- |
 | `<version>`, such as `0.2.0` | the image built from the git tag `v<version>`, moved only by a run started by hand for that tag |
-| `latest` | the highest version tag, once its GitHub release is created or a run started by hand publishes it |
+| `latest` | the highest full published release version, once its GitHub prerelease is promoted after the Apache vote, or an explicit image retry publishes it |
 | `main` | the development head |
 | `<commit id>` | one commit, by its complete id, moved only by a run started by hand for a tag on it |
 
-A git tag `v*` names a release candidate, and pushing one publishes nothing.
-The GitHub release of a version is created after the Apache vote passes, and
-creating it publishes the image under that version. The image is a
+A git tag `v*` names a release candidate. CI on its push creates a GitHub
+prerelease holding the binaries it built, for developer testing and the release
+manager's SVN staging. After the Apache vote passes and the approved files move
+to the Apache release directory, the prerelease is promoted to a full release. That promotion publishes the image under that version. The image is a
 convenience, not part of the Apache release. Any `asz` command runs the same
 way: put it after the image name. See
 [Container Image](docs/en/setup/container-image.md). `make docker` builds the

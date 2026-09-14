@@ -26,7 +26,7 @@
 // A miss is not a loss: the next scan compares against the last manifest,
 // so a write that slipped through lands as an unattributed change.
 //
-// The list is versioned as ReadonlyV1 and named in every record. The
+// The list is versioned as ReadonlyV2 and named in every record. The
 // fixture in testdata holds real commands with the outcome each must get.
 package readonly
 
@@ -35,16 +35,17 @@ import (
 	"strings"
 )
 
-// ReadonlyV1 names this list, for the record.
-const ReadonlyV1 = "readonly-v1"
+// ReadonlyV2 names this list, for the record. Version 2 scans executable
+// wrappers and commands whose arguments can write files or run programs.
+const ReadonlyV2 = "readonly-v2"
 
 // plain are the programs that cannot write to the working tree.
 var plain = map[string]bool{}
 
 func init() {
-	for _, w := range strings.Fields(`cd grep rg cat ls head tail wc sort uniq cut tr diff cmp echo printf pwd which
-		type stat file du df date env printenv jq tree basename dirname realpath readlink test [ true false sleep
-		ps uname hostname whoami id nl column comm od xxd hexdump strings sha256sum shasum md5sum seq expr wait read`) {
+	for _, w := range strings.Fields(`cd grep cat ls head tail wc cut tr diff cmp echo printf pwd which
+		type stat du df date printenv jq basename dirname realpath readlink test [ true false sleep
+		ps uname hostname whoami id nl column comm od hexdump strings sha256sum shasum md5sum seq expr wait read`) {
 		plain[w] = true
 	}
 }
@@ -55,17 +56,15 @@ func init() {
 var gitRead = map[string]bool{}
 
 func init() {
-	for _, w := range strings.Fields(`status log diff show branch remote rev-parse describe blame ls-files ls-tree
-		cat-file tag fetch grep shortlog for-each-ref check-ignore reflog version merge-base config count-objects
-		name-rev symbolic-ref add --version --help`) {
+	for _, w := range strings.Fields(`status log diff show rev-parse describe blame ls-files ls-tree
+		cat-file grep shortlog for-each-ref check-ignore version merge-base count-objects
+		name-rev --version --help`) {
 		gitRead[w] = true
 	}
 }
 
 // gitReadSub are two-word git subcommands that read.
 var gitReadSub = map[string]bool{"stash list": true, "stash show": true, "worktree list": true, "worktree prune": true}
-
-var goRead = map[string]bool{"version": true, "env": true, "list": true, "doc": true}
 
 // keywordStart are words dropped from the front of a segment.
 var keywordStart = map[string]bool{"if": true, "while": true, "until": true, "elif": true, "then": true, "else": true, "do": true, "time": true, "!": true}
@@ -74,6 +73,15 @@ var keywordStart = map[string]bool{"if": true, "while": true, "until": true, "el
 var keywordOnly = map[string]bool{"done": true, "fi": true, "esac": true, ";;": true, "}": true, ")": true, "{": true, "(": true}
 
 var assignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// inertVariables change only how a program formats what it prints. Any other
+// variable may choose a program the command runs, as GIT_EXTERNAL_DIFF,
+// GIT_CONFIG_* and LD_PRELOAD do, so its assignment is scanned.
+var inertVariables = map[string]bool{
+	"LANG": true, "LANGUAGE": true, "LC_ALL": true, "LC_COLLATE": true, "LC_CTYPE": true, "LC_MESSAGES": true,
+	"LC_NUMERIC": true, "LC_TIME": true, "TZ": true, "TERM": true, "COLUMNS": true, "LINES": true,
+	"NO_COLOR": true, "CLICOLOR": true, "CLICOLOR_FORCE": true, "FORCE_COLOR": true,
+}
 var devNull = regexp.MustCompile(`^>{1,2}\|?\s*/dev/null`)
 var dupOut = regexp.MustCompile(`^>>?&(\d+|-)`)
 var dupIn = regexp.MustCompile(`^<&(\d+|-)`)
@@ -141,10 +149,7 @@ func split(text string) (segs []string, redirect, subst bool) {
 		case c == '>':
 			rest := text[i:]
 			switch {
-			case strings.HasPrefix(rest, ">="):
-				cur.WriteString(">=")
-				i += 2
-			case devNull.MatchString(rest):
+			case nullRedirect(rest):
 				m := devNull.FindString(rest)
 				cur.WriteString(m)
 				i += len(m)
@@ -187,8 +192,16 @@ func split(text string) (segs []string, redirect, subst bool) {
 			i++
 		}
 	}
+	if q != 0 {
+		redirect = true // malformed quoting is not a command we can classify
+	}
 	flush()
 	return segs, redirect, subst
+}
+
+func nullRedirect(rest string) bool {
+	m := devNull.FindString(rest)
+	return m != "" && (len(m) == len(rest) || strings.ContainsRune(" \t\n;&|", rune(rest[len(m)])))
 }
 
 // words splits a segment on whitespace, honouring quotes.
@@ -233,6 +246,12 @@ func segmentReadOnly(seg string) bool {
 		w = w[1:]
 	}
 	for len(w) > 0 && assignment.MatchString(w[0]) {
+		// A bare assignment matters too: it updates a variable the shell
+		// already exports to every later command.
+		name, _, _ := strings.Cut(w[0], "=")
+		if !inertVariables[name] {
+			return false
+		}
 		w = w[1:]
 	}
 	if len(w) == 0 {
@@ -241,21 +260,27 @@ func segmentReadOnly(seg string) bool {
 	first := w[0]
 	switch {
 	case keywordOnly[first]:
-		return true
+		return len(w) == 1
 	case first == "for" || first == "case" || first == "select":
-		return true // "for f in a b" and "case x in" hold no command
+		return false // compound grammar may put a command in this segment
 	case first == "xargs":
-		rest := w[1:]
-		for len(rest) > 0 && strings.HasPrefix(rest[0], "-") {
-			rest = rest[1:]
-		}
-		if len(rest) == 0 {
+		return false // standard input can supply a writing option or executable
+	case first == "env":
+		return len(w) == 1 // any arguments may select an executable
+	case first == "sort":
+		return !hasOption(w[1:], "o", "output", "compress-program")
+	case first == "tree":
+		return !hasOption(w[1:], "o", "output")
+	case first == "rg":
+		return !hasOption(w[1:], "", "pre", "hostname-bin")
+	case first == "sed":
+		// Only the common print-only form is recognized. Other scripts can
+		// write with w, execute with e, or load more script text from a file.
+		if len(w) < 3 || w[1] != "-n" || !sedPrint.MatchString(w[2]) {
 			return false
 		}
-		return segmentReadOnly(strings.Join(rest, " "))
-	case first == "sed":
-		for _, x := range w[1:] {
-			if x == "--in-place" || strings.HasPrefix(x, "--in-place=") || (strings.HasPrefix(x, "-") && !strings.HasPrefix(x, "--") && strings.Contains(x, "i")) {
+		for _, arg := range w[3:] {
+			if strings.HasPrefix(arg, "-") {
 				return false
 			}
 		}
@@ -263,16 +288,16 @@ func segmentReadOnly(seg string) bool {
 	case first == "find":
 		for _, x := range w[1:] {
 			switch x {
-			case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls":
+			case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls":
 				return false
 			}
 		}
 		return true
 	case first == "awk":
-		return !strings.Contains(seg, "system(")
+		return awkReadOnly(w[1:])
 	case first == "git":
 		args := w[1:]
-		for len(args) > 0 && (args[0] == "-C" || args[0] == "--no-pager" || args[0] == "-c") {
+		for len(args) > 0 && (args[0] == "-C" || args[0] == "--no-pager") {
 			if args[0] == "--no-pager" {
 				args = args[1:]
 			} else {
@@ -282,12 +307,84 @@ func segmentReadOnly(seg string) bool {
 		if len(args) == 0 {
 			return true
 		}
+		if hasOption(args, "O", "output", "ext-diff", "textconv", "filters", "exec", "upload-pack", "receive-pack", "open-files-in-pager") {
+			return false
+		}
+		switch args[0] {
+		case "branch":
+			return len(args) == 1 || (len(args) == 2 && (args[1] == "--show-current" || args[1] == "-v" || args[1] == "-vv")) || listOnly(args[1:], "--list")
+		case "remote":
+			return len(args) == 1 || (len(args) == 2 && (args[1] == "-v" || args[1] == "--verbose"))
+		case "tag":
+			return len(args) == 1 || listOnly(args[1:], "--list") || listOnly(args[1:], "-l")
+		case "config":
+			return len(args) > 1 && (args[1] == "--get" || args[1] == "--get-all" || args[1] == "--get-regexp" || args[1] == "--list" || args[1] == "get" || args[1] == "list")
+		case "symbolic-ref":
+			return len(args) == 2 && !strings.HasPrefix(args[1], "-")
+		case "reflog":
+			return len(args) == 1 || args[1] == "show"
+		}
 		if len(args) > 1 && gitReadSub[args[0]+" "+args[1]] {
 			return true
 		}
 		return gitRead[args[0]]
 	case first == "go":
-		return len(w) > 1 && goRead[w[1]]
+		return len(w) > 1 && (w[1] == "version" || (w[1] == "env" && !hasOption(w[2:], "wu")))
 	}
 	return plain[first]
+}
+
+func listOnly(args []string, option string) bool {
+	if len(args) == 0 || args[0] != option {
+		return false
+	}
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "-") {
+			return false
+		}
+	}
+	return true
+}
+
+// hasOption accepts attached short values and long values after an equals
+// sign. Unknown parsing cases may scan unnecessarily, but never skip writes.
+func hasOption(args []string, short string, long ...string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--") {
+			name, _, _ := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+			for _, option := range long {
+				if name == option {
+					return true
+				}
+			}
+		} else if strings.HasPrefix(arg, "-") && strings.ContainsAny(arg[1:], short) {
+			return true
+		}
+	}
+	return false
+}
+
+var sedPrint = regexp.MustCompile(`^([0-9]+|/[^/]*\/)(,([0-9]+|\$|/[^/]*\/))?p$`)
+
+func awkReadOnly(args []string) bool {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return false
+	}
+	// A program file, a loaded extension, or another program can execute
+	// arbitrary code. Keep the one inline program form only.
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "-") {
+			return false
+		}
+	}
+	program := args[0]
+	if strings.Contains(program, "system") || strings.ContainsAny(program, "|@") {
+		return false
+	}
+	for i := 0; i < len(program); i++ {
+		if program[i] == '>' && (i+1 == len(program) || program[i+1] != '=') {
+			return false
+		}
+	}
+	return true
 }

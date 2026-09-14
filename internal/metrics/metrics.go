@@ -48,7 +48,6 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -145,6 +144,10 @@ type Stats struct {
 	Skipped  int
 	Deferred int
 	Errors   []error
+	// PendingSessions need another pass because a file waited for its
+	// continuation or could not be derived. A watching pipeline must carry
+	// them even when only other sessions land new records.
+	PendingSessions []string
 }
 
 // Deriver derives from the landed files of a root that no earlier pass
@@ -196,72 +199,97 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		}
 	}
 	for _, session := range sessions {
+		// A session the first pass did not finish keeps that pass's look-back
+		// until it is finished. It is kept per session, not per file: a file
+		// the pass never reached, after an error, must not export the old
+		// history the first pass was asked to leave out. Files that land
+		// later hold newer records, which the look-back does not remove.
+		if !since.IsZero() {
+			state.PendingSince[session] = since
+		}
+		sessionSince := state.PendingSince[session]
 		files, err := storage.LandedFiles(d.Zone, session)
 		if err != nil {
 			st.Errors = append(st.Errors, err)
+			st.PendingSessions = append(st.PendingSessions, session)
 			continue
 		}
 		ss := state.session(session)
+		receiptPath := func(lf storage.LandedFile) string {
+			return filepath.Join(d.Zone.SessionDir(session), "metrics", fmt.Sprintf("%06d.json", lf.Seq))
+		}
+		// A pass whose progress was not saved may have published receipts for
+		// files after one that waited for its grace. Their requests are in the
+		// spool already. Apply them before any file is derived again, so the
+		// waiting file's windows follow theirs, as after a saved pass. A receipt
+		// that cannot be read is reported when the loop reaches its file.
+		for _, lf := range files {
+			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
+			if state.Derived[filepath.ToSlash(rel)] != "" {
+				continue
+			}
+			if r, err := loadReceipt(receiptPath(lf), lf); err == nil && r != nil {
+				r.commit(ss)
+			}
+		}
+		pending := false
 		for i, lf := range files {
 			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
 			rel = filepath.ToSlash(rel)
 			if state.Derived[rel] != "" {
 				continue
 			}
-			next := nextOfStream(files, i)
-			res, err := deriveFile(lf, next, since, ss)
+			receiptPath := receiptPath(lf)
+			receipt, deferred, err := d.deriveReceipt(receiptPath, lf, files[i+1:], sessionSince, ss, grace)
 			if err != nil {
 				st.Errors = append(st.Errors, fmt.Errorf("%s: %w", rel, err))
+				pending = true
+				// A later receipt depends on which calls and windows this
+				// file consumed. Publishing it after a failure could record
+				// the same continuation again, permanently.
+				break
+			}
+			if deferred {
+				st.Deferred++
+				pending = true
 				continue
 			}
-			if res.openTail && next == nil && grace > 0 {
-				if fi, err := os.Stat(lf.Path); err == nil && d.Now().Sub(fi.ModTime()) < grace {
-					st.Deferred++
-					continue
-				}
-			}
-			if !since.IsZero() && !res.latest.IsZero() && res.latest.Before(since) {
+			if receipt.Skipped {
 				st.Skipped++
 			}
-			if len(res.points) > 0 {
-				data, err := proto.Marshal(request(res.points, d.Version))
+			if len(receipt.Request) > 0 {
+				_, created, err := spool.PutNamed(SpoolName(session, lf.Seq), receipt.Request)
 				if err != nil {
 					st.Errors = append(st.Errors, err)
-					continue
-				}
-				_, created, err := spool.PutNamed(SpoolName(session, lf.Seq), data)
-				if err != nil {
-					st.Errors = append(st.Errors, err)
-					continue
+					pending = true
+					// This receipt already reserves its calls, but they have
+					// not been applied to the pass's state. Retry it before
+					// deciding what any later file should count.
+					break
 				}
 				// A request that was there already, from a pass cut short
 				// after writing it, is not a new one.
 				if created {
 					st.Requests++
-					st.Points += len(res.points)
+					st.Points += receipt.Points
 				}
 			}
 			// The file's effect on the state is applied only now, with its
 			// request on disk, so a failed write is derived again.
-			res.commit(ss)
-			state.Derived[rel] = res.digest
+			receipt.commit(ss)
+			state.Derived[rel] = receipt.Digest
 			st.Files++
+		}
+		if pending {
+			st.PendingSessions = append(st.PendingSessions, session)
+		} else {
+			delete(state.PendingSince, session)
 		}
 	}
 	if err := state.save(filepath.Join(spool.Dir(), StateFile), d.Now()); err != nil {
 		return nil, err
 	}
 	return st, nil
-}
-
-// nextOfStream is the landed file after files[i] on the same stream, or nil.
-func nextOfStream(files []storage.LandedFile, i int) *storage.LandedFile {
-	for j := i + 1; j < len(files); j++ {
-		if files[j].Stream == files[i].Stream && files[i].Stream != "" {
-			return &files[j]
-		}
-	}
-	return nil
 }
 
 // latestReceived is when the newest request from the runtime's exporter was
@@ -311,31 +339,24 @@ type point struct {
 // result is what deriving one file found, held until its request is on
 // disk and then committed to the session's state.
 type result struct {
-	points   []point
-	counted  []string
-	lastEnd  map[string]time.Time
-	digest   string
-	latest   time.Time
-	openTail bool
-}
-
-func (r *result) commit(ss *sessionState) {
-	for _, id := range r.counted {
-		ss.Calls[id] = true
-	}
-	for k, t := range r.lastEnd {
-		ss.Series[k] = t.UnixNano()
-	}
+	points  []point
+	counted []string
+	lastEnd map[string]time.Time
+	digest  string
+	latest  time.Time
+	// openTail names the last file holding the continuing call. The grace
+	// starts there, not at its first fragment, which may be much older.
+	openTail string
 }
 
 // deriveFile reads one landed file's calls and turns the ones that finished
 // into points. A call whose last fragment is the file's last record may go
-// on in the next file of the stream; when that file exists its leading
-// fragments of the call are read too, and the call is counted here, once.
+// on across several files of the stream. Their leading fragments are read
+// until another transcript record ends the call, and it is counted once.
 // Points take the minute the call's last fragment falls in, and a window
 // that never overlaps the series' last: a minute already passed by an
 // earlier point follows that point instead.
-func deriveFile(lf storage.LandedFile, next *storage.LandedFile, since time.Time, ss *sessionState) (*result, error) {
+func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since time.Time, ss *sessionState) (*result, error) {
 	f, err := os.Open(lf.Path)
 	if err != nil {
 		return nil, err
@@ -387,12 +408,25 @@ func deriveFile(lf storage.LandedFile, next *storage.LandedFile, since time.Time
 	}
 	res.digest = hex.EncodeToString(h.Sum(nil))
 	if tail && last != nil && !ss.Calls[last.id] {
-		if next != nil {
-			if err := continueIn(next.Path, last); err != nil {
+		res.openTail = lf.Path
+		for _, next := range following {
+			if next.Stream != lf.Stream {
+				continue
+			}
+			more, matched, err := continueIn(next.Path, last)
+			if err != nil {
 				return nil, err
 			}
-		} else {
-			res.openTail = true
+			if matched {
+				res.openTail = next.Path
+				if last.at.After(res.latest) {
+					res.latest = last.at
+				}
+			}
+			if !more {
+				res.openTail = ""
+				break
+			}
 		}
 	}
 	sums := map[point]int64{}
@@ -401,10 +435,14 @@ func deriveFile(lf storage.LandedFile, next *storage.LandedFile, since time.Time
 		if ss.Calls[id] {
 			continue
 		}
-		res.counted = append(res.counted, id)
 		if !c.finished || c.usage == nil || c.at.IsZero() {
 			continue
 		}
+		// An unfinished call may receive its final usage in a later file,
+		// even after this file's grace expired. Only usable final usage
+		// consumes the call's identity. Old completed calls still consume
+		// it below, so replaying history cannot bypass the look-back.
+		res.counted = append(res.counted, id)
 		minute := c.at.Truncate(time.Minute)
 		if !since.IsZero() && minute.Add(time.Minute).Before(since) {
 			continue
@@ -477,26 +515,34 @@ func (c *call) take(rec *sessiondata.Record, t time.Time, ok bool) {
 	}
 }
 
-// continueIn reads the leading fragments of a call from the next file of
-// its stream: the file was cut at a budget, and the call's end is there.
-func continueIn(path string, c *call) error {
+// continueIn reads the leading fragments of a call. more says the call
+// may continue in another file; matched says this file held a fragment.
+// Metadata and workspace changes do not interrupt a transcript's call.
+func continueIn(path string, c *call) (more, matched bool, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return false, false, err
 	}
 	defer f.Close()
 	rd, err := sessiondata.NewReader(f)
 	if err != nil {
-		return err
+		return false, false, err
+	}
+	if rd.Header().Kind != sessiondata.KindTranscript {
+		return true, false, nil
 	}
 	for {
 		rec, err := rd.Next()
-		if errors.Is(err, io.EOF) || (err == nil && rec.Call != c.id) {
-			return nil
+		if errors.Is(err, io.EOF) {
+			return true, matched, nil
 		}
 		if err != nil {
-			return err
+			return false, matched, err
 		}
+		if rec.Call != c.id {
+			return false, matched, nil
+		}
+		matched = true
 		t, ok := recordTime(rec)
 		c.take(rec, t, ok)
 	}
@@ -579,6 +625,9 @@ type state struct {
 	UpdatedAt string                   `json:"updated_at"`
 	Derived   map[string]string        `json:"derived"`
 	Sessions  map[string]*sessionState `json:"sessions"`
+	// PendingSince retains the first pass's look-back, by session, for each
+	// session that pass did not finish, including across a restart.
+	PendingSince map[string]time.Time `json:"pending_session_since,omitempty"`
 }
 
 type sessionState struct {
@@ -596,7 +645,7 @@ func (s *state) session(id string) *sessionState {
 }
 
 func loadState(path string) (*state, bool, error) {
-	s := &state{Schema: 1, Derived: map[string]string{}, Sessions: map[string]*sessionState{}}
+	s := &state{Schema: 1, Derived: map[string]string{}, Sessions: map[string]*sessionState{}, PendingSince: map[string]time.Time{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -612,6 +661,9 @@ func loadState(path string) (*state, bool, error) {
 	}
 	if s.Sessions == nil {
 		s.Sessions = map[string]*sessionState{}
+	}
+	if s.PendingSince == nil {
+		s.PendingSince = map[string]time.Time{}
 	}
 	for _, ss := range s.Sessions {
 		if ss.Calls == nil {

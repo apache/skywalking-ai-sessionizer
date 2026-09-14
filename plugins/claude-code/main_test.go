@@ -18,6 +18,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,7 +120,7 @@ func TestAShellCommandIsObservedEndToEnd(t *testing.T) {
 	if r.Outcome == nil || r.Outcome.State != changes.OutcomeFailed || r.Outcome.ExitCode == nil || *r.Outcome.ExitCode != 1 {
 		t.Fatalf("outcome: %+v", r.Outcome)
 	}
-	if r.Policy == nil || r.Policy.Exclusions != "standard-v1" || r.Policy.ReadOnly != "readonly-v1" || len(r.Policy.Expanded) == 0 {
+	if r.Policy == nil || r.Policy.Exclusions != "standard-v1" || r.Policy.ReadOnly != "readonly-v2" || len(r.Policy.Expanded) == 0 {
 		t.Fatalf("policy: %+v", r.Policy)
 	}
 	if *r.ChangedFiles != 2 || r.Root.Path != ws || r.Coverage != changes.CoverageComplete {
@@ -177,6 +178,135 @@ func TestAnEditInsideASubagentComesFromTheResponse(t *testing.T) {
 	runHook(strings.NewReader(hookInput("PostToolUse", session, "", "Edit", "toolu_m", `{"file_path":"x"}`, resp, "")), data, ws, now)
 	if _, err := os.Stat(output.Path(data, session, "main")); !os.IsNotExist(err) {
 		t.Fatal("a main-stream edit was recorded by the plugin")
+	}
+}
+
+func TestSubagentEditsRespectCaptureScope(t *testing.T) {
+	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
+		for _, location := range []string{"excluded", "default-excluded", "outside", "second-root"} {
+			t.Run(tool+"/"+location, func(t *testing.T) {
+				data, ws, second, outside := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+				roots, _ := json.Marshal([]string{ws, second})
+				if err := os.WriteFile(filepath.Join(data, "settings.yaml"), []byte("roots: "+string(roots)+"\nexclude:\n  add: [/private/]\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				file := map[string]string{
+					"excluded":         filepath.Join(ws, "private", "secret.txt"),
+					"default-excluded": filepath.Join(ws, "node_modules", "secret.txt"),
+					"outside":          filepath.Join(outside, "secret.txt"),
+					"second-root":      filepath.Join(second, "allowed.txt"),
+				}[location]
+				response := map[string]any{"filePath": file, "originalFile": "old\n", "content": "private content\n"}
+				if tool == "NotebookEdit" {
+					response = map[string]any{"notebook_path": file, "original_file": "old\n", "updated_file": "private content\n"}
+				}
+				raw, _ := json.Marshal(response)
+				runHook(strings.NewReader(hookInput("PostToolUse", "session", "agent", tool, "edit", `{}`, string(raw), "")), data, ws, time.Now())
+				path := output.Path(data, "session", "agent")
+				if location != "second-root" {
+					if _, err := os.Stat(path); !os.IsNotExist(err) {
+						t.Fatalf("an edit outside the capture scope was recorded: %v", err)
+					}
+					return
+				}
+				recs := readLines(t, path)
+				if len(recs) != 1 || recs[0].Root.Path != second || recs[0].Changes[0].Path != "allowed.txt" || recs[0].Policy == nil {
+					t.Fatalf("the containing root and policy were not recorded: %+v", recs)
+				}
+			})
+		}
+	}
+}
+
+func TestSubagentEditsDoNotFollowLinks(t *testing.T) {
+	data, ws, target := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(target, "secret.txt"), []byte("private content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(ws, "linked")); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+	// Start a manifest so the edit's update could otherwise insert bytes
+	// through the link and leak them as a deletion in a later scan.
+	now := time.Now()
+	shell := func(id string) {
+		now = now.Add(time.Second)
+		for _, event := range []string{"PreToolUse", "PostToolUse"} {
+			runHook(strings.NewReader(hookInput(event, "session", "", "Bash", id, `{"command":"make build"}`, `{}`, "")), data, ws, now)
+		}
+	}
+	shell("before")
+	response := `{"filePath":` + jsonString(filepath.Join(ws, "linked", "secret.txt")) + `,"content":"private content"}`
+	runHook(strings.NewReader(hookInput("PostToolUse", "session", "agent", "Write", "edit", `{}`, response, "")), data, ws, time.Now())
+	if _, err := os.Stat(output.Path(data, "session", "agent")); !os.IsNotExist(err) {
+		t.Fatal("a file through a symbolic link was recorded")
+	}
+	shell("after")
+	for _, rec := range readLines(t, output.Path(data, "session", "main")) {
+		if len(rec.Changes) > 0 {
+			t.Fatalf("a manifest update observed a linked file: %+v", rec.Changes)
+		}
+	}
+}
+
+func TestSubagentEditHunksHonorSizeCap(t *testing.T) {
+	for _, tool := range []string{"Edit", "Write", "NotebookEdit"} {
+		t.Run(tool, func(t *testing.T) {
+			data, ws := t.TempDir(), t.TempDir()
+			if err := os.WriteFile(filepath.Join(data, "settings.yaml"), []byte("size_cap: 4\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(ws, "large.txt")
+			response := map[string]any{"filePath": file, "originalFile": "old\n", "content": "large content\n",
+				"structuredPatch": []any{map[string]any{"oldStart": 1, "oldLines": 1, "newStart": 1, "newLines": 1, "lines": []string{"-old", "+large content"}}}}
+			if tool == "NotebookEdit" {
+				response = map[string]any{"notebook_path": file, "original_file": "old\n", "updated_file": "large content\n"}
+			}
+			raw, _ := json.Marshal(response)
+			runHook(strings.NewReader(hookInput("PostToolUse", "session", "agent", tool, "edit", `{}`, string(raw), "")), data, ws, time.Now())
+			rec := readLines(t, output.Path(data, "session", "agent"))[0]
+			change := rec.Changes[0]
+			if change.Diff != changes.DiffTooLarge || len(change.Hunks) != 0 || change.Additions != nil || change.Deletions != nil || change.After.SHA256 == "" || change.After.Bytes == nil || *change.After.Bytes != 14 {
+				t.Fatalf("a large edit must retain its hash and size only: %+v", change)
+			}
+		})
+	}
+}
+
+// An executable wrapper must open a real window. Otherwise a concurrent
+// tool's scan assigns its writes to the wrong window alone.
+func TestWrappedWriterSharesConcurrentWindow(t *testing.T) {
+	for _, command := range []string{"env cp source.txt target.txt", "sort -o target.txt target.txt"} {
+		t.Run(command, func(t *testing.T) {
+			data, ws := t.TempDir(), t.TempDir()
+			file := filepath.Join(ws, "target.txt")
+			if err := os.WriteFile(file, []byte("old\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now()
+			writer := `{"command":` + jsonString(command) + `}`
+			idle := `{"command":"python3 -c pass"}`
+			invoke := func(event, id, input string) {
+				now = now.Add(time.Second)
+				runHook(strings.NewReader(hookInput(event, "session", "", "Bash", id, input, `{"stdout":"","stderr":""}`, "")), data, ws, now)
+			}
+			invoke("PreToolUse", "idle", idle)
+			invoke("PreToolUse", "writer", writer)
+			if err := os.WriteFile(file, []byte("new\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			invoke("PostToolUse", "writer", writer)
+			invoke("PostToolUse", "idle", idle)
+			recs := readLines(t, output.Path(data, "session", "main"))
+			if len(recs) != 2 {
+				t.Fatalf("got %d records, want both tool windows", len(recs))
+			}
+			for _, rec := range recs {
+				if rec.Basis != changes.BasisToolWindow || len(rec.Changes) != 1 || rec.Changes[0].Attribution != changes.AttributionShared || len(rec.Changes[0].Windows) != 2 {
+					t.Fatalf("the writing window was lost from attribution: %+v", rec)
+				}
+			}
+		})
 	}
 }
 

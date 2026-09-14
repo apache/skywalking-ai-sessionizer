@@ -138,3 +138,20 @@ func TestOnlyTheDocumentAndARecordAreServed(t *testing.T) {
 		}
 	}
 }
+
+// A parser killed while writing its first round leaves a temporary file in
+// the rounds directory. The list names only conversations with a round.
+func TestListSkipsAConversationWithOnlyATemporaryRound(t *testing.T) {
+	root := t.TempDir()
+	rounds := filepath.Join(root, "_conversations", "interrupted", "rounds")
+	if err := os.MkdirAll(rounds, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rounds, ".tmp-123"), []byte("incomplete"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := view.New(storage.NewZone(root), nil).List()
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("listed %v, %v; want no conversation", ids, err)
+	}
+}

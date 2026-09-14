@@ -188,6 +188,12 @@ func (c *Chain) List() ([]RoundFile, error) {
 		if m == nil {
 			continue
 		}
+		// A round is never empty. An empty file under a round's name is the
+		// reservation of a writer that stopped before its rename, on a
+		// filesystem without an exclusive rename. It is not in the chain.
+		if info, err := e.Info(); err == nil && info.Size() == 0 {
+			continue
+		}
 		n, err := strconv.ParseUint(m[1], 10, 64)
 		if err != nil {
 			continue
@@ -214,6 +220,16 @@ func (c *Chain) Publish(round uint64, digest string, data []byte) (string, error
 		return "", err
 	} else if have+1 != round {
 		return "", fmt.Errorf("sessionflow: cannot publish round %d: the chain head is round %d", round, have)
+	}
+	// An abandoned reservation of an earlier round has another digest in its
+	// name, so no write collides with it. It is removed here, under the lock,
+	// so no reader or sender waits for it to be finished.
+	if ents, err := os.ReadDir(c.RoundsDir()); err == nil {
+		for _, e := range ents {
+			if roundNameRe.MatchString(e.Name()) {
+				storage.RemoveAbandonedReservation(filepath.Join(c.RoundsDir(), e.Name()))
+			}
+		}
 	}
 	path := filepath.Join(c.RoundsDir(), roundName(round, digest))
 	err := storage.WriteExclusive(path, storage.PermLanded, func(w io.Writer) error {

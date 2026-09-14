@@ -1,4 +1,4 @@
-# Shell commands with the outcome readonly-v1 must give them.
+# Shell commands with the outcome readonly-v2 must give them.
 #
 # One case per non-comment line: the outcome, a tab, the command. "read" means
 # the plugin may skip the scan; "scan" means it must scan, whether the command
@@ -9,7 +9,7 @@
 # home paths and private names. The shapes are what matter: which words start
 # each segment, and what sits inside quotes.
 
-# --- read-only: one or more read-only programs joined by pipes and && ---
+# --- common pipelines; version 2 scans forms with unobserved arguments or scripts ---
 read	grep -rn "likePrefix" apps --include="*.ts" | head -20
 read	ls test/e2e/playwright/ && git diff 13c1796 --stat -- test/e2e/playwright/specs/admin/pages.spec.ts
 read	git log --oneline -3 && echo "---" && ls apps/ui/src/layer/
@@ -34,12 +34,12 @@ read	grep -c "" internal/*.go | sort -t: -k2 -n | tail
 read	env | grep -i claude
 read	ps -eo pid,etime,command | grep -iE "vite|tsx|pnpm" | grep -v grep | head -20
 read	test -f asz.yaml && echo present || echo absent
-read	GOFLAGS=-mod=mod go list ./... | head
+scan	GOFLAGS=-mod=mod go list ./... | head
 
 # a pipe inside double quotes is part of the grep pattern, not a segment boundary
 read	grep -rn "Dashboard header\|Layer header" --exclude-dir=node_modules . 2>/dev/null | head -60
 read	grep -n "repository\|tag:\|image:" chart/values.yaml | head -60; echo "-----"; sed -n '40,90p' chart/values.yaml
-read	find apps packages -name "*.test.ts" -not -path "*/node_modules/*" | xargs grep -ln "layer\|sidebar" -i | head -40
+scan	find apps packages -name "*.test.ts" -not -path "*/node_modules/*" | xargs grep -ln "layer\|sidebar" -i | head -40
 
 # a redirection sign inside single quotes is text
 read	grep -o '<link rel="canonical"[^>]*>' page.html | sort -u | head -20
@@ -58,19 +58,19 @@ read	go version >/dev/null 2>&1 && echo has-go || echo no-go
 read	echo done >&2
 read	git log --oneline -5 2>&1 | head -3
 
-# xargs handing arguments to a read-only program
-read	find test/e2e/script -name "playwright.sh" | head -1 | xargs cat
-read	grep -rln "auth/login" apps/bff/src | head; find apps/bff/src -name "*.test.ts" | xargs grep -ln "login" | head
+# xargs may append writing options from its input, even to a read-only program
+scan	find test/e2e/script -name "playwright.sh" | head -1 | xargs cat
+scan	grep -rln "auth/login" apps/bff/src | head; find apps/bff/src -name "*.test.ts" | xargs grep -ln "login" | head
 
 # shell keywords around read-only commands
-read	for f in ja ko de fr es pt; do echo "=== $f ==="; git diff -- apps/ui/src/i18n/locales/$f.json | grep "^+  \"Dashboard templates"; done
+scan	for f in ja ko de fr es pt; do echo "=== $f ==="; git diff -- apps/ui/src/i18n/locales/$f.json | grep "^+  \"Dashboard templates"; done
 read	if grep -q "changes" docs/menu.yml; then echo listed; else echo missing; fi
 
 # git subcommands that read, or that touch only .git/, which is excluded scope
 read	git status --porcelain | head -50 && echo "---" && git stash list
 read	git diff master...pr-144 --stat && echo "=== MERGE BASE ===" && git merge-base master pr-144
 read	echo "=== LOCAL BRANCHES ===" && git branch -vv && echo && echo "=== WORKTREES ===" && git worktree list
-read	git add -A && git --no-pager diff --cached --stat | tail -5
+scan	git add -A && git --no-pager diff --cached --stat | tail -5
 read	git log -2 --format='%B' | grep -iE "co-authored|generated with" || echo "clean"
 read	git worktree list && git worktree prune && git worktree list
 

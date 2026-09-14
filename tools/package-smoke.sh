@@ -97,6 +97,9 @@ actual=${actual%%[[:space:]]*}
 [ "$actual" = "$listed" ] || fail "the sha512 of $(basename "$pkg") is $actual, and $sum says $listed"
 echo "$(basename "$pkg"): its sha512 matches $(basename "$sum")"
 
+step "Archive metadata"
+sh "$tree/tools/package-check.sh" "$pkg" || fail "the package contains macOS metadata"
+
 step "Unpack"
 dir="$work/package"
 if [ -n "$exe" ]; then

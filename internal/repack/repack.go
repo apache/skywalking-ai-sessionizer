@@ -55,6 +55,22 @@ type slot struct {
 	files  []storage.LandedFile
 }
 
+// CheckDestination refuses a populated root before any session is written.
+// A prior chain binds to its original landed bytes and cannot be reused.
+func CheckDestination(root string) error {
+	items, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("repack: destination: %w", err)
+	}
+	if len(items) > 0 {
+		return fmt.Errorf("repack: destination %s is not empty; use a new or empty directory", root)
+	}
+	return nil
+}
+
 // Session re-cuts every landed file of session from src into dst so that no
 // file exceeds budget bytes, except one holding a single record larger than
 // that. Records keep their bytes and their order; the session's cursors are
@@ -75,8 +91,19 @@ func Session(src, dst *storage.Zone, session string, budget int64, now time.Time
 		return nil, fmt.Errorf("repack: session %s has no landed files", session)
 	}
 	srcDir, dstDir := src.SessionDir(session), dst.SessionDir(session)
-	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+	// Reserve a new session directory even when Session is called without
+	// the command's whole-root check. A retry must never rewrite its files.
+	chainDir := filepath.Join(dst.Root(), "_conversations", session)
+	if _, err := os.Lstat(chainDir); err == nil {
+		return nil, fmt.Errorf("repack: destination already has a chain for %s", session)
+	} else if !os.IsNotExist(err) {
 		return nil, err
+	}
+	if err := os.MkdirAll(dst.Root(), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.Mkdir(dstDir, 0o755); err != nil {
+		return nil, fmt.Errorf("repack: destination session must be new: %w", err)
 	}
 
 	// Group by slot, keeping slots in the order their first file landed and
@@ -245,7 +272,7 @@ func closeOut(o *out) (err error) {
 	if err = os.Chmod(name, storage.PermLanded); err != nil {
 		return err
 	}
-	if err = os.Rename(name, o.final); err != nil {
+	if err = storage.RenameExclusive(name, o.final); err != nil {
 		return err
 	}
 	if d, derr := os.Open(filepath.Dir(o.final)); derr == nil {

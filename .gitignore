@@ -19,6 +19,8 @@ go.work.sum
 .idea/
 .vscode/
 .DS_Store
+._*
+__MACOSX/
 
 # Collected conversation data. /data is the DEFAULT storage root, so running
 # `asz collect` in a checkout would otherwise stage private transcripts.

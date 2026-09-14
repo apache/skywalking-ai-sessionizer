@@ -53,6 +53,9 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 	if dstRoot == srcRoot {
 		return fmt.Errorf("repack: DEST is the storage root itself; landed files are never rewritten in place")
 	}
+	if err := repack.CheckDestination(dstRoot); err != nil {
+		return err
+	}
 	want := arg(1)
 	sessions, err := sessionDirs(srcRoot)
 	if err != nil {

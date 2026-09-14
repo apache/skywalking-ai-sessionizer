@@ -9,3 +9,6 @@ data
 docs
 tests
 *.md
+**/._*
+**/.DS_Store
+**/__MACOSX

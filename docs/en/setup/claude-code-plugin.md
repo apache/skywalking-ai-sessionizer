@@ -116,7 +116,9 @@ size_cap: 1048576
 ```
 
 `roots` are the directories observed; empty means the project directory Claude Code hands every
-hook. `tools.scope` names the tools observed with a scan; the editing tools need no entry.
+hook. Subagent edits must be inside one of these roots and pass the same exclusion and symbolic
+link rules as a scan. Their record names the root containing the file and the policy in force.
+`tools.scope` names the tools observed with a scan; the editing tools need no entry.
 
 ## Exclusions
 
@@ -170,6 +172,8 @@ exclude:
 other name matches at any depth. `remove` names a default to keep observing, for example
 `**/vendor/`. `.gitignore` is never read. Symbolic links are neither followed nor recorded. A
 file over `size_cap`, or one holding a NUL byte, lands as path and hash only, with the reason.
+This applies to subagent edits too, including patches supplied by the runtime. The cap applies
+to both the original and resulting content, and to the patch itself.
 
 ## The read-only skip
 
@@ -182,31 +186,46 @@ double quotes still runs a command.
 Any of these makes the command scan: an unquoted redirection to anything but `/dev/null` or
 another descriptor, a heredoc, a command substitution, a process substitution. Otherwise the
 command is split on unquoted `|`, `||`, `&&`, `;`, `&` and newlines, and every segment's first
-word must be on this list, `readonly-v1`:
+word must be on this list, `readonly-v2`, with the restrictions below:
 
 ```text
-cd grep rg cat ls head tail wc sort uniq cut tr diff cmp echo printf pwd which type stat file
-du df date env printenv jq tree basename dirname realpath readlink test [ true false sleep
-ps uname hostname whoami id nl column comm od xxd hexdump strings sha256sum shasum md5sum
+cd grep cat ls head tail wc cut tr diff cmp echo printf pwd which type stat
+du df date printenv jq basename dirname realpath readlink test [ true false sleep
+ps uname hostname whoami id nl column comm od hexdump strings sha256sum shasum md5sum
 seq expr wait read
-sed    without -i or --in-place
-find   without -delete, -exec, -execdir, -ok or -fprint
-awk    without system(
-xargs  when the program it runs is on this list
-git    status log diff show branch remote rev-parse describe blame ls-files ls-tree cat-file
-       tag fetch grep shortlog for-each-ref check-ignore reflog version merge-base config
-       count-objects name-rev symbolic-ref add, and stash list, stash show, worktree list,
-       worktree prune
-go     version env list doc
+env    with no arguments
+sort   without -o, --output or --compress-program
+tree   without -o or --output
+rg     without --pre or --hostname-bin
+sed    only -n followed by a print command, such as '10,20p' or '/start/,/end/p', then file names
+find   without -delete, -exec, -execdir, -ok, -okdir, -fprint, -fprint0, -fprintf or -fls
+awk    one inline program without system, redirection, pipes or extensions; no option arguments
+git    status log diff show rev-parse describe blame ls-files ls-tree cat-file grep shortlog
+       for-each-ref check-ignore version merge-base count-objects name-rev, and stash list,
+       stash show, worktree list, worktree prune; branch, remote, tag, config, symbolic-ref
+       and reflog only in recognized query forms
+go     version, or env without -w or -u
 ```
 
-`git add` is on the list because it changes only `.git/`, which is excluded scope. `git commit`
-is not, because a pre-commit hook can rewrite files. A miss is not a loss: the next scan compares
-against the last manifest, so a write that slipped through lands as an unattributed change. On
-the corpus above, 69.3% of shell commands are read-only under this list, so most shell commands
-wait for no scan. The fixture
-`plugins/claude-code/internal/readonly/testdata/commands.txt` holds 93 real commands with the
-outcome each must get, and the classifier's test reads it.
+An `env` invocation with arguments and every `xargs` invocation are scanned: they can run another
+program or supply writing options. Git commands with explicit output files, external programs,
+filters, text conversion or `-c` settings are scanned too. `git add`, `git fetch` and `git commit`
+are scanned because filters or hooks can write outside `.git/`. Go package loading can update
+module files, so `go list` and `go doc` are scanned. Unknown forms, including compound `for` and
+`case` syntax, also scan.
+
+A variable assignment at the start of a segment scans too, as in `GIT_EXTERNAL_DIFF=./tool git diff`,
+because a variable such as `GIT_EXTERNAL_DIFF`, `GIT_CONFIG_*` or `LD_PRELOAD` can run another
+program. A bare assignment scans as well: it changes a variable the shell may already export. Only
+these variables leave a segment read-only, since they change how output is formatted: `LANG`,
+`LANGUAGE`, `LC_ALL`, `LC_COLLATE`, `LC_CTYPE`, `LC_MESSAGES`, `LC_NUMERIC`, `LC_TIME`, `TZ`,
+`TERM`, `COLUMNS`, `LINES`, `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE` and `FORCE_COLOR`.
+
+The previous `readonly-v1` classified 69.3% of the corpus above as read-only. The skip rate of
+`readonly-v2` has not been measured. The fixture
+`plugins/claude-code/internal/readonly/testdata/commands.txt` holds the same 93 real commands,
+with their expectations updated for this policy, and the classifier's test reads it. The new
+policy has its own name so older records keep the meaning of the classifier they ran under.
 
 ## Retention
 
