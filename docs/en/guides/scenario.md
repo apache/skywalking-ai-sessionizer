@@ -76,7 +76,8 @@ asz scenario build tests/scenarios/assembly.yaml --format claude-code --out DIR 
 asz server -config DIR/asz.yaml                             # collect, parse and serve, on the interval
 ```
 
-`server` refreshes on the interval because the configuration the build writes says `mode: watch`.
+`server` refreshes every 5 seconds because the configuration the build writes says `mode: watch`
+and `interval: 5s`. The product default is 10 minutes, which would make a feed look stopped.
 To feed a receiver instead of a page, name it under `export.otlp` and run `asz collect`, which
 sends at the end of every period. With a receiver named, under either command, each session of the
 feed is removed once all of it is sent, or later with `--remove`.

@@ -199,6 +199,12 @@ func (a *Adapter) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// DefaultInterval is the period between passes in watch mode. Every pass
+// lands what moved as new files, so a short period lands many small files,
+// and each file is one log record when it is sent. Tests and scenario feeds
+// set their own shorter period.
+const DefaultInterval = 10 * time.Minute
+
 // Collector controls collection cadence for one adapter.
 type Collector struct {
 	// Mode is "watch" (poll continuously) or "once" (single pass, then exit).
@@ -244,7 +250,7 @@ func Default() *Config {
 			MetricsLookback: "24h",
 			Collector: Collector{
 				Mode:          ModeWatch,
-				Interval:      5 * time.Second,
+				Interval:      DefaultInterval,
 				MaxDeltaBytes: 2 << 20,
 			},
 		}, {
@@ -264,7 +270,7 @@ func Default() *Config {
 			Exclude: []string{"/private/tmp/**"},
 			Collector: Collector{
 				Mode:          ModeWatch,
-				Interval:      5 * time.Second,
+				Interval:      DefaultInterval,
 				MaxDeltaBytes: 2 << 20,
 			},
 		}},
@@ -354,7 +360,7 @@ func (c *Collector) applyDefaults() {
 		c.Mode = ModeWatch
 	}
 	if c.Interval <= 0 {
-		c.Interval = 5 * time.Second
+		c.Interval = DefaultInterval
 	}
 	if c.MaxDeltaBytes <= 0 {
 		c.MaxDeltaBytes = 2 << 20

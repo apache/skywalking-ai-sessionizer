@@ -18,7 +18,7 @@ adapters:
       - /private/tmp/**
     collector:
       mode: watch
-      interval: 5s
+      interval: 10m
       max_delta_bytes: 2097152
 ```
 
@@ -75,8 +75,20 @@ are the tool's, not yours, which is why they are excluded by default.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass, which is the backfill path over history that already exists. `asz collect` then exits, and `asz server` goes on serving what that pass produced. `-once` on the command line overrides the file. |
-| `interval` | `5s` | How long the pipeline sleeps between passes in watch mode. It is the whole period: `asz collect` and `asz server` land, parse and send once per interval. |
+| `interval` | `10m` | How long the pipeline sleeps between passes in watch mode. It is the whole period: `asz collect` and `asz server` land, parse and send once per interval. Both make a pass when they start, then one every interval. |
 | `max_delta_bytes` | `2097152` | How much of a growing source the collector lands in one `.sd` file, 2 MiB. A large catch-up is split into several files. When the next source line is longer than the budget, the collector reads to the end of the source instead. That file then holds the long line and every complete line after it. A file travels whole as one log record, so the largest record a receiver has to accept is the largest file, not the budget. A change applies to new files only. `asz repack` brings an existing root under a new budget. |
+
+### Choosing an interval
+
+Keep the interval in minutes. A pass lands what moved since the last pass, and a landed file is
+never appended to, so every pass that finds new records writes new files. A short interval
+therefore writes many small files. Each landed file is one log record when it is
+[sent](export-otlp.md), so it also means many small records at the receiver. A longer interval
+writes fewer, larger files, up to `max_delta_bytes` each, and the page and the receiver see new
+data that much later.
+
+A few seconds is a value for tests. A [scenario build](../guides/scenario.md) writes `5s` into the
+configuration it creates, so a collector beside a feed picks each session up as it arrives.
 
 ### Several local adapters
 
@@ -93,9 +105,9 @@ settings combine:
 
 A disabled adapter does not count. The receiver, `claude-code-otlp`, takes no `collector` block,
 so it does not count either. When it is the only adapter enabled, `asz collect` sends what it
-lands to `export.otlp.endpoint` every 5 seconds, the compiled default.
+lands to `export.otlp.endpoint` every 10 minutes, the compiled default.
 
-Both commands print the result when they start, on their `source` line: `(every 5s)` when the
+Both commands print the result when they start, on their `source` line: `(every 10m0s)` when the
 pipeline watches, `(once)` when it does not. `asz view` collects nothing, but it checks the root
 for new rounds at the same shortest interval.
 
@@ -155,7 +167,7 @@ adapters:
       - /private/tmp/**
     collector:
       mode: watch
-      interval: 5s
+      interval: 10m
       max_delta_bytes: 2097152
 ```
 

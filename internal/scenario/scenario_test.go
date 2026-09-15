@@ -200,11 +200,37 @@ func TestBuildSwitchesCollectorModeAndKeepsWhatWasAppended(t *testing.T) {
 	if !strings.Contains(string(after), "mode: watch") {
 		t.Fatal("the collector is not in watch mode after a feed build")
 	}
+	// The product default is minutes, so a feed must say its own period or
+	// a watching collector beside it looks stopped.
+	if !strings.Contains(string(after), "interval: "+feedInterval) {
+		t.Fatal("a feed build did not write its collector interval")
+	}
 	if !strings.HasSuffix(string(after), appended) {
 		t.Fatal("what was appended to the configuration was lost")
 	}
 	// And back again, so neither direction is a one-way door.
 	if _, err := Build(sc, FormatClaudeCode, out, Options{At: at}); err != nil {
 		t.Fatalf("a one-shot build into a feed's directory was refused: %v", err)
+	}
+
+	// A directory an earlier build wrote, before builds set an interval, is
+	// still this build's: the block gains the interval and keeps the rest.
+	current, err := os.ReadFile(b.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earlier := strings.ReplaceAll(string(current), "      interval: "+feedInterval+"\n", "")
+	if err := os.WriteFile(b.Config, []byte(earlier), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(sc, FormatClaudeCode, out, Options{At: at, Watch: true}); err != nil {
+		t.Fatalf("a feed into an earlier build's directory was refused: %v", err)
+	}
+	rewritten, err := os.ReadFile(b.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rewritten), "interval: "+feedInterval) || !strings.HasSuffix(string(rewritten), appended) {
+		t.Fatalf("an earlier build's configuration was not brought up to date:\n%s", rewritten)
 	}
 }

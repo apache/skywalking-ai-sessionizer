@@ -312,7 +312,7 @@ a receiver. Nothing needs a restart. Every request for a conversation lists its 
 and folds again when the head round has moved. A landed file that arrives after the fold is found
 by a new scan of the session directory. That scan runs at most once a second, so a request for a
 sequence that does not exist does not walk the directory every time. The root itself is checked on
-the collector interval, 5 seconds by default. `/api/status` reports as `last_refresh` the last time
+the collector interval, 10 minutes by default. `/api/status` reports as `last_refresh` the last time
 a head round or the size of its file changed, and the list page reloads when that time moves.
 
 A round file is created under its final name and written in place, so a listing can show a round

@@ -106,8 +106,10 @@ Open `http://127.0.0.1:8787`. The list page shows every conversation; a conversa
 its talks, its execution streams, the flow on a time axis, and the evidence behind every step.
 
 On a machine with Claude Code, `asz server` alone is enough. It runs the collector and the parser
-itself, every 5 seconds by default, and the list page shows when the data was last refreshed and
-when it will be next. The two steps above are worth running once to see what each does.
+itself, once when it starts and then every 10 minutes by default, and the list page shows when the
+data was last refreshed and when it will be next. A shorter
+[interval](configuration.md#choosing-an-interval) shows new data sooner and writes more, smaller
+files. The two steps above are worth running once to see what each does.
 
 ## Check
 

@@ -125,36 +125,51 @@ func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error
 // A one-shot build leaves the collector in once mode, because the source
 // stops growing when the build returns. A feed keeps writing new sessions,
 // so its configuration says watch, and asz collect or asz server beside it
-// picks each one up on its own interval.
+// picks each one up within feedInterval. The product default is minutes,
+// which would leave a feed looking stopped.
 func writeConfig(out, source string, watch bool) (string, error) {
 	path := filepath.Join(out, "asz.yaml")
 	mode, other := "once", "watch"
 	if watch {
 		mode, other = "watch", "once"
 	}
-	text := configText(out, source, mode)
+	text := configText(out, source, mode, feedInterval)
 	old, err := os.ReadFile(path)
 	if err != nil {
 		return path, os.WriteFile(path, []byte(text), 0o644)
 	}
-	switch {
-	// A file that starts with what the build writes is the build's, with
-	// whatever a person appended, such as the export block for a push.
-	case strings.HasPrefix(string(old), text):
+	if strings.HasPrefix(string(old), text) {
+		// A file that starts with what the build writes is the build's, with
+		// whatever a person appended, such as the export block for a push.
 		return path, nil
-	// The same build in the other collector mode, which is what adding or
-	// dropping --every does to a directory that already holds sessions.
-	// Rewrite the block and keep what was appended to it.
-	case strings.HasPrefix(string(old), configText(out, source, other)):
-		kept := old[len(configText(out, source, other)):]
-		return path, os.WriteFile(path, append([]byte(text), kept...), 0o644)
-	default:
-		return "", errors.New("scenario: " + path + " exists and is not this build's; use another --out")
 	}
+	// The same build in the other collector mode, which is what adding or
+	// dropping --every does to a directory that already holds sessions, or
+	// a file an earlier build wrote without an interval. Rewrite the block
+	// and keep what was appended to it.
+	for _, prior := range []string{
+		configText(out, source, other, feedInterval),
+		configText(out, source, mode, ""),
+		configText(out, source, other, ""),
+	} {
+		if strings.HasPrefix(string(old), prior) {
+			return path, os.WriteFile(path, append([]byte(text), old[len(prior):]...), 0o644)
+		}
+	}
+	return "", errors.New("scenario: " + path + " exists and is not this build's; use another --out")
 }
 
-// configText is the configuration for one collector mode.
-func configText(out, source, mode string) string {
+// feedInterval is the collector period a scenario build writes. It is short
+// so a watching collector picks up a feed's sessions as they arrive.
+const feedInterval = "5s"
+
+// configText is the configuration for one collector mode. An empty interval
+// is the form builds wrote before they set one.
+func configText(out, source, mode, interval string) string {
+	collector := "    collector:\n      mode: " + mode + "\n"
+	if interval != "" {
+		collector += "      interval: " + interval + "\n"
+	}
 	return fmt.Sprintf(`# Written by asz scenario build. The storage root is this directory; the
 # adapter's source is the source directory beside it, which an sd build
 # leaves empty.
@@ -168,19 +183,15 @@ adapters:
     # no look-back: a scenario is history by construction.
     metrics: true
     metrics_lookback: none
-    collector:
-      mode: %s
-  - name: claude-code-changes
+%s  - name: claude-code-changes
     enabled: true
     source_root: %s/plugins/data
-    collector:
-      mode: %s
-# To export the session with asz push, name the receiver:
+%s# To export the session with asz push, name the receiver:
 # export:
 #   otlp:
 #     protocol: grpc
 #     endpoint: 127.0.0.1:11800
-`, out, source, mode, source, mode)
+`, out, source, collector, source, collector)
 }
 
 func mkdirAll(dir string) error { return os.MkdirAll(dir, 0o755) }
