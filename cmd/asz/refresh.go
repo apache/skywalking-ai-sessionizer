@@ -29,6 +29,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
@@ -59,15 +60,23 @@ type refresher struct {
 	match   func(claudecode.Session) bool
 	changes *claudecodechanges.Collector
 	cmatch  func(claudecodechanges.Session) bool
-	// The directories the two collectors read. They are checked on every
-	// pass, not once, so a source that appears later is picked up.
-	colSource     string
-	changesSource string
-	interval      time.Duration
-	maxRound      int64
+	// provider lands the bodies Claude Code wrote for its model provider,
+	// and providerAd holds its filter settings.
+	provider   *claudecodeprovider.Collector
+	providerAd config.Adapter
+	// The directories the collectors read. They are checked on every pass,
+	// not once, so a source that appears later is picked up.
+	colSource      string
+	changesSource  string
+	providerSource string
+	interval       time.Duration
+	maxRound       int64
 	// pushAfter is when sending may resume, set when a receiver asks to be
 	// left alone for longer than one period. Zero means now.
 	pushAfter time.Time
+	// waiting and unreadable are the provider body counts the last pass
+	// printed, so a pass that changes either says so.
+	waiting, unreadable int
 
 	// base carries the status fields that do not change between passes.
 	base view.Status
@@ -165,9 +174,18 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			r.cmatch = changesMatch(ad)
 			r.changesSource = src
 			names, sources = append(names, ad.Name), append(sources, src)
+		case config.AdapterClaudeCodeProvider:
+			src, err := claudecodeprovider.ResolveSourceRoot(ad.SourceRoot)
+			if err != nil {
+				return nil, err
+			}
+			r.provider = claudecodeprovider.New(src, zone, ad.Collector.MaxDeltaBytes)
+			r.providerAd = ad
+			r.providerSource = src
+			names, sources = append(names, ad.Name), append(sources, src)
 		}
 	}
-	if r.col == nil && r.changes == nil {
+	if r.col == nil && r.changes == nil && r.provider == nil {
 		// No local adapter is enabled. A root filled somewhere else, by a
 		// receiver or copied from another machine, is served as it is.
 		fmt.Fprintln(os.Stderr, "source   : no local adapter enabled; nothing is collected")
@@ -183,6 +201,7 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 		r.remover = &remove.Remover{
 			Zone: zone, Source: r.colSource, Local: r.col, LocalMatch: r.match,
 			Changes: r.changes, ChangesRoot: r.changesSource, ChangesMatch: r.cmatch,
+			Provider: r.provider, ProviderRoot: r.providerSource,
 			Derives: r.deriver != nil,
 		}
 	}
@@ -333,6 +352,7 @@ func (r *refresher) pass() error {
 
 	var errs []error
 	var landed, records, sessionsSeen, pending, conflicts, busy int
+	var waiting, unreadable int
 	changed := map[string]bool{}
 
 	var cs *claudecode.Stats
@@ -380,6 +400,38 @@ func (r *refresher) pass() error {
 		conflicts += ch.Conflicts
 		busy += ch.Busy
 		for _, id := range ch.Changed {
+			changed[id] = true
+		}
+	}
+
+	// The provider bodies come after the transcripts, so a response the
+	// transcripts are the only evidence for finds its session in this pass.
+	providerHere := false
+	if r.provider != nil {
+		var perr error
+		if providerHere, perr = present(r.providerSource, true); perr != nil {
+			errs = append(errs, perr)
+		}
+	}
+	if providerHere {
+		projects := r.colSource
+		if projects == "" {
+			projects, _ = claudecode.ResolveSourceRoot("")
+		}
+		ps, err := r.provider.CollectAll(providerFilter(r.providerAd, projects, r.zone))
+		if err != nil {
+			errs = append(errs, err)
+			ps = &claudecodeprovider.Stats{}
+		}
+		errs = append(errs, ps.Errors...)
+		landed += ps.SourcesLanded
+		records += ps.Records
+		sessionsSeen += ps.Sessions
+		pending += ps.Pending
+		conflicts += ps.Conflicts
+		busy += ps.Busy
+		waiting, unreadable = ps.Waiting, ps.Unreadable
+		for _, id := range ps.Changed {
 			changed[id] = true
 		}
 	}
@@ -555,13 +607,20 @@ func (r *refresher) pass() error {
 	if removed > 0 {
 		pushed += fmt.Sprintf(" removed=%d", removed)
 	}
-	if first || landed > 0 || rounds > 0 || busy > 0 || pushed != "" || len(errs) > 0 {
+	bodies := waiting != r.waiting || unreadable != r.unreadable
+	r.waiting, r.unreadable = waiting, unreadable
+	if first || landed > 0 || rounds > 0 || busy > 0 || pushed != "" || len(errs) > 0 || bodies {
 		contended := ""
 		if busy > 0 {
 			// Two writers on one root is a supported setup, so this is a
 			// number to read, not an error. It says how much of this pass
 			// the other one was already doing.
 			contended = fmt.Sprintf(" busy=%d", busy)
+		}
+		if waiting > 0 || unreadable > 0 || bodies {
+			// Provider bodies no session claims yet, and files that are not a
+			// body. Neither fails the pass, and both are said.
+			contended += fmt.Sprintf(" bodies_waiting=%d bodies_unreadable=%d", waiting, unreadable)
 		}
 		fmt.Printf("[%s] refreshed: sessions=%d landed=%d records=%d rounds=%d%s%s (%s)\n",
 			now.Format("15:04:05"), sessionsSeen, landed, records, rounds, contended, pushed,

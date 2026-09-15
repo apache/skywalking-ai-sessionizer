@@ -34,6 +34,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
@@ -48,7 +49,7 @@ import (
 
 // The file kinds the export page names.
 var wireKinds = map[string]bool{
-	"changes":    true,
+	"changes": true, "provider_body": true,
 	"transcript": true, "agent_meta": true, "journal": true, "workflow_manifest": true, "workflow_script": true, "round": true,
 }
 
@@ -105,7 +106,7 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 	// for a runtime format, the mock's for sd.
 	named := newPusher()
 	named.ServiceName = ""
-	named.Runtimes = map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, mock.Name: mock.RuntimeName}
+	named.Runtimes = map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, claudecodeprovider.Name: claudecodeprovider.RuntimeName, mock.Name: mock.RuntimeName}
 	if _, err := named.Pass(); err != nil {
 		return nil, err
 	}
@@ -219,7 +220,13 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 			if a["asz.seq"] != fmt.Sprintf("int:%d", f.seq) {
 				bad("%s: seq %s, the header says %d", f.rel, a["asz.seq"], f.seq)
 			}
-			if (a["asz.stream"] != "") == (a["asz.run"] != "") || a["asz.stream"] != f.stream || a["asz.run"] != f.batch {
+			// A file names a stream or a run, except a provider file, which
+			// belongs to the session and names neither.
+			names := (a["asz.stream"] != "") != (a["asz.run"] != "")
+			if f.kind == string(sessiondata.KindProviderBody) {
+				names = a["asz.stream"] == "" && a["asz.run"] == ""
+			}
+			if !names || a["asz.stream"] != f.stream || a["asz.run"] != f.batch {
 				bad("%s: stream %q run %q, the header says stream %q batch %q", f.rel, a["asz.stream"], a["asz.run"], f.stream, f.batch)
 			}
 			for _, k := range []string{"asz.conversation", "asz.round", "asz.session.from_time", "asz.session.through_time", "asz.conversation.title", "asz.conversation.talks"} {

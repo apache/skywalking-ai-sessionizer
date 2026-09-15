@@ -48,14 +48,16 @@ func (b *builder) stage1Canonical() {
 	// stream, not a step of it: it names the tool it belongs to and a view
 	// joins the two. Letting it into a stream would change that stream's
 	// record count and time range, so a session with such records would
-	// fold differently from the same session without them.
+	// fold differently from the same session without them. A provider body
+	// is set aside for the same reason: it is what a call sent and got back,
+	// joined to the call by a view, and no step of any stream.
 	bounded := make([]int32, 0, len(all))
 	for _, i := range all {
 		e := &b.ix.Entries[i]
 		if b.opt.ThroughSeq > 0 && uint64(e.Seq) > b.opt.ThroughSeq {
 			continue
 		}
-		if e.Kind == index.KindChanges {
+		if e.Kind == index.KindChanges || e.Kind == index.KindProviderBody {
 			continue
 		}
 		bounded = append(bounded, i)

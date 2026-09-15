@@ -55,6 +55,7 @@ pkg/sessiondata/                Session Data: the landed record, `.sd` — publi
 pkg/model/                      the conversation vocabulary: node kinds, relations, qualification
 pkg/sessionflow/                Session Flow: the round chain of conversation structure, `.sf`
 pkg/sessionview/                asz.view: one conversation as one document, version 1.0; never a file
+pkg/providerbody/               provider bodies: cuts a body against what its session holds, and rebuilds it byte for byte
 internal/index/                 derived lookup structure the assembler resolves against
 internal/assemble/              the eight-stage pipeline, index in and structure out
 internal/parse/                 one round: assemble, compare against the chain, publish the delta
@@ -67,6 +68,7 @@ internal/metrics/               derives the runtime's token metric from landed S
 internal/repack/                re-cuts landed files into a new root under another budget
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/claudecodeotlp/ the claude-code-otlp adapter: a receiver for the runtime's own exporter, metrics into the spool
+internal/adapters/claudecodeprovider/ the claude-code-provider adapter: the request and response bodies Claude Code writes, landed into their sessions
 internal/adapters/mock/         the mock dialect: Session Data a scenario writes directly
 internal/scenario/              scenarios: the model, the clock, the two writers, and each session's marker (collector side)
 internal/scenario/expect/       expectation files evaluated over a root (server side)

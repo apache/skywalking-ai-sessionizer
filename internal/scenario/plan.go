@@ -46,6 +46,10 @@ type Options struct {
 	// wrote, once all of it is sent. The build records it in the session's
 	// marker. It has no effect on the plan.
 	Remove Removal
+	// MaxDelta is the largest landed file, in bytes. The build writes it
+	// into the configuration as every local adapter's max_delta_bytes, and
+	// an sd build cuts its provider files at it. Zero leaves the default.
+	MaxDelta int64
 }
 
 // EventKind is one shape of record.
@@ -213,6 +217,10 @@ type Plan struct {
 	Events  []Event
 	Streams []Stream
 	Runs    []Run
+	// Provider says the plan's ids are those of a scenario with provider
+	// bodies, and bodies says it writes them. See ProviderBodies.
+	Provider bool
+	bodies   bool
 	// at is the base time the plan was resolved against, which Span
 	// measures from.
 	at       time.Time
@@ -273,7 +281,7 @@ func (sc *Scenario) Plan(opts Options) (*Plan, error) {
 	if scale == 0 {
 		scale = 1
 	}
-	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, at: at, interval: interval, scale: scale}
+	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, at: at, interval: interval, scale: scale}
 	if p.Project == "" {
 		p.Project = "-Users-dev-scenario"
 	}
@@ -439,6 +447,16 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		}
 	}
 	call, req := id+"-call", id+"-req"
+	if b.p.Provider {
+		// A runtime's message and request ids are unique across sessions.
+		// Positions are not, and provider bodies of every session share one
+		// directory, named by the request id and joined by the message id,
+		// so they carry the session too. Sessions a repeated build makes
+		// differ only near the end of their ids, so all of it is used.
+		sum := sha256.Sum256([]byte(b.p.Session))
+		tag := hex.EncodeToString(sum[:6])
+		call, req = call+"-"+tag, req+"-"+tag
+	}
 	var frags []Event
 	if c.Thinking != "" {
 		text := c.Thinking

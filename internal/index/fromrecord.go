@@ -62,6 +62,15 @@ func FromRecord(ix *Index, hdr *sessiondata.Header, rec *sessiondata.Record,
 			e.TS = t.UnixNano()
 		}
 	}
+	if e.Kind == KindProviderBody {
+		// Its parts are pieces of a body, never change records, and a block
+		// per part is all a round needs to count them.
+		blocks := make([]Block, len(rec.Parts))
+		for i := range blocks {
+			blocks[i] = Block{Ord: uint16(i), Kind: BlockOther}
+		}
+		return e, blocks
+	}
 	return e, blocksOf(in, rec)
 }
 
@@ -95,6 +104,8 @@ func kindOf(hdr *sessiondata.Header, rec *sessiondata.Record) Kind {
 		return KindScript
 	case sessiondata.KindChanges:
 		return KindChanges
+	case sessiondata.KindProviderBody:
+		return KindProviderBody
 	}
 	switch rec.From {
 	case sessiondata.FromAgent:

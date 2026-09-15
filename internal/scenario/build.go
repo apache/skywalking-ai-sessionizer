@@ -106,14 +106,14 @@ func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error
 		if now.IsZero() {
 			now = time.Now()
 		}
-		res.Files, err = writeSD(p, out, now.UTC())
+		res.Files, err = writeSD(p, out, now.UTC(), opts.MaxDelta)
 	default:
 		return nil, fmt.Errorf("scenario: unknown format %q; use %s or %s", format, FormatClaudeCode, FormatSD)
 	}
 	if err != nil {
 		return nil, err
 	}
-	res.Config, err = writeConfig(out, source, opts.Watch)
+	res.Config, err = writeConfig(out, source, opts.Watch, opts.MaxDelta)
 	return res, err
 }
 
@@ -127,13 +127,13 @@ func Build(sc *Scenario, format Format, out string, opts Options) (*Built, error
 // so its configuration says watch, and asz collect or asz server beside it
 // picks each one up within feedInterval. The product default is minutes,
 // which would leave a feed looking stopped.
-func writeConfig(out, source string, watch bool) (string, error) {
+func writeConfig(out, source string, watch bool, maxDelta int64) (string, error) {
 	path := filepath.Join(out, "asz.yaml")
 	mode, other := "once", "watch"
 	if watch {
 		mode, other = "watch", "once"
 	}
-	text := configText(out, source, mode, feedInterval)
+	text := configText(out, source, mode, feedInterval, true, maxDelta)
 	old, err := os.ReadFile(path)
 	if err != nil {
 		return path, os.WriteFile(path, []byte(text), 0o644)
@@ -145,15 +145,18 @@ func writeConfig(out, source string, watch bool) (string, error) {
 	}
 	// The same build in the other collector mode, which is what adding or
 	// dropping --every does to a directory that already holds sessions, or
-	// a file an earlier build wrote without an interval. Rewrite the block
-	// and keep what was appended to it.
-	for _, prior := range []string{
-		configText(out, source, other, feedInterval),
-		configText(out, source, mode, ""),
-		configText(out, source, other, ""),
-	} {
-		if strings.HasPrefix(string(old), prior) {
-			return path, os.WriteFile(path, append([]byte(text), old[len(prior):]...), 0o644)
+	// a file an earlier build wrote without an interval or without the
+	// provider adapter. Rewrite the block and keep what was appended to it.
+	for _, m := range []string{mode, other} {
+		for _, interval := range []string{feedInterval, ""} {
+			for _, provider := range []bool{true, false} {
+				for _, delta := range []int64{maxDelta, 0} {
+					prior := configText(out, source, m, interval, provider, delta)
+					if prior != text && strings.HasPrefix(string(old), prior) {
+						return path, os.WriteFile(path, append([]byte(text), old[len(prior):]...), 0o644)
+					}
+				}
+			}
 		}
 	}
 	return "", errors.New("scenario: " + path + " exists and is not this build's; use another --out")
@@ -164,11 +167,19 @@ func writeConfig(out, source string, watch bool) (string, error) {
 const feedInterval = "5s"
 
 // configText is the configuration for one collector mode. An empty interval
-// is the form builds wrote before they set one.
-func configText(out, source, mode, interval string) string {
+// is the form builds wrote before they set one, and provider false the form
+// before they wrote provider bodies. A zero maxDelta leaves the default.
+func configText(out, source, mode, interval string, provider bool, maxDelta int64) string {
 	collector := "    collector:\n      mode: " + mode + "\n"
 	if interval != "" {
 		collector += "      interval: " + interval + "\n"
+	}
+	if maxDelta > 0 {
+		collector += fmt.Sprintf("      max_delta_bytes: %d\n", maxDelta)
+	}
+	providerBlock := ""
+	if provider {
+		providerBlock = "  - name: claude-code-provider\n    enabled: true\n    source_root: " + source + "/" + ProviderBodyDir + "\n" + collector
 	}
 	return fmt.Sprintf(`# Written by asz scenario build. The storage root is this directory; the
 # adapter's source is the source directory beside it, which an sd build
@@ -186,12 +197,12 @@ adapters:
 %s  - name: claude-code-changes
     enabled: true
     source_root: %s/plugins/data
-%s# To export the session with asz push, name the receiver:
+%s%s# To export the session with asz push, name the receiver:
 # export:
 #   otlp:
 #     protocol: grpc
 #     endpoint: 127.0.0.1:11800
-`, out, source, collector, source, collector)
+`, out, source, collector, source, collector, providerBlock)
 }
 
 func mkdirAll(dir string) error { return os.MkdirAll(dir, 0o755) }

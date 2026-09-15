@@ -82,8 +82,11 @@ func (ix *Index) Build() {
 	dup := make([]bool, len(ix.Entries))
 	for i := range ix.Entries {
 		e := &ix.Entries[i]
-		if e.Record == 0 {
-			continue // no identity to compare on, so every such entry is its own record
+		if e.Record == 0 || e.Kind == KindProviderBody {
+			// No identity to compare on, so every such entry is its own
+			// record. A provider body's id names a body file, never a
+			// record of a stream, so it must not make one a duplicate.
+			continue
 		}
 		if _, seen := ix.byRecord[e.Record]; seen {
 			dup[i] = true
@@ -91,8 +94,12 @@ func (ix *Index) Build() {
 		}
 		ix.byRecord[e.Record] = int32(i)
 	}
+	// A provider body names the call its response came from, but it is no
+	// fragment of that call. In byMsg it would change the call's fragments,
+	// so it stays out of every derived lookup, as a duplicate does.
+	skip := func(i int) bool { return dup[i] || ix.Entries[i].Kind == KindProviderBody }
 	for i := range ix.Entries {
-		if dup[i] {
+		if skip(i) {
 			continue
 		}
 		e := &ix.Entries[i]
@@ -110,7 +117,7 @@ func (ix *Index) Build() {
 	ix.byToolRef = make(map[uint32][]int32)
 	ix.byChild = make(map[uint32][]int32)
 	for i := range ix.Entries {
-		if dup[i] {
+		if skip(i) {
 			continue
 		}
 		e := &ix.Entries[i]
@@ -128,7 +135,7 @@ func (ix *Index) Build() {
 	ix.byToolBlock = make(map[uint32][]int32, len(ix.Blocks))
 	for i := range ix.Blocks {
 		b := &ix.Blocks[i]
-		if b.ToolID == 0 || dup[b.Entry] {
+		if b.ToolID == 0 || skip(int(b.Entry)) {
 			continue
 		}
 		ix.byToolBlock[b.ToolID] = append(ix.byToolBlock[b.ToolID], int32(i))

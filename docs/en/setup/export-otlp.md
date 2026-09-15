@@ -93,7 +93,7 @@ The resource, which names the service a record belongs to:
 
 | Attribute | Value |
 | --- | --- |
-| `service.name` | `export.otlp.service_name`, or when empty the runtime that produced each session, read off its landed header's adapter: `Claude Code` for `claude-code-local`, `Mock Agent` for `mock`. One service per kind of agent, and a root that holds both is pushed as both |
+| `service.name` | `export.otlp.service_name`, or when empty the runtime that produced each session, read off its landed header's adapter: `Claude Code` for `claude-code-local`, `claude-code-changes` and `claude-code-provider`, `Mock Agent` for `mock`. One service per kind of agent, and a root that holds both is pushed as both |
 | `service.instance.id` | `export.otlp.instance_id`: who is pushing, in words the people reading the receiver recognise. A receiver lists it under the service as the instance, so put your mailbox, your name, or the machine there. Empty means `user@host` of the machine running `asz push`, which is stable across restarts. The session a record belongs to is on the record as `asz.session` |
 | `service.layer` | `export.otlp.layer`, `AI_AGENT` by default, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores |
 | `telemetry.sdk.name` | `asz`, so a receiver can tell these records apart from any other source |
@@ -109,7 +109,7 @@ body:
 | `asz.format` | `sd` for a landed file, `sf` for a round |
 | `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
 | `asz.file` | the file's path relative to the storage root |
-| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`; for `sf`, `round` |
+| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `provider_body`; for `sf`, `round` |
 | `asz.file.digest` | the file's SHA-256, the digest of the body as received |
 | `asz.lines` | how many lines the body has, the header and the closing line included |
 | `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |
@@ -117,7 +117,7 @@ body:
 | `asz.session.from_time`, `asz.session.through_time` | for `sf` only: the session's own range as of that round, when it began and its last activity so far. A landed file never carries it: it can travel before any round exists, and the last activity keeps moving, so the value there would be missing or stale |
 | `asz.conversation.title`, `asz.conversation.talks`, `asz.conversation.steps`, `asz.conversation.streams`, `asz.conversation.segments`, `asz.conversation.unresolved` | for `sf` only: what a list of conversations shows, as of that round, copied off the round's header. A receiver lists conversations off its newest round per conversation and never folds |
 | `asz.seq` | for `sd`: the landed sequence. With the session it names the file a round's `{seq, row}` reference points at, and the row is a line of the body |
-| `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to |
+| `asz.stream`, `asz.run` | for `sd`: the stream or workflow run the file belongs to. A `provider_body` file belongs to the session and carries neither |
 | `asz.conversation`, `asz.round` | for `sf`: the conversation and the round number |
 
 The record's time is chosen so a receiver can bound a read by a range it already holds. A landed

@@ -76,6 +76,21 @@ func (z *Zone) RunDir(session, runID string) string {
 	return filepath.Join(z.SessionDir(session), "runs", runID)
 }
 
+// ProviderDir holds the session's provider bodies: what the runtime sent its
+// model provider and what came back. It sits at the session level, not under
+// a stream, because a body names no stream. Which stream and which call it
+// belongs to is joined later, from evidence, and a path must not say it.
+func (z *Zone) ProviderDir(session string) string {
+	return filepath.Join(z.SessionDir(session), "provider_body")
+}
+
+// ProviderStatePath is where the root keeps which provider body files have
+// landed, and which wait for a session. It is derived from the landed records
+// and rebuilt when it is missing.
+func (z *Zone) ProviderStatePath() string {
+	return filepath.Join(z.root, "_provider", "seen.state")
+}
+
 // IndexDir holds the session's derived lookup index.
 //
 // The index is disposable: deleting it loses nothing, because it rebuilds from

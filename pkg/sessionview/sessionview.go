@@ -84,6 +84,16 @@ type Conversation struct {
 	WorkspaceChanges []WorkspaceChange `json:"workspace_changes"`
 }
 
+// ProviderBody names one landed provider body joined to a call: whether it
+// is the request or the response, and the landed record it rebuilds from.
+// The body is not in the document. A reader loads it: the record Ref names,
+// and the session's provider_body files with that sequence or lower, which
+// hold everything it refers to. See Session Data, Provider bodies.
+type ProviderBody struct {
+	Role string          `json:"role"`
+	Ref  sessionflow.Ref `json:"ref"`
+}
+
 // WorkspaceChange is one change record with the step it joins to and where
 // it was read from. The record's own fields follow, as changes/1 lists
 // them; its captured_by says who observed it. Step is empty when no step
@@ -119,6 +129,11 @@ type Summary struct {
 	Unresolved int `json:"unresolved"`
 	// Changes counts the workspace change records.
 	Changes int `json:"changes"`
+	// ProviderBodies counts the session's landed provider bodies, and
+	// CapturedPrompts the calls whose request is captured: the calls that
+	// list a request.
+	ProviderBodies  int `json:"provider_bodies"`
+	CapturedPrompts int `json:"captured_prompts"`
 
 	// From and To are when the session began and its last activity, from
 	// the session node.
@@ -266,6 +281,9 @@ type Node struct {
 	// Changes names the workspace change records joined to
 	// this step, by id, in the order WorkspaceChanges lists them.
 	Changes []string `json:"changes,omitempty"`
+	// ProviderBodies names the provider bodies joined to a call step: its
+	// request, then its response, each only when joined exactly.
+	ProviderBodies []ProviderBody `json:"provider_bodies,omitempty"`
 
 	Children []Node `json:"children,omitempty"`
 	Edges    []Edge `json:"edges,omitempty"`

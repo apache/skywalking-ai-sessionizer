@@ -74,7 +74,7 @@ producer of them.
 | `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
-| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
+| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`; several means it did not choose, and neither does a view |
@@ -162,6 +162,44 @@ and a viewer showing one prefers it. A change
 several windows could have made appears in each of their records, marked `shared` and naming the
 others, and is counted once. A record with `basis: skipped_read_only` carries no changes and
 means the call was not observed, never that it changed nothing.
+
+## Provider bodies
+
+A call step lists the provider bodies joined to it under `provider_bodies`: its request, then its
+response, each only when the join is exact. An entry names where the body is landed. It does not
+carry the body.
+
+```json
+{"id":"call/msg_011C…","kind":"llm.call", …,
+ "provider_bodies":[{"role":"request","ref":{"seq":4,"row":5}},
+                    {"role":"response","ref":{"seq":4,"row":6}}]}
+```
+
+| Key | Value |
+| --- | --- |
+| `role` | `request` or `response` |
+| `ref` | the landed `provider_body` record: `seq` names a file under `files`, `row` the record in it |
+
+A reader loads a body when it wants it. A body refers to pieces and bodies that landed before it in
+the same session, sometimes in an earlier file, so a reader loads the session's `provider_body` files
+with a sequence up to the one `ref` names, in order, keeps them, and rebuilds the body as
+[Session Data](session-data.md#provider-bodies) describes. Every such file is listed under `files`.
+A later body needs only the files not loaded yet. The document stays the size of the structure,
+however large the bodies.
+
+A response joins to the call whose message id it carries. A request names no call, only its prompt
+and the request id of the call before it in its chain, so it joins to the call of a stream whose
+previous call's response carries that request id and whose prompt is the one the request names. The
+first call of a stream matches a request that names no previous request. A request joins only when
+exactly one request and exactly one call carry those two ids. A synthetic call, which the runtime wrote
+without calling the provider, takes part in no join. No request joins in a stream whose landed
+transcript lines have a gap, since a call may be missing between two that look consecutive; its
+responses still join. A body that joins to no call, such as
+the request that names the session, a compaction request, or a retried request, is listed on no
+step; its file is still under `files`. Nothing is joined by position or by time.
+
+`summary.provider_bodies` counts the session's landed bodies, and `summary.captured_prompts` the calls
+that list a request.
 
 ## Rendering the whole conversation
 

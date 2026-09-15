@@ -179,6 +179,31 @@ Set `source_root` to collect from a copy. The session filters are the ones above
 workspace each session's records name. It is on by default because it costs nothing when the
 plugin is not installed: there is nothing to discover. It takes no `metrics`.
 
+## The provider adapter
+
+```yaml
+adapters:
+  - name: claude-code-provider
+    enabled: true
+    source_root: ""
+    include: []
+    exclude:
+      - /private/tmp/**
+    collector:
+      mode: watch
+      interval: 10m
+      max_delta_bytes: 2097152
+```
+
+`claude-code-provider` lands the request and response bodies Claude Code writes for its model
+provider when `OTEL_LOG_RAW_API_BODIES=file:<absolute path>` is in its environment. Empty
+`source_root` resolves `asz/provider-bodies` under the same directory `claude-code-local` resolves;
+the variable must name that directory by its absolute path. The session filters are the ones above,
+judged by the directory each session's main transcript sits under. It runs after the other local
+adapters in a pass. It is on by default because it costs nothing until the variable is set: there
+is nothing to list. It takes no `metrics`. See
+[Claude Code Provider Bodies](claude-code-provider-bodies.md).
+
 ## The receiver adapter
 
 ```yaml

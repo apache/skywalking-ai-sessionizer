@@ -235,6 +235,12 @@ const (
 	// posture, like the local adapter, and the plugin needs nothing from
 	// it: it discovers and tails what the plugin has already written.
 	AdapterClaudeCodeChanges = "claude-code-changes"
+	// AdapterClaudeCodeProvider reads the request and response bodies
+	// Claude Code writes for its model provider when
+	// OTEL_LOG_RAW_API_BODIES names a directory. Pull posture, like the
+	// local adapter: Claude Code writes the files, and this adapter finds
+	// each body's session and lands it.
+	AdapterClaudeCodeProvider = "claude-code-provider"
 )
 
 // Default returns the configuration used when none is supplied.
@@ -266,6 +272,18 @@ func Default() *Config {
 			// default because it costs nothing when the plugin is not
 			// installed: there is nothing to discover.
 			Name:    AdapterClaudeCodeChanges,
+			Enabled: true,
+			Exclude: []string{"/private/tmp/**"},
+			Collector: Collector{
+				Mode:          ModeWatch,
+				Interval:      DefaultInterval,
+				MaxDeltaBytes: 2 << 20,
+			},
+		}, {
+			// The bodies Claude Code writes when it is told to. On by default
+			// because it costs nothing until OTEL_LOG_RAW_API_BODIES names
+			// the directory: there is nothing to list.
+			Name:    AdapterClaudeCodeProvider,
 			Enabled: true,
 			Exclude: []string{"/private/tmp/**"},
 			Collector: Collector{
@@ -399,6 +417,9 @@ func (c *Config) Validate() error {
 		}
 		if a.Name == AdapterClaudeCodeChanges && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
 			return fmt.Errorf("config: adapter %q reads change records only: it takes source_root, include, exclude and collector, not metrics, metrics_lookback or listen", a.Name)
+		}
+		if a.Name == AdapterClaudeCodeProvider && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
+			return fmt.Errorf("config: adapter %q reads provider bodies only: it takes source_root, include, exclude and collector, not metrics, metrics_lookback or listen", a.Name)
 		}
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)

@@ -40,6 +40,9 @@ type SessionReport struct {
 	// Relanded counts records an interrupted pass caused to be landed twice.
 	// It is reported so it is visible, not because it is wrong.
 	Relanded int
+	// Bodies lists the provider bodies that do not rebuild. They are counted
+	// in Problems too.
+	Bodies []BodyProblem
 }
 
 // OK reports whether every stream in the session is contiguous and intact.
@@ -96,6 +99,17 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			}
 		}
 	}
+	pr, bodies, err := Provider(z.ProviderDir(session))
+	if err != nil {
+		return nil, err
+	}
+	if pr.Files > 0 {
+		rep.Streams = append(rep.Streams, pr)
+		rep.Records += pr.Records
+		rep.Relanded += pr.Relanded
+		rep.Bodies = bodies
+		rep.Problems += len(bodies)
+	}
 	return rep, nil
 }
 
@@ -115,6 +129,9 @@ func (r *SessionReport) Details() []string {
 		if s.End != nil {
 			out = append(out, fmt.Sprintf("end gap  %s", *s.End))
 		}
+	}
+	for _, b := range r.Bodies {
+		out = append(out, fmt.Sprintf("body     %s", b))
 	}
 	return out
 }

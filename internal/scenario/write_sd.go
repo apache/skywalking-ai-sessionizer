@@ -20,17 +20,21 @@ package scenario
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -40,7 +44,7 @@ import (
 // checkpoint lands only what is new, sequences taken from the session's
 // state, and every file write-once. asz verify passes on the result and the
 // parser reads it like any other root.
-func writeSD(p *Plan, root string, now time.Time) ([]string, error) {
+func writeSD(p *Plan, root string, now time.Time, maxDelta int64) ([]string, error) {
 	z := storage.NewZone(root)
 	sessionDir := z.SessionDir(p.Session)
 	if err := mkdirAll(sessionDir); err != nil {
@@ -59,7 +63,10 @@ func writeSD(p *Plan, root string, now time.Time) ([]string, error) {
 	if err := state.RecoverNextSeq(sessionDir); err != nil {
 		return nil, err
 	}
-	w := &sdWriter{p: p, z: z, state: state, now: now}
+	if maxDelta <= 0 {
+		maxDelta = 2 << 20
+	}
+	w := &sdWriter{p: p, z: z, state: state, now: now, maxDelta: maxDelta}
 
 	// Streams first, main before its children, then the runs' files, so the
 	// sequences a round refers to come out in landed order. A lost record
@@ -97,6 +104,9 @@ func writeSD(p *Plan, root string, now time.Time) ([]string, error) {
 		if err := w.run(r); err != nil {
 			return nil, err
 		}
+	}
+	if err := w.provider(); err != nil {
+		return nil, err
 	}
 	if err := state.Save(statePath, now); err != nil {
 		return nil, err
@@ -142,11 +152,12 @@ func (w *sdWriter) reindex() error {
 }
 
 type sdWriter struct {
-	p       *Plan
-	z       *storage.Zone
-	state   *storage.SessionState
-	now     time.Time
-	written []string
+	p        *Plan
+	z        *storage.Zone
+	state    *storage.SessionState
+	now      time.Time
+	maxDelta int64
+	written  []string
 }
 
 // source names a stream's or a run's file as the header's src: the mock has
@@ -425,4 +436,119 @@ func finish(r *sessiondata.Record, ord uint64, off *uint64) {
 	sum := sha256.Sum256(b)
 	r.Sha, r.Bytes = hex.EncodeToString(sum[:6]), len(b)
 	*off += uint64(len(b)) + 1
+}
+
+// provider lands the plan's provider bodies that the cursor has not seen, cut
+// against what the session already holds, into files of at most maxDelta
+// bytes, as the adapter cuts them. The adapter lands the same bodies in the
+// same order, so each record holds the same parts.
+func (w *sdWriter) provider() error {
+	bodies := w.p.ProviderBodies()
+	if len(bodies) == 0 {
+		return nil
+	}
+	dir := w.z.ProviderDir(w.p.Session)
+	if err := mkdirAll(dir); err != nil {
+		return err
+	}
+	cursorPath := filepath.Join(dir, string(sessiondata.KindProviderBody)+".cursor")
+	cur, err := storage.LoadCursor(cursorPath, storage.CursorAppend, ".")
+	if err != nil {
+		return err
+	}
+	held := providerbody.NewSession()
+	files, err := storage.LandedFiles(w.z, w.p.Session)
+	if err != nil {
+		return err
+	}
+	for _, lf := range files {
+		if lf.Stream != "" || lf.RunID != "" {
+			continue
+		}
+		_, recs, err := readAll(lf.Path)
+		if err != nil {
+			return err
+		}
+		for _, r := range recs {
+			if err := held.Add(r); err != nil && !errors.Is(err, providerbody.ErrRepeat) {
+				return err
+			}
+		}
+	}
+	// A body is new when the session does not hold it, not when it comes
+	// after the ones a build landed before: a later checkpoint can plan a
+	// body that sorts before a child's bodies an earlier one landed.
+	var recs []*sessiondata.Record
+	for _, b := range bodies {
+		if _, ok := held.Holds(claudecodeprovider.ID(b.Name)); ok {
+			continue
+		}
+		rec, err := held.Encode(claudecodeprovider.BodyOf(b.Name, b.Bytes))
+		if err != nil {
+			return fmt.Errorf("scenario: provider body %s: %w", b.Name, err)
+		}
+		recs = append(recs, rec)
+	}
+	if len(recs) == 0 {
+		return nil
+	}
+	var last uint64
+	flush := func(batch []*sessiondata.Record) error {
+		seq := w.state.Take()
+		hdr := sessiondata.Header{
+			H: 1, Seq: seq, At: w.now.UTC().Format(time.RFC3339Nano), Kind: sessiondata.KindProviderBody,
+			Adapter: mock.Name + "/" + mock.Version, Dialect: mock.Dialect, Src: ".", Session: w.p.Session,
+		}
+		path := filepath.Join(dir, storage.LandedName(string(sessiondata.KindProviderBody), storage.Stamp(w.now), seq))
+		err := storage.WriteAtomic(path, storage.PermLanded, func(out io.Writer) error {
+			rw, err := sessiondata.NewWriter(out, &hdr)
+			if err != nil {
+				return err
+			}
+			for _, r := range batch {
+				if err := rw.Write(r); err != nil {
+					return err
+				}
+			}
+			return rw.Close()
+		})
+		if err != nil {
+			return err
+		}
+		w.written = append(w.written, path)
+		last = seq
+		return nil
+	}
+	var batch []*sessiondata.Record
+	var size int64
+	for _, r := range recs {
+		// As the adapter cuts: a file ends before a body that would take it
+		// past the budget.
+		n := providerbody.RecordBytes(r)
+		if len(batch) > 0 && providerbody.FileOverhead+size+n > w.maxDelta {
+			if err := flush(batch); err != nil {
+				return err
+			}
+			batch, size = nil, 0
+		}
+		batch = append(batch, r)
+		size += n
+	}
+	if len(batch) > 0 {
+		if err := flush(batch); err != nil {
+			return err
+		}
+	}
+	seq := last
+	cur.Ord, cur.LastSeq, cur.State = uint64(len(bodies)), seq, storage.CursorActive
+	return cur.Save(cursorPath, w.now)
+}
+
+func readAll(path string) (sessiondata.Header, []*sessiondata.Record, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return sessiondata.Header{}, nil, err
+	}
+	defer f.Close()
+	return sessiondata.All(f)
 }

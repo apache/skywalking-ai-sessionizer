@@ -81,6 +81,23 @@ func LockExport(root string) (*SessionLock, error) {
 	return l, err
 }
 
+// ErrProviderBusy means another collector holds this root's provider state.
+var ErrProviderBusy = errors.New("storage: the provider body state is held by another collector")
+
+// LockProvider takes an exclusive lock over one storage root's provider body
+// state.
+//
+// The runtime writes every session's bodies into one flat directory, so which
+// of them have landed is known for the root, not for a session. Two collectors
+// deciding that at once would both land a new body into its session.
+func LockProvider(root string) (*SessionLock, error) {
+	l, err := lockDir(filepath.Join(root, "_provider"))
+	if errors.Is(err, ErrSessionBusy) {
+		return nil, ErrProviderBusy
+	}
+	return l, err
+}
+
 // LockExportWait is LockExport, waiting up to timeout for the lock rather
 // than giving up at once.
 //

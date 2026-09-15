@@ -31,6 +31,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
@@ -146,8 +147,11 @@ func (c *removalCase) bad(format string, a ...any) {
 }
 
 func (c *removalCase) changesRoot() string { return filepath.Join(c.source, "plugins", "data") }
-func (c *removalCase) markerPath() string  { return scenario.MarkerPath(c.source, c.session) }
-func (c *removalCase) chainDir() string    { return filepath.Join(c.dir, "_conversations", c.session) }
+func (c *removalCase) providerRoot() string {
+	return filepath.Join(c.source, scenario.ProviderBodyDir)
+}
+func (c *removalCase) markerPath() string { return scenario.MarkerPath(c.source, c.session) }
+func (c *removalCase) chainDir() string   { return filepath.Join(c.dir, "_conversations", c.session) }
 
 func (c *removalCase) sourcePath(rel string) string {
 	return filepath.Join(c.source, filepath.FromSlash(rel))
@@ -169,7 +173,9 @@ func (c *removalCase) remover() *remove.Remover {
 	return &remove.Remover{Zone: c.zone, Source: c.source,
 		Local:   claudecode.New(c.source, c.zone, 0),
 		Changes: claudecodechanges.New(c.changesRoot(), c.zone, 0), ChangesRoot: c.changesRoot(),
-		Derives: true, Now: checkNow}
+		Provider:     claudecodeprovider.New(c.providerRoot(), c.zone, 0),
+		ProviderRoot: c.providerRoot(),
+		Derives:      true, Now: checkNow}
 }
 
 // push sends what the copy has not sent yet, and records the check's
@@ -528,7 +534,7 @@ func (c *removalCase) goneWhole(m *scenario.Marker, when string) error {
 			bad("the spool file %s is still there", it.Name())
 		}
 	}
-	for _, state := range []string{filepath.Join(c.dir, otlp.StateFile), filepath.Join(c.dir, storage.SpoolDir, metrics.StateFile)} {
+	for _, state := range []string{filepath.Join(c.dir, otlp.StateFile), filepath.Join(c.dir, storage.SpoolDir, metrics.StateFile), c.zone.ProviderStatePath()} {
 		data, err := os.ReadFile(state)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err

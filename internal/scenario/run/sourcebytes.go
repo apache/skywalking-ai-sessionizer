@@ -28,6 +28,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -67,7 +68,9 @@ func partsKeepSourceBytes(root, session string, sources map[string]string) ([]st
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", lf.Path, err)
 		}
-		if len(recs) > 0 && recs[0].Ord == 1 {
+		// Every provider record starts at ord 1, being a whole body, so none
+		// of them is an older version of another.
+		if len(recs) > 0 && recs[0].Ord == 1 && hdr.Kind != sessiondata.KindProviderBody {
 			newest[sourceKey{hdr.Adapter, hdr.Src}] = len(all)
 		}
 		all = append(all, landed{filepath.Base(lf.Path), hdr, recs})
@@ -76,12 +79,21 @@ func partsKeepSourceBytes(root, session string, sources map[string]string) ([]st
 	fail := func(format string, a ...any) {
 		out = append(out, "parts_keep_source_bytes: "+fmt.Sprintf(format, a...))
 	}
+	held := providerbody.NewSession()
 	for i, l := range all {
+		adapter, _, _ := strings.Cut(l.hdr.Adapter, "/")
+		dir, ok := sources[adapter]
+		if l.hdr.Kind == sessiondata.KindProviderBody {
+			if !ok {
+				fail("%s: no source directory for adapter %s", l.name, adapter)
+				continue
+			}
+			providerKeepsSourceBytes(l.name, dir, l.recs, held, fail)
+			continue
+		}
 		if i < newest[sourceKey{l.hdr.Adapter, l.hdr.Src}] {
 			continue
 		}
-		adapter, _, _ := strings.Cut(l.hdr.Adapter, "/")
-		dir, ok := sources[adapter]
 		if !ok {
 			fail("%s: no source directory for adapter %s", l.name, adapter)
 			continue
@@ -132,4 +144,51 @@ func partsKeepSourceBytes(root, session string, sources map[string]string) ([]st
 		}
 	}
 	return out, nil
+}
+
+// providerKeepsSourceBytes checks provider bodies against the files the
+// runtime wrote: each record's digest and size are its file's, each piece it
+// keeps is a run of that file's bytes, and the body it rebuilds to, against
+// what the session held before it, is the file exactly.
+func providerKeepsSourceBytes(name, dir string, recs []*sessiondata.Record, held *providerbody.Session, fail func(string, ...any)) {
+	for row, rec := range recs {
+		m, err := providerbody.ManifestOf(rec)
+		if err != nil {
+			fail("%s row %d: %v", name, row+1, err)
+			continue
+		}
+		src, err := os.ReadFile(filepath.Join(dir, m.Src))
+		if err != nil {
+			fail("%s row %d: %v", name, row+1, err)
+			continue
+		}
+		sum := sha256.Sum256(src)
+		if got := hex.EncodeToString(sum[:])[:12]; got != rec.Sha || rec.Bytes != len(src) {
+			fail("%s row %d: sha %s and %d bytes, and its file %s gives %s and %d", name, row+1, rec.Sha, rec.Bytes, m.Src, got, len(src))
+		}
+		for b, p := range rec.Parts[:len(rec.Parts)-1] {
+			kept := []byte(p.Data)
+			if p.Kind == sessiondata.PartUnknown {
+				if kept, err = p.Raw(); err != nil {
+					fail("%s row %d block %d: %v", name, row+1, b, err)
+					continue
+				}
+			}
+			if !bytes.Contains(src, kept) {
+				fail("%s row %d block %d: the piece is not its file's bytes", name, row+1, b)
+			}
+		}
+		if err := held.Add(rec); err != nil {
+			fail("%s row %d: %v", name, row+1, err)
+			continue
+		}
+		body, err := held.Body(rec.ID)
+		if err != nil {
+			fail("%s row %d: %v", name, row+1, err)
+			continue
+		}
+		if !bytes.Equal(body, src) {
+			fail("%s row %d: the body rebuilds to other bytes than %s", name, row+1, m.Src)
+		}
+	}
 }

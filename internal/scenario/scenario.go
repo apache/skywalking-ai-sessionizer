@@ -53,7 +53,17 @@ type Scenario struct {
 	// Interval is the session's clock: the gap between consecutive steps in
 	// every stream, unless a step says after. Zero means one second.
 	Interval time.Duration `yaml:"interval"`
-	Steps    []Step        `yaml:"steps"`
+	// ProviderBodies writes the request and response body of every provider
+	// call, as Claude Code does when OTEL_LOG_RAW_API_BODIES names a
+	// directory. A claude-code build writes them as files; an sd build lands
+	// them.
+	ProviderBodies bool   `yaml:"provider_bodies"`
+	Steps          []Step `yaml:"steps"`
+
+	// omitBodies writes no provider bodies while keeping everything else a
+	// scenario with provider bodies has, its ids included, so the two builds
+	// can be compared.
+	omitBodies bool
 }
 
 // Step is one thing that happened. Exactly one of the kind fields is set.
