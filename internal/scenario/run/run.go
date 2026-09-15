@@ -31,6 +31,8 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
+	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/repack"
@@ -156,7 +158,7 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 			name = "final"
 		}
 		var err error
-		built, err = scenario.Build(sc, f, out, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval, Through: cp})
+		built, err = scenario.Build(sc, f, out, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval, Through: cp, MaxDelta: ex.Collect.MaxDeltaBytes})
 		if err != nil {
 			return nil, "", err
 		}
@@ -255,6 +257,19 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 			}
 			return changesLeaveTheFold(sc, f, out, session, opts, ex.Parse.MaxRoundBytes)
 		}},
+		{"provider_bodies_leave_the_fold", ex.Properties.ProviderBodiesLeaveTheFold, func() ([]string, error) {
+			if !sc.ProviderBodies {
+				return nil, nil
+			}
+			return providerBodiesLeaveTheFold(sc, f, out, session, opts, ex.Parse.MaxRoundBytes)
+		}},
+		{"provider_bodies_rebuild", ex.Properties.ProviderBodiesRebuild, func() ([]string, error) {
+			if !sc.ProviderBodies {
+				return nil, nil
+			}
+			lines, _, err := expect.ProviderBodiesRebuild(out, session)
+			return lines, err
+		}},
 		{"reproducible", ex.Properties.Reproducible, func() ([]string, error) {
 			// Two parses of identical landed evidence must produce identical
 			// rounds. The chain in out was cut at checkpoints, so it is not
@@ -302,6 +317,13 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 				if cs.Records != 0 || cs.SourcesLanded != 0 {
 					return []string{fmt.Sprintf("recollect_idempotent: a second collect of the changes landed %d records from %d sources", cs.Records, cs.SourcesLanded)}, nil
 				}
+				ps, err := claudecodeprovider.New(filepath.Join(out, "_source", scenario.ProviderBodyDir), zone, 0).CollectAll(collectEvery)
+				if err != nil {
+					return nil, err
+				}
+				if ps.Records != 0 || ps.SourcesLanded != 0 {
+					return []string{fmt.Sprintf("recollect_idempotent: a second collect of the provider bodies landed %d records from %d sources", ps.Records, ps.SourcesLanded)}, nil
+				}
 				return nil, nil
 			}},
 			struct {
@@ -315,8 +337,9 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 				fn   func() ([]string, error)
 			}{"parts_keep_source_bytes", ex.Properties.PartsKeepSourceBytes, func() ([]string, error) {
 				return partsKeepSourceBytes(out, session, map[string]string{
-					claudecode.Name:        filepath.Join(out, "_source"),
-					claudecodechanges.Name: filepath.Join(out, "_source", "plugins", "data"),
+					claudecode.Name:         filepath.Join(out, "_source"),
+					claudecodechanges.Name:  filepath.Join(out, "_source", "plugins", "data"),
+					claudecodeprovider.Name: filepath.Join(out, "_source", scenario.ProviderBodyDir),
 				})
 			}},
 			struct {
@@ -397,7 +420,8 @@ func collect(f scenario.Format, out string) (int, error) {
 	if f != scenario.FormatClaudeCode {
 		return 0, nil
 	}
-	st, err := claudecode.New(filepath.Join(out, "_source"), storage.NewZone(out), 0).CollectAll(nil)
+	budget := budgets(out)
+	st, err := claudecode.New(filepath.Join(out, "_source"), storage.NewZone(out), budget[config.AdapterClaudeCodeLocal]).CollectAll(nil)
 	if err != nil {
 		return 0, err
 	}
@@ -405,24 +429,63 @@ func collect(f scenario.Format, out string) (int, error) {
 		return 0, fmt.Errorf("collect: %v", st.Errors)
 	}
 	// The plugin's lines, through their own adapter, as asz view runs both.
-	cs, err := claudecodechanges.New(filepath.Join(out, "_source", "plugins", "data"), storage.NewZone(out), 0).CollectAll(nil)
+	cs, err := claudecodechanges.New(filepath.Join(out, "_source", "plugins", "data"), storage.NewZone(out), budget[config.AdapterClaudeCodeChanges]).CollectAll(nil)
 	if err != nil {
 		return 0, err
 	}
 	if len(cs.Errors) != 0 {
 		return 0, fmt.Errorf("collect changes: %v", cs.Errors)
 	}
-	return st.SourcesLanded + cs.SourcesLanded, nil
+	// The provider bodies last, as the pipeline collects them, so a
+	// response only a transcript names finds its session.
+	ps, err := claudecodeprovider.New(filepath.Join(out, "_source", scenario.ProviderBodyDir), storage.NewZone(out), budget[config.AdapterClaudeCodeProvider]).CollectAll(collectEvery)
+	if err != nil {
+		return 0, err
+	}
+	if len(ps.Errors) != 0 {
+		return 0, fmt.Errorf("collect provider bodies: %v", ps.Errors)
+	}
+	return st.SourcesLanded + cs.SourcesLanded + ps.SourcesLanded, nil
 }
+
+// budgets reads each local adapter's max_delta_bytes from the configuration
+// the build wrote, so a check lands files cut the way the pipeline over that
+// configuration cuts them. A root with no configuration, such as a copy the
+// removal check makes, lands at the defaults.
+func budgets(out string) map[string]int64 {
+	out2 := map[string]int64{}
+	cfg, err := config.Load(filepath.Join(out, "asz.yaml"))
+	if err != nil {
+		return out2
+	}
+	for _, ad := range cfg.Adapters {
+		out2[ad.Name] = ad.Collector.MaxDeltaBytes
+	}
+	return out2
+}
+
+// collectEvery is the provider adapter's filter in a scenario root, where
+// every session is the build's own.
+func collectEvery(string) claudecodeprovider.Verdict { return claudecodeprovider.Collect }
 
 // changesLeaveTheFold builds the scenario again without its changes and
 // compares the folds: the nodes, the relations and the talks must be the
 // same, because a change record is evidence beside a step and never a
 // step. The chain's bytes differ, since a round binds the files it read.
 func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
+	return leavesTheFold("changes_leave_the_fold", "the changes", sc.WithoutChanges(), f, out, session, opts, maxRound)
+}
+
+// providerBodiesLeaveTheFold does the same for provider bodies: a body is
+// what a call sent and got back, joined to the call by a view, and no step.
+func providerBodiesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
+	return leavesTheFold("provider_bodies_leave_the_fold", "the provider bodies", sc.WithoutProviderBodies(), f, out, session, opts, maxRound)
+}
+
+func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
 	plain := out + "-plain"
 	defer os.RemoveAll(plain)
-	built, err := scenario.Build(sc.WithoutChanges(), f, plain, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval})
+	built, err := scenario.Build(plainScenario, f, plain, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval})
 	if err != nil {
 		return nil, err
 	}
@@ -442,7 +505,14 @@ func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session 
 	}
 	var lines []string
 	for _, d := range expect.Compare(with, without) {
-		lines = append(lines, "changes_leave_the_fold: the fold differs with and without the changes: "+d)
+		lines = append(lines, property+": the fold differs with and without "+what+": "+d)
+	}
+	same, err := expect.SameIdentity(out, session, plain, built.Session)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range same {
+		lines = append(lines, property+": a node or relation differs with and without "+what+": "+d)
 	}
 	return lines, nil
 }
@@ -609,6 +679,15 @@ func repackKeepsStructure(out, session string, maxRound int64) ([]string, error)
 	}
 	for _, d := range expect.Compare(a, b) {
 		lines = append(lines, "repack_keeps_structure: "+d)
+	}
+	// Provider bodies refer to each other by record id and digest, never by
+	// file and row, so they rebuild on the re-cut root too.
+	rebuilt, _, err := expect.ProviderBodiesRebuild(twin, session)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range rebuilt {
+		lines = append(lines, "repack_keeps_structure: "+l)
 	}
 	return lines, nil
 }

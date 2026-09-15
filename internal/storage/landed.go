@@ -35,6 +35,8 @@ type LandedFile struct {
 	Seq    uint64
 	Stream string // set for a stream's records
 	RunID  string // set for a workflow run's records
+	// Neither is set for a file at the session level: the provider bodies,
+	// which belong to no one stream or run.
 }
 
 // LandedFiles lists every landed record file for a session, in sequence order.
@@ -97,6 +99,10 @@ func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
 				return nil, err
 			}
 		}
+	}
+
+	if err := add(z.ProviderDir(session), "", false); err != nil {
+		return nil, err
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })

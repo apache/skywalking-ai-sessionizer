@@ -179,7 +179,7 @@ func main() {
 			continue
 		}
 		switch ad.Name {
-		case config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges:
+		case config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges, config.AdapterClaudeCodeProvider:
 			local = append(local, ad)
 		case config.AdapterClaudeCodeOTLP:
 			if cmd != "collect" && cmd != "server" {
@@ -205,7 +205,7 @@ func main() {
 	switch cmd {
 	case "sources":
 		if len(local) == 0 {
-			fatal(fmt.Errorf("%s: no enabled %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges))
+			fatal(fmt.Errorf("%s: no enabled %s, %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges, config.AdapterClaudeCodeProvider))
 		}
 		for _, ad := range local {
 			if err := run(cfg, ad, *once); err != nil {
@@ -277,6 +277,9 @@ func startReceiver(cfg *config.Config, ad config.Adapter) error {
 func cmdSources(cfg *config.Config, ad config.Adapter, once bool) error {
 	if ad.Name == config.AdapterClaudeCodeChanges {
 		return cmdSourcesChanges(cfg, ad, once)
+	}
+	if ad.Name == config.AdapterClaudeCodeProvider {
+		return cmdSourcesProvider(cfg, ad, once)
 	}
 	root, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
@@ -403,6 +406,7 @@ func printIndexDetail(ix *index.Index, id string) {
 		index.KindMeta: "agent_meta", index.KindJournal: "journal",
 		index.KindManifest: "manifest", index.KindScript: "script",
 		index.KindOther: "other", index.KindUnknown: "unknown", index.KindChanges: "changes",
+		index.KindProviderBody: "provider_body",
 	}
 	byKind := map[index.Kind]int{}
 	msgs := map[uint32]int{}

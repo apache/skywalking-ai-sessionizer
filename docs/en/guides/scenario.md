@@ -170,6 +170,10 @@ and the pass says why once, on standard error, as `kept: every marked session: <
   names, `XDG_CONFIG_HOME/claude` and `~/.claude`.
 - `DIR/_removed` is a symbolic link, or not a directory.
 
+A session whose build wrote provider bodies is kept too, with a `kept: <session-id>: <reason>` line,
+while the `claude-code-provider` adapter is switched off or reads anything but
+`DIR/_source/provider-bodies`, and waits while any of its bodies is not landed.
+
 One session is kept, with a `kept: <session-id>: <reason>` line, when something about it needs a
 person. Examples are a receiver that rejected records of it, a file the build wrote that has
 changed or is missing, and a file for it that the build did not write. A kept line is not an error.
@@ -202,6 +206,7 @@ whose names produce the same run id, ignoring letter case. `source-bytes.yaml` i
 session: mock-build-and-check       # optional; default derived from the steps
 title: build and check              # optional
 interval: 1s                        # the gap between steps, in every stream
+provider_bodies: false              # optional; true writes every call's request and response body
 steps:
   - input: run the build            # a person's message: opens a run and a talk
   - inject: {type: skill_listing, text: "skills: 1"}
@@ -328,6 +333,8 @@ checkpoints:
     unresolved_kinds: {tool_result: none}
     session: {from: +0s, to: +11.1s}      # the session node's range, as deltas from --at
     view: {state: verified, problems: 0, talks: 3, files: 6, first_talk: {label: run the build, runs: 2}}
+    # with provider_bodies: the landed bodies, and the calls whose request is captured
+    # view: {provider_bodies: 14, captured_prompts: 7, provider_files: 5}
     verify: {problems: 0}                 # what asz verify reports over the root
   helped:
     lose: [{stream: checker, kind: transcript}]   # deleted from the root after this checkpoint's parse
@@ -351,6 +358,11 @@ properties:                               # all on unless set false
   push_follows_the_wire: true
   removed_after_sent: true
   view_covers_the_session: true
+  changes_leave_the_fold: true            # when a tool changes a file
+  provider_bodies_leave_the_fold: true    # when the scenario writes provider bodies
+  provider_bodies_rebuild: true           # when the scenario writes provider bodies
+collect:
+  max_delta_bytes: 0                      # the largest landed file; the build writes it into its configuration
 parse:
   max_round_bytes: 0                      # a parse setting, when the scenario needs one
 push:
@@ -397,6 +409,28 @@ read on. A refused request must leave every file for the next pass, a second pas
 nothing, and writing every body back to its path must give a root that verifies and folds the
 same. `push.kinds` names the file kinds a scenario's push must carry; `all-kinds.yaml` names all
 six.
+
+**Provider bodies.** With `provider_bodies: true`, every call writes the request and the response
+Claude Code would write when `OTEL_LOG_RAW_API_BODIES` names a directory: the whole message list of
+its stream again, the cache marker on the newest message, a billing header naming the prompt and
+the previous call's request, and the session in `metadata.user_id`. A compaction starts the list
+again. A `claude-code` build writes them as files under `DIR/_source/provider-bodies`, each stamped
+with when it was written, and its configuration enables `claude-code-provider` there; an `sd` build
+lands the same bodies in the same order. Such a scenario's message and request ids carry the start of
+the session id, because every session shares the one directory and a runtime's ids are unique across
+sessions. `parts_keep_source_bytes` rebuilds every landed body and compares it with its file, and
+`provider_bodies_leave_the_fold` builds the scenario again without bodies, with the same ids, and
+compares the folds node by node, parent by parent and relation by relation. A node whose id is built
+from a landed position is compared by the record it stands on, since files of another kind landing
+between shift positions. `changes_leave_the_fold` compares the same way.
+`provider_bodies_rebuild` reads every body a call lists the way a reader that loads bodies on demand
+does: only the session's `provider_body` files up to the one the body's `ref` names, in order. Each
+body must rebuild to its manifest's digest. It runs again on the root `repack_keeps_structure` re-cuts,
+where every file and row moved. `collect.max_delta_bytes` sets the largest landed file: the build
+writes it into its configuration, the check collects by that configuration, and an `sd` build cuts its
+provider files at it, so a small value spreads bodies over many files and makes them refer across
+files.
+`tests/scenarios/provider-bodies.yaml` is the example.
 
 The removal is checked too. `removed_after_sent` makes full copies of the finished root and runs a
 pipeline's pass over each: collect, derive, parse, send to a receiver in the test, then remove.

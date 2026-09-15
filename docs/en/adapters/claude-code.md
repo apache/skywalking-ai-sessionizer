@@ -742,12 +742,57 @@ the same nodes with and without them, and the view joins each record to its step
 tool-use id. The scenario `tests/scenarios/workspace-changes.yaml` checks both paths in both
 formats, and that the fold is unchanged.
 
+## Provider bodies
+
+With `OTEL_LOG_RAW_API_BODIES=file:<dir>` in its environment, Claude Code writes the body of every
+request it sends its model provider, and of every response, to that directory.
+`claude-code-provider` is the adapter for them. [Claude Code Provider Bodies](../setup/claude-code-provider-bodies.md)
+says how to turn it on, what the files hold and what lands; this section says what was measured.
+
+Two captures of Claude Code 2.1.260, on `claude-opus-5` with 1M context, each one headless process
+fed one turn at a time:
+
+| | First capture | Second capture |
+| --- | --- | --- |
+| Turns | 3 | 6, including `/compact` |
+| Tools | Read, Grep and Glob only | the full list, write tools refused by permission |
+| Bodies | 6 requests, 6 responses | 15 requests, 15 responses |
+| Bytes written | 674,017 | 1,739,105 |
+| Transcript bytes | 263,111 | 598,360 main, 77,694 subagent |
+| Every body cut and written as one `provider_body` file | 172,120 bytes (25.5%) | 376,154 bytes (21.6%) |
+
+- **Every call sends its chain's whole message list again**, across turns. Earlier messages come
+  back unchanged except the cache marker, which moves to the newest message; a message holding one
+  text block becomes a plain string once the marker leaves it. Each response comes back unchanged as
+  the next assistant message. `role:"system"` messages are placed between the others: the
+  environment, the deferred tool list, and a `<total_tokens>` note after each prompt and tool result.
+- **Bodies are compact JSON**, keys in the order `model`, `messages`, `system`, `tools`, `betas`,
+  `metadata`, `max_tokens`, `thinking`. Encoding each parsed file again compactly gave its exact
+  bytes.
+- **A chain is a stream's run of calls.** Its first request names no `cc_prev_req`; each later one
+  names the previous call of the same chain, across turns. A subagent has its own chain, and its
+  requests carry the parent's session and the parent's current `cc_prompt_id`. No agent id appears in
+  any body.
+- **A compaction request** copies the request of the call before it up to that call's prompt, adds
+  the instruction as a second text block in the same user message, and names the same `cc_prev_req`
+  with no `cc_prompt_id`. The next call names the call before the compaction and starts a new
+  message list with the summary. So `cc_prev_req` alone does not identify a request's call.
+- **Which session a response belongs to.** Of 15 responses, 11 are named by a later request, 2 are
+  the last of their chain and found only through the transcript's message id, and 2, the call that
+  names the session and the compaction call, are found by neither and are not landed.
+- **Names.** The adapter reads Claude Code's fields and writes the model's words: `session_id` in
+  `metadata.user_id` becomes `session`, `cc_prompt_id` becomes `run`, `cc_prev_req` becomes
+  `previous_request`, a response's `id` becomes `call`, and a response file's name becomes `request`.
+  The record id is the file name without `.json`.
+- **The join in the view**, on the second capture: all 13 calls had their request and their response
+  joined exactly, the subagent's included; the two requests with no call were left unjoined.
+
 ## What this adapter cannot supply
 
 | | Why |
 | --- | --- |
 | **Reasoning text** | Claude Code asks the provider not to return it, so most thinking blocks carry only a signature. `unavailable` where the runtime wrote none. See below. |
-| **Serialized request** | system prompt, tool schemas and cache annotations are absent from transcripts: 0 files contain `"tools":[`, and `compactMetadata.preservedMessages.allUuids` names 5 ids that exist nowhere on disk. asz produces no input manifest and no `input_of` relation, and reports model-context coverage as `unavailable`, as the model's [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) requires. |
+| **Serialized request** | system prompt, tool schemas and cache annotations are absent from transcripts: 0 files contain `"tools":[`, and `compactMetadata.preservedMessages.allUuids` names 5 ids that exist nowhere on disk. asz produces no input manifest and no `input_of` relation, and reports model-context coverage as `unavailable`, as the model's [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) requires. Claude Code writes each request and response itself when told to, and the `claude-code-provider` adapter lands them beside the transcripts, joined to their calls in the view; see [Provider bodies](#provider-bodies). The fold is unchanged by them. |
 | **Injected preamble** | the instruction block prepended to the first user message has no transcript record. Its *data* survives as `attachment` records; its rendered form does not. |
 | **Per-call duration and cost** | not written to transcripts. Available via OTLP. |
 | **`tool.execution`** | no local record; the call and result are observable, the execution is not. |

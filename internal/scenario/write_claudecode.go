@@ -160,6 +160,25 @@ func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 			return nil, nil, err
 		}
 	}
+	// The provider bodies, where Claude Code writes them: one flat directory
+	// for every session, each file stamped with when it was written, which
+	// is the order the adapter lands them in.
+	for _, b := range p.ProviderBodies() {
+		rel := ProviderBodyDir + "/" + b.Name
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, nil, err
+		}
+		if err := os.WriteFile(path, b.Bytes, 0o644); err != nil {
+			return nil, nil, err
+		}
+		if err := os.Chtimes(path, b.At, b.At); err != nil {
+			return nil, nil, err
+		}
+		written = append(written, path)
+		sum := sha256.Sum256(b.Bytes)
+		marked[rel] = MarkerFile{Path: rel, Size: int64(len(b.Bytes)), SHA256: hex.EncodeToString(sum[:])}
+	}
 	sort.Strings(written)
 	files := make([]MarkerFile, 0, len(marked))
 	for _, f := range marked {

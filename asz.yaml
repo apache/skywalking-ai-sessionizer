@@ -123,6 +123,34 @@ adapters:
       interval: 10m
       max_delta_bytes: 2097152
 
+  # The request and response bodies Claude Code exchanges with its model
+  # provider: the system prompt, the tool schemas and every message as it
+  # was sent. Claude Code writes them when its environment has
+  # OTEL_LOG_RAW_API_BODIES=file:<absolute path of source_root>, for example
+  # in the env block of ~/.claude/settings.json. This adapter finds each
+  # body's session, and lands it with what the session already holds taken
+  # out. On by default because it costs nothing until that variable is set.
+  - name: claude-code-provider
+    enabled: true
+
+    # Where Claude Code writes the bodies. Leave empty for asz/provider-bodies
+    # under CLAUDE_CONFIG_DIR, XDG_CONFIG_HOME/claude, or ~/.claude. The
+    # variable must name the same directory by its absolute path: Claude
+    # Code does not expand ~, and resolves a relative path against each
+    # session's own working directory.
+    source_root: ""
+
+    # The same session filter as claude-code-local, judged by the working
+    # directory the session's main transcript was recorded under.
+    include: []
+    exclude:
+      - /private/tmp/**
+
+    collector:
+      mode: watch
+      interval: 10m
+      max_delta_bytes: 2097152
+
 parse:
   # The largest round file the parser writes, in bytes. A round travels
   # whole as one log record, so it is cut at the same budget as a landed

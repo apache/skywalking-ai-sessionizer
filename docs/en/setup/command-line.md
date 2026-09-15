@@ -45,6 +45,11 @@ list is absent when no session spans more than one.
 With the `claude-code-changes` adapter enabled, a second table lists the sessions the plugin has
 written change records for, with their streams and workspace.
 
+With the `claude-code-provider` adapter enabled, it names the directory Claude Code writes provider
+bodies to, counts the requests and responses there, and lists the sessions the requests name. A
+response names no session, so it is counted only. See
+[Claude Code Provider Bodies](claude-code-provider-bodies.md).
+
 ## collect
 
 The pipeline. One pass does three things, in this order:

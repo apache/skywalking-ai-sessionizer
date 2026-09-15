@@ -46,10 +46,12 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -68,6 +70,10 @@ const conversationsDir = "_conversations"
 // there, and a removal checks that the changes adapter reads it there.
 const changesPrefix = "plugins/data/"
 
+// providerPrefix is where, under the local adapter's source directory, the
+// provider adapter's source directory is. The build writes the bodies there.
+const providerPrefix = scenario.ProviderBodyDir + "/"
+
 // Remover removes the sessions a scenario build marked, once all of each is
 // sent. The pipeline calls Pass at the end of every pass, after the push,
 // while it holds the scenario lock.
@@ -82,6 +88,10 @@ type Remover struct {
 	Changes      *claudecodechanges.Collector
 	ChangesRoot  string
 	ChangesMatch func(claudecodechanges.Session) bool
+	// Provider is nil when the provider adapter is not enabled. A session
+	// whose build wrote provider bodies waits for it.
+	Provider     *claudecodeprovider.Collector
+	ProviderRoot string
 	// Derives says claude-code-local derives metrics, so every landed file
 	// must be derived before its session can go.
 	Derives bool
@@ -349,6 +359,12 @@ func (r *Remover) Pass(in Input) *Result {
 		res.Errors = append(res.Errors, err)
 		return res
 	}
+	// The provider adapter's table names the sessions' body files, which are
+	// gone with them.
+	if err := claudecodeprovider.Forget(r.Zone, ids, p.now); err != nil {
+		res.Errors = append(res.Errors, err)
+		return res
+	}
 	if err := r.hook(Point{Step: 6, Where: WhereDone}); err != nil {
 		res.Errors = append(res.Errors, err)
 		return res
@@ -472,7 +488,11 @@ func (r *Remover) Blocked(in Input) string {
 	// not only the one this process's environment selects. The pipeline can
 	// run with CLAUDE_CONFIG_DIR or XDG_CONFIG_HOME set differently from the
 	// Claude Code a person runs on the same machine.
-	for _, src := range []string{r.Source, r.ChangesRoot} {
+	sources := []string{r.Source, r.ChangesRoot}
+	if r.Provider != nil {
+		sources = append(sources, r.ProviderRoot)
+	}
+	for _, src := range sources {
 		for _, own := range claudeCodeDirs() {
 			if overlaps(src, own) {
 				return fmt.Sprintf("%s is, holds, or lies inside %s, where Claude Code keeps its own files; asz never removes there", src, own)
@@ -545,6 +565,8 @@ type session struct {
 	hasLocal    bool
 	changes     claudecodechanges.Session
 	hasChanges  bool
+	// providerFiles are the body files the marker lists, by name.
+	providerFiles []string
 }
 
 func (s *session) unlock() {
@@ -693,6 +715,34 @@ func (p *pass) whole(s *session) verdict {
 	for _, src := range s.changes.Sources {
 		found[changesPrefix+src.Rel] = true
 	}
+	// The provider bodies the build wrote are found where the adapter reads
+	// them, and every body the adapter gave this session must be one of them.
+	for _, f := range s.m.Files {
+		if strings.HasPrefix(f.Path, providerPrefix) {
+			s.providerFiles = append(s.providerFiles, strings.TrimPrefix(f.Path, providerPrefix))
+		}
+	}
+	if len(s.providerFiles) > 0 {
+		want := resolved(filepath.Join(p.r.Source, scenario.ProviderBodyDir))
+		if p.r.Provider == nil {
+			return blocked("the provider adapter is off; the bodies the build wrote under %s would never be landed", want)
+		}
+		if got := resolved(p.r.ProviderRoot); got != want {
+			return blocked("the provider adapter reads %s, not %s; the bodies the build wrote would never be landed", p.r.ProviderRoot, want)
+		}
+		for _, name := range s.providerFiles {
+			found[providerPrefix+name] = true
+		}
+	}
+	if p.r.Provider != nil {
+		attributed, err := p.r.Provider.SessionFiles(s.id)
+		if err != nil {
+			return blocked("%v", err)
+		}
+		for name := range attributed {
+			found[providerPrefix+name] = true
+		}
+	}
 	for _, rel := range sortedKeys(found) {
 		if !want[rel] {
 			return blocked("%s is not a file the build wrote", p.source(rel))
@@ -751,6 +801,15 @@ func (p *pass) covered(s *session) verdict {
 			return waiting("%s", reason)
 		}
 	}
+	if len(s.providerFiles) > 0 {
+		ok, reason, err := p.r.Provider.Covered(s.id, s.providerFiles)
+		if err != nil {
+			return blocked("%v", err)
+		}
+		if !ok {
+			return waiting("%s", reason)
+		}
+	}
 	return verdict{}
 }
 
@@ -796,6 +855,19 @@ func (p *pass) landed(s *session) (*landedSet, verdict) {
 		case claudecode.Name:
 		case claudecodechanges.Name:
 			src = changesPrefix + src
+		case claudecodeprovider.Name:
+			// A provider file holds many bodies, and each record names the
+			// body file it came from.
+			names, err := providerBodyFiles(lf.Path)
+			if err != nil {
+				return nil, blocked("landed file %s cannot be read: %v", rel, err)
+			}
+			for _, name := range names {
+				if !want[providerPrefix+name] {
+					return nil, blocked("landed file %s holds a body the build did not write", rel)
+				}
+			}
+			src = providerPrefix + names[0]
 		default:
 			return nil, blocked("landed file %s came through the adapter %q, which reads no file a build writes", rel, info.Adapter)
 		}
@@ -1279,4 +1351,30 @@ func sortedKeys(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// providerBodyFiles lists the body file each record of a landed provider file
+// came from. A file with no record names none, and is refused.
+func providerBodyFiles(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	_, recs, err := sessiondata.All(f)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, rec := range recs {
+		m, err := providerbody.ManifestOf(rec)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m.Src)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("it holds no body")
+	}
+	return out, nil
 }

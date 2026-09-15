@@ -28,6 +28,8 @@ session.
         journal.cursor · journal-…sd
         manifest.cursor · manifest-…sd
         script.cursor · script-…sd
+    provider_body/                       the bodies the runtime exchanged with its model
+      provider_body-<collected-at>-<seq>.sd  provider, when claude-code-provider collects them
     index/
       entries.bin                        the derived index
       index.state                        how far the index reaches
@@ -38,6 +40,9 @@ session.
       rounds/
         r000001-<digest>.sf
         r000002-<digest>.sf
+  _provider/                             when claude-code-provider runs
+    seen.state                           which body files landed, in which session, and which wait
+    .lock                                one provider collector per root
   _metrics/                              the metrics spool, when an adapter produces metrics
     spool.state                          the next number for a received request
     metrics.state                        what the local derivation has counted
@@ -55,7 +60,8 @@ session.
     <session-id>.chain/                  its conversation's directory, moved here whole
 ```
 
-Child streams are flat siblings of `main`, keyed by agent id. The storage path deliberately does
+Child streams are flat siblings of `main`, keyed by agent id. Provider bodies sit under the
+session, not under a stream, because a body names no stream; the view joins each to its call. The storage path deliberately does
 not mirror the source tree: a path must not encode a relationship the pipeline is supposed to
 derive. [Export over OpenTelemetry](../setup/export-otlp.md) says how the metrics spool fills and
 what `push.state` records. `_scenario/` and `_removed/` exist only in a root a scenario build
@@ -273,6 +279,32 @@ A session a scenario build marked is the one case where asz deletes a source its
 the session is sent, a pipeline removes its source first and then the whole session directory, as
 [Retention](#retention) describes.
 
+## Provider bodies
+
+Claude Code writes the bodies of every session into one flat directory, one file per body, and never
+appends to one. Neither kind of cursor fits: an append cursor tracks a position in one growing file,
+and a session of thousands of calls would need thousands of snapshot cursors. So the adapter keeps
+one table for the root, `_provider/seen.state`: for each body file, its size, its modification
+time, the start of its digest, its state, its session, and the ids that join it. The states are
+`landed`, `waiting` for a session, `excluded` by the filter, `unreadable`, `changed` after it landed,
+and `conflict` with a body of the same name the session already holds.
+
+The table is derived. Every landed body is a record whose manifest names its file, its size and its
+digest, so a missing table is rebuilt from the landed records, and the first pass after reads each
+file once more to compare its digest. A file lands before the table says so, and the table says so only after the session's index and
+state are saved: a pass that stops between the two reads the file again, finds the session already
+holds it, lands nothing, and closes the index gap. A `landed` line is
+trusted only while its session's `provider_body/` directory exists, so a body whose session was removed
+lands again. A line whose file and session are both gone is dropped. A landed provider file that does not read is
+left out of a rebuilt table and reported, and every other session's bodies are collected. Every pass
+also compares each session's index with its landed provider files, and brings a session whose index
+is behind up to date, so a pass that stopped between landing and saving the index, or met the session
+busy, leaves no lasting gap.
+
+A pass holds `_provider/.lock` for the table and each session's own lock while it lands into that
+session. It lands every new body of a session into one file, in the order the files were written,
+cut at `max_delta_bytes`.
+
 ## The index
 
 `index/` holds identifiers and roles, never text: which record is in which stream, which call a
@@ -426,7 +458,7 @@ The removal then goes in this order:
 3. `<root>/<session-id>/` is renamed to `_removed/<session-id>/`, and deleted there.
 4. `_conversations/<session-id>/` is renamed to `_removed/<session-id>.chain/`, and deleted there.
 5. The spool files the session owns are deleted.
-6. The session's lines in `push.state` and `metrics.state` are dropped.
+6. The session's lines in `push.state`, `metrics.state` and `_provider/seen.state` are dropped.
 7. The marker is deleted.
 
 Each step comes where it does for a reason:

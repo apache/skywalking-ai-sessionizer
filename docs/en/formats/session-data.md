@@ -41,11 +41,11 @@ stops at the first longer line.
 | `schema` | `sd/1` |
 | `seq` | the landed sequence number, monotonic per session |
 | `at` | when the file was collected |
-| `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script` or `changes`. `otlp_log` and `otlp_span` are reserved for a push transport, and `provider_body` is reserved too. No adapter writes any of the three. |
+| `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes` or `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport, and no adapter writes either. |
 | `adapter` | how the records were acquired, with its contract version |
 | `dialect` | whose schema they were read as. A push receiver and a local reader for one runtime share a dialect and nothing else. |
 | `src` | the source, relative to the adapter's source root, with forward slashes on every platform |
-| `session`, `stream`, `batch` | the session, the execution stream (`main` or an agent id), and the group of children a workflow run started |
+| `session`, `stream`, `batch` | the session, the execution stream (`main` or an agent id), and the group of children a workflow run started. A `provider_body` file names neither a stream nor a batch |
 
 A reader refuses a header unless `h` is `1`, `schema` is `sd/1`, and `kind`, `session`, `src` and
 `dialect` are all present. The writer in `pkg/sessiondata` fills in `h` and `schema`, and refuses
@@ -68,7 +68,8 @@ lets a reader check the record against its source for as long as the source exis
 ## File kinds
 
 One `.sd` file holds one cut of one source. The header's `kind` says which, and the records of
-each kind carry a characteristic set of fields.
+each kind carry a characteristic set of fields. A `provider_body` file is the exception: its source
+is a directory with one file per body, and each record names its own file.
 
 | `kind` | Collected from | Its records | What refers to it |
 | --- | --- | --- | --- |
@@ -78,6 +79,7 @@ each kind carry a characteristic set of fields.
 | `workflow_manifest` | a workflow run's manifest | one record with `batch` and `label`, and a `data` part | the run's name |
 | `workflow_script` | the program a workflow ran | one record whose part is `unknown`: the source is a program, not data | nothing; kept because it is part of the session |
 | `changes` | the files the asz Claude Code plugin saw a tool call change, one line per call | one record per observed call, with `id`, `tool` and `time` lifted from it and the line whole as one `data` part, a `changes/1` record; no `from` and no flags, so assembly emits no node for it | nothing in a round; the view joins each to its step by `tool`. A transcript's `Edit` and `Write` results carry the same record as a second `data` part, from the runtime's own patch. See the [Claude Code plugin](../setup/claude-code-plugin.md). |
+| `provider_body` | the request and response bodies Claude Code wrote for its model provider, one file per body | one record per body, with `id` unique in the session (for Claude Code, the body's file name without `.json`), `run` on a request, `call` on a response, `model`, and the parts described in [Provider bodies](#provider-bodies); no `from` and no flags, so assembly emits no node for it. The header's `src` is `.` and it names no stream | nothing in a round; the view joins each to its call. See [Claude Code Provider Bodies](../setup/claude-code-provider-bodies.md) |
 
 A source that is one document, not a stream of lines, lands as one record with `ord` 1 and `off` 0.
 Its `sha` and `bytes` cover the whole document. The Claude Code adapter's `agent_meta`,
@@ -126,7 +128,9 @@ is a child's synchronous return, which is the parent's copy of the child's outpu
 the flag only on a `journal` record. Nothing removes the parent's copy, so it stays as the result
 of the call that started the child.
 
-`asz verify` checks `ord`, `off` and `bytes` without the source. In each stream or run, across its
+`asz verify` checks `ord`, `off` and `bytes` without the source. A provider body is a whole
+document at `ord` 1 and `off` 0, so for it `asz verify` rebuilds the body instead, as
+[Provider bodies](#provider-bodies) says. In each stream or run, across its
 files of one kind, `ord` must run 1, 2, 3 with no gap, starting at 1. The first record must start
 at byte 0, and each record after it at the byte after the previous record's line ends. Where the
 stream has an append cursor, the records must reach the line and the byte the cursor names (see
@@ -153,6 +157,61 @@ to the index, to a round and to a reader. A dialect writes one part for each pie
 the source record, in source order. Content it cannot describe goes in as an `unknown` part in the
 same place, never left out. A part the adapter adds beside the content, such as the `changes/1`
 record on an edit result, comes after them.
+
+## Provider bodies
+
+A request Claude Code sends repeats most of the request before it: the whole message list of its
+chain, the system prompt and the tool schemas. A `provider_body` record keeps only what its session
+does not hold yet, and says how to put the rest back.
+
+Its parts come in source order. Each is a `data` part holding a piece of the body, byte for byte: a
+tool definition, or a JSON string of 1 KiB or more, with its quotes. The last part is a `data`
+part that asz builds, the manifest, schema `provider_body/1`:
+
+```json
+{"schema":"provider_body/1","role":"request","src":"fcc261af-….request.json",
+ "sha256":"<SHA-256 of the whole body>","bytes":137054,"depth":1,"chain":"3e1f…",
+ "model":"claude-opus-5","session":"9a91…","run":"75db…","previous_request":"req_011C…",
+ "segments":[{"copy":{"from":"03455f62-….request","sha256":"…","len":26777}},
+             {"lit":"…"},{"part":0},{"piece":"<SHA-256 of a piece>"},{"lit":"…"}]}
+```
+
+| Key | Value |
+| --- | --- |
+| `role`, `src`, `sha256`, `bytes` | request or response, where the body came from relative to the adapter's source root, as a header's `src` is, and the digest and size of the whole body |
+| `segments` | joined in order, they are the body. `lit` is a JSON string whose UTF-8 bytes are literal bytes of the body. `part` is a part of this record. `piece` is the SHA-256 of a piece an earlier record of the session holds. `copy` is the first `len` bytes of the earlier body whose record id is `from` and whose digest is `sha256` |
+| `depth` | how many copies lie between this body and one with none. It is at most 32; a body whose base is that deep copies nothing |
+| `bytes` limit | a body may claim at most 256 MiB, and a rebuild stops as soon as it passes the size its record claims, so a damaged record cannot make a reader hold more than one body |
+| `chain` | the first sixteen hexadecimal characters of the SHA-256 of the request's first message, with the cache marker taken out. It chooses which earlier body a copy comes from. It is storage, and a join must not rely on it |
+| `why` | set when the body is kept whole in one `unknown` part, and why it could not be cut |
+| `model`, `session`, `run`, `call`, `request`, `previous_request` | the values the body carries that join it, as its adapter read them, in the model's words: the session it names; on a request, the run it was sent in; on a response, the call it answers and the provider's id for its request; on a request, the provider request id of the call before it in its chain. Empty when the body carries none. The [adapter's glossary](../adapters/claude-code.md#provider-bodies) says what the runtime calls each |
+
+A reference is a digest or a record id, never a file and a row, because `asz repack` renumbers files
+and rows and carries record lines unchanged. Every reference points at a record that landed before
+this one in the same session, so a session rebuilds on its own. A reference may point into an earlier
+file: the tool schemas, for instance, land once, in the session's first provider file. So to rebuild
+a body in the `provider_body` file with sequence N, a reader reads the session's `provider_body` files
+with sequence N or lower, in order, and keeps them: a later body needs only the files it has not read
+yet. Package `pkg/providerbody` does this.
+
+Keeping each file on its own would repeat the tool schemas, the system prompt and one whole request in
+every file. On the second capture, cut into three files of ten bodies, that took 43.9% of the bytes
+Claude Code wrote instead of 21.7%, and a long session with requests of several megabytes would keep
+almost nothing.
+
+A body can have nothing to refer to: the first body of a session, the first of a chain, one past the
+depth limit, or one in a session whose earlier `provider_body` files are gone from the root. It lands
+with all of its pieces, and rebuilds from its own record. A body that refers to a file the reader does
+not have does not rebuild. `asz verify` reports it, and a receiver that keeps a session's files in
+several storage stages has to read the earlier files from whichever stage holds them.
+
+The adapter checks each record before it lands: it writes the record with the Session Data writer,
+reads it back and rebuilds the body. A body that does not come back whole, or is not one JSON object
+in valid UTF-8, lands whole in one `unknown` part with a `why`. `asz verify` rebuilds every landed
+body and compares it with `sha256`, and reports a reference to something the session does not hold.
+
+On two captures of Claude Code 2.1.260, the landed `provider_body` files were 25.5% and 21.6% of the
+bytes Claude Code wrote, and all 42 bodies rebuilt exactly.
 
 ## Closing line
 

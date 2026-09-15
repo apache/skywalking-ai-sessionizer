@@ -23,9 +23,11 @@ package expect
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +41,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
@@ -50,6 +53,7 @@ type File struct {
 	Checkpoints map[string]*Checkpoint `yaml:"checkpoints"`
 	Properties  Properties             `yaml:"properties"`
 	Parse       ParseOptions           `yaml:"parse"`
+	Collect     CollectOptions         `yaml:"collect"`
 	// Push is what the OTLP push of the finished session must carry.
 	Push *Push `yaml:"push"`
 }
@@ -58,6 +62,12 @@ type File struct {
 // the file kinds that must appear on the wire.
 type Push struct {
 	Kinds []string `yaml:"kinds"`
+}
+
+// CollectOptions are collector settings a scenario runs under. The build
+// writes them into its configuration, and the collection follows it.
+type CollectOptions struct {
+	MaxDeltaBytes int64 `yaml:"max_delta_bytes"`
 }
 
 // ParseOptions are parse settings a scenario runs under.
@@ -87,7 +97,16 @@ type Properties struct {
 	// to the same nodes and relations: a change record is evidence beside a
 	// step, never a step. Checked when a scenario has changes.
 	ChangesLeaveTheFold *bool `yaml:"changes_leave_the_fold"`
-	MetricsMatchThePlan *bool `yaml:"metrics_match_the_plan"`
+	// ProviderBodiesLeaveTheFold says the same scenario without its provider
+	// bodies folds to the same nodes and relations. Checked when a scenario
+	// writes provider bodies.
+	ProviderBodiesLeaveTheFold *bool `yaml:"provider_bodies_leave_the_fold"`
+	// ProviderBodiesRebuild says every body a call lists rebuilds from the
+	// session's provider files up to the one it is in, as a reader loading
+	// bodies on demand reads them. Checked when a scenario writes provider
+	// bodies, and again on the root repack_keeps_structure re-cuts.
+	ProviderBodiesRebuild *bool `yaml:"provider_bodies_rebuild"`
+	MetricsMatchThePlan   *bool `yaml:"metrics_match_the_plan"`
 	// RemovedAfterSent says what a pipeline's removal does with the session,
 	// on copies of the finished root. Nothing goes before all of it is sent
 	// to the one receiver the pipeline sends to. All of it goes once it is,
@@ -164,6 +183,7 @@ type Verify struct {
 var landedPrefix = map[string]string{
 	"transcript": "transcript", "agent_meta": "meta", "journal": "journal",
 	"workflow_manifest": "manifest", "workflow_script": "script", "changes": "changes",
+	"provider_body": "provider_body",
 }
 
 // Resolve finds the landed file a Lose names among a session's files. The
@@ -176,7 +196,7 @@ func (l Lose) Resolve(files []storage.LandedFile, stream string) (*storage.Lande
 	}
 	prefix, known := landedPrefix[l.Kind]
 	if l.Kind != "" && !known {
-		return nil, fmt.Errorf("lose: unknown kind %q; the kinds are transcript, agent_meta, journal, workflow_manifest, workflow_script, changes", l.Kind)
+		return nil, fmt.Errorf("lose: unknown kind %q; the kinds are transcript, agent_meta, journal, workflow_manifest, workflow_script, changes, provider_body", l.Kind)
 	}
 	seen := 0
 	for i := range files {
@@ -257,6 +277,12 @@ type View struct {
 	ChangedFiles  *int           `yaml:"changed_files"`
 	CapturedBy    map[string]int `yaml:"captured_by"`
 	ChangesJoined *int           `yaml:"changes_joined"`
+	// ProviderBodies counts the landed provider bodies, and CapturedPrompts
+	// the calls that list a request.
+	// ProviderFiles counts the session's provider_body files.
+	ProviderFiles   *int `yaml:"provider_files"`
+	ProviderBodies  *int `yaml:"provider_bodies"`
+	CapturedPrompts *int `yaml:"captured_prompts"`
 }
 
 // Talk is what a talk in the document must say.
@@ -522,6 +548,23 @@ func checkView(root, session string, want *View) ([]string, error) {
 	}
 	if doc.Summary.Changes != len(doc.WorkspaceChanges) {
 		bad("view.summary.changes is %d, the document lists %d", doc.Summary.Changes, len(doc.WorkspaceChanges))
+	}
+	if want.ProviderBodies != nil && doc.Summary.ProviderBodies != *want.ProviderBodies {
+		bad("view.provider_bodies is %d, want %d", doc.Summary.ProviderBodies, *want.ProviderBodies)
+	}
+	if want.ProviderFiles != nil {
+		n := 0
+		for _, f := range doc.Files {
+			if f.Kind == string(sessiondata.KindProviderBody) {
+				n++
+			}
+		}
+		if n != *want.ProviderFiles {
+			bad("view.provider_files is %d, want %d", n, *want.ProviderFiles)
+		}
+	}
+	if want.CapturedPrompts != nil && doc.Summary.CapturedPrompts != *want.CapturedPrompts {
+		bad("view.captured_prompts is %d, want %d", doc.Summary.CapturedPrompts, *want.CapturedPrompts)
 	}
 	if want.ChangedFiles != nil || want.CapturedBy != nil || want.ChangesJoined != nil {
 		files, joined := 0, 0
@@ -948,7 +991,8 @@ func RecordsWellFormed(root, session string) ([]string, error) {
 				out = append(out, fmt.Sprintf("records_well_formed: %s: header field %q is empty", filepath.Base(lf.Path), name))
 			}
 		}
-		if hdr.Session != session || (hdr.Stream == "" && hdr.Batch == "") {
+		// A provider body belongs to the session and no stream or run in it.
+		if hdr.Session != session || (hdr.Stream == "" && hdr.Batch == "" && hdr.Kind != sessiondata.KindProviderBody) {
 			out = append(out, fmt.Sprintf("records_well_formed: %s: header identity %s stream=%q batch=%q", filepath.Base(lf.Path), hdr.Session, hdr.Stream, hdr.Batch))
 		}
 		for i, line := range lines[1 : len(lines)-1] {
@@ -1117,6 +1161,50 @@ func ViewCoversTheSession(root, session string) ([]string, error) {
 	if doc.Summary.Changes != len(doc.WorkspaceChanges) {
 		bad("summary.changes is %d, the document lists %d", doc.Summary.Changes, len(doc.WorkspaceChanges))
 	}
+	// Only a call lists provider bodies, its request before its response,
+	// each naming a landed provider_body record of that role, and the
+	// summary counts what the calls list.
+	bodies := providerRecords(root, session)
+	prompts := 0
+	var checkBodies func(n *sessionview.Node)
+	checkBodies = func(n *sessionview.Node) {
+		if len(n.ProviderBodies) > 0 && n.Kind != model.KindLLMCall {
+			bad("%s (%s) lists provider bodies and is no call", n.ID, n.Kind)
+		}
+		// A synthetic call was never sent to a provider: it has no body.
+		for _, c := range n.Children {
+			if c.Kind == model.KindMessageSynthetic && len(n.ProviderBodies) > 0 {
+				bad("%s is a synthetic call and lists provider bodies", n.ID)
+			}
+		}
+		for i, pb := range n.ProviderBodies {
+			if pb.Role == "request" {
+				prompts++
+			}
+			role, ok := bodies[[2]uint64{pb.Ref.Seq, pb.Ref.Row}]
+			switch {
+			case !ok:
+				bad("call %s lists a provider body at %d/%d that is no landed provider body", n.ID, pb.Ref.Seq, pb.Ref.Row)
+			case role != pb.Role:
+				bad("call %s lists a %s at %d/%d, and the record there is a %s", n.ID, pb.Role, pb.Ref.Seq, pb.Ref.Row, role)
+			case i > 0 && pb.Role == "request":
+				bad("call %s lists its request after another body", n.ID)
+			}
+		}
+		for i := range n.Children {
+			checkBodies(&n.Children[i])
+		}
+	}
+	for i := range doc.Talks {
+		checkBodies(&doc.Talks[i])
+	}
+	for i := range doc.Loose {
+		checkBodies(&doc.Loose[i])
+	}
+	if doc.Summary.CapturedPrompts != prompts || doc.Summary.ProviderBodies != len(bodies) {
+		bad("summary.provider_bodies is %d and captured_prompts %d, the root holds %d bodies and %d calls list a request",
+			doc.Summary.ProviderBodies, doc.Summary.CapturedPrompts, len(bodies), prompts)
+	}
 	if len(doc.Talks) != len(v.NodesByKind(model.KindTalk)) || doc.Summary.Talks != len(doc.Talks) {
 		bad("%d talks in the document, %d in the fold, summary says %d", len(doc.Talks), len(v.NodesByKind(model.KindTalk)), doc.Summary.Talks)
 	}
@@ -1153,4 +1241,240 @@ func firstN(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// providerRecords is the role of every landed provider body of a session, by
+// file sequence and row, a body landed twice counted once.
+func providerRecords(root, session string) map[[2]uint64]string {
+	out := map[[2]uint64]string{}
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return out
+	}
+	seen := map[string]bool{}
+	for _, lf := range files {
+		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindProviderBody)+"-") {
+			continue
+		}
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			continue
+		}
+		_, recs, err := sessiondata.All(f)
+		f.Close()
+		if err != nil {
+			continue
+		}
+		for row, rec := range recs {
+			m, err := providerbody.ManifestOf(rec)
+			if err != nil || seen[rec.ID] {
+				continue
+			}
+			seen[rec.ID] = true
+			out[[2]uint64{lf.Seq, uint64(row + 1)}] = m.Role
+		}
+	}
+	return out
+}
+
+// ProviderBodiesRebuild reads every provider body a call lists the way a
+// reader that loads bodies on demand reads it: the session's provider_body
+// files with a sequence up to the one the body's ref names, in order, and
+// nothing else. Each body must rebuild to the digest and size its manifest
+// states. It also says how many provider files the session has, so a check
+// can tell that bodies referred across files.
+func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
+	c, err := view.New(storage.NewZone(root), nil).Load(session)
+	if err != nil {
+		return nil, 0, err
+	}
+	doc, err := c.Build()
+	if err != nil {
+		return nil, 0, err
+	}
+	var out []string
+	bad := func(format string, a ...any) {
+		out = append(out, "provider_bodies_rebuild: "+fmt.Sprintf(format, a...))
+	}
+	var refs []sessionview.ProviderBody
+	var walk func(n *sessionview.Node)
+	walk = func(n *sessionview.Node) {
+		refs = append(refs, n.ProviderBodies...)
+		for i := range n.Children {
+			walk(&n.Children[i])
+		}
+	}
+	for i := range doc.Talks {
+		walk(&doc.Talks[i])
+	}
+	for i := range doc.Loose {
+		walk(&doc.Loose[i])
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].Ref.Seq != refs[j].Ref.Seq {
+			return refs[i].Ref.Seq < refs[j].Ref.Seq
+		}
+		return refs[i].Ref.Row < refs[j].Ref.Row
+	})
+
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return nil, 0, err
+	}
+	type landed struct {
+		seq  uint64
+		recs []*sessiondata.Record
+	}
+	var provider []landed
+	for _, lf := range files {
+		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindProviderBody)+"-") {
+			continue
+		}
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			return nil, 0, err
+		}
+		_, recs, err := sessiondata.All(f)
+		f.Close()
+		if err != nil {
+			return nil, 0, err
+		}
+		provider = append(provider, landed{lf.Seq, recs})
+	}
+
+	// One session, fed file by file as the refs reach further, never past
+	// the file a ref names.
+	held := providerbody.NewSession()
+	next := 0
+	for _, r := range refs {
+		for next < len(provider) && provider[next].seq <= r.Ref.Seq {
+			for _, rec := range provider[next].recs {
+				if err := held.Add(rec); err != nil && !errors.Is(err, providerbody.ErrRepeat) {
+					bad("%s in file %d does not hold together: %v", rec.ID, provider[next].seq, err)
+				}
+			}
+			next++
+		}
+		var rec *sessiondata.Record
+		for _, p := range provider {
+			if p.seq == r.Ref.Seq && r.Ref.Row >= 1 && int(r.Ref.Row) <= len(p.recs) {
+				rec = p.recs[r.Ref.Row-1]
+			}
+		}
+		if rec == nil {
+			bad("a call lists %d/%d, which is no landed provider body", r.Ref.Seq, r.Ref.Row)
+			continue
+		}
+		m, err := providerbody.ManifestOf(rec)
+		if err != nil {
+			bad("%v", err)
+			continue
+		}
+		body, err := held.Body(rec.ID)
+		switch {
+		case err != nil:
+			bad("%s does not rebuild from the files up to %d: %v", rec.ID, r.Ref.Seq, err)
+		case len(body) != m.Bytes || providerbody.Digest(body) != m.SHA256:
+			bad("%s rebuilds to other bytes than its manifest states", rec.ID)
+		case m.Role != r.Role:
+			bad("%s is a %s, listed as a %s", rec.ID, m.Role, r.Role)
+		}
+	}
+	return out, len(provider), nil
+}
+
+// SameIdentity compares two folds of one scenario node by node, parent by
+// parent and relation by relation, not only by count. A node id built from a
+// landed position names the file's sequence, which files of another kind
+// landing between them shift, so a node with a reference is named by the
+// record it stands on: its kind, its stream, its file's source and the
+// record's line in that source, and the part.
+func SameIdentity(rootA, sessionA, rootB, sessionB string) ([]string, error) {
+	a, err := foldIdentity(rootA, sessionA)
+	if err != nil {
+		return nil, err
+	}
+	b, err := foldIdentity(rootB, sessionB)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, side := range []struct {
+		label    string
+		has, not map[string]bool
+	}{{"only in the first", a, b}, {"only in the second", b, a}} {
+		var missing []string
+		for k := range side.has {
+			if !side.not[k] {
+				missing = append(missing, k)
+			}
+		}
+		sort.Strings(missing)
+		for i, k := range missing {
+			if i == 5 {
+				out = append(out, fmt.Sprintf("%s: … and %d more", side.label, len(missing)-5))
+				break
+			}
+			out = append(out, side.label+": "+k)
+		}
+	}
+	return out, nil
+}
+
+// positionID matches an id sessionflow.RefID builds: a kind, a landed
+// sequence and row, and a part.
+var positionID = regexp.MustCompile(`^[^/]+/[0-9]+/[0-9]+(:[0-9]+)?$`)
+
+func foldIdentity(root, session string) (map[string]bool, error) {
+	v, err := parse.View(root, session)
+	if err != nil {
+		return nil, err
+	}
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return nil, err
+	}
+	type at struct{ seq, row uint64 }
+	source := map[at]string{}
+	for _, lf := range files {
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			return nil, err
+		}
+		hdr, recs, err := sessiondata.All(f)
+		f.Close()
+		if err != nil {
+			return nil, err
+		}
+		for row, rec := range recs {
+			source[at{lf.Seq, uint64(row + 1)}] = fmt.Sprintf("%s#%d", hdr.Src, rec.Ord)
+		}
+	}
+	name := map[string]string{}
+	nameOf := func(id string) string {
+		if s, ok := name[id]; ok {
+			return s
+		}
+		n := v.Nodes[id]
+		// Only an id built from a landed position is renamed; any other id
+		// is compared as it is, since nothing but the evidence moves it.
+		if n == nil || n.Ref == nil || !positionID.MatchString(id) {
+			name[id] = id
+			return id
+		}
+		s := fmt.Sprintf("%s|%s|%s", n.Kind, n.Stream, source[at{n.Ref.Seq, n.Ref.Row}])
+		if n.Ref.Block != nil {
+			s += fmt.Sprintf(":%d", *n.Ref.Block)
+		}
+		name[id] = s
+		return s
+	}
+	out := map[string]bool{}
+	for id, n := range v.Nodes {
+		out["node "+nameOf(id)+" in "+nameOf(n.Parent)] = true
+	}
+	for _, r := range v.Relations {
+		out["relation "+r.Type+" "+nameOf(r.From)+" -> "+nameOf(r.To)] = true
+	}
+	return out, nil
 }

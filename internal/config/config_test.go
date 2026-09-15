@@ -58,8 +58,8 @@ func TestRepoConfigSpellsOutEveryValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Adapters) != 3 {
-		t.Fatalf("adapters: got %d, want the local adapter, the receiver and the changes adapter", len(got.Adapters))
+	if len(got.Adapters) != 4 {
+		t.Fatalf("adapters: got %d, want the local adapter, the receiver, the changes adapter and the provider adapter", len(got.Adapters))
 	}
 	for _, a := range got.Adapters {
 		if a.Name == AdapterClaudeCodeOTLP {
