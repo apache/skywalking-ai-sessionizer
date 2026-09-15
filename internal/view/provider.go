@@ -147,7 +147,13 @@ func (c *Conversation) providerBodies(landed []storage.LandedFile) (int, map[str
 		if calls[i].at.Seq != calls[j].at.Seq {
 			return calls[i].at.Seq < calls[j].at.Seq
 		}
-		return calls[i].at.Row < calls[j].at.Row
+		if calls[i].at.Row != calls[j].at.Row {
+			return calls[i].at.Row < calls[j].at.Row
+		}
+		// The nodes come from a map. Two calls on one record would otherwise
+		// take their order from the map, and a request its call from that
+		// order, so the same files could give two documents.
+		return calls[i].id < calls[j].id
 	})
 
 	join := func(i int, step, quality string) {
