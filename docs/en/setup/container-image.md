@@ -92,7 +92,8 @@ docker run --rm -p 8787:8787 \
   ghcr.io/apache/skywalking-ai-sessionizer:latest
 ```
 
-The default command is `server`, so this lands, parses and serves on the collector's interval. To
+The default command is `server`, so this lands, parses and serves on the collector's interval: once
+when it starts, then every 10 minutes unless the configuration sets another. To
 collect without serving a page, put `collect` after the image name.
 
 The container user is not the host user, so on Linux the storage root must be writable by it.

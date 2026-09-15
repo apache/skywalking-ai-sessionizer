@@ -53,7 +53,7 @@ Default storage root is `./data`, relative to the working directory.
 
 ```sh
 ./bin/asz collect -once          # single pass; the backfill path
-./bin/asz collect                # watch mode, 5s interval
+./bin/asz collect                # watch mode: a pass now, then every 10 minutes
 ```
 
 To land somewhere else, write a config and pass it:
@@ -74,7 +74,7 @@ adapters:
 ```
 
 Without `-config`, a command run from the repository root reads the `asz.yaml` there. Its
-values are the built-in defaults: storage root `./data`, watch mode, a 5 second interval. Pass a
+values are the built-in defaults: storage root `./data`, watch mode, a 10 minute interval. Pass a
 file like the one above when you want a single backfill pass into another directory.
 
 ## 5. Read the result line

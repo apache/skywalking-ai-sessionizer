@@ -69,8 +69,13 @@ adapters:
       # over history that already exists. asz server runs the same pipeline
       # beside the page, and shows the last and the next refresh on its
       # list page.
+      #
+      # Both commands make a pass when they start, then one every interval.
+      # A pass lands what moved as new files, so a short interval lands many
+      # small files, and each file is one log record when it is sent. Keep
+      # a few seconds for tests; scenario feeds write their own.
       mode: watch
-      interval: 5s
+      interval: 10m
 
       # The largest landed file the collector writes, in bytes. A large
       # catch-up is split into several files rather than one enormous one,
@@ -115,7 +120,7 @@ adapters:
 
     collector:
       mode: watch
-      interval: 5s
+      interval: 10m
       max_delta_bytes: 2097152
 
 parse:
