@@ -30,9 +30,11 @@ import (
 var magic = [4]byte{'A', 'S', 'I', 'X'}
 
 const (
-	// seq row stream batch kind trigger flags ts  record parent call run continues tool child started_by label  first count
-	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*9 + 4 + 4 // 72
-	blockWidth = 4 + 2 + 1 + 4 + 4 + 4 + 4                   // 23
+	// seq row stream batch kind trigger flags ts  record parent call run continues tool child started_by label  ord first count
+	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*9 + 8 + 4 + 4 // 80
+	blockWidth = 4 + 2 + 1 + 4 + 4 + 4 + 4                       // 23
+	// entry role request previous
+	bodyWidth = 4 + 1 + 4 + 4 // 13
 )
 
 var le = binary.LittleEndian
@@ -100,6 +102,17 @@ func (ix *Index) Write(dir string) error {
 	for i := range ix.Blocks {
 		encodeBlock(bbuf, &ix.Blocks[i])
 		if _, err := w.Write(bbuf); err != nil {
+			return err
+		}
+	}
+
+	if err := writeU32(w, uint32(len(ix.Bodies))); err != nil {
+		return err
+	}
+	ybuf := make([]byte, bodyWidth)
+	for i := range ix.Bodies {
+		encodeBody(ybuf, &ix.Bodies[i])
+		if _, err := w.Write(ybuf); err != nil {
 			return err
 		}
 	}
@@ -186,9 +199,21 @@ func Load(dir, session string) (ix *Index, ok bool, err error) {
 		decodeBlock(b, &blocks[i])
 	}
 
+	if b, err = read(4); err != nil {
+		return nil, false, err
+	}
+	nBody := int(le.Uint32(b))
+	bodies := make([]Body, nBody)
+	for i := 0; i < nBody; i++ {
+		if b, err = read(bodyWidth); err != nil {
+			return nil, false, err
+		}
+		decodeBody(b, &bodies[i])
+	}
+
 	return &Index{
 		Session: session, Strings: loadInterner(strs),
-		Entries: entries, Blocks: blocks,
+		Entries: entries, Blocks: blocks, Bodies: bodies,
 	}, true, nil
 }
 
@@ -212,8 +237,23 @@ func encodeEntry(b []byte, e *Entry) {
 	le.PutUint32(b[52:], e.Child)
 	le.PutUint32(b[56:], e.StartedBy)
 	le.PutUint32(b[60:], e.Label)
-	le.PutUint32(b[64:], e.BlockFirst)
-	le.PutUint32(b[68:], e.BlockCount)
+	le.PutUint64(b[64:], e.Ord)
+	le.PutUint32(b[72:], e.BlockFirst)
+	le.PutUint32(b[76:], e.BlockCount)
+}
+
+func encodeBody(b []byte, x *Body) {
+	le.PutUint32(b[0:], x.Entry)
+	b[4] = byte(x.Role)
+	le.PutUint32(b[5:], x.Request)
+	le.PutUint32(b[9:], x.Previous)
+}
+
+func decodeBody(b []byte, x *Body) {
+	x.Entry = le.Uint32(b[0:])
+	x.Role = BodyRole(b[4])
+	x.Request = le.Uint32(b[5:])
+	x.Previous = le.Uint32(b[9:])
 }
 
 func decodeEntry(b []byte, e *Entry) {
@@ -234,8 +274,9 @@ func decodeEntry(b []byte, e *Entry) {
 	e.Child = le.Uint32(b[52:])
 	e.StartedBy = le.Uint32(b[56:])
 	e.Label = le.Uint32(b[60:])
-	e.BlockFirst = le.Uint32(b[64:])
-	e.BlockCount = le.Uint32(b[68:])
+	e.Ord = le.Uint64(b[64:])
+	e.BlockFirst = le.Uint32(b[72:])
+	e.BlockCount = le.Uint32(b[76:])
 }
 
 func encodeBlock(b []byte, k *Block) {

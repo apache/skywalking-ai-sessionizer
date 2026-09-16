@@ -415,8 +415,8 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 			written += int64(len(ln.Bytes))
 			// The index is built from the CONVERTED record, so the source is
 			// parsed once and the index has no dialect in it.
-			e, blocks := index.FromRecord(p.ix, hdr, rec, uint32(seq), uint32(row+1))
-			p.ix.Append(e, blocks...)
+			e, blocks, body := index.FromRecord(p.ix, hdr, rec, uint32(seq), uint32(row+1))
+			p.ix.AppendRecord(e, blocks, body)
 		}
 		return rw.Close()
 	})
@@ -486,8 +486,8 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 		if err := rw.Write(rec); err != nil {
 			return err
 		}
-		e, blocks := index.FromRecord(p.ix, hdr, rec, uint32(seq), 1)
-		p.ix.Append(e, blocks...)
+		e, blocks, body := index.FromRecord(p.ix, hdr, rec, uint32(seq), 1)
+		p.ix.AppendRecord(e, blocks, body)
 		return rw.Close()
 	})
 	if err != nil {

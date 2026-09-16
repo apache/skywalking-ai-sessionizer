@@ -126,6 +126,36 @@ These are the prefixes asz writes:
 | `control.command` | `command/<seq>/<row>` |
 | `control.notice` | `notice/<seq>/<row>` |
 
+#### The bodies a call exchanged
+
+An `llm.call` node carries `provider_bodies` in its `attrs` when the session holds what the call
+sent to its model provider and what came back:
+
+```json
+"provider_bodies": [
+  {"role": "request",  "ref": {"seq": 4, "row": 3}},
+  {"role": "response", "ref": {"seq": 4, "row": 4}}
+]
+```
+
+The bodies themselves are never in a round. Each entry names the `provider_body` record it rebuilds
+from, and a reader loads that record and the session's `provider_body` files with that sequence or
+lower, which hold everything it refers to. See
+[Session Data, Provider bodies](session-data.md#provider-bodies).
+
+The join is made when the round is parsed, and it is made again from the evidence each round covers.
+A response joins by the message id it carries, which is the call's own. A request names no call,
+only the request before it and its prompt, so it joins to the call of its stream whose previous
+call's response carries that request id and whose prompt is the one it names, when exactly one
+request and exactly one call carry the pair. Nothing is joined by position or by time, and a call
+whose join is not exact carries nothing. A body that lands after the round covering its call joins
+in a later round, as a new revision of the call; evidence that makes a join ambiguous withdraws it
+the same way.
+
+The `session` node states `provider_bodies_landed`, how many bodies the session holds as of that
+round, joined or not, so a reader can say what was captured without opening a landed file. It is a
+count, named apart from the list a call carries so that one name never means two things.
+
 A reference into the landed data is a landed sequence, a row, and optionally a content block. That
 is the whole address. A reader takes both the content and the time from the `.sd` record it names.
 The record's `time` field is when the runtime says it happened. The page that `asz view` serves

@@ -215,8 +215,8 @@ func TestAResponseNoLaterRequestNamesIsClaimedByItsTranscript(t *testing.T) {
 	// The local adapter lands the transcript and indexes the call.
 	ix := index.New(sessionA)
 	hdr := &sessiondata.Header{Kind: sessiondata.KindTranscript, Session: sessionA, Stream: "main"}
-	e, blocks := index.FromRecord(ix, hdr, &sessiondata.Record{ID: "u1", Call: "msg_last", From: sessiondata.FromAgent}, 1, 1)
-	ix.Append(e, blocks...)
+	e, blocks, body := index.FromRecord(ix, hdr, &sessiondata.Record{ID: "u1", Call: "msg_last", From: sessiondata.FromAgent}, 1, 1)
+	ix.AppendRecord(e, blocks, body)
 	if err := ix.Write(f.zone.IndexDir(sessionA)); err != nil {
 		t.Fatal(err)
 	}

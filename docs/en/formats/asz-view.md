@@ -187,6 +187,13 @@ with a sequence up to the one `ref` names, in order, keeps them, and rebuilds th
 A later body needs only the files not loaded yet. The document stays the size of the structure,
 however large the bodies.
 
+The join is not made when the document is rendered. It is made when a round is parsed, and the round
+carries it, so every reader of a conversation — asz's own page, and a server that mirrors the format —
+shows the same bodies on the same calls without opening one. See
+[Session Flow](session-flow.md#the-bodies-a-call-exchanged). A conversation whose rounds were parsed
+before that carries no bodies on its calls; parsing its chain again from the landed files brings
+them in.
+
 A response joins to the call whose message id it carries. A request names no call, only its prompt
 and the request id of the call before it in its chain, so it joins to the call of a stream whose
 previous call's response carries that request id and whose prompt is the one the request names. The
@@ -198,8 +205,8 @@ responses still join. A body that joins to no call, such as
 the request that names the session, a compaction request, or a retried request, is listed on no
 step; its file is still under `files`. Nothing is joined by position or by time.
 
-`summary.provider_bodies` counts the session's landed bodies, and `summary.captured_prompts` the calls
-that list a request.
+`summary.provider_bodies` counts the session's landed bodies as of the folded chain, joined or not, and
+`summary.captured_prompts` the calls that list a request.
 
 ## Rendering the whole conversation
 

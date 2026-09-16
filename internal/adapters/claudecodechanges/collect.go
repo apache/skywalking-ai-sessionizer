@@ -253,8 +253,8 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 				return err
 			}
 			written += int64(len(ln.Bytes))
-			e, blocks := index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1))
-			ix.Append(e, blocks...)
+			e, blocks, body := index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1))
+			ix.AppendRecord(e, blocks, body)
 		}
 		return rw.Close()
 	})

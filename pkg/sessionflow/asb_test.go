@@ -572,3 +572,72 @@ func TestFoldCarriesTheHeadRoundsCounts(t *testing.T) {
 		t.Fatalf("bash_runs is %d; a count the head round does not carry must stay unknown, not become zero", *v.BashRuns)
 	}
 }
+
+// A provider body a call names is a reference like any other: it must lie in the
+// round's own range, and an attribute that claims to carry bodies but does not
+// read is refused rather than read as none.
+func TestProviderBodyReferencesAreChecked(t *testing.T) {
+	attrs := func(raw string) json.RawMessage { return json.RawMessage(raw) }
+	for _, tc := range []struct {
+		name  string
+		attrs json.RawMessage
+		want  string
+	}{
+		{
+			"past the watermark",
+			attrs(`{"provider_bodies":[{"role":"request","ref":{"seq":99,"row":1}}]}`),
+			"past the round's declared",
+		},
+		{
+			"not the shape",
+			attrs(`{"provider_bodies":[{"role":"request","ref":{"seq":1,"row":1}},{"role":7}]}`),
+			"not a list of provider bodies",
+		},
+		{
+			"a role nothing means",
+			attrs(`{"provider_bodies":[{"role":"prompt","ref":{"seq":1,"row":1}}]}`),
+			"has the role",
+		},
+		{
+			// sequences and rows are counted from one, so a zero in either names
+			// no landed record, and a round's own range cannot cover sequence 0
+			"no sequence",
+			attrs(`{"provider_bodies":[{"role":"request","ref":{"seq":0,"row":1}}]}`),
+			"no position",
+		},
+		{
+			"no row",
+			attrs(`{"provider_bodies":[{"role":"request","ref":{"seq":1}}]}`),
+			"no position",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := tc.attrs
+			data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+				_ = w.Node(sessionflow.Node{
+					Entity: sessionflow.Entity{ID: "call/1"}, Kind: "llm.call", Attrs: a,
+				})
+			})
+			if _, err := sessionflow.Read(bytes.NewReader(data)); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("accepted %s, err=%v", tc.attrs, err)
+			}
+		})
+	}
+
+	// One that is in range reads back as the call carries it.
+	ok := json.RawMessage(`{"provider_bodies":[{"role":"request","ref":{"seq":1,"row":2}},` +
+		`{"role":"response","ref":{"seq":1,"row":3}}]}`)
+	data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "call/1"}, Kind: "llm.call", Attrs: ok})
+	})
+	round, err := sessionflow.Read(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodies, err := sessionflow.ProviderBodiesOf(round.Nodes[0].Attrs)
+	if err != nil || len(bodies) != 2 ||
+		bodies[0].Role != sessionflow.RoleRequest || bodies[1].Ref.Row != 3 {
+		t.Fatalf("read back %+v, err=%v", bodies, err)
+	}
+}

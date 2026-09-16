@@ -181,6 +181,60 @@ type Node struct {
 	Attrs  json.RawMessage `json:"attrs,omitempty"`
 }
 
+// The roles a provider body can have. A body is one side of one provider call.
+const (
+	RoleRequest  = "request"
+	RoleResponse = "response"
+)
+
+// ProviderBody names one landed provider body joined to a call: whether it is
+// the request or the response, and the landed record it rebuilds from.
+//
+// A call node carries the bodies joined to it under the `provider_bodies`
+// attribute. The body is never in the round: a reader loads the record this
+// names, and the session's provider_body files with that sequence or lower,
+// which hold everything it refers to.
+type ProviderBody struct {
+	Role string `json:"role"`
+	Ref  Ref    `json:"ref"`
+}
+
+// ProviderBodiesAttr is the attribute a call node carries them under.
+const ProviderBodiesAttr = "provider_bodies"
+
+// ProviderBodiesOf reads the bodies a node carries. A node that carries none
+// returns none and no error; a node whose attribute is there but is not this
+// shape is an error, so a reader can refuse it rather than read it as none.
+func ProviderBodiesOf(attrs json.RawMessage) ([]ProviderBody, error) {
+	if len(attrs) == 0 {
+		return nil, nil
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(attrs, &all); err != nil {
+		return nil, nil // not an object: no attribute of ours is in it
+	}
+	raw, has := all[ProviderBodiesAttr]
+	if !has {
+		return nil, nil
+	}
+	var bodies []ProviderBody
+	if err := json.Unmarshal(raw, &bodies); err != nil {
+		return nil, fmt.Errorf("sessionflow: %s is not a list of provider bodies: %w", ProviderBodiesAttr, err)
+	}
+	for _, y := range bodies {
+		if y.Role != RoleRequest && y.Role != RoleResponse {
+			return nil, fmt.Errorf("sessionflow: a provider body has the role %q", y.Role)
+		}
+		// Both halves of the position, not just one: sequences and rows are
+		// counted from one, so a zero in either names no landed record. The
+		// general check refuses only a reference that is zero in both.
+		if y.Ref.Seq == 0 || y.Ref.Row == 0 {
+			return nil, fmt.Errorf("sessionflow: a provider body is at seq %d row %d, which is no position", y.Ref.Seq, y.Ref.Row)
+		}
+	}
+	return bodies, nil
+}
+
 // Relation is a typed edge that is not containment.
 type Relation struct {
 	Entity

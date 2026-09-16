@@ -92,7 +92,10 @@ type Stats struct {
 	Runs    int
 	Steps   int
 
-	ProviderCalls     int
+	ProviderCalls int
+	// ProviderBodies counts the bodies the session holds as of this round, a
+	// body landed twice counted once, joined to a call or not.
+	ProviderBodies    int
 	CallFragments     int
 	CallsWithoutEnd   int // never received a terminal fragment: usage is unavailable
 	SyntheticMessages int
@@ -154,6 +157,13 @@ type builder struct {
 	// nodes they connect do not exist until then.
 	spawnEdges []spawnEdge
 
+	// bodiesOfCall is the provider bodies joined to each call node, which the
+	// call carries into the round.
+	bodiesOfCall map[string][]sessionflow.ProviderBody
+
+	// byPosition finds an entry by its landed position, built when first asked.
+	byPosition map[[2]uint32]int32
+
 	// container maps a landed record, by (seq, row), to the node that holds it.
 	container map[[2]uint32]string
 
@@ -205,7 +215,8 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 	b.stage6Epochs()    // context resets cut
 	b.stage7Talks()     // talks and runs built, steps placed
 	b.stage8Segments()  // commit windows proposed
-	b.emitSteps()       // leaves written, now that their containers are known
+	b.joinProviderBodies()
+	b.emitSteps() // leaves written, now that their containers are known
 
 	return b.result(), nil
 }
@@ -236,7 +247,13 @@ func (b *builder) result() *Result {
 	// would silently re-read them next round.
 	r.ThroughSeq = b.opt.ThroughSeq
 	if r.ThroughSeq == 0 {
-		for _, i := range b.canonical {
+		// Every landed record this assembly could have read, not only the entries
+		// it made steps of. A provider body is no step of any stream and a
+		// duplicate is no step either, yet a call names the one and the gap check
+		// reads the other, so a watermark that left them out would describe less
+		// than the assembly used - and assembling again under that watermark
+		// would not give the same answer.
+		for i := range b.ix.Entries {
 			if s := uint64(b.ix.Entries[i].Seq); s > r.ThroughSeq {
 				r.ThroughSeq = s
 			}

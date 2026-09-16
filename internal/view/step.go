@@ -116,11 +116,38 @@ func (c *Conversation) records(refs []*sessionflow.Ref) map[[2]uint64]*sessionda
 	return out
 }
 
+// withoutProviderBodies drops the attribute a call carries its bodies in.
+//
+// The document gives them a field of their own, provider_bodies on the step, so
+// leaving them in the attributes as well would say the same thing twice, in two
+// shapes. Every other attribute travels as the round wrote it.
+func withoutProviderBodies(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var a map[string]json.RawMessage
+	if json.Unmarshal(raw, &a) != nil {
+		return raw
+	}
+	if _, has := a[sessionflow.ProviderBodiesAttr]; !has {
+		return raw
+	}
+	delete(a, sessionflow.ProviderBodiesAttr)
+	if len(a) == 0 {
+		return nil
+	}
+	out, err := json.Marshal(a)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
 // step renders one node and everything under it.
 func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*sessiondata.Record) step {
 	out := step{
 		ID: n.ID, Kind: n.Kind, Parent: n.Parent, Stream: n.Stream,
-		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: n.Attrs,
+		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: withoutProviderBodies(n.Attrs),
 	}
 	// Both directions together, by relation id and then direction, so the
 	// same fold renders the same edges in the same order every time; a

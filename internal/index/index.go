@@ -31,9 +31,9 @@
 // landed files. Nothing downstream may treat it as authoritative.
 package index
 
-// Schema is the on-disk index version. Bump it when Entry or Block changes;
-// a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 12
+// Schema is the on-disk index version. Bump it when Entry, Block or Body
+// changes; a mismatch discards the index and rebuilds rather than migrating.
+const Schema = 13
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -194,9 +194,47 @@ type Entry struct {
 	// evidence in the data; everything else has to be derived.
 	Label uint32
 
+	// Ord is the record's own position in its stream, as its source numbered
+	// the line. It is the one source position the index keeps, and it is kept
+	// because a join needs to know whether a stream's records are all there: a
+	// missing line leaves no other trace, since landed rows are dense. It keeps
+	// the source's own width: a number narrowed to fit would make a partial
+	// stream look whole.
+	Ord uint64
+
 	// Blocks indexes into Index.Blocks: [BlockFirst, BlockFirst+BlockCount).
 	BlockFirst uint32
 	BlockCount uint32
+}
+
+// BodyRole is which side of a provider call a body is.
+type BodyRole uint8
+
+const (
+	BodyRoleUnknown BodyRole = iota
+	BodyRoleRequest
+	BodyRoleResponse
+)
+
+// Body is what a provider-body record's manifest carries that joins it to a
+// call, for the records of kind KindProviderBody.
+//
+// It is a table of its own, as Blocks is, because only a small share of records
+// are bodies and every record would otherwise pay for these fields. The values
+// are in the manifest, which is the record's last part, so they are read while
+// landing: the assembler joins a body to its call from the index alone and
+// never opens a landed file.
+type Body struct {
+	Entry uint32 // index into Index.Entries
+	Role  BodyRole
+	// Request is the provider's own id for the request a RESPONSE answers. A
+	// request body has none: the runtime names the request file before the
+	// provider has answered, so the id does not exist yet.
+	Request uint32
+	// Previous is the request id of the call before this one, which a REQUEST
+	// carries. It is the only link a request has to the conversation it
+	// continues, and it names a response's Request.
+	Previous uint32
 }
 
 // BlockKind classifies a joinable content block.
