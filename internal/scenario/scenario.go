@@ -28,6 +28,7 @@ package scenario
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -57,13 +58,35 @@ type Scenario struct {
 	// call, as Claude Code does when OTEL_LOG_RAW_API_BODIES names a
 	// directory. A claude-code build writes them as files; an sd build lands
 	// them.
-	ProviderBodies bool   `yaml:"provider_bodies"`
-	Steps          []Step `yaml:"steps"`
+	ProviderBodies bool `yaml:"provider_bodies"`
+	// SystemPrompt is the system prompt the main stream sends, written as the
+	// runtime sends it. Empty leaves the stand-in, which is filler sized to
+	// exercise cutting rather than something to read.
+	SystemPrompt string `yaml:"system_prompt"`
+	// Tools are the tools the main stream advertises, in the order it sends
+	// them. Empty leaves the stand-in. See ToolDef for why they are written
+	// out rather than derived from the calls.
+	Tools []ToolDef `yaml:"tools"`
+	Steps []Step    `yaml:"steps"`
 
 	// omitBodies writes no provider bodies while keeping everything else a
 	// scenario with provider bodies has, its ids included, so the two builds
 	// can be compared.
 	omitBodies bool
+}
+
+// ToolDef is one tool a request advertises: the name the model calls, what
+// the tool is told to be, and the shape of its input.
+//
+// A scenario writes its own, and shares none with another scenario. A request
+// body is read as a document, and a borrowed description describes the wrong
+// agent: the same name means a different thing to a release manager and to an
+// inbox assistant. Deriving one from the calls cannot work either, because a
+// description is prose about what the tool is for, which no call carries.
+type ToolDef struct {
+	Name        string         `yaml:"name"`
+	Description string         `yaml:"description"`
+	InputSchema map[string]any `yaml:"input_schema"`
 }
 
 // Step is one thing that happened. Exactly one of the kind fields is set.
@@ -208,9 +231,14 @@ type Agent struct {
 	Name   string `yaml:"name"`
 	Prompt string `yaml:"prompt"`
 	// After is the delta from the request to the child's first record.
-	After  time.Duration `yaml:"after"`
-	Steps  []Step        `yaml:"steps"`
-	Notify bool          `yaml:"notify"`
+	After time.Duration `yaml:"after"`
+	// SystemPrompt and Tools are what this child's own calls send. A child
+	// is given a narrower set than its parent, which is the point of
+	// starting one, so it writes its own rather than inheriting.
+	SystemPrompt string    `yaml:"system_prompt"`
+	Tools        []ToolDef `yaml:"tools"`
+	Steps        []Step    `yaml:"steps"`
+	Notify       bool      `yaml:"notify"`
 	// Lost says the child's file never reached the collector, nor its meta
 	// file. The parent's records about the child stay.
 	Lost bool `yaml:"lost"`
@@ -221,7 +249,10 @@ type Agent struct {
 type Skill struct {
 	Name  string `yaml:"name"`
 	Agent string `yaml:"agent"`
-	Steps []Step `yaml:"steps"`
+	// SystemPrompt and Tools are what this fork's own calls send.
+	SystemPrompt string    `yaml:"system_prompt"`
+	Tools        []ToolDef `yaml:"tools"`
+	Steps        []Step    `yaml:"steps"`
 	// Lost says the child's file never reached the collector.
 	Lost bool `yaml:"lost"`
 }
@@ -239,7 +270,10 @@ type Workflow struct {
 type Child struct {
 	Name   string `yaml:"name"`
 	Prompt string `yaml:"prompt"`
-	Steps  []Step `yaml:"steps"`
+	// SystemPrompt and Tools are what this child's own calls send.
+	SystemPrompt string    `yaml:"system_prompt"`
+	Tools        []ToolDef `yaml:"tools"`
+	Steps        []Step    `yaml:"steps"`
 	// Lost says the child's file never reached the collector. The run's
 	// journal still names the child.
 	Lost bool `yaml:"lost"`
@@ -284,11 +318,106 @@ func (sc *Scenario) Validate() error {
 	if sc.Interval < 0 {
 		return errors.New("interval must not be negative")
 	}
+	if err := validateTools(sc.Tools, "tools"); err != nil {
+		return err
+	}
+	if err := bothOrNeither(sc.SystemPrompt, sc.Tools, "the scenario"); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
-	return validateSteps(sc.Steps, "steps", seen, true)
+	return validateSteps(sc.Steps, "steps", seen, true, advertised(sc.Tools))
 }
 
-func validateSteps(steps []Step, where string, seen map[string]bool, main bool) error {
+// validateTools checks one advertised tool list. A name is required, and no
+// name is advertised twice: a provider is sent one definition per name, and a
+// repeat would quietly shadow the other.
+//
+// A description is not required. A runtime may declare a tool without one, and
+// a scenario has to be able to write what a runtime sends.
+func validateTools(tools []ToolDef, where string) error {
+	seen := map[string]bool{}
+	for i, t := range tools {
+		at := fmt.Sprintf("%s[%d]", where, i)
+		if t.Name == "" {
+			return fmt.Errorf("%s: a tool needs a name", at)
+		}
+		if seen[t.Name] {
+			return fmt.Errorf("%s: %s is advertised twice", at, t.Name)
+		}
+		seen[t.Name] = true
+		if err := writableAsJSON(t.InputSchema); err != nil {
+			return fmt.Errorf("%s: %s: input_schema %w", at, t.Name, err)
+		}
+	}
+	return nil
+}
+
+// bothOrNeither refuses a stream that writes one of its system prompt and its
+// tools without the other.
+//
+// Each falls back on its own, so half a declaration leaves the other half as
+// the stand-in: an authored calendar prompt beside the stand-in's Read and
+// Bash, which is the very thing writing them is meant to stop. Writing neither
+// is fine and keeps the stand-in whole.
+func bothOrNeither(system string, tools []ToolDef, who string) error {
+	if system != "" && tools == nil {
+		return fmt.Errorf("%s writes a system_prompt but no tools; write both or neither", who)
+	}
+	if system == "" && tools != nil {
+		return fmt.Errorf("%s writes tools but no system_prompt; write both or neither", who)
+	}
+	return nil
+}
+
+// writableAsJSON reports whether a value a scenario supplied can be written
+// into a body.
+//
+// A body is written with encoding/json, which refuses an infinity and a NaN --
+// both of which YAML writes as plain scalars, `.inf` and `.nan`. The writer
+// cannot report that failure, so such a value would leave an empty body and
+// surface much later as a digest that does not match. Refusing it here names
+// the tool and the file instead.
+func writableAsJSON(v any) error {
+	if v == nil {
+		return nil
+	}
+	if _, err := json.Marshal(v); err != nil {
+		return fmt.Errorf("cannot be written as JSON: %w", err)
+	}
+	return nil
+}
+
+// advertised is the set of tool names a stream sends, or nil when it writes
+// none. A stream that writes none is not checked against its calls.
+func advertised(tools []ToolDef) map[string]bool {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, t := range tools {
+		out[t.Name] = true
+	}
+	return out
+}
+
+// calls reports the tool a step invokes, as the writers name it. Starting a
+// child is a tool call like any other: the response carries a tool_use block
+// named Agent, Skill or Workflow.
+func calls(c *Call) string {
+	switch {
+	case c.Tool != nil:
+		return c.Tool.Name
+	case c.Agent != nil:
+		return "Agent"
+	case c.Skill != nil:
+		return "Skill"
+	case c.Workflow != nil:
+		return "Workflow"
+	}
+	return ""
+}
+
+func validateSteps(steps []Step, where string, seen map[string]bool, main bool, sent map[string]bool) error {
 	for i := range steps {
 		s := &steps[i]
 		at := fmt.Sprintf("%s[%d]", where, i)
@@ -339,14 +468,31 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool) 
 			if kinds > 1 {
 				return fmt.Errorf("%s: a call requests at most one of tool, agent, skill, workflow", at)
 			}
-			if c.Tool != nil && c.Tool.Name == "" {
-				return fmt.Errorf("%s: a tool has a name", at)
+			// A model cannot call a tool the request did not offer it, so a
+			// stream that says what it advertises must advertise what it calls.
+			if name := calls(c); sent != nil && name != "" && !sent[name] {
+				return fmt.Errorf("%s: %s is called but not advertised; add it to this stream's tools", at, name)
+			}
+			if c.Tool != nil {
+				if c.Tool.Name == "" {
+					return fmt.Errorf("%s: a tool has a name", at)
+				}
+				// A tool's input is written into a body by the same encoder.
+				if err := writableAsJSON(c.Tool.Input); err != nil {
+					return fmt.Errorf("%s: %s: input %w", at, c.Tool.Name, err)
+				}
 			}
 			if c.Agent != nil {
 				if c.Agent.Name == "" {
 					return fmt.Errorf("%s: an agent has a name", at)
 				}
-				if err := validateSteps(c.Agent.Steps, at+".agent.steps", seen, false); err != nil {
+				if err := validateTools(c.Agent.Tools, at+".agent.tools"); err != nil {
+					return err
+				}
+				if err := bothOrNeither(c.Agent.SystemPrompt, c.Agent.Tools, at+".agent"); err != nil {
+					return err
+				}
+				if err := validateSteps(c.Agent.Steps, at+".agent.steps", seen, false, advertised(c.Agent.Tools)); err != nil {
 					return err
 				}
 			}
@@ -354,7 +500,13 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool) 
 				if c.Skill.Name == "" || c.Skill.Agent == "" {
 					return fmt.Errorf("%s: a skill has a name and an agent", at)
 				}
-				if err := validateSteps(c.Skill.Steps, at+".skill.steps", seen, false); err != nil {
+				if err := validateTools(c.Skill.Tools, at+".skill.tools"); err != nil {
+					return err
+				}
+				if err := bothOrNeither(c.Skill.SystemPrompt, c.Skill.Tools, at+".skill"); err != nil {
+					return err
+				}
+				if err := validateSteps(c.Skill.Steps, at+".skill.steps", seen, false, advertised(c.Skill.Tools)); err != nil {
 					return err
 				}
 			}
@@ -366,7 +518,13 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool) 
 					if ch.Name == "" {
 						return fmt.Errorf("%s: workflow child %d has a name", at, j)
 					}
-					if err := validateSteps(ch.Steps, fmt.Sprintf("%s.workflow.children[%d].steps", at, j), seen, false); err != nil {
+					if err := validateTools(ch.Tools, fmt.Sprintf("%s.workflow.children[%d].tools", at, j)); err != nil {
+						return err
+					}
+					if err := bothOrNeither(ch.SystemPrompt, ch.Tools, fmt.Sprintf("%s.workflow.children[%d]", at, j)); err != nil {
+						return err
+					}
+					if err := validateSteps(ch.Steps, fmt.Sprintf("%s.workflow.children[%d].steps", at, j), seen, false, advertised(ch.Tools)); err != nil {
 						return err
 					}
 				}

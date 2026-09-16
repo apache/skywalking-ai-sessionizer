@@ -207,6 +207,28 @@ session: mock-build-and-check       # optional; default derived from the steps
 title: build and check              # optional
 interval: 1s                        # the gap between steps, in every stream
 provider_bodies: false              # optional; true writes every call's request and response body
+system_prompt: |                    # optional; the system prompt this stream's calls send
+  You build and check a repository.
+# optional, but all or nothing with system_prompt, and a stream must advertise
+# every tool it calls -- starting a child counts, as Agent, Skill or Workflow
+tools:
+  - name: Bash
+    description: |
+      Runs a shell command in the repository and returns its output.
+    input_schema:
+      type: object
+      properties:
+        command: {type: string}
+      required: [command]
+  - name: Agent
+    description: |
+      Starts a subagent with a context window of its own and returns its
+      final report.
+    input_schema:
+      type: object
+      properties:
+        description: {type: string}
+        prompt: {type: string}
 steps:
   - input: run the build            # a person's message: opens a run and a talk
   - inject: {type: skill_listing, text: "skills: 1"}
@@ -222,6 +244,8 @@ steps:
         name: checker
         prompt: check the tests
         after: 1s                   # the child's first record, relative to the call
+        system_prompt: You check tests.   # this child's own, not its parent's
+        tools: [{name: Bash, description: Runs a shell command.}]
         steps: [{call: {text: Tests pass.}}]
         notify: true                # the runtime reports the child finished: a second run
   - call: {text: Build passed and tests are green.}
@@ -414,7 +438,19 @@ six.
 Claude Code would write when `OTEL_LOG_RAW_API_BODIES` names a directory: the whole message list of
 its stream again, the cache marker on the newest message, a billing header naming the prompt and
 the previous call's request, and the session in `metadata.user_id`. A compaction starts the list
-again. A `claude-code` build writes them as files under `DIR/_source/provider-bodies`, each stamped
+again.
+
+The system prompt and the tools a request advertises come from `system_prompt` and `tools`, written
+per stream: a scenario writes its own, and shares none with another scenario. A request body is read
+as a document, and a borrowed description describes the wrong agent, since the same tool name means
+a different thing to a release manager and to an inbox assistant. They cannot be derived from the
+calls either, because a description is prose about what a tool is for, which no call carries. A
+child writes its own, since a narrower set is the reason to start one. A scenario that writes
+neither gets a stand-in: filler sized to make a body worth cutting, not something to read. The
+response carries the call's own `usage`, the same numbers the transcript records, so a reader
+comparing the two sees one number.
+
+A `claude-code` build writes them as files under `DIR/_source/provider-bodies`, each stamped
 with when it was written, and its configuration enables `claude-code-provider` there; an `sd` build
 lands the same bodies in the same order. Such a scenario's message and request ids carry the start of
 the session id, because every session shares the one directory and a runtime's ids are unique across
