@@ -25,6 +25,18 @@
   rebuilds from, joined by the bodies' own ids; a reader loads the bodies when it wants them.
   `summary.provider_bodies` counts the bodies and `summary.captured_prompts` the calls whose request is
   captured. The version stays `1.0`.
+- **The round carries that join.** An `llm.call` in a `.sf` round carries `provider_bodies` in its
+  attributes, and the `session` node how many bodies the session holds. The join was made when a
+  conversation was rendered, which meant every reader repeated it, and to repeat it a reader had to
+  open every landed body — the largest files a session holds — to read one line of each. A server
+  that mirrors the format paid that on every read of a conversation: measured on the end-to-end
+  session, 27,884 bytes of provider bodies against 8,158 bytes of transcript, none of it in the
+  document. It is now resolved once, when the round is parsed, from the index alone; the index keeps
+  each body's role, its request id and the request before it, and each record's line in its stream,
+  which is what tells a gapped stream from a whole one. The rules are unchanged, the document is
+  unchanged, and a round reader refuses a body reference past the round's own range as it refuses
+  any other. A conversation whose rounds were parsed before this carries no bodies on its calls;
+  parsing its chain again brings them in. The index schema is bumped, so it rebuilds itself.
 - `asz verify` rebuilds every landed provider body and compares its digest. `storage.LandedFiles`
   lists the session's `provider_body/` directory, so parse, push, repack and the view see the files.
   The root keeps a derived table of the body files, `_provider/seen.state`.

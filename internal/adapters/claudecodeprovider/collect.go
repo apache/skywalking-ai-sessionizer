@@ -516,8 +516,8 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 				if err := rw.Write(rec); err != nil {
 					return err
 				}
-				e, blocks := index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1))
-				ix.Append(e, blocks...)
+				e, blocks, body := index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1))
+				ix.AppendRecord(e, blocks, body)
 			}
 			return rw.Close()
 		})

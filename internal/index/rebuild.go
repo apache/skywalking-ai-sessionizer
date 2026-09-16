@@ -92,8 +92,8 @@ func indexLandedFile(ix *Index, lf storage.LandedFile) (int, error) {
 		if err != nil {
 			return n, fmt.Errorf("index: %s row %d: %w", lf.Path, row, err)
 		}
-		e, blocks := FromRecord(ix, &hdr, rec, uint32(lf.Seq), row)
-		ix.Append(e, blocks...)
+		e, blocks, body := FromRecord(ix, &hdr, rec, uint32(lf.Seq), row)
+		ix.AppendRecord(e, blocks, body)
 		n++
 	}
 	return n, nil

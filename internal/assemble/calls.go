@@ -154,6 +154,11 @@ func (b *builder) emitCall(c *providerCall, parent string) {
 		a["usage"] = model.Unavailable
 		a["stop_reason"] = model.Unavailable
 	}
+	// What the call sent to the provider and what came back, where they landed.
+	// The bodies themselves are never in a round; a reader loads them.
+	if bodies := b.bodiesOfCall[c.NodeID]; len(bodies) > 0 {
+		a[sessionflow.ProviderBodiesAttr] = bodies
+	}
 	b.node(sessionflow.Node{
 		Entity: sessionflow.Entity{ID: c.NodeID}, Kind: model.KindLLMCall,
 		Parent: parent, Stream: c.Stream.Name,

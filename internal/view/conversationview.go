@@ -33,7 +33,6 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
-	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
@@ -176,16 +175,16 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	annotateChanges(v.Loose, byStep)
 	v.Summary.Changes = len(v.WorkspaceChanges)
 
-	// The provider bodies, joined to their calls. A call carries where its
-	// request and response are landed; a reader loads them when it wants
-	// them, and the document stays the size of the structure.
-	total, byCall := c.providerBodies(landed)
+	// The provider bodies each call carries, as the round joined them. A call
+	// names where its request and its response landed; a reader loads them when
+	// it wants them, and the document stays the size of the structure.
+	total, byCall := c.providerBodies()
 	annotateProvider(v.Talks, byCall)
 	annotateProvider(v.Loose, byCall)
 	v.Summary.ProviderBodies = total
 	for _, bodies := range byCall {
 		for _, b := range bodies {
-			if b.Role == providerbody.RoleRequest {
+			if b.Role == sessionflow.RoleRequest {
 				v.Summary.CapturedPrompts++
 			}
 		}

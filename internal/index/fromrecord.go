@@ -22,6 +22,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -36,11 +37,11 @@ import (
 // payloads, which meant every runtime needed its own index-building code and
 // the index could only be rebuilt by whichever adapter wrote it.
 func FromRecord(ix *Index, hdr *sessiondata.Header, rec *sessiondata.Record,
-	seq, row uint32) (Entry, []Block) {
+	seq, row uint32) (Entry, []Block, *Body) {
 
 	in := ix.Strings
 	e := Entry{
-		Seq: seq, Row: row,
+		Seq: seq, Row: row, Ord: rec.Ord,
 		Stream: in.ID(hdr.Stream), Batch: in.ID(batchOf(hdr, rec)),
 		Kind: kindOf(hdr, rec),
 
@@ -69,9 +70,28 @@ func FromRecord(ix *Index, hdr *sessiondata.Header, rec *sessiondata.Record,
 		for i := range blocks {
 			blocks[i] = Block{Ord: uint16(i), Kind: BlockOther}
 		}
-		return e, blocks
+		return e, blocks, bodyOf(in, rec)
 	}
-	return e, blocksOf(in, rec)
+	return e, blocksOf(in, rec), nil
+}
+
+// bodyOf reads the join keys off a provider body's manifest, which is the
+// record's last part. A record whose manifest does not read is indexed like any
+// other record and joins to nothing: the file is still evidence, and a reader
+// that wants the body will say why it cannot have it.
+func bodyOf(in *Interner, rec *sessiondata.Record) *Body {
+	m, err := providerbody.ManifestOf(rec)
+	if err != nil {
+		return nil
+	}
+	b := &Body{Request: in.ID(m.Request), Previous: in.ID(m.PreviousRequest)}
+	switch m.Role {
+	case providerbody.RoleRequest:
+		b.Role = BodyRoleRequest
+	case providerbody.RoleResponse:
+		b.Role = BodyRoleResponse
+	}
+	return b
 }
 
 // batchOf takes the batch from the record when it names one, and from the file

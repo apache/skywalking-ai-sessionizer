@@ -20,6 +20,11 @@
 checkpoints:
   launched:
     kinds: {llm.call: 2}
+    view:
+      # The child's bodies are written ten seconds on, so this round has the
+      # main stream's two. The call gains its own in the round that reads them.
+      provider_bodies: 4
+      captured_prompts: 2
   final:
     kinds: {llm.call: 3}
     view:

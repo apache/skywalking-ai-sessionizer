@@ -63,6 +63,7 @@ func (b *builder) stage1Canonical() {
 		bounded = append(bounded, i)
 	}
 	b.canonical = bounded
+	b.stats.ProviderBodies = len(b.bodiesInWindow())
 	b.stats.Entries = len(b.canonical)
 	b.stats.Duplicates = len(b.ix.Entries) - len(all)
 	b.stats.Beyond = len(all) - len(b.canonical)
@@ -106,6 +107,13 @@ func (b *builder) stage2Streams() {
 	// file, and because they are evidence they reproduce with the round.
 	if from, through, ok := b.timeRange(); ok {
 		a["from_time"], a["through_time"] = from, through
+	}
+	// How many provider bodies the session holds as of this round, joined or
+	// not: a reader states what was captured without opening a landed file. It
+	// is a count, and it is named apart from the list a call carries, so one
+	// name never means two things.
+	if b.stats.ProviderBodies > 0 {
+		a["provider_bodies_landed"] = b.stats.ProviderBodies
 	}
 	b.node(sessionflow.Node{
 		Entity: sessionflow.Entity{ID: sessionNode}, Kind: model.KindSession,

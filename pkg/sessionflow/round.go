@@ -206,6 +206,20 @@ func Read(r io.Reader) (*Round, error) {
 			if err := checkRefs(line, n.Ref, n.Refs, &out.Header); err != nil {
 				return nil, err
 			}
+			// A reference inside an attribute is a reference: a provider body a
+			// call names must lie in the round's own range like any other, and an
+			// attribute that is there but does not read is refused, not skipped.
+			carried, cerr := ProviderBodiesOf(n.Attrs)
+			if cerr != nil {
+				return nil, fmt.Errorf("sessionflow: line %d: node %q: %w", line, n.ID, cerr)
+			}
+			var bodies []Ref
+			for _, y := range carried {
+				bodies = append(bodies, y.Ref)
+			}
+			if err := checkRefs(line, nil, bodies, &out.Header); err != nil {
+				return nil, err
+			}
 			out.Nodes = append(out.Nodes, n)
 		case FrameRelation:
 			var v Relation

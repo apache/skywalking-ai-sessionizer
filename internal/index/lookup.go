@@ -30,6 +30,8 @@ type Index struct {
 	Strings *Interner
 	Entries []Entry
 	Blocks  []Block
+	// Bodies holds the provider bodies among the entries, in landed order.
+	Bodies []Body
 
 	byRecord    map[uint32]int32
 	byMsg       map[uint32][]int32
@@ -45,6 +47,16 @@ type Index struct {
 // New returns an empty Index for a session.
 func New(session string) *Index {
 	return &Index{Session: session, Strings: NewInterner()}
+}
+
+// AppendRecord adds what FromRecord returned: the entry, its blocks, and the
+// body when the record is one.
+func (ix *Index) AppendRecord(e Entry, blocks []Block, body *Body) {
+	if body != nil {
+		body.Entry = uint32(len(ix.Entries))
+		ix.Bodies = append(ix.Bodies, *body)
+	}
+	ix.Append(e, blocks...)
 }
 
 // Append adds one record and its blocks, wiring the block range.

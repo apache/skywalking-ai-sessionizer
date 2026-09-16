@@ -18,11 +18,13 @@
 package index_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 func build(t *testing.T) *index.Index {
@@ -192,5 +194,73 @@ func TestEntriesWithoutIdentityAreKeptSeparate(t *testing.T) {
 	}
 	if got := ix.Stream("main"); len(got) != 3 {
 		t.Errorf("Stream: %d entries, want 3", len(got))
+	}
+}
+
+// A provider body's join keys are read from its manifest while landing, and they
+// survive being written and read back. A record whose manifest is not a provider
+// body's is indexed like any other: it is evidence, and it joins to nothing.
+func TestProviderBodiesAreIndexedAndSurviveTheRoundTrip(t *testing.T) {
+	manifest := func(role, request, previous string) json.RawMessage {
+		m := map[string]any{
+			"schema": "provider_body/1", "role": role, "sha256": "d", "bytes": 2, "depth": 0,
+			"segments": []any{map[string]any{"lit": "{}"}},
+		}
+		if request != "" {
+			m["request"] = request
+		}
+		if previous != "" {
+			m["previous_request"] = previous
+		}
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	hdr := &sessiondata.Header{Kind: sessiondata.KindProviderBody, Session: "sess-1", Stream: "main"}
+	ix := index.New("sess-1")
+	for row, rec := range []*sessiondata.Record{
+		{Ord: 1, ID: "one.request", Run: "cycle-1", Parts: []sessiondata.Part{
+			{Kind: sessiondata.PartData, Data: manifest("request", "", "req-0")},
+		}},
+		{Ord: 2, ID: "one.response", Call: "msg_1", Parts: []sessiondata.Part{
+			{Kind: sessiondata.PartData, Data: manifest("response", "req-1", "")},
+		}},
+		{Ord: 3, ID: "not-a-body", Parts: []sessiondata.Part{
+			{Kind: sessiondata.PartData, Data: json.RawMessage(`{"schema":"other/1"}`)},
+		}},
+	} {
+		e, blocks, body := index.FromRecord(ix, hdr, rec, 4, uint32(row+1))
+		ix.AppendRecord(e, blocks, body)
+	}
+	if len(ix.Bodies) != 2 {
+		t.Fatalf("indexed %d bodies, want 2", len(ix.Bodies))
+	}
+
+	dir := t.TempDir()
+	if err := ix.Write(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := index.Load(dir, "sess-1")
+	if err != nil || !ok {
+		t.Fatalf("Load: ok=%v err=%v", ok, err)
+	}
+	if len(got.Bodies) != 2 {
+		t.Fatalf("read back %d bodies, want 2", len(got.Bodies))
+	}
+	request, response := got.Bodies[0], got.Bodies[1]
+	if request.Role != index.BodyRoleRequest || got.Strings.String(request.Previous) != "req-0" {
+		t.Errorf("request: %+v", request)
+	}
+	if response.Role != index.BodyRoleResponse || got.Strings.String(response.Request) != "req-1" {
+		t.Errorf("response: %+v", response)
+	}
+	// the entry each body belongs to, and the source line the gap check reads
+	if e := got.Entries[request.Entry]; e.Ord != 1 || got.Strings.String(e.Run) != "cycle-1" {
+		t.Errorf("request entry: %+v", e)
+	}
+	if e := got.Entries[response.Entry]; e.Ord != 2 || got.Strings.String(e.Call) != "msg_1" {
+		t.Errorf("response entry: %+v", e)
 	}
 }
