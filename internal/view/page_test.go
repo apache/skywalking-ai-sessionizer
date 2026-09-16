@@ -87,6 +87,9 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 		view.AssetPrefix + "host-shell/horizon-theme.css",
 		view.AssetPrefix + "host-shell/themes.json",
 		"mountConversationView", "isSupportedDocument", "/view", "/record/", "/api/glossary",
+		// Without loadFiles the renderer offers no Prompt tab at all, so the
+		// page beside the storage root would show less than the SkyWalking UI.
+		"loadFiles", "/files?",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("the page does not name %q", want)
@@ -121,9 +124,9 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 	}
 }
 
-// Only the document and a record are served under a conversation: the
-// routes the old page read are gone with it.
-func TestOnlyTheDocumentAndARecordAreServed(t *testing.T) {
+// Only the document, a record and the landed files are served under a
+// conversation: the routes the old page read are gone with it.
+func TestOnlyTheDocumentARecordAndFilesAreServed(t *testing.T) {
 	h := view.New(storage.NewZone(t.TempDir()), nil).Handler()
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/c/nothing/view", nil))

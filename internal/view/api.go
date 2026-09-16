@@ -177,11 +177,14 @@ func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
 }
 
 var viewPath = regexp.MustCompile(`^/api/c/([^/]+)/view$`)
+var filesPath = regexp.MustCompile(`^/api/c/([^/]+)/files$`)
 var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)
 
 // apiConversation serves what the page reads of one conversation: the whole
-// asz.view document, and the landed record behind a step by address. The
-// renderer draws the document alone; only the Evidence tab asks for more.
+// asz.view document, the landed record behind a step by address, and landed
+// files by sequence. The renderer draws the document alone; the Evidence tab
+// asks for a record and the Prompt tab for the files a call's bodies are cut
+// across.
 func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 	if m := recordPath.FindStringSubmatch(r.URL.Path); m != nil {
 		seq, _ := strconv.ParseUint(m[2], 10, 64)
@@ -191,6 +194,10 @@ func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if m := viewPath.FindStringSubmatch(r.URL.Path); m != nil {
 		s.apiView(w, m[1])
+		return
+	}
+	if m := filesPath.FindStringSubmatch(r.URL.Path); m != nil {
+		s.apiFiles(w, m[1], r.URL.Query())
 		return
 	}
 	fail(w, fmt.Errorf("not found"), http.StatusNotFound)

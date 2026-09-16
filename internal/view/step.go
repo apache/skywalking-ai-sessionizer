@@ -18,11 +18,13 @@
 package view
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -430,6 +432,98 @@ func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64) {
 	writeJSON(w, rec)
 }
 
+// maxFileSeqs bounds one read. A call's bodies are a handful of files, so a
+// request naming more than this is not the page asking.
+const maxFileSeqs = 32
+
+// maxFileBytes bounds what one read holds. The files are read whole, encoded
+// whole and written whole, so the bytes are held several times over; without a
+// budget a handful of oversize files would be a way to exhaust this process.
+const maxFileBytes = 64 << 20
+
+// apiFiles serves landed files whole, by sequence: how the Prompt tab gets the
+// provider bodies a call points at. A body is cut across the files up to the
+// one it names, so a reader asks for a run of them at once rather than one by
+// one.
+//
+// The bytes travel as base64 in a JSON array, not framed by length the way the
+// OAP's route frames them. That route serves a browser it does not own and a
+// body of any size; this one serves the page beside it, and the simple shape
+// costs a third more bytes over a loopback connection to save the page parsing
+// a framed stream by hand.
+//
+// A sequence with no landed file is left out rather than refused: the renderer
+// reports which files it did not get, and one missing file does not spoil the
+// rest.
+func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values) {
+	c, err := s.Load(id)
+	if err != nil {
+		fail(w, err, http.StatusNotFound)
+		return
+	}
+	// The renderer names the session it is reading for. This viewer serves one
+	// session's files, so a different name is a question it cannot answer.
+	if want := q.Get("session"); want != "" && want != c.Session {
+		fail(w, fmt.Errorf("view: %s is not the session of this conversation", want), http.StatusBadRequest)
+		return
+	}
+	seqs := q["seq"]
+	if len(seqs) == 0 {
+		fail(w, fmt.Errorf("view: no seq asked for"), http.StatusBadRequest)
+		return
+	}
+	if len(seqs) > maxFileSeqs {
+		fail(w, fmt.Errorf("view: %d sequences asked for, at most %d a request", len(seqs), maxFileSeqs), http.StatusBadRequest)
+		return
+	}
+	out := make([]map[string]any, 0, len(seqs))
+	seen := map[uint64]bool{}
+	var held int64
+	for _, text := range seqs {
+		seq, perr := strconv.ParseUint(text, 10, 64)
+		if perr != nil || seq == 0 {
+			fail(w, fmt.Errorf("view: %q is not a sequence", text), http.StatusBadRequest)
+			return
+		}
+		// A repeat would be read and held again, and the reader gains nothing
+		// from a second copy of a file it already has.
+		if seen[seq] {
+			continue
+		}
+		seen[seq] = true
+		path, lerr := c.landedPath(seq)
+		if lerr != nil {
+			continue
+		}
+		body, rerr := os.ReadFile(path)
+		if rerr != nil {
+			// A file that is gone is left out, as an unknown sequence is: the
+			// renderer says which it did not get. Anything else -- a permission
+			// or an I/O failure -- is this server's problem and is reported, so
+			// a reader can ask again rather than being told the file is absent.
+			if os.IsNotExist(rerr) {
+				continue
+			}
+			fail(w, rerr, http.StatusInternalServerError)
+			return
+		}
+		// A landed file may be large and the whole answer is held in memory to
+		// be encoded, so the run stops at a budget rather than reading whatever
+		// is asked for. What is left out reads as missing, which the renderer
+		// already reports, and a smaller ask brings it.
+		if held+int64(len(body)) > maxFileBytes {
+			break
+		}
+		held += int64(len(body))
+		out = append(out, map[string]any{
+			"seq":   seq,
+			"file":  filepath.Base(path),
+			"bytes": base64.StdEncoding.EncodeToString(body),
+		})
+	}
+	writeJSON(w, out)
+}
+
 // record reads one landed record whole.
 //
 // Nothing is cached: a record is read when a reader asks to see it, which is
@@ -474,6 +568,13 @@ func (c *Conversation) scanPaths() map[uint64]string {
 	out := map[uint64]string{}
 	_ = filepath.WalkDir(c.zone.SessionDir(c.Session), func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
+			return nil
+		}
+		// A landed file is written once and left read-only, so it is always a
+		// regular file. Anything else carrying a landed name is not one: a
+		// symlink in a root from somewhere else would otherwise be read and
+		// served as though it were landed data, whatever it pointed at.
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		m := seqSuffix.FindStringSubmatch(d.Name())

@@ -58,11 +58,20 @@ func (p *Plan) ProviderBodies() []ProviderBody {
 		return nil
 	}
 	lost := p.lostStreams()
+	declared := map[string]Stream{}
+	for _, s := range p.Streams {
+		declared[s.ID] = s
+	}
 	chains := map[string]*bodyChain{}
 	chainOf := func(stream string) *bodyChain {
 		c := chains[stream]
 		if c == nil {
 			c = &bodyChain{main: stream == "main"}
+			if c.main {
+				c.system, c.tools = p.SystemPrompt, p.Tools
+			} else if s, ok := declared[stream]; ok {
+				c.system, c.tools = s.SystemPrompt, s.Tools
+			}
 			chains[stream] = c
 		}
 		return c
@@ -105,9 +114,11 @@ func (p *Plan) ProviderBodies() []ProviderBody {
 				out = append(out, ProviderBody{
 					Name: e.Req + ".response.json",
 					At:   e.At.Add(time.Millisecond),
+					// The same usage the transcript records for this call, so a
+					// reader comparing the two sees one number, not two.
 					Bytes: encodeBody(map[string]any{
 						"id": e.Call, "type": "message", "role": "assistant", "model": ccModel,
-						"content": c.blocks, "stop_reason": e.Stop,
+						"content": c.blocks, "stop_reason": e.Stop, "usage": ccUsage(e.Usage),
 					}),
 				})
 				c.push(map[string]any{"role": "assistant", "content": c.blocks})
@@ -142,6 +153,10 @@ type bodyChain struct {
 	prev   string
 	call   string
 	blocks []any
+	// system and tools are what the scenario wrote for this stream. Empty
+	// leaves the stand-in.
+	system string
+	tools  []ToolDef
 }
 
 // user adds a prompt. The first message of a chain carries the injected
@@ -201,6 +216,9 @@ func (c *bodyChain) request(session string) []byte {
 	if c.prompt != "" {
 		header += " cc_prompt_id=" + c.prompt + ";"
 	}
+	// The stand-in, for a scenario that writes none. It is filler sized to
+	// make a body worth cutting, not something to read: a scenario meant to
+	// be read writes its own system prompt and tools.
 	system := "You are Claude Code, working in a scenario. " + strings.Repeat("Use the tools to answer. ", 80)
 	tools := []any{
 		map[string]any{"name": "Read", "description": strings.Repeat("Reads a file from the local filesystem. ", 40),
@@ -211,6 +229,26 @@ func (c *bodyChain) request(session string) []byte {
 	if !c.main {
 		system = "You are an agent that searches a repository. " + strings.Repeat("Report what you find. ", 60)
 		tools = tools[:1]
+	}
+	if c.system != "" {
+		system = c.system
+	}
+	// Written and empty is not the same as unwritten: a scenario may say its
+	// agent advertises no tools at all, which is a request a runtime sends.
+	if c.tools != nil {
+		// Empty, never nil: a stream that advertises nothing sends an empty
+		// list, and a nil slice would be written as null, which is not a
+		// request any runtime sends.
+		tools = []any{}
+		for _, t := range c.tools {
+			schema := t.InputSchema
+			if schema == nil {
+				schema = map[string]any{"type": "object", "properties": map[string]any{}}
+			}
+			tools = append(tools, map[string]any{
+				"name": t.Name, "description": t.Description, "input_schema": schema,
+			})
+		}
 	}
 	user, _ := json.Marshal(map[string]string{"device_id": "scenario", "account_uuid": "scenario", "session_id": session})
 	type body struct {

@@ -172,6 +172,10 @@ type Stream struct {
 	Prompt string
 	Tool   string
 	Batch  string
+	// SystemPrompt and Tools are what this stream's calls send, as the
+	// scenario wrote them. Empty leaves the stand-in. See ProviderBodies.
+	SystemPrompt string
+	Tools        []ToolDef
 	// Lost says the stream's file never reached the collector.
 	Lost bool
 }
@@ -217,6 +221,15 @@ type Plan struct {
 	Events  []Event
 	Streams []Stream
 	Runs    []Run
+	// SystemPrompt and Tools are what the main stream's calls send, as the
+	// scenario wrote them. Empty leaves the stand-in. See ProviderBodies.
+	//
+	// They alias the scenario's own, which two plans of one scenario share.
+	// A caller reads them and does not write them: changing one here would
+	// change what a later plan of the same scenario writes, and the same
+	// scenario must always produce the same bytes.
+	SystemPrompt string
+	Tools        []ToolDef
 	// Provider says the plan's ids are those of a scenario with provider
 	// bodies, and bodies says it writes them. See ProviderBodies.
 	Provider bool
@@ -281,7 +294,8 @@ func (sc *Scenario) Plan(opts Options) (*Plan, error) {
 	if scale == 0 {
 		scale = 1
 	}
-	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, at: at, interval: interval, scale: scale}
+	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, at: at, interval: interval, scale: scale,
+		SystemPrompt: sc.SystemPrompt, Tools: sc.Tools}
 	if p.Project == "" {
 		p.Project = "-Users-dev-scenario"
 	}
@@ -527,7 +541,8 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 			Ack: &Ack{Child: child, Prompt: a.Prompt, Label: a.Name}, Lost: lost}
 		b.emit(ack)
 		l.last = ack.ID
-		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: a.Name, Prompt: a.Prompt, Tool: tool.ID, Lost: a.Lost})
+		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: a.Name, Prompt: a.Prompt, Tool: tool.ID,
+			SystemPrompt: a.SystemPrompt, Tools: a.Tools, Lost: a.Lost})
 		cl := &lane{stream: child, t: ack.At, first: true, prefix: a.Name, lost: a.Lost}
 		if a.After == 0 {
 			cl.t = cl.t.Add(b.scaled(b.p.interval))
@@ -561,7 +576,8 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 			Of: tool.ID, Text: "forked", Fork: &Fork{Child: child}, Lost: lost}
 		b.emit(res)
 		l.last = res.ID
-		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: sk.Agent, Tool: tool.ID, Lost: sk.Lost})
+		b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: sk.Agent, Tool: tool.ID,
+			SystemPrompt: sk.SystemPrompt, Tools: sk.Tools, Lost: sk.Lost})
 		cl := &lane{stream: child, t: res.At.Add(b.scaled(b.p.interval)), prefix: sk.Agent, lost: sk.Lost}
 		prompt := Event{Kind: EvInput, Stream: child, At: cl.t, ID: child + "-prompt", Run: child + "-cycle", Text: "run the skill " + sk.Name, Lost: sk.Lost}
 		b.emit(prompt)
@@ -594,7 +610,8 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		for i, ch := range w.Children {
 			child := agentID(w.Name + "/" + ch.Name)
 			r.Children = append(r.Children, child)
-			b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: ch.Name, Prompt: ch.Prompt, Batch: runID, Lost: ch.Lost})
+			b.p.Streams = append(b.p.Streams, Stream{ID: child, Label: ch.Name, Prompt: ch.Prompt, Batch: runID,
+				SystemPrompt: ch.SystemPrompt, Tools: ch.Tools, Lost: ch.Lost})
 			t := start.Add(b.scaled(time.Duration(i) * 100 * time.Millisecond))
 			r.Journal = append(r.Journal, JournalLine{Type: "started", Child: child, At: t})
 			cl := &lane{stream: child, batch: runID, t: t, prefix: ch.Name, lost: ch.Lost}

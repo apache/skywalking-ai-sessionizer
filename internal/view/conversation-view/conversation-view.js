@@ -23,6 +23,550 @@ function reducedMotion() {
   const g = globalThis;
   return typeof g.matchMedia === "function" && g.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
+const K = new Uint32Array([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
+function sha256Hex(bytes) {
+  const h = new Uint32Array([1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]);
+  const w = new Uint32Array(64);
+  const length = bytes.length;
+  const padded = new Uint8Array(length + 72 >> 6 << 6);
+  padded.set(bytes);
+  padded[length] = 128;
+  const bits = length * 8;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 8, Math.floor(bits / 4294967296));
+  view.setUint32(padded.length - 4, bits >>> 0);
+  for (let at = 0; at < padded.length; at += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(at + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const a2 = w[i - 15];
+      const b2 = w[i - 2];
+      const s0 = (a2 >>> 7 | a2 << 25) ^ (a2 >>> 18 | a2 << 14) ^ a2 >>> 3;
+      const s1 = (b2 >>> 17 | b2 << 15) ^ (b2 >>> 19 | b2 << 13) ^ b2 >>> 10;
+      w[i] = w[i - 16] + s0 + w[i - 7] + s1 >>> 0;
+    }
+    let [a, b, c, d, e, f, g, hh] = [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]];
+    for (let i = 0; i < 64; i++) {
+      const s1 = (e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7);
+      const ch = e & f ^ ~e & g;
+      const t1 = hh + s1 + ch + K[i] + w[i] >>> 0;
+      const s0 = (a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10);
+      const maj = a & b ^ a & c ^ b & c;
+      const t2 = s0 + maj >>> 0;
+      hh = g;
+      g = f;
+      f = e;
+      e = d + t1 >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = t1 + t2 >>> 0;
+    }
+    h[0] = h[0] + a >>> 0;
+    h[1] = h[1] + b >>> 0;
+    h[2] = h[2] + c >>> 0;
+    h[3] = h[3] + d >>> 0;
+    h[4] = h[4] + e >>> 0;
+    h[5] = h[5] + f >>> 0;
+    h[6] = h[6] + g >>> 0;
+    h[7] = h[7] + hh >>> 0;
+  }
+  let out = "";
+  for (const word of h) out += word.toString(16).padStart(8, "0");
+  return out;
+}
+const MAX_BODY_BYTES = 256 * 1024 * 1024;
+const MAX_DEPTH = 32;
+const CACHE_LIMIT = 32 * 1024 * 1024;
+const ROLE_REQUEST = "request";
+const ROLE_RESPONSE = "response";
+const PROMPT_SCHEMA = "provider_body/1";
+const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8", { fatal: true });
+function readProviderFile(seq, bytes) {
+  const out = [];
+  let row = 0;
+  for (const line of splitLines(bytes)) {
+    if (row === 0) {
+      row++;
+      continue;
+    }
+    let text;
+    let node;
+    try {
+      text = decoder.decode(line);
+      node = JSON.parse(text);
+    } catch {
+      return out;
+    }
+    if (node["t"] === "end") return out;
+    const record = readRecord(seq, row, node, text);
+    if (record) out.push(record);
+    row++;
+  }
+  return out;
+}
+function readRecord(seq, row, node, line) {
+  const parts = Array.isArray(node["parts"]) ? node["parts"] : [];
+  if (!parts.length) return null;
+  const raws = rawPartData(line);
+  const read2 = parts.map((p, i) => ({
+    kind: typeof p["k"] === "string" ? p["k"] : "",
+    raw: raws[i] ?? null,
+    encoding: typeof p["encoding"] === "string" ? p["encoding"] : void 0
+  }));
+  const last = read2[read2.length - 1];
+  if (last.kind !== "data" || last.raw === null) return null;
+  let manifest;
+  try {
+    manifest = JSON.parse(last.raw);
+  } catch {
+    return null;
+  }
+  if (!wellFormed(manifest)) return null;
+  const id = typeof node["id"] === "string" ? node["id"] : "";
+  if (!id) return null;
+  return { id, seq, row, parts: read2, manifest };
+}
+function wellFormed(m) {
+  if (!m || typeof m !== "object") return false;
+  if (m.schema !== PROMPT_SCHEMA || typeof m.sha256 !== "string" || typeof m.role !== "string") return false;
+  if (!Number.isSafeInteger(m.bytes) || !Number.isSafeInteger(m.depth)) return false;
+  if (!Array.isArray(m.segments)) return false;
+  for (const name of ["src", "chain", "why", "model", "session", "run", "call", "request", "previous_request"]) {
+    if (m[name] !== void 0 && typeof m[name] !== "string") return false;
+  }
+  for (const seg of m.segments) {
+    if (!seg || typeof seg !== "object") return false;
+    if (seg.lit !== void 0 && typeof seg.lit !== "string") return false;
+    if (seg.piece !== void 0 && typeof seg.piece !== "string") return false;
+    if (seg.part !== void 0 && seg.part !== null && !Number.isSafeInteger(seg.part)) return false;
+    if (seg.copy !== void 0) {
+      const c = seg.copy;
+      if (!c || typeof c !== "object") return false;
+      if (typeof c.from !== "string" || typeof c.sha256 !== "string" || !Number.isSafeInteger(c.len)) return false;
+    }
+  }
+  return true;
+}
+class PromptError extends Error {
+}
+class PromptStore {
+  constructor() {
+    __publicField(this, "records", /* @__PURE__ */ new Map());
+    __publicField(this, "byPosition", /* @__PURE__ */ new Map());
+    /** The record and part holding each piece, by the piece's sha256. */
+    __publicField(this, "pieces", /* @__PURE__ */ new Map());
+    __publicField(this, "cache", /* @__PURE__ */ new Map());
+    __publicField(this, "cacheOrder", []);
+    __publicField(this, "cacheBytes", 0);
+    /** The seqs whose files were added, so a reader knows what it still needs. */
+    __publicField(this, "loaded", /* @__PURE__ */ new Set());
+  }
+  /** Whether the file of that seq was added already. */
+  has(seq) {
+    return this.loaded.has(seq);
+  }
+  /**
+   * Adds one file's records, in line order. A record already held is left as it is.
+   *
+   * The file counts as held only when nothing in it waited on a record this session does not have.
+   * A body refers to bodies that landed before it, so a file read out of order loses those records;
+   * reading the earlier file later must bring this one back, and it cannot if the file is held.
+   */
+  addFile(file) {
+    let waiting = false;
+    for (const record of readProviderFile(file.seq, file.bytes)) {
+      if (this.add(record) === "unresolved") waiting = true;
+    }
+    if (waiting) this.loaded.delete(file.seq);
+    else this.loaded.add(file.seq);
+  }
+  /** The manifest of the body at a landed position, or null when it is not held. */
+  manifestAt(seq, row) {
+    var _a;
+    return ((_a = this.byPosition.get(`${seq}/${row}`)) == null ? void 0 : _a.manifest) ?? null;
+  }
+  /** The body at a landed position. Throws a PromptError when it is not held or does not rebuild. */
+  bodyAt(seq, row) {
+    const record = this.byPosition.get(`${seq}/${row}`);
+    if (!record) throw new PromptError(`no body landed at seq ${seq} row ${row}`);
+    return this.body(record.id);
+  }
+  /** The body held under a record id. */
+  body(id) {
+    const held = this.cache.get(id);
+    if (held) return held;
+    const record = this.records.get(id);
+    if (!record) throw new PromptError(`no body ${id}`);
+    const bytes = this.rebuild(record);
+    this.remember(id, bytes);
+    return bytes;
+  }
+  /** The record a response with that provider request id carries, or null. */
+  responseOfRequestId(requestId) {
+    for (const r of this.records.values()) {
+      if (r.manifest.role === ROLE_RESPONSE && r.manifest.request === requestId) return r;
+    }
+    return null;
+  }
+  add(record) {
+    const m = record.manifest;
+    if (m.bytes < 0 || m.bytes > MAX_BODY_BYTES || m.depth < 0 || m.depth > MAX_DEPTH) return "refused";
+    const own = record.parts.length - 1;
+    let copies = 0;
+    for (const seg of m.segments ?? []) {
+      if (seg.part != null) {
+        if (seg.part < 0 || seg.part >= own) return "refused";
+      } else if (seg.piece) {
+        if (!this.pieces.has(seg.piece)) return "unresolved";
+      } else if (seg.copy) {
+        copies++;
+        const base = this.records.get(seg.copy.from);
+        if (!base) return "unresolved";
+        if (base.manifest.sha256 !== seg.copy.sha256 || seg.copy.len < 0 || seg.copy.len > base.manifest.bytes) return "refused";
+        if (m.depth !== base.manifest.depth + 1 || m.depth > MAX_DEPTH) return "refused";
+      }
+    }
+    if (copies === 0 && m.depth !== 0) return "refused";
+    const already = this.records.get(record.id);
+    if (already) {
+      if (already.manifest.sha256 !== m.sha256 || already.manifest.bytes !== m.bytes) return "refused";
+      try {
+        if (sha256Hex(this.rebuild(record)) !== m.sha256) return "refused";
+      } catch {
+        return "refused";
+      }
+      this.byPosition.set(`${record.seq}/${record.row}`, already);
+      return "added";
+    }
+    this.records.set(record.id, record);
+    this.byPosition.set(`${record.seq}/${record.row}`, record);
+    for (let i = 0; i < own; i++) {
+      const part = record.parts[i];
+      if (part.kind !== "data" || part.raw === null) continue;
+      const d = sha256Hex(encoder.encode(part.raw));
+      if (!this.pieces.has(d)) this.pieces.set(d, { id: record.id, part: i });
+    }
+    return "added";
+  }
+  rebuild(record) {
+    const m = record.manifest;
+    if (m.bytes < 0 || m.bytes > MAX_BODY_BYTES) throw new PromptError(`${record.id} claims ${m.bytes} bytes`);
+    const out = new Uint8Array(m.bytes);
+    let at = 0;
+    const take = (bytes) => {
+      if (at + bytes.length > m.bytes) throw new PromptError(`${record.id} rebuilds past the ${m.bytes} bytes it claims`);
+      out.set(bytes, at);
+      at += bytes.length;
+    };
+    for (const seg of m.segments ?? []) {
+      if (seg.lit) {
+        take(encoder.encode(seg.lit));
+      } else if (seg.part != null) {
+        if (seg.part < 0 || seg.part >= record.parts.length - 1) {
+          throw new PromptError(`${record.id} names part ${seg.part} it does not have`);
+        }
+        take(partBytes(record.parts[seg.part]));
+      } else if (seg.piece) {
+        const at2 = this.pieces.get(seg.piece);
+        if (!at2) throw new PromptError(`${record.id} names a piece no earlier record holds`);
+        take(partBytes(this.records.get(at2.id).parts[at2.part]));
+      } else if (seg.copy) {
+        const base = this.body(seg.copy.from);
+        if (seg.copy.len < 0 || seg.copy.len > base.length) {
+          throw new PromptError(`${record.id} copies ${seg.copy.len} bytes of a ${base.length} byte body`);
+        }
+        take(base.subarray(0, seg.copy.len));
+      }
+    }
+    if (at !== m.bytes || sha256Hex(out) !== m.sha256) {
+      throw new PromptError(`${record.id} rebuilds to ${at} bytes that do not match its digest`);
+    }
+    return out;
+  }
+  remember(id, bytes) {
+    var _a;
+    this.cache.set(id, bytes);
+    this.cacheOrder.push(id);
+    this.cacheBytes += bytes.length;
+    while (this.cacheBytes > CACHE_LIMIT && this.cacheOrder.length > 1) {
+      const old = this.cacheOrder.shift();
+      this.cacheBytes -= ((_a = this.cache.get(old)) == null ? void 0 : _a.length) ?? 0;
+      this.cache.delete(old);
+    }
+  }
+}
+function partBytes(part) {
+  if (part.raw === null) throw new PromptError("a part without data");
+  if (part.kind !== "unknown") return encoder.encode(part.raw);
+  const text = JSON.parse(part.raw);
+  if (typeof text !== "string") throw new PromptError("an unknown part's data is not one JSON string");
+  if (!part.encoding) return encoder.encode(text);
+  if (part.encoding === "base64") {
+    const binary = atob(text);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  }
+  throw new PromptError(`unknown part encoding ${part.encoding}`);
+}
+function splitLines(bytes) {
+  const out = [];
+  let from = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] === 10) {
+      out.push(bytes.subarray(from, i));
+      from = i + 1;
+    }
+  }
+  if (from < bytes.length) out.push(bytes.subarray(from));
+  return out;
+}
+function rawPartData(line) {
+  let pos = 0;
+  const peek = () => line.charAt(pos);
+  const skipSpace = () => {
+    while (pos < line.length && " 	\r\n".includes(line.charAt(pos))) pos++;
+  };
+  const expect = (c) => {
+    if (line.charAt(pos) !== c) throw new PromptError(`expected ${c} at ${pos}`);
+    pos++;
+  };
+  const string = () => {
+    expect('"');
+    let out2 = "";
+    for (; ; ) {
+      const c = line.charAt(pos++);
+      if (c === '"') return out2;
+      if (c === "\\") {
+        const e = line.charAt(pos++);
+        if (e === "u") {
+          out2 += String.fromCharCode(parseInt(line.slice(pos, pos + 4), 16));
+          pos += 4;
+        } else {
+          out2 += e;
+        }
+      } else {
+        out2 += c;
+      }
+    }
+  };
+  const skipValue = () => {
+    const c = peek();
+    if (c === '"') {
+      string();
+    } else if (c === "{" || c === "[") {
+      const close = c === "{" ? "}" : "]";
+      pos++;
+      for (; ; ) {
+        skipSpace();
+        if (peek() === close) {
+          pos++;
+          return;
+        }
+        if (c === "{") {
+          string();
+          skipSpace();
+          expect(":");
+          skipSpace();
+        }
+        skipValue();
+        skipSpace();
+        if (peek() === ",") pos++;
+      }
+    } else {
+      while (pos < line.length && !",}] 	\r\n".includes(line.charAt(pos))) pos++;
+    }
+  };
+  const partDataOf = () => {
+    let data = null;
+    expect("{");
+    for (; ; ) {
+      skipSpace();
+      if (peek() === "}") {
+        pos++;
+        return data;
+      }
+      const key = string();
+      skipSpace();
+      expect(":");
+      skipSpace();
+      const start = pos;
+      skipValue();
+      if (key === "data") data = line.slice(start, pos);
+      skipSpace();
+      if (peek() === ",") pos++;
+    }
+  };
+  const out = [];
+  try {
+    skipSpace();
+    expect("{");
+    for (; ; ) {
+      skipSpace();
+      if (peek() === "}") return out;
+      const key = string();
+      skipSpace();
+      expect(":");
+      skipSpace();
+      if (key === "parts" && peek() === "[") {
+        out.length = 0;
+        pos++;
+        for (; ; ) {
+          skipSpace();
+          if (peek() === "]") {
+            pos++;
+            break;
+          }
+          out.push(partDataOf());
+          skipSpace();
+          if (peek() === ",") pos++;
+        }
+      } else {
+        skipValue();
+      }
+      skipSpace();
+      if (peek() === ",") pos++;
+    }
+  } catch {
+    return out;
+  }
+}
+class PromptCache {
+  constructor() {
+    __publicField(this, "stores", /* @__PURE__ */ new Map());
+    __publicField(this, "outcomes", /* @__PURE__ */ new Map());
+    __publicField(this, "running", null);
+  }
+  store(session) {
+    let s = this.stores.get(session);
+    if (!s) {
+      s = new PromptStore();
+      this.stores.set(session, s);
+    }
+    return s;
+  }
+  outcome(session) {
+    return this.outcomes.get(session) ?? null;
+  }
+  /** Whether a read is in flight for that session. */
+  reading(session) {
+    var _a;
+    return ((_a = this.running) == null ? void 0 : _a.key) === session;
+  }
+  /**
+   * Loads the files of a session up to and including `throughSeq`, skipping what is held, at most
+   * `batch` seqs a request, and tells `onProgress` after each file. One read runs at a time: starting
+   * another ends the one before it, as a reader who moves on has stopped waiting for it.
+   */
+  async load(session, seqs, loader, batch, onProgress) {
+    var _a, _b;
+    (_a = this.running) == null ? void 0 : _a.controller.abort();
+    const controller = new AbortController();
+    this.running = { key: session, controller };
+    const store = this.store(session);
+    const want = seqs.filter((seq) => !store.has(seq)).sort((a, b) => a - b);
+    const outcome = { missing: [], unresolved: [] };
+    let loaded = 0;
+    try {
+      for (let at = 0; at < want.length; at += batch) {
+        const asked = want.slice(at, at + batch);
+        const answered = /* @__PURE__ */ new Set();
+        await loader({ session, seqs: asked, signal: controller.signal }, (file) => {
+          store.addFile(file);
+          answered.add(file.seq);
+          loaded++;
+          onProgress(loaded, want.length);
+        });
+        for (const seq of asked) {
+          if (!answered.has(seq)) {
+            outcome.missing.push(seq);
+          } else if (!store.has(seq)) {
+            outcome.unresolved.push(seq);
+          }
+        }
+      }
+    } catch (err) {
+      if (controller.signal.aborted) throw err;
+      outcome.failed = err instanceof Error ? err.message : String(err);
+    } finally {
+      if (((_b = this.running) == null ? void 0 : _b.controller) === controller) this.running = null;
+    }
+    this.outcomes.set(session, outcome);
+    return outcome;
+  }
+  /** Ends any read in flight, as a view being destroyed must. */
+  stop() {
+    var _a;
+    (_a = this.running) == null ? void 0 : _a.controller.abort();
+    this.running = null;
+  }
+}
 const UNOBSERVED = "--:--:--";
 function makeFormatter(locale, unavailable = "unavailable") {
   const time = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
@@ -266,6 +810,7 @@ class ConversationModel {
             refs: n.refs,
             attrs: n.attrs,
             usage: n.usage,
+            providerBodies: n.provider_bodies,
             flags: n.flags,
             dropped: n.dropped,
             edges: n.edges ?? [],
@@ -612,6 +1157,48 @@ const ENGLISH = {
   close: "Close",
   whatDoesMean: "What does {key} mean?",
   changes: "Changes",
+  prompt: "Prompt",
+  promptNotHere: "The bodies of this call are not among the files this document lists.",
+  promptBothStored: "The request this call sent and the response it received are stored.",
+  promptRequestStored: "The request this call sent is stored.",
+  promptResponseStored: "The response this call received is stored.",
+  promptLoadCost: "Reading them loads {files} file(s) of this session, {bytes} bytes as stored.",
+  promptLoad: "Load the prompt",
+  promptLoading: "{loaded} of {total} files",
+  promptReading: "Reading…",
+  promptLoadFailed: "The files could not be read: {why}",
+  promptFilesMissing: "These files of the session are not stored, so a body that needs them cannot be rebuilt: seq {seqs}.",
+  promptSides: "Which side of the call to show",
+  promptRequest: "Request",
+  promptResponse: "Response",
+  promptNoRequest: "The request of this call was not captured.",
+  promptNoResponse: "The response of this call was not captured.",
+  promptRebuildFailed: "This body did not come back whole.",
+  promptRequestModes: "How much of the request to show",
+  promptWholeRequest: "Whole request",
+  promptWholeBody: "The body",
+  promptChanges: "What it added",
+  promptNoPrevious: "The request before this one is not among the loaded bodies, so there is nothing to compare with.",
+  promptSystem: "System prompt",
+  promptTools: "Tools ({count})",
+  promptMessages: "Messages ({count})",
+  promptMessageOf: "{n} of {total}",
+  promptMessagesNote: "{bytes} bytes as sent",
+  promptSettings: "Settings",
+  promptBlocks: "{count} block(s), {bytes} bytes",
+  promptShared: "The {count} message(s) before are as the call before sent them, {bytes} bytes.",
+  promptRewritten: "The history was rewritten, which is what a compaction does.",
+  promptAlsoChanged: "Also changed: {what}.",
+  promptAdded: "Added by this call ({count})",
+  promptNothingAdded: "This request adds no message.",
+  promptStopReason: "stopped: {reason}",
+  promptThinking: "Thinking",
+  promptReminder: "Injected by the runtime",
+  promptToolUse: "Tool use: {name}",
+  promptToolResult: "Tool result",
+  promptToolFailed: "Tool result, which failed",
+  promptToolFor: "for {id}",
+  promptUnknownRole: "message",
   changesBadge: "{n} changes",
   oneFileChanged: "1 file",
   filesChanged: "{n} files",
@@ -675,10 +1262,14 @@ function fill(template, vars) {
 }
 const ICON_CHANGES = "acv-i-changes";
 const ICON_READONLY = "acv-i-readonly";
+const ICON_POP_OUT = "acv-i-pop-out";
+const ICON_DOCK = "acv-i-dock";
 function symbolDefs() {
   return `<svg class="acv-defs" aria-hidden="true" focusable="false">
     <symbol id="${ICON_CHANGES}" viewBox="0 0 16 16"><path d="M3 4.5h10M8 1.5v6M3 12h10" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="${ICON_READONLY}" viewBox="0 0 16 16"><path d="M1.5 8s2.6-4.5 6.5-4.5S14.5 8 14.5 8s-2.6 4.5-6.5 4.5S1.5 8 1.5 8z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2.1" fill="currentColor"/></symbol>
+    <symbol id="${ICON_POP_OUT}" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4"/><path d="M6.5 13.5h-4v-4"/><path d="M13.5 2.5 9 7"/><path d="M2.5 13.5 7 9"/></g></symbol>
+    <symbol id="${ICON_DOCK}" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 6.5h-4v-4"/><path d="M2.5 9.5h4v4"/><path d="M9.5 6.5 14 2"/><path d="M6.5 9.5 2 14"/></g></symbol>
   </svg>`;
 }
 function icon(id, cls = "") {
@@ -884,8 +1475,8 @@ function drawChangesTab(ctx, body, step) {
   bindChangeControls(ctx, body, redrawBoth(ctx));
   body.querySelectorAll("[data-to-evidence]").forEach(
     (b) => b.onclick = () => {
-      const block = b.dataset.refBlock;
-      ctx.state.rawRef = { seq: Number(b.dataset.refSeq), row: Number(b.dataset.refRow), ...block ? { block: Number(block) } : {} };
+      const block2 = b.dataset.refBlock;
+      ctx.state.rawRef = { seq: Number(b.dataset.refSeq), row: Number(b.dataset.refRow), ...block2 ? { block: Number(block2) } : {} };
       ctx.showTab("evidence");
     }
   );
@@ -1034,7 +1625,7 @@ function setInspectorPopped(ctx, on) {
   const btn = ctx.q(".acv-pop-btn");
   btn.setAttribute("aria-pressed", String(on));
   btn.title = on ? ctx.s.dockInspector : ctx.s.popOutInspector;
-  btn.textContent = on ? "⤡" : "⤢";
+  btn.innerHTML = icon(on ? ICON_DOCK : ICON_POP_OUT);
 }
 function drawOverview(ctx) {
   var _a, _b;
@@ -1138,6 +1729,146 @@ function trapFocus(ctx, e) {
     e.preventDefault();
     (e.shiftKey ? last : first).focus();
   }
+}
+const REMINDER = "<system-reminder>";
+const MARKED_IN_MESSAGE = 2;
+const MARKED_IN_LIST = 1;
+const NOT_MARKED = -1;
+function readBody(bytes, role) {
+  const text = new TextDecoder().decode(bytes);
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { kind: "other", raw: null, text };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "other", raw: value };
+  const body = value;
+  if (role === "request" && Array.isArray(body["messages"])) return readRequest(body);
+  if (role === "response" && Array.isArray(body["content"])) return readResponse(body);
+  return { kind: "other", raw: value };
+}
+function readRequest(body) {
+  const rest = /* @__PURE__ */ Object.create(null);
+  for (const [k, v] of Object.entries(body)) {
+    if (k !== "system" && k !== "tools" && k !== "messages") rest[k] = v;
+  }
+  return {
+    kind: "request",
+    model: typeof body["model"] === "string" ? body["model"] : void 0,
+    system: readSystem(body["system"]),
+    tools: readTools(body["tools"]),
+    messages: body["messages"].map(readMessage),
+    rest,
+    raw: body
+  };
+}
+function readResponse(body) {
+  const rest = /* @__PURE__ */ Object.create(null);
+  for (const [k, v] of Object.entries(body)) {
+    if (k !== "content" && k !== "usage" && k !== "stop_reason" && k !== "id") rest[k] = v;
+  }
+  return {
+    kind: "response",
+    model: typeof body["model"] === "string" ? body["model"] : void 0,
+    id: typeof body["id"] === "string" ? body["id"] : void 0,
+    stopReason: typeof body["stop_reason"] === "string" ? body["stop_reason"] : void 0,
+    blocks: body["content"].map(readBlock),
+    usage: body["usage"] && typeof body["usage"] === "object" ? body["usage"] : void 0,
+    rest,
+    raw: body
+  };
+}
+function readSystem(value) {
+  if (typeof value === "string") return [{ kind: "text", text: value }];
+  if (!Array.isArray(value)) return [];
+  return value.map(readBlock);
+}
+function readTools(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((t) => {
+    const tool2 = t ?? {};
+    const description = typeof tool2["description"] === "string" ? tool2["description"] : "";
+    return { name: typeof tool2["name"] === "string" ? tool2["name"] : "", description, raw: t };
+  });
+}
+function readMessage(value) {
+  const m = value ?? {};
+  const content = m["content"];
+  const blocks = typeof content === "string" ? [{ kind: "text", text: content }] : Array.isArray(content) ? content.map(readBlock) : [];
+  return { role: typeof m["role"] === "string" ? m["role"] : "", blocks, raw: value };
+}
+function readBlock(value) {
+  if (typeof value === "string") return { kind: "text", text: value };
+  if (!value || typeof value !== "object") return { kind: "unknown", json: value };
+  const b = value;
+  const kind = typeof b["type"] === "string" ? b["type"] : "unknown";
+  if (kind === "text" && typeof b["text"] === "string") {
+    return { kind, text: b["text"], reminder: b["text"].includes(REMINDER) };
+  }
+  if (kind === "thinking") {
+    const thinking = typeof b["thinking"] === "string" ? b["thinking"] : "";
+    return { kind, text: thinking, json: value };
+  }
+  if (kind === "tool_use") {
+    return {
+      kind,
+      name: typeof b["name"] === "string" ? b["name"] : "",
+      ...typeof b["id"] === "string" ? { id: b["id"] } : {},
+      json: b["input"]
+    };
+  }
+  if (kind === "tool_result") {
+    const content = b["content"];
+    const about = {
+      ...typeof b["tool_use_id"] === "string" ? { id: b["tool_use_id"] } : {},
+      ...b["is_error"] === true ? { failed: true } : {}
+    };
+    if (typeof content === "string") return { kind, text: content, json: value, ...about };
+    return { kind, json: content ?? value, ...about };
+  }
+  return { kind, json: value };
+}
+function deltaOf(previous, current) {
+  let shared = 0;
+  let rewritten = false;
+  const least = Math.min(previous.messages.length, current.messages.length);
+  while (shared < least && same(previous.messages[shared].raw, current.messages[shared].raw, MARKED_IN_MESSAGE)) shared++;
+  if (shared < least) rewritten = true;
+  const added = current.messages.slice(shared);
+  let sharedBytes = 0;
+  for (let i = 0; i < shared; i++) sharedBytes += size(current.messages[i].raw);
+  return {
+    added,
+    sharedMessages: shared,
+    sharedBytes,
+    rewritten,
+    systemChanged: !same(previous.raw["system"], current.raw["system"], MARKED_IN_LIST),
+    toolsChanged: !same(previous.raw["tools"], current.raw["tools"], MARKED_IN_LIST),
+    settingsChanged: !same(settings(previous), settings(current), NOT_MARKED)
+  };
+}
+function settings(r) {
+  const out = /* @__PURE__ */ Object.create(null);
+  for (const [k, v] of Object.entries(r.rest)) if (k !== "metadata") out[k] = v;
+  return out;
+}
+function same(a, b, markedTo) {
+  return canonical(a, markedTo) === canonical(b, markedTo);
+}
+function size(value) {
+  return new TextEncoder().encode(JSON.stringify(value) ?? "").length;
+}
+function canonical(value, markedTo, depth = 0) {
+  if (Array.isArray(value)) return `[${value.map((v) => canonical(v, markedTo, depth + 1)).join(",")}]`;
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  const obj = value;
+  const parts = [];
+  for (const k of Object.keys(obj).sort()) {
+    if (depth <= markedTo && k === "cache_control") continue;
+    parts.push(`${JSON.stringify(k)}:${canonical(obj[k], markedTo, depth + 1)}`);
+  }
+  return `{${parts.join(",")}}`;
 }
 const LINE_DIFF_CAP = 400;
 function lineDiff(before, after) {
@@ -1358,8 +2089,8 @@ function drawStructured(st, s) {
   const rest = pair ? st.fields.filter((f) => !EDIT_PAIR.includes(f.key)) : st.fields;
   const inline = rest.filter((f) => !f.block);
   const blocks = rest.filter((f) => f.block);
-  const side = (f) => `<span class="acv-copy-src" hidden>${esc(f.value)}</span>${copyButton(s, `${s.copy} ${f.key}`)}`;
-  const diff = pair ? `<span class="acv-field block"><span class="acv-field-key">${EDIT_PAIR.join(" → ")}</span>${pair.map((f) => `<span class="acv-field acv-copy-side">${side(f)}</span>`).join("")}<pre class="acv-diff acv-edit-diff">${lineDiff(pair[0].value, pair[1].value).map((r) => `<div class="acv-diff-line ${r.kind}">${esc((r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ") + r.text)}</div>`).join("")}</pre></span>` : "";
+  const side = (f) => `<span class="acv-field acv-copy-side"><span class="acv-field-key">${esc(f.key)}</span><span class="acv-copy-src" hidden>${esc(f.value)}</span>${copyButton(s, `${s.copy} ${f.key}`)}</span>`;
+  const diff = pair ? `<span class="acv-field block">${side(pair[0])}<span class="acv-edit-arrow">→</span>${side(pair[1])}<pre class="acv-diff acv-edit-diff">${lineDiff(pair[0].value, pair[1].value).map((r) => `<div class="acv-diff-line ${r.kind}">${esc((r.kind === "add" ? "+" : r.kind === "del" ? "-" : " ") + r.text)}</div>`).join("")}</pre></span>` : "";
   return `<span class="acv-fields">${[...inline, ...blocks].map(one).join("")}${diff}</span>`;
 }
 function editPair(st) {
@@ -1396,6 +2127,361 @@ function clipNote(ctx, text, bytes) {
   const shown = new TextEncoder().encode(text).length;
   return bytes > shown ? esc(fill(ctx.s.fullTextNote, { shown: ctx.f.number(shown), total: ctx.f.number(bytes) })) : "";
 }
+const BATCH = 32;
+const PREVIEW = 600;
+const JSON_PREVIEW = 4e3;
+function bodiesOf(e) {
+  return (e == null ? void 0 : e.providerBodies) ?? [];
+}
+function hasPrompt(ctx, e) {
+  return !!ctx.loadFiles && bodiesOf(e).length > 0;
+}
+function plan(ctx, ref) {
+  const files = ctx.model.doc.files ?? [];
+  const own = files.find((f) => f.kind === "provider_body" && f.seq === ref.seq);
+  if (!own) return null;
+  const session = own.file.split("/")[0] ?? "";
+  const earlier = files.filter((f) => f.kind === "provider_body" && f.seq !== null && f.seq <= ref.seq && f.file.startsWith(`${session}/`));
+  return {
+    session,
+    seqs: earlier.map((f) => f.seq).sort((a, b) => a - b),
+    bytes: earlier.reduce((n, f) => n + f.bytes, 0)
+  };
+}
+function sidesOf(ctx, e) {
+  var _a, _b;
+  const bodies = bodiesOf(e);
+  const request = (_a = bodies.find((b) => b.role === ROLE_REQUEST)) == null ? void 0 : _a.ref;
+  const response = (_b = bodies.find((b) => b.role === ROLE_RESPONSE)) == null ? void 0 : _b.ref;
+  const deepest = bodies.reduce((a, b) => !a || b.ref.seq > a.seq ? b.ref : a, null);
+  if (!deepest) return null;
+  const p = plan(ctx, deepest);
+  if (!p) return null;
+  return { request, response, session: p.session, seqs: p.seqs, bytes: p.bytes };
+}
+function drawPrompt(ctx, body, e) {
+  const { s, f, state } = ctx;
+  const sides = sidesOf(ctx, e);
+  if (!sides) {
+    body.innerHTML = `<div class="acv-empty">${esc(s.promptNotHere)}</div>`;
+    return;
+  }
+  const store = ctx.prompts.store(sides.session);
+  const absent = sides.seqs.filter((seq) => !store.has(seq));
+  const outcome = ctx.prompts.outcome(sides.session);
+  const covered = /* @__PURE__ */ new Set([...(outcome == null ? void 0 : outcome.missing) ?? [], ...(outcome == null ? void 0 : outcome.unresolved) ?? []]);
+  const unasked = (outcome == null ? void 0 : outcome.failed) ? absent : absent.filter((seq) => !covered.has(seq));
+  if (unasked.length) {
+    drawUnloaded(ctx, body, sides, outcome == null ? void 0 : outcome.failed);
+    return;
+  }
+  if (state.promptSide === "request" && !sides.request) state.promptSide = "response";
+  if (state.promptSide === "response" && !sides.response) state.promptSide = "request";
+  const ref = state.promptSide === "request" ? sides.request : sides.response;
+  const role = state.promptSide === "request" ? ROLE_REQUEST : ROLE_RESPONSE;
+  let read2 = null;
+  let manifest = null;
+  let failure = "";
+  let bytes = 0;
+  if (ref) {
+    manifest = store.manifestAt(ref.seq, ref.row);
+    try {
+      const raw = store.bodyAt(ref.seq, ref.row);
+      bytes = raw.length;
+      read2 = readBody(raw, role);
+    } catch (err) {
+      failure = err instanceof PromptError ? err.message : String(err);
+    }
+  }
+  const missing = absent.length ? `<div class="acv-warning">${esc(fill(s.promptFilesMissing, { seqs: absent.join(", ") }))}</div>` : "";
+  const head = `
+    <div class="acv-prompt-head">
+      <div class="acv-prompt-ids">
+        ${(manifest == null ? void 0 : manifest.model) ? `<span class="acv-source-badge">${esc(manifest.model)}</span>` : ""}
+        ${ref ? `<span class="acv-faint mono">seq ${ref.seq} · row ${ref.row}</span>` : ""}
+        ${bytes ? `<span class="acv-faint">${esc(f.number(bytes))} B</span>` : ""}
+      </div>
+      <div class="acv-prompt-modes" role="group" aria-label="${esc(s.promptSides)}">
+        ${sides.request ? sideButton(ctx, "request", s.promptRequest) : ""}
+        ${sides.response ? sideButton(ctx, "response", s.promptResponse) : ""}
+      </div>
+    </div>`;
+  let panel;
+  try {
+    panel = drawSide(ctx, e, read2, sides, store, ref, failure);
+  } catch (err) {
+    panel = `<div class="acv-warning">${esc(s.promptRebuildFailed)}<br>${esc(err instanceof Error ? err.message : String(err))}</div>`;
+  }
+  body.innerHTML = `${missing}${head}${panel}`;
+  wire(ctx, body);
+}
+function drawSide(ctx, e, read2, sides, store, ref, failure) {
+  const { s, state } = ctx;
+  let panel;
+  if (!ref) {
+    panel = `<div class="acv-empty">${esc(state.promptSide === "request" ? s.promptNoRequest : s.promptNoResponse)}</div>`;
+  } else if (failure) {
+    panel = `<div class="acv-warning">${esc(s.promptRebuildFailed)}<br>${esc(failure)}</div>`;
+  } else if (!read2) {
+    panel = `<div class="acv-warning">${esc(s.promptRebuildFailed)}</div>`;
+  } else if (read2.kind === "request") {
+    panel = drawRequest(ctx, e, read2, sides, store);
+  } else if (read2.kind === "response") {
+    panel = drawResponse(ctx, e, read2);
+  } else if (read2.text != null) {
+    panel = section(ctx, e, "raw", s.promptWholeBody, "", block(ctx, { kind: "text", text: read2.text }, `${e.id}|${state.promptSide}|raw`), true);
+  } else {
+    panel = section(ctx, e, "raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|${state.promptSide}|raw`), true);
+  }
+  return panel;
+}
+function sideButton(ctx, side, label) {
+  const on = ctx.state.promptSide === side;
+  return `<button type="button" class="acv-chip${on ? " on" : ""}" data-prompt-side="${side}" aria-pressed="${on}">${esc(label)}</button>`;
+}
+function drawUnloaded(ctx, body, sides, failed) {
+  const { s, f } = ctx;
+  const store = ctx.prompts.store(sides.session);
+  const missing = sides.seqs.filter((seq) => !store.has(seq));
+  const reading = ctx.prompts.reading(sides.session);
+  body.innerHTML = `
+    <div class="acv-prompt-offer">
+      <div>${esc(sides.request && sides.response ? s.promptBothStored : sides.request ? s.promptRequestStored : s.promptResponseStored)}</div>
+      <div class="acv-faint">${esc(fill(s.promptLoadCost, { files: String(missing.length), bytes: f.number(sides.bytes) }))}</div>
+      <div class="acv-prompt-progress">${failed ? `<span class="acv-warning">${esc(fill(s.promptLoadFailed, { why: failed }))}</span>` : ""}</div>
+      <button type="button" class="acv-btn" data-load-prompt ${reading ? "disabled" : ""}>${esc(reading ? s.promptReading : s.promptLoad)}</button>
+    </div>`;
+  const button = body.querySelector("[data-load-prompt]");
+  const progress = body.querySelector(".acv-prompt-progress");
+  if (!button || !ctx.loadFiles) return;
+  button.onclick = async () => {
+    button.disabled = true;
+    progress.textContent = fill(ctx.s.promptLoading, { loaded: "0", total: String(missing.length) });
+    try {
+      await ctx.prompts.load(sides.session, sides.seqs, ctx.loadFiles, BATCH, (loaded, total) => {
+        if (progress.isConnected) progress.textContent = fill(ctx.s.promptLoading, { loaded: String(loaded), total: String(total) });
+      });
+    } catch {
+      return;
+    }
+    ctx.drawInspector();
+  };
+}
+function drawRequest(ctx, e, read2, sides, store) {
+  const { s, f, state } = ctx;
+  const previous = state.promptWhole ? null : previousRequest(ctx, e, sides, store);
+  const modes = `
+    <div class="acv-prompt-modes" role="group" aria-label="${esc(s.promptRequestModes)}">
+      <button type="button" class="acv-chip${state.promptWhole ? " on" : ""}" data-prompt-whole="1" aria-pressed="${state.promptWhole}">${esc(s.promptWholeRequest)}</button>
+      <button type="button" class="acv-chip${state.promptWhole ? "" : " on"}" data-prompt-whole="0" aria-pressed="${!state.promptWhole}">${esc(s.promptChanges)}</button>
+    </div>`;
+  if (!state.promptWhole) {
+    if (!previous) return `${modes}<div class="acv-empty">${esc(s.promptNoPrevious)}</div>`;
+    return `${modes}${drawDelta(ctx, e, deltaOf(previous, read2), read2)}`;
+  }
+  const system = read2.system.length ? section(ctx, e, "system", s.promptSystem, blockSummary(ctx, read2.system), read2.system.map((b, i) => block(ctx, b, `${e.id}|req|sys|${i}`)).join("")) : "";
+  const tools = read2.tools.length ? section(
+    ctx,
+    e,
+    "tools",
+    fill(s.promptTools, { count: String(read2.tools.length) }),
+    read2.tools.slice(0, 3).map((t) => t.name).join(", "),
+    read2.tools.map((t, i) => tool(ctx, t, `${e.id}|req|tool|${i}`)).join("")
+  ) : "";
+  const messages = section(
+    ctx,
+    e,
+    "messages",
+    fill(s.promptMessages, { count: String(read2.messages.length) }),
+    fill(s.promptMessagesNote, { bytes: f.number(new TextEncoder().encode(JSON.stringify(read2.raw["messages"])).length) }),
+    read2.messages.map((m, i) => message(ctx, m, i + 1, read2.messages.length, `${e.id}|req|msg|${i}`)).join(""),
+    true
+  );
+  const settings2 = section(ctx, e, "settings", s.promptSettings, Object.keys(read2.rest).join(", "), json(ctx, read2.rest, `${e.id}|req|set`));
+  const whole = section(ctx, e, "request-raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|req|raw`));
+  return `${modes}${system}${tools}${messages}${settings2}${whole}`;
+}
+function previousRequest(ctx, e, sides, store) {
+  var _a, _b, _c;
+  if (!sides.request) return null;
+  const mine = store.manifestAt(sides.request.seq, sides.request.row);
+  if (!(mine == null ? void 0 : mine.previous_request)) return null;
+  const response = store.responseOfRequestId(mine.previous_request);
+  if (!(response == null ? void 0 : response.manifest.call)) return null;
+  const call = response.manifest.call;
+  for (const step of ctx.model.stepById.values()) {
+    const bodies = bodiesOf(step);
+    const theirResponse = (_a = bodies.find((b) => b.role === ROLE_RESPONSE)) == null ? void 0 : _a.ref;
+    const theirRequest = (_b = bodies.find((b) => b.role === ROLE_REQUEST)) == null ? void 0 : _b.ref;
+    if (!theirResponse || !theirRequest || step.id === e.id) continue;
+    if (((_c = store.manifestAt(theirResponse.seq, theirResponse.row)) == null ? void 0 : _c.call) !== call) continue;
+    try {
+      const read2 = readBody(store.bodyAt(theirRequest.seq, theirRequest.row), ROLE_REQUEST);
+      return read2.kind === "request" ? read2 : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+function drawDelta(ctx, e, delta, read2) {
+  const { s, f } = ctx;
+  const changed = [
+    delta.systemChanged ? s.promptSystem : "",
+    delta.toolsChanged ? fill(s.promptTools, { count: String(read2.tools.length) }) : "",
+    delta.settingsChanged ? s.promptSettings : ""
+  ].filter(Boolean);
+  const notes = [
+    `<div class="acv-faint">${esc(fill(s.promptShared, { count: String(delta.sharedMessages), bytes: f.number(delta.sharedBytes) }))}</div>`,
+    delta.rewritten ? `<div class="acv-warning">${esc(s.promptRewritten)}</div>` : "",
+    changed.length ? `<div class="acv-faint">${esc(fill(s.promptAlsoChanged, { what: changed.join(", ") }))}</div>` : ""
+  ].join("");
+  const added = delta.added.length ? delta.added.map((m, i) => message(ctx, m, delta.sharedMessages + i + 1, read2.messages.length, `${e.id}|req|msg|${delta.sharedMessages + i}`)).join("") : `<div class="acv-empty">${esc(s.promptNothingAdded)}</div>`;
+  return `${notes}<div class="acv-kicker" style="margin-top:12px">${esc(fill(s.promptAdded, { count: String(delta.added.length) }))}</div>${added}`;
+}
+function drawResponse(ctx, e, read2) {
+  const { s } = ctx;
+  const facts = [
+    read2.stopReason ? `<span class="acv-source-badge">${esc(fill(s.promptStopReason, { reason: read2.stopReason }))}</span>` : "",
+    read2.id ? `<span class="acv-faint mono">${esc(read2.id)}</span>` : ""
+  ].join(" ");
+  const usage = read2.usage ? `<div class="acv-provenance">${Object.entries(read2.usage).map(
+    ([k, v]) => `<span class="acv-source-badge">${esc(k)} ${esc(
+      typeof v === "number" || typeof v === "string" ? String(v) : JSON.stringify(v) ?? ""
+    )}</span>`
+  ).join("")}</div>` : "";
+  const blocks = read2.blocks.map((b, i) => block(ctx, b, `${e.id}|res|${i}`)).join("");
+  const rest = Object.keys(read2.rest).length ? section(ctx, e, "response-settings", s.promptSettings, Object.keys(read2.rest).join(", "), json(ctx, read2.rest, `${e.id}|res|rest`)) : "";
+  const whole = section(ctx, e, "response-raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|res|raw`));
+  return `<div class="acv-prompt-facts">${facts}</div>${usage}${blocks}${rest}${whole}`;
+}
+function section(ctx, e, key, title, note, inner, openByDefault = false) {
+  const id = `${e.id}|${key}`;
+  const open = ctx.state.openPromptSections.has(id) || openByDefault && !ctx.state.openPromptSections.has(`-${id}`);
+  return `
+    <section class="acv-prompt-section">
+      <button type="button" class="acv-prompt-head-btn" data-prompt-section="${esc(id)}" aria-expanded="${open}">
+        <span class="acv-kicker">${esc(title)}</span>
+        ${note ? `<span class="acv-faint">${esc(note)}</span>` : ""}
+        <span class="acv-prompt-caret">${open ? "▾" : "▸"}</span>
+      </button>
+      ${open ? `<div class="acv-prompt-body">${inner}</div>` : ""}
+    </section>`;
+}
+function message(ctx, m, n, total, key) {
+  const { s } = ctx;
+  return `
+    <div class="acv-prompt-message">
+      <div class="acv-prompt-message-head">
+        <span class="acv-prompt-role">${esc(m.role || s.promptUnknownRole)}</span>
+        <span class="acv-faint">${esc(fill(s.promptMessageOf, { n: String(n), total: String(total) }))}</span>
+      </div>
+      <div class="acv-prompt-message-body">${m.blocks.map((b, i) => block(ctx, b, `${key}|${i}`)).join("")}</div>
+    </div>`;
+}
+function block(ctx, b, key) {
+  const { s } = ctx;
+  if (b.kind === "text" || b.kind === "thinking") {
+    const text = b.text ?? "";
+    const label = b.kind === "thinking" ? s.promptThinking : b.reminder ? s.promptReminder : "";
+    const mark = b.kind === "thinking" ? " thinking" : b.reminder ? " injected" : "";
+    return `
+      <div class="acv-prompt-block${mark}">
+        ${label ? `<div class="acv-kicker">${esc(label)}</div>` : ""}
+        ${textBlock$1(ctx, text, key)}
+      </div>`;
+  }
+  if (b.kind === "tool_use") {
+    return `
+      <div class="acv-prompt-block tool">
+        <div class="acv-kicker">${esc(fill(s.promptToolUse, { name: b.name ?? "" }))}${blockId(ctx, b)}</div>
+        ${json(ctx, b.json, key)}
+      </div>`;
+  }
+  if (b.kind === "tool_result") {
+    return `
+      <div class="acv-prompt-block tool${b.failed ? " failed" : ""}">
+        <div class="acv-kicker">${esc(b.failed ? s.promptToolFailed : s.promptToolResult)}${blockId(ctx, b)}</div>
+        ${b.text != null ? textBlock$1(ctx, b.text, key) : json(ctx, b.json, key)}
+      </div>`;
+  }
+  return `<div class="acv-prompt-block"><div class="acv-kicker">${esc(b.kind)}</div>${json(ctx, b.json, key)}</div>`;
+}
+function blockId(ctx, b) {
+  return b.id ? ` <span class="acv-faint mono">${esc(fill(ctx.s.promptToolFor, { id: b.id }))}</span>` : "";
+}
+function tool(ctx, t, key) {
+  const first = t.description.split("\n")[0] ?? "";
+  return `
+    <div class="acv-prompt-tool">
+      <div class="acv-prompt-tool-name mono">${esc(t.name)}</div>
+      <div class="acv-faint">${esc(first.length > 200 ? `${first.slice(0, 200)}…` : first)}</div>
+      ${json(ctx, t.raw, key)}
+    </div>`;
+}
+function blockSummary(ctx, blocks) {
+  const bytes = new TextEncoder().encode(blocks.map((b) => b.text ?? "").join("")).length;
+  return fill(ctx.s.promptBlocks, { count: String(blocks.length), bytes: ctx.f.number(bytes) });
+}
+function textBlock$1(ctx, text, key) {
+  const { s, state } = ctx;
+  const long = text.length > PREVIEW;
+  const open = long && state.openTexts.has(key);
+  const more = long && !open ? `<button type="button" class="acv-linkish acv-text-more" data-text-toggle="${esc(key)}">${esc(s.showAllLines)}</button>` : "";
+  return `<div class="acv-block" data-copy-scope>${esc(open || !long ? text : `${text.slice(0, PREVIEW)}…`)}${copyButton(
+    s
+  )}<span class="acv-copy-src" hidden>${esc(text)}</span></div>${more}`;
+}
+function json(ctx, value, key) {
+  const { s, state } = ctx;
+  const text = JSON.stringify(value, null, 2) ?? "";
+  const long = text.length > JSON_PREVIEW;
+  const open = long && state.openTexts.has(key);
+  const more = long && !open ? `<button type="button" class="acv-linkish acv-text-more" data-text-toggle="${esc(key)}">${esc(s.showAllLines)}</button>` : "";
+  return `<pre class="acv-raw" data-copy-scope>${esc(open || !long ? text : `${text.slice(0, JSON_PREVIEW)}…`)}${copyButton(
+    s
+  )}<span class="acv-copy-src" hidden>${esc(text)}</span></pre>${more}`;
+}
+function wire(ctx, body) {
+  body.querySelectorAll("[data-prompt-side]").forEach((b) => {
+    b.onclick = () => {
+      ctx.state.promptSide = b.dataset.promptSide;
+      ctx.drawInspector();
+    };
+  });
+  body.querySelectorAll("[data-prompt-whole]").forEach((b) => {
+    b.onclick = () => {
+      ctx.state.promptWhole = b.dataset.promptWhole === "1";
+      ctx.drawInspector();
+    };
+  });
+  body.querySelectorAll("[data-prompt-section]").forEach((b) => {
+    b.onclick = () => {
+      const id = b.dataset.promptSection;
+      const open = b.getAttribute("aria-expanded") === "true";
+      if (open) {
+        ctx.state.openPromptSections.delete(id);
+        ctx.state.openPromptSections.add(`-${id}`);
+      } else {
+        ctx.state.openPromptSections.delete(`-${id}`);
+        ctx.state.openPromptSections.add(id);
+      }
+      ctx.drawInspector();
+    };
+  });
+  body.querySelectorAll("[data-text-toggle]").forEach((b) => {
+    b.onclick = () => {
+      ctx.state.openTexts.add(b.dataset.textToggle);
+      ctx.drawInspector();
+    };
+  });
+  body.querySelectorAll(".acv-copy").forEach((b) => {
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      copyField(b, ctx.s.copied);
+    };
+  });
+}
 function field(dt, dd, mono = false) {
   return `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`;
 }
@@ -1409,17 +2495,21 @@ function drawInspector(ctx) {
   const relTab = ctx.q('[data-tab="relations"]');
   const hasRels = !!(e && e.edges.length);
   relTab.hidden = !hasRels;
-  if (!hasRels && state.tab === "relations") {
-    ctx.showTab("details");
-    return;
-  }
+  const promptTab = ctx.q('[data-tab="prompt"]');
+  const prompts = hasPrompt(ctx, e);
+  promptTab.hidden = !prompts;
   const changesTab = ctx.q('[data-tab="changes"]');
   const hasChanges = !!(e && m.changesOf(e.id).length);
   changesTab.hidden = !hasChanges;
-  if (!hasChanges && state.tab === "changes") {
-    ctx.showTab("details");
-    return;
-  }
+  const offered = {
+    details: true,
+    evidence: true,
+    relations: hasRels,
+    changes: hasChanges,
+    prompt: prompts
+  };
+  const tab = offered[state.tab] ? state.tab : "details";
+  ctx.root.querySelectorAll("[data-tab]").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
   const title = ctx.q(".acv-inspector-title");
   const meta = ctx.q(".acv-inspector-meta");
   const body = ctx.q(".acv-inspector-body");
@@ -1431,9 +2521,10 @@ function drawInspector(ctx) {
   }
   title.textContent = e.name ? `${e.kind} · ${e.name}` : kindTitle(e.kind, s);
   meta.textContent = `${e.stream.slice(0, 12)} · ${f.time(e.at)}${e.bytes ? ` · ${f.number(e.bytes)} B` : ""}`;
-  if (state.tab === "details") drawDetails(ctx, body, e);
-  else if (state.tab === "relations") drawRelations(ctx, body, e);
-  else if (state.tab === "changes") drawChangesTab(ctx, body, e);
+  if (tab === "details") drawDetails(ctx, body, e);
+  else if (tab === "relations") drawRelations(ctx, body, e);
+  else if (tab === "changes") drawChangesTab(ctx, body, e);
+  else if (tab === "prompt") drawPrompt(ctx, body, e);
   else void drawEvidence(ctx, body, e);
 }
 function drawFolderPanel(ctx) {
@@ -1636,14 +2727,14 @@ async function drawEvidence(ctx, body, e) {
     seen.add(k);
     return true;
   });
-  const same = (a, b) => a.seq === b.seq && a.row === b.row && (a.block ?? null) === (b.block ?? null);
+  const same2 = (a, b) => a.seq === b.seq && a.row === b.row && (a.block ?? null) === (b.block ?? null);
   const own = list.length;
-  if (state.rawRef && !list.some((r) => same(r, state.rawRef))) list.push(state.rawRef);
+  if (state.rawRef && !list.some((r) => same2(r, state.rawRef))) list.push(state.rawRef);
   if (!list.length) {
     body.innerHTML = `<div class="acv-empty">${esc(s.derivedByAssembly)}</div>`;
     return;
   }
-  const pick = (state.rawRef && list.find((r) => same(r, state.rawRef))) ?? list[0];
+  const pick = (state.rawRef && list.find((r) => same2(r, state.rawRef))) ?? list[0];
   const role = (i) => i >= own ? s.changeRecordRef : e.kind === "tool" || e.kind === "agent.call" ? i === 0 ? s.request : s.result : own > 1 ? `${s.part} ${i + 1}` : s.record;
   const shown = e.text ? new TextEncoder().encode(e.text).length : 0;
   const clipped = e.bytes && shown && e.bytes > shown;
@@ -1661,8 +2752,8 @@ async function drawEvidence(ctx, body, e) {
     <div class="acv-record-box">${ctx.loadRecord ? `<button type="button" class="acv-btn" data-load-record>${esc(s.loadFullRecord)}</button>` : ""}</div>`;
   body.querySelectorAll("[data-ref]").forEach(
     (b) => b.onclick = () => {
-      const [seq, row, block] = b.dataset.ref.split("/");
-      state.rawRef = { seq: Number(seq), row: Number(row), ...block ? { block: Number(block) } : {} };
+      const [seq, row, block2] = b.dataset.ref.split("/");
+      state.rawRef = { seq: Number(seq), row: Number(row), ...block2 ? { block: Number(block2) } : {} };
       state.explain = null;
       ctx.drawInspector();
     }
@@ -2556,7 +3647,7 @@ function skeleton(s) {
         <div class="acv-inspector-head">
           <div class="acv-inspector-headrow">
             <div class="acv-heading"><span class="acv-kicker">${esc(s.inspector)}</span><h2 class="acv-inspector-title">—</h2></div>
-            <button type="button" class="acv-btn acv-pop-btn" aria-pressed="false" title="${esc(s.popOutInspector)}">⤢</button>
+            <button type="button" class="acv-btn acv-pop-btn" aria-pressed="false" title="${esc(s.popOutInspector)}">${icon(ICON_POP_OUT)}</button>
           </div>
           <div class="acv-inspector-meta"></div>
         </div>
@@ -2565,6 +3656,7 @@ function skeleton(s) {
           <button class="acv-tab" type="button" role="tab" data-tab="relations" aria-selected="false">${esc(s.relations)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="evidence" aria-selected="false">${esc(s.evidence)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="changes" aria-selected="false" hidden>${esc(s.changes)}</button>
+          <button class="acv-tab" type="button" role="tab" data-tab="prompt" aria-selected="false" hidden>${esc(s.prompt)}</button>
         </div>
         <div class="acv-inspector-body" role="tabpanel"></div>
       </aside>
@@ -2639,6 +3731,9 @@ function mountConversationView(host, opts) {
     openChangeFiles: /* @__PURE__ */ new Set(),
     openTexts: /* @__PURE__ */ new Set(),
     inspectorPopped: false,
+    promptSide: "request",
+    promptWhole: true,
+    openPromptSections: /* @__PURE__ */ new Set(),
     fullDiffs: /* @__PURE__ */ new Set()
   };
   let muted = 0;
@@ -2658,6 +3753,8 @@ function mountConversationView(host, opts) {
     f: opts.formatter ?? EN_US_FORMATTER,
     glossary: opts.glossary ?? null,
     loadRecord: opts.loadRecord,
+    loadFiles: opts.loadFiles,
+    prompts: new PromptCache(),
     state,
     q(selector) {
       const el = root.querySelector(selector);
@@ -2848,7 +3945,6 @@ function mountConversationView(host, opts) {
   }
   function showTab(tab) {
     state.tab = tab;
-    root.querySelectorAll("[data-tab]").forEach((t) => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
     drawInspector(ctx);
   }
   function centerOn(id, behavior, alsoTranscript = true) {
@@ -3013,6 +4109,7 @@ function mountConversationView(host, opts) {
     destroy() {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerdown", onPointerDown);
+      ctx.prompts.stop();
       teardownPanels();
       root.innerHTML = "";
       root.classList.remove("acv");

@@ -170,6 +170,27 @@ try {
       if (!res.ok) throw new Error("record " + ref.seq + "/" + ref.row + ": " + res.status);
       return res.json();
     }),
+    // The landed files a call's provider bodies are cut across. Without this
+    // the Prompt tab is not offered at all, so the page beside the storage
+    // root would show less than the SkyWalking UI does.
+    loadFiles: (req, onFile) => {
+      const q = new URLSearchParams();
+      q.set("session", req.session);
+      for (const seq of req.seqs) q.append("seq", seq);
+      return fetch(api + "/files?" + q, { signal: req.signal }).then(res => {
+        if (!res.ok) throw new Error("files: " + res.status);
+        return res.json();
+      }).then(files => {
+        for (const f of files) {
+          // Base64 in, bytes out: the reader rebuilds a body from the record
+          // lines exactly as they landed, so nothing may be re-encoded.
+          const raw = atob(f.bytes);
+          const bytes = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+          onFile({ seq: f.seq, file: f.file, bytes });
+        }
+      });
+    },
     state: stateFromURL(),
     onStateChange: s => {
       if (same(s, stateFromURL())) return;

@@ -49,6 +49,17 @@
   every body the build wrote is landed, deletes the body files with the session's other files, and
   drops the session's lines from `_provider/seen.state`. `tests/scenarios/provider-bodies.yaml` is the
   example, with bodies cut into five files.
+- **`asz view` draws the prompt too.** The embedded renderer moves to Horizon `0ce1f8d6`, which added
+  the inspector's Prompt tab, and the page gains the files route that tab reads: `GET
+  /api/c/{conversation}/files?session=&seq=` returns the landed files by sequence, at most 32 a
+  request, as base64 in a JSON array. The renderer offers the tab only to a host that can read files,
+  so without the route the page beside the storage root would have shown less than the SkyWalking UI.
+- **A scenario writes the prompt its agent sends.** `system_prompt` and `tools` say what a stream's
+  requests carry, on the scenario for the main stream and on an `agent`, `skill` or workflow child
+  for its own. Before this every scenario sent the same stand-in, which advertised `Read` and `Bash`
+  whatever the agent did, so a calendar assistant was drawn as a coding agent. The stand-in stays for
+  a scenario that writes neither, because it is sized to make a body worth cutting. A response now
+  carries the call's own `usage`, the numbers its transcript already records.
 
 ## Collection
 
