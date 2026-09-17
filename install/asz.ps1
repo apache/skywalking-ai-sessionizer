@@ -55,6 +55,10 @@ try {
     $From = "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
     Write-Host "${Me}: downloading $Pkg through the Apache mirrors"
   } catch {
+    # Only a 404 sends it to the archive. A download site that cannot be
+    # reached says nothing about the version, and the reason is reported.
+    $Status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+    if ($Status -ne 404) { throw "${Me}: cannot download $Pkg.sha512 from downloads.apache.org: $($_.Exception.Message)" }
     try { Invoke-WebRequest -UseBasicParsing -OutFile "$Zip.sha512" "$Archive/$Pkg.sha512" }
     catch { throw "${Me}: neither downloads.apache.org nor archive.apache.org has $Pkg. Is $Version released?" }
     $From = "$Archive/$Pkg"

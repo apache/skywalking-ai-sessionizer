@@ -79,15 +79,21 @@ trap 'exit 1' HUP INT TERM
 # version but slows down heavy use, so it is not asked first.
 site=https://downloads.apache.org/skywalking/ai-sessionizer/$version
 archive=https://archive.apache.org/dist/skywalking/ai-sessionizer/$version
-if curl -fsSL -o "$tmp/$pkg.sha512" "$site/$pkg.sha512" 2>/dev/null; then
-  from="https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$version/$pkg&action=download"
-  say "downloading $pkg through the Apache mirrors"
-elif curl -fsSL -o "$tmp/$pkg.sha512" "$archive/$pkg.sha512"; then
-  from=$archive/$pkg
-  say "downloading $pkg from archive.apache.org, as the download site holds only the newest release"
-else
-  fail "neither downloads.apache.org nor archive.apache.org has $pkg. Is $version released, and is there a package for $os/$arch?"
-fi
+# Only a 404 sends it to the archive. A download site that cannot be reached
+# says nothing about the version, and the reason is reported instead.
+code=$(curl -sSL -o "$tmp/$pkg.sha512" -w '%{http_code}' "$site/$pkg.sha512") ||
+  fail "cannot reach downloads.apache.org. The error is above."
+case "$code" in
+  200)
+    from="https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$version/$pkg&action=download"
+    say "downloading $pkg through the Apache mirrors" ;;
+  404)
+    curl -fsSL -o "$tmp/$pkg.sha512" "$archive/$pkg.sha512" ||
+      fail "neither downloads.apache.org nor archive.apache.org has $pkg. Is $version released, and is there a package for $os/$arch?"
+    from=$archive/$pkg
+    say "downloading $pkg from archive.apache.org, as the download site holds only the newest release" ;;
+  *) fail "downloads.apache.org answered $code for $pkg.sha512" ;;
+esac
 curl -fsSL -o "$tmp/$pkg" "$from" || fail "cannot download $pkg"
 want=$(cut -d ' ' -f 1 "$tmp/$pkg.sha512")
 if command -v sha512sum >/dev/null 2>&1; then got=$(sha512sum "$tmp/$pkg"); else got=$(shasum -a 512 "$tmp/$pkg"); fi
