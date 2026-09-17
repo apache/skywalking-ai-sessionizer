@@ -343,10 +343,15 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 		case FragThinking:
 			if e.Text == "" {
 				r.Parts = []sessiondata.Part{{Kind: sessiondata.PartReasoning, State: "unavailable"}}
-				r.Dropped = []sessiondata.Drop{{What: "reasoning signature", Bytes: 3, Why: "a provider verifies it; a reader cannot read it"}}
 			} else {
 				r.Parts = []sessiondata.Part{{Kind: sessiondata.PartReasoning, Text: e.Text, State: "available", Bytes: len(e.Text)}}
 			}
+			// Whether or not the reasoning text survived, the block carried a
+			// signature and the adapter dropped it. A claude-code build writes
+			// one on every thinking block, because a runtime does, so recording
+			// the drop only for reasoning that was already gone left the same
+			// scenario landing different records in the two formats.
+			r.Dropped = []sessiondata.Drop{{What: "reasoning signature", Bytes: 3, Why: "a provider verifies it; a reader cannot read it"}}
 		case FragText:
 			r.Parts = []sessiondata.Part{textPart(e.Text)}
 		case FragToolUse:

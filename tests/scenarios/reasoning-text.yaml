@@ -1,0 +1,34 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+
+# Reasoning a runtime kept the text of, beside reasoning it kept only the
+# signature of.
+#
+# A thinking block always carries a signature, and the adapter drops it: a
+# provider verifies it and a reader cannot read it. That is true whether or not
+# the reasoning text survived, so both records land with the drop recorded. The
+# sd writer used to record it only for reasoning that was already gone, and the
+# same scenario then landed different records in the two formats, which only
+# `records_match` could see. Every other scenario writes `unavailable`, so the
+# branch with text had no cover at all.
+steps:
+  - input: work out why the loader is slow
+  - call:
+      thinking: The second call reads the same file, so the cost is the parse and not the disk.
+      text: The parse is the cost.
+  - call: {thinking: unavailable, text: Caching the parsed form removes it.}
