@@ -28,6 +28,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/apache/skywalking-ai-sessionizer/tools/debfixture"
 )
 
 func TestSourceArchiveOmitsMetadata(t *testing.T) {
@@ -94,7 +96,7 @@ func TestArchiveMetadataIsRejected(t *testing.T) {
 	if err != nil {
 		t.Skip("archive checks need the release shell")
 	}
-	for _, ext := range []string{"tgz", "zip"} {
+	for _, ext := range []string{"tgz", "zip", "deb"} {
 		for _, name := range []string{"LICENSE", "._asz", "licenses/._LICENSE", ".DS_Store", "__MACOSX/asz"} {
 			t.Run(ext+"/"+name, func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "package."+ext)
@@ -102,7 +104,16 @@ func TestArchiveMetadataIsRejected(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if ext == "zip" {
+				switch ext {
+				case "deb":
+					body, err := debfixture.Bytes("Package: asz\n", map[string]string{"usr/share/doc/asz/" + name: "x"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := f.Write(body); err != nil {
+						t.Fatal(err)
+					}
+				case "zip":
 					w := zip.NewWriter(f)
 					entry, err := w.Create(name)
 					if err != nil {
@@ -114,7 +125,7 @@ func TestArchiveMetadataIsRejected(t *testing.T) {
 					if err := w.Close(); err != nil {
 						t.Fatal(err)
 					}
-				} else {
+				default:
 					gz := gzip.NewWriter(f)
 					w := tar.NewWriter(gz)
 					if err := w.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: 1}); err != nil {

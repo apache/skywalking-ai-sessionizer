@@ -29,7 +29,8 @@ A GitHub release alone cannot provide that approval. See the
   to a full GitHub release.
 - **The container image** is a convenience. The promotion of the GitHub release starts CI's image
   job. A tag push and a default manual CI run publish no image.
-- **The Homebrew, Scoop and winget manifests** are conveniences, submitted after the release.
+- **The Homebrew, Scoop and winget manifests** and **the apt repository** are conveniences,
+  written after the release.
 
 0.3.0 is the first version to go through this process. 0.1.0 and 0.2.0 were published on GitHub
 before it, as full GitHub releases carrying binary packages that CI built. No vote was held for
@@ -47,6 +48,7 @@ GitHub releases as pre-releases, or to remove their packages, is for the PMC to 
 | [The website](#the-website) | the release manager | the downloads entry and the documentation of the version |
 | [The announcement](#the-announcement) | the release manager | the mail to the dev and announce lists |
 | [Install manifests](#install-manifests) | the release manager, once the PMC agrees to each channel | the Homebrew, Scoop and winget manifests, each submitted |
+| [The apt repository](#the-apt-repository) | the release manager | the version in the apt repository on the website |
 | [Later: remove old versions](#later-remove-old-versions) | a PMC member | the release directory without the versions the new one replaces |
 
 Between step 1 and step 2, the release manager waits for CI by hand. Nothing in the script waits.
@@ -382,6 +384,13 @@ writes nothing into `dist/$VERSION/`. The plan does not claim that prerelease as
   Code plugin, and the binary distribution's `LICENSE`, `NOTICE` and `licenses/`. Both binaries
   end in `.exe` on Windows. These packages include the renderer's two OFL fonts and their license
   texts.
+- Each Debian package is `apache-skywalking-ai-sessionizer-$VERSION-bin-<package>-<arch>.deb`, one
+  for each package in `DEB_PACKAGES` in the tag's Makefile and each Linux platform. `asz` installs
+  `/usr/bin/asz`, and `asz-claude-code` installs `/usr/bin/asz-claude-plugin`. Each holds the same
+  binary as the Linux binary package, with the same `LICENSE`, `NOTICE` and `licenses/` under
+  `/usr/share/doc/<package>/`. `tools/debpackage` writes them, so a build on macOS gives the same
+  bytes as one on Linux. `candidate` checks that each installs its binary and the licenses, and
+  that its control file names the package, `$VERSION` and the architecture of its file name.
 - Every archive has a `.sha512` checksum and an ASCII-armored detached `.asc` signature.
 
 No package carries the Claude Code plugin's manifest and hooks. Users install them from the
@@ -394,8 +403,9 @@ without cgo on Linux with its configured Go toolchain and packages with GNU tar,
 It uses `GOWORK=off` and `GOFLAGS=-mod=readonly`. Both binaries report `$VERSION` and the Go
 version used to build them. The run must pass the whole CI workflow, including package smoke
 tests on all six platforms, and on the same six the Claude Code check, which installs each package
-and the plugin as the install pages say and runs a session the plugin must record. Only then are
-its archives eligible for the candidate.
+and the plugin as the install pages say and runs a session the plugin must record. The `apt` job
+installs Debian packages with apt, in Debian and Ubuntu, on x86-64 and ARM 64. Only then are its
+archives eligible for the candidate.
 
 `make binaries` remains useful for local build checks. Those archives are not the release
 candidate. GNU and macOS archive tools can produce different bytes even from the same files, so
@@ -475,11 +485,12 @@ svn export https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer/$VER
 cd candidate
 curl -fsSLO https://dist.apache.org/repos/dist/release/skywalking/KEYS
 gpg --import KEYS
-for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "$f"; done
+for f in *.tgz *.zip *.deb; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "$f"; done
 ```
 
-1. The source package and one binary package for each platform are there, each with its `.asc`
-   and `.sha512`. The platforms are the `PLATFORMS` list in the Makefile of the tag.
+1. The source package, one binary package for each platform, and one Debian package for each
+   package in `DEB_PACKAGES` and each Linux platform are there, each with its `.asc` and `.sha512`.
+   The lists are in the Makefile of the tag.
 2. `shasum -a 512 -c` passes for each package.
 3. `gpg --verify` passes for each package, with a key from KEYS. gpg prints `Good signature`,
    and nothing about an expired or revoked key: no `[expired]` after the name, no
@@ -583,6 +594,19 @@ for f in *.tgz *.zip; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.asc" "
    CI's `packages` job runs the same script on all six packages, each on a GitHub runner of its
    own platform, on every CI run. If you use Claude Code, the unpacked `asz` can also be tried on
    your own conversations: `asz sources`, `asz collect -once`, `asz parse`, `asz verify`.
+10. On Debian or Ubuntu, a Debian package installs, and holds the binary of the Linux package:
+
+    ```sh
+    sudo apt install ./apache-skywalking-ai-sessionizer-$VERSION-bin-asz-amd64.deb
+    asz version
+    dpkg -L asz
+    sudo apt remove asz
+    ```
+
+    `asz version` must report `$VERSION`, and `dpkg -L` must list `/usr/bin/asz`, and `LICENSE`,
+    `NOTICE` and `licenses/` under `/usr/share/doc/asz/`. On any machine,
+    `tools/deb-list.sh` from the source package lists what a `.deb` installs, and
+    `tools/deb-list.sh --control` prints its control file.
 
 ### The result
 
@@ -977,8 +1001,37 @@ that `.sha512`, so the manifests describe the voted bytes. It also refuses a mac
 that lacks a file the formula installs, or that holds `asz` or the plugin's binary without its
 executable bit, because such a formula would fail for everyone on that platform.
 
-[Install](../setup/install.md) marks each package manager as not published yet. When a manifest is
-accepted for the first time, update that page with the command that installs from it.
+When a manifest is accepted for the first time, add the command that installs from it to
+[Install](../setup/install.md).
+
+## The apt repository
+
+`https://skywalking.apache.org/apt` is an apt repository: `static/apt` in apache/skywalking-website.
+It holds no package. It holds the index, which lists every released version of `asz` and
+`asz-claude-code`, signed with a key in KEYS, and a `.htaccess` that redirects each package's
+address to the voted `.deb` on the Apache download sites: the newest version through the mirrors,
+and every older one from archive.apache.org, which keeps every version. apt follows the redirect
+and checks the file against the index. The index is written after the vote from the voted packages,
+and is not voted on.
+
+After Publish, and at least one hour after the move, in a checkout of apache/skywalking-website on a
+branch from master:
+
+```sh
+GPG_USER=<your key in KEYS> tools/apt-repository.sh --from dist --check <skywalking-website>/static/apt $VERSION
+```
+
+It holds each `.deb` to its `.sha512` and its `.asc` to KEYS, installs them with apt in Debian and
+Ubuntu in docker, adds them to the index, and writes the redirects. It then signs the index with
+your key, and checks that apt would accept the signature with the keys from KEYS. Without `--from`
+it downloads released packages from the Apache sites, which is how older versions are added. Open
+a pull request on apache/skywalking-website with the change to `static/apt`. The
+`binary-distribution` skill in `.claude/skills/` does this with Claude Code, with the Homebrew
+formulae.
+
+CI's `apt` job runs `tools/apt-check.sh` on every change: it builds two versions, writes and signs
+their index, serves it with Apache httpd as the website does, and installs, downgrades, upgrades and
+removes both packages with apt.
 
 ## Later: remove old versions
 
@@ -998,6 +1051,9 @@ these:
    downloads page links the files that would be removed.
 2. The Scoop bucket names the new version. Its manifest downloads the version it names from the
    download site, and that URL stops working when the version is removed.
+3. The website pull request that adds the new version to [the apt repository](#the-apt-repository)
+   has merged. Until then, apt downloads the older version through the mirrors, from the files that
+   would be removed.
 
 The move is not repeated, and the steps after it run again. For each version older than
 `$VERSION`, it runs:

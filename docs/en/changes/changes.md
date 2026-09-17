@@ -105,6 +105,19 @@
   writes them into `Formula/` from the released packages, checks them with Homebrew first, and
   moves `asz` and `asz-claude-code` only forward. The `binary-distribution` skill runs it and opens
   the pull request.
+- **Debian packages, and an apt repository on the website.** Each release ships
+  `apache-skywalking-ai-sessionizer-VERSION-bin-asz-ARCH.deb` and `...-bin-asz-claude-code-ARCH.deb`
+  for amd64 and arm64, voted and signed with the other packages. `tools/debpackage` writes them in
+  `make binaries` from the same staged files, with the same time, owner and modes, so a rebuild
+  gives the same bytes on any machine. `https://skywalking.apache.org/apt` serves an index of every
+  released version, signed with a key in KEYS, and `.htaccess` redirects that send apt to the newest
+  version on the mirrors and to every older one on archive.apache.org. `tools/aptindex` writes the
+  index and the redirects, and `tools/apt-repository.sh` checks the released packages against their
+  `.sha512` and KEYS, adds them and signs the index; the `binary-distribution` skill runs it with the
+  Homebrew formulae. CI's `apt` job installs two versions through Apache httpd with the same
+  redirects, in Debian and Ubuntu, on amd64 and arm64. [Install](../setup/install.md) gives the
+  commands. `candidate` checks each `.deb`'s contents and control file, and `make binaries` removes
+  `.DS_Store`, `._` and `__MACOSX` files from what it packages.
 - **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
   installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
   [Install](../setup/install.md#install-script) runs them from the version's tag in one command. The

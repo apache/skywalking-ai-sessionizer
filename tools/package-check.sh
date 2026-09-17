@@ -36,6 +36,7 @@ for package in "$@"; do
         listing=$(tar -tzf "$package")
       fi ;;
     *.zip) listing=$(unzip -Z1 "$package") ;;
+    *.deb) listing=$(sh "$(dirname "$0")/deb-list.sh" "$package") ;;
     *) echo "package-check: unsupported archive $package" >&2; exit 2 ;;
   esac
   bad=$(printf '%s\n' "$listing" | grep -E '(^|/)(\._[^/]*|\.DS_Store|__MACOSX)(/|$)' || true)

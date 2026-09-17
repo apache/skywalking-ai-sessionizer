@@ -251,6 +251,7 @@ jobs:
           path: |
             dist/*.tgz
             dist/*.zip
+            dist/*.deb
             dist/*.sha512
           if-no-files-found: error
 
@@ -414,6 +415,43 @@ jobs:
           make binaries checksums VERSION=0.0.0
           tools/homebrew-check.sh 0.0.0 dist
 
+  # The Debian packages, through the apt repository the SkyWalking website
+  # serves: tools/aptindex writes the index for two versions, Apache httpd
+  # serves it with its redirects, and apt in Debian and in Ubuntu installs,
+  # downgrades, upgrades and removes them. The packages are built here with
+  # two versions of a release's form, which the index requires, for the
+  # Linux platforms only. Each runner installs its own architecture.
+  apt:
+    name: apt ${{ matrix.arch }}
+    if: github.event_name != 'release'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      # Run by hand for a tag older than this job, the tag has no check.
+      - name: Build two versions and install them with apt
+        run: |
+          if [ ! -f tools/apt-check.sh ]; then
+            echo "::notice::this tag has no tools/apt-check.sh, so apt is not run"
+            exit 0
+          fi
+          for v in 0.0.1 0.0.2; do
+            make binaries checksums VERSION=$v PLATFORMS="linux/amd64 linux/arm64" DIST=apt/$v
+          done
+          tools/apt-check.sh apt 0.0.1 0.0.2
+
   lint:
     name: Lint
     if: github.event_name != 'release'
@@ -431,7 +469,7 @@ jobs:
   candidate-assets:
     name: Prerelease binaries
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [license, build, source-package, lint, binaries, packages, claude-code, homebrew, collector, conversation-view]
+    needs: [license, build, source-package, lint, binaries, packages, claude-code, homebrew, apt, collector, conversation-view]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -449,7 +487,8 @@ jobs:
           VERSION: ${{ needs.binaries.outputs.version }}
         run: |
           platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
-          bash tools/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" dist "$platforms"
+          debs=$(sed -nE 's/^DEB_PACKAGES[[:space:]]*:?=[[:space:]]*//p' Makefile)
+          bash tools/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" dist "$platforms" "$debs"
 
   # Candidate tags build and test their packages without publishing an image.
   # A manual image retry requires an existing public GitHub release.
@@ -548,7 +587,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, source-package, lint, docker, binaries, packages, claude-code, homebrew, collector, conversation-view, candidate-assets]
+    needs: [license, build, source-package, lint, docker, binaries, packages, claude-code, homebrew, apt, collector, conversation-view, candidate-assets]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

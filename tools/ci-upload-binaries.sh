@@ -23,7 +23,8 @@
 # failed or rejected candidate must be removed explicitly before its
 # replacement is prepared.
 set -euo pipefail
-[ "$#" -eq 6 ] || { echo 'usage: ci-upload-binaries.sh VERSION COMMIT RUN_ID RUN_ATTEMPT PKG_DIR "OS/ARCH ..."' >&2; exit 2; }
+[ "$#" -eq 6 ] || [ "$#" -eq 7 ] || { echo 'usage: ci-upload-binaries.sh VERSION COMMIT RUN_ID RUN_ATTEMPT PKG_DIR "OS/ARCH ..." ["DEB_PACKAGES"]' >&2; exit 2; }
+[ "$#" -eq 7 ] || set -- "$@" ""
 script_dir=$(cd "$(dirname "$0")" && pwd)
 python3 - "$@" "$script_dir/package-check.sh" <<'PY'
 import hashlib
@@ -60,7 +61,7 @@ def digest(path, algorithm="sha512"):
     return result.hexdigest()
 
 def main():
-    version, commit, run_id, attempt, directory, platforms, checker = sys.argv[1:]
+    version, commit, run_id, attempt, directory, platforms, deb_text, checker = sys.argv[1:]
     require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version), "invalid version")
     require(re.fullmatch(r"[0-9a-f]{40}", commit), "invalid commit")
     for identifier in (run_id, attempt):
@@ -77,6 +78,16 @@ def main():
         os_name, arch = platform.split("/")
         extension = "zip" if os_name == "windows" else "tgz"
         packages.append(f"apache-skywalking-ai-sessionizer-{version}-bin-{os_name}-{arch}.{extension}")
+    # DEB_PACKAGES in the tag's Makefile names the Debian packages, one for
+    # each Linux platform. A tag from before them passes none.
+    debs = deb_text.split()
+    require(len(debs) == len(set(debs)) and set(debs) <= {"asz", "asz-claude-code"},
+            "DEB_PACKAGES must name distinct packages among asz and asz-claude-code")
+    for name in debs:
+        for platform in pairs:
+            os_name, arch = platform.split("/")
+            if os_name == "linux":
+                packages.append(f"apache-skywalking-ai-sessionizer-{version}-bin-{name}-{arch}.deb")
     names = sorted(packages + [name + ".sha512" for name in packages])
     require({entry.name for entry in package_dir.iterdir()} == set(names), "the CI package directory has missing or extra files")
     for name in names:
