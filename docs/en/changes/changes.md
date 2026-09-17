@@ -80,3 +80,9 @@
   than every full release, and no for a patch of an older line. `--latest` and `--not-latest` answer
   without asking. The `latest` image tag follows GitHub's latest release, so one decision moves
   both. Before, the image took the highest version on its own.
+- `website.txt` is a release for `data/projects.yml`, the one file where the SkyWalking website now
+  keeps its downloads and its documentation. Before, it held entries for `data/releases.yml` and
+  `data/docs.yml`, which the website no longer has, so the 0.3.0 entries were rewritten by hand.
+  The release is marked the latest, with the Latest documentation, only when GitHub's Latest label
+  names it. A run after promotion reads the label, so its entries agree with the label too. The
+  release guide describes the new shape, and the steps `publish` prints name the new file.

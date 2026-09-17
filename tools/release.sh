@@ -943,6 +943,13 @@ if [ "$cmd" = publish ]; then
     # The run that promoted decided the label. A later run leaves it alone,
     # and says so rather than ignoring the option.
     [ -z "$latest" ] || fail "$tag was promoted by an earlier publish, which decided whether it is the latest release. Change the label by hand: gh release edit $tag --repo $release_repo --latest=<true or false>"
+    # The website entries mark the release as the latest or not, and they
+    # must agree with the label that run set, so the label is read.
+    latest_tag=$(gh release list --repo "$release_repo" --limit 1000 --json tagName,isLatest \
+      --jq '.[] | select(.isLatest) | .tagName') \
+      || fail "cannot read which GitHub release is the latest. The website entries need it. Nothing has changed"
+    if [ "$latest_tag" = "$tag" ]; then latest=true; else latest=false; fi
+    say "latest   : ${latest_tag:-no release} is the latest GitHub release"
   else
     say "$tag is a GitHub prerelease, promoted after the move"
     # Promotion does not move the Latest label by itself: CI created the
@@ -1194,60 +1201,65 @@ MAIL
     printf '%s %s' "$os" "$arch"
   }
 
-  # The shapes are those of data/releases.yml and data/docs.yml in
-  # apache/skywalking-website: a package is linked through the mirror
-  # selector, and its signature and checksum through downloads.apache.org.
+  # The shape is that of a release in data/projects.yml in
+  # apache/skywalking-website, which gives both the downloads page and the
+  # documentation. A package is linked through the mirror selector, and its
+  # signature and checksum through downloads.apache.org.
   website_entries() {
-    local d t b first=true
-    d=$(site_date "$published_on")
+    local t b
     cat <<YAML
-# data/releases.yml in apache/skywalking-website, for the downloads page.
-# The first release adds this entry to the list of "- type: Foundations",
-# after Grafana Plugins, the place data/docs.yml gives AI Sessionizer.
-# A later release puts its own items first under source and under
-# distribution, and points the links of versions no longer in the release
-# directory at https://archive.apache.org/dist/skywalking/ai-sessionizer/.
+# data/projects.yml in apache/skywalking-website, for the downloads page and
+# the documentation. Find the project whose repo is skywalking-ai-sessionizer,
+# and add this item to its list under releases.
+YAML
+    if [ "$latest" = true ]; then
+      cat <<YAML
+#
+# $tag is the latest release, as on GitHub. Put the item first. On the
+# release that was the latest before it:
+# - set latest to false,
+# - remove docs.latestLink and docs.latestCommitId, and
+# - point its link, asc and sha512 at
+#   https://archive.apache.org/dist/skywalking/ai-sessionizer/<its version>/.
+# Change nothing else in an older release.
 
-    - name: SkyWalking AI Sessionizer
-      icon: skywalking
-      description: Conversation-level observability, measurement and export for long-lived AI agents.
-      source:
-        - version: $tag
-          date: $d
-          downloadLink:
-            - name: src
-              link: $closer/$version/$pkg-$version-src.tgz
-            - name: asc
-              link: $downloads/$version/$pkg-$version-src.tgz.asc
-            - name: sha512
-              link: $downloads/$version/$pkg-$version-src.tgz.sha512
-      distribution:
-        - version: $tag
-          date: $d
-          downloadLink:
+          - version: $tag
+            latest: true
+            docs:
+              link: /docs/skywalking-ai-sessionizer/$tag/readme/
+              commitId: $commit
+              latestLink: /docs/skywalking-ai-sessionizer/latest/readme/
+              latestCommitId: $commit
+YAML
+    else
+      cat <<YAML
+#
+# $tag is not the latest release, as on GitHub. Put the item after every
+# newer release, and change no other release.
+
+          - version: $tag
+            latest: false
+            docs:
+              link: /docs/skywalking-ai-sessionizer/$tag/readme/
+              commitId: $commit
+YAML
+    fi
+    cat <<YAML
+            downloads:
+              - name: Source archive
+                type: source
+                link: $closer/$version/$pkg-$version-src.tgz
+                asc: $downloads/$version/$pkg-$version-src.tgz.asc
+                sha512: $downloads/$version/$pkg-$version-src.tgz.sha512
 YAML
     for t in $platforms; do
       b=$(binary_package "$t")
-      if [ "$first" = false ]; then printf '            - name: "|"\n'; fi
-      first=false
-      printf '            - name: %s\n              link: %s\n' "$(platform_name "$t")" "$closer/$version/$b"
-      printf '            - name: asc\n              link: %s\n' "$downloads/$version/$b.asc"
-      printf '            - name: sha512\n              link: %s\n' "$downloads/$version/$b.sha512"
+      printf '              - name: %s\n                type: binary\n' "$(platform_name "$t")"
+      printf '                link: %s\n' "$closer/$version/$b"
+      printf '                asc: %s\n' "$downloads/$version/$b.asc"
+      printf '                sha512: %s\n' "$downloads/$version/$b.sha512"
     done
-    cat <<YAML
-
-# data/docs.yml in apache/skywalking-website, for the documentation. The
-# AI Sessionizer entry is there already, with Next only. Put these items
-# right after Next. A later release sets the commitId of Latest to its own
-# commit and puts its own item right after Latest.
-
-        - version: Latest
-          link: /docs/skywalking-ai-sessionizer/latest/readme/
-          commitId: $commit
-        - version: $tag
-          link: /docs/skywalking-ai-sessionizer/$tag/readme/
-          commitId: $commit
-YAML
+    printf '            date: %s\n' "$(site_date "$published_on")"
   }
 
   announce_mail > "$out/announce.txt"
@@ -1269,8 +1281,9 @@ YAML
   say "----"
   say "Next, in this order:"
   say "  1. At least one hour after the move, as the ASF release policy asks, open a pull"
-  say "     request on apache/skywalking-website with $out/website.txt: the downloads entry"
-  say "     in data/releases.yml and the $tag documentation in data/docs.yml."
+  say "     request on apache/skywalking-website with $out/website.txt: the $tag release"
+  say "     in data/projects.yml, which gives its downloads and its documentation. Add the"
+  say "     release post under content/events/ in the same pull request."
   say "  2. Once the website lists $version, and at least one hour after the move, send"
   say "     $out/announce.txt to dev@skywalking.apache.org and announce@apache.org, as plain"
   say "     text from your apache.org address. Sign it with your release key if your mail"

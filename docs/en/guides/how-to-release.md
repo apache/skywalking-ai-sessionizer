@@ -677,6 +677,9 @@ It does these steps in order.
    ```sh
    gh release edit v$VERSION --repo apache/skywalking-ai-sessionizer --latest=true
    ```
+
+   On a promoted release, it reads which release the label names, because the website entries
+   must say whether `$VERSION` is the latest. A label changed by hand is followed too.
 3. **Find the candidate:**
 
    ```sh
@@ -745,8 +748,9 @@ It does these steps in order.
    and resumes here. A release promoted already is not promoted again.
 8. **Write the files for the later steps** into `dist/$VERSION/`:
    - `announce.txt`, the announcement mail.
-   - `website.txt`, the entries for the website. They carry the day of the move, as svn records
-     it in UTC, so a later run of `publish` writes the same date.
+   - `website.txt`, the release for `data/projects.yml` on the website. It is marked the latest
+     release only when GitHub's label names `v$VERSION`. It carries the day of the move, as svn
+     records it in UTC, so a later run of `publish` writes the same date.
    - `install/`, the install manifests. It removes the old `install/` first, then runs
      `tools/install-manifests.sh $VERSION dist/$VERSION dist/$VERSION/install`. If that script
      fails, the move and the promotion are still done. Fix the script and run `publish` again: it
@@ -803,69 +807,59 @@ gh workflow run ci.yaml --repo apache/skywalking-ai-sessionizer --ref v$VERSION 
 Wait at least one hour after the move, as the
 [ASF release policy](https://www.apache.org/legal/release-policy.html) asks before a download page
 changes. Then open a pull request on
-[apache/skywalking-website](https://github.com/apache/skywalking-website) with the entries in
-`dist/$VERSION/website.txt`:
+[apache/skywalking-website](https://github.com/apache/skywalking-website) with the release in
+`dist/$VERSION/website.txt`.
 
-- **`data/releases.yml`**, the downloads page. The first release adds the whole entry to the list
-  under `- type: Foundations`, after Grafana Plugins, which is where `data/docs.yml` lists AI
-  Sessionizer. A later release puts its own items first under `source` and under `distribution`.
-  It also points the links of versions no longer in the release directory at
-  `https://archive.apache.org/dist/skywalking/ai-sessionizer/`.
-- **`data/docs.yml`**, the documentation. The AI Sessionizer entry there lists Next only. Put the
-  `Latest` and `v$VERSION` items right after Next. A later release sets the `commitId` of Latest
-  to its own commit, and puts its own item right after Latest.
+The website keeps every project in one file, `data/projects.yml`. A release there gives both the
+downloads page and the documentation of its version. Find the project whose `repo` is
+`skywalking-ai-sessionizer`, and add the release to its list under `releases`. The project must
+have exactly one release with `latest: true`. `website.txt` follows GitHub's Latest label, which
+[Publish](#3-publish) set, and says which of these two cases the version is:
 
-By hand, the entry in `data/releases.yml` is:
+- **The latest release.** Put it first, with `latest: true`. Its `docs` carry `latestLink` and
+  `latestCommitId`, and they make the Latest documentation. On the release that was the latest
+  before it, set `latest` to `false`, remove `docs.latestLink` and `docs.latestCommitId`, and point
+  its `link`, `asc` and `sha512` at `https://archive.apache.org/dist/skywalking/ai-sessionizer/`.
+  Change nothing else in an older release.
+- **Not the latest release**, such as a patch of an older line. Put it after every newer release,
+  with `latest: false` and no Latest documentation. Change no other release.
 
-```yaml
-    - name: SkyWalking AI Sessionizer
-      icon: skywalking
-      description: Conversation-level observability, measurement and export for long-lived AI agents.
-      source:
-        - version: v$VERSION
-          date: Sep. 11th, 2026
-          downloadLink:
-            - name: src
-              link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz
-            - name: asc
-              link: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz.asc
-            - name: sha512
-              link: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz.sha512
-      distribution:
-        - version: v$VERSION
-          date: Sep. 11th, 2026
-          downloadLink:
-            - name: MacOS ARM64
-              link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz
-            - name: asc
-              link: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.asc
-            - name: sha512
-              link: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.sha512
-            - name: "|"
-            # The same three items for each other platform, in the order of PLATFORMS, with an
-            # item named "|" between two platforms: MacOS AMD64, Linux AMD64, Linux ARM64,
-            # Windows AMD64 and Windows ARM64.
-```
-
-The items in `data/docs.yml` are:
+By hand, the release when it is the latest is:
 
 ```yaml
-        - version: Latest
-          link: /docs/skywalking-ai-sessionizer/latest/readme/
-          commitId: <commit hash of v$VERSION>
-        - version: v$VERSION
-          link: /docs/skywalking-ai-sessionizer/v$VERSION/readme/
-          commitId: <commit hash of v$VERSION>
+          - version: v$VERSION
+            latest: true
+            docs:
+              link: /docs/skywalking-ai-sessionizer/v$VERSION/readme/
+              commitId: <commit hash of v$VERSION>
+              latestLink: /docs/skywalking-ai-sessionizer/latest/readme/
+              latestCommitId: <commit hash of v$VERSION>
+            downloads:
+              - name: Source archive
+                type: source
+                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz
+                asc: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz.asc
+                sha512: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-src.tgz.sha512
+              - name: MacOS ARM64
+                type: binary
+                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz
+                asc: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.asc
+                sha512: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.sha512
+              # The same four lines for each other platform, in the order of PLATFORMS:
+              # MacOS AMD64, Linux AMD64, Linux ARM64, Windows AMD64 and Windows ARM64.
+            date: Sep. 17th, 2026
 ```
 
 The date is the day of the move, as svn records it in UTC, in the form the website uses. A later
 run of `publish` writes the same date. The packages are linked through closer.lua, which the
-[ASF rules for download pages](https://infra.apache.org/release-download-pages.html) require.
+[ASF rules for download pages](https://infra.apache.org/release-download-pages.html) require. The
+commit of the documentation is the commit the tag names, and the website builds the documentation
+of `v$VERSION` and of Latest from it.
 
 The website also posts news of each SkyWalking release under `content/events/`, and the script
-does not write that post. `content/events/release-apache-skywalking-mcp-0-2-0/index.md` in the
-website repository shows the shape: a title, a date, a link to the downloads page, what changed,
-and the release packages. It can go in the same pull request.
+does not write that post. `content/events/release-apache-skywalking-ai-sessionizer-0-3-0/index.md`
+in the website repository shows the shape: a title, a date, a link to the downloads page, and what
+changed, with a link to the milestone at the end. It can go in the same pull request.
 
 Wait until the website is deployed and its downloads page lists the version before the
 announcement. The mail links the downloads page and the documentation.

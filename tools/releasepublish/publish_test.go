@@ -479,6 +479,75 @@ func TestPublishAsksWhetherTheVersionBecomesLatest(t *testing.T) {
 			if got := f.state().Latest; got != tc.latest {
 				t.Fatalf("promoted with --latest=%s, want %s", got, tc.latest)
 			}
+			f.requireWebsiteLatest(tc.latest == "true")
+		})
+	}
+}
+
+// The website entries are a release of data/projects.yml in
+// apache/skywalking-website. They mark the release as the latest only when
+// GitHub's label does, and only the latest release carries the Latest
+// documentation.
+func (f *fixture) requireWebsiteLatest(latest bool) {
+	f.t.Helper()
+	text := string(f.read("dist/" + version + "/website.txt"))
+	pkg := "apache-skywalking-ai-sessionizer-" + version
+	for _, want := range []string{
+		"data/projects.yml",
+		"          - version: v" + version + "\n",
+		"              link: /docs/skywalking-ai-sessionizer/v" + version + "/readme/\n",
+		"              - name: Source archive\n                type: source\n" +
+			"                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/" + version + "/" + pkg + "-src.tgz\n" +
+			"                asc: https://downloads.apache.org/skywalking/ai-sessionizer/" + version + "/" + pkg + "-src.tgz.asc\n" +
+			"                sha512: https://downloads.apache.org/skywalking/ai-sessionizer/" + version + "/" + pkg + "-src.tgz.sha512\n",
+		"              - name: Linux AMD64\n                type: binary\n" +
+			"                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-linux-amd64.tgz\n",
+		"            date: Sep. 15th, 2026\n",
+	} {
+		if !strings.Contains(text, want) {
+			f.t.Fatalf("website.txt has no %q:\n%s", want, text)
+		}
+	}
+	for _, stale := range []string{"releases.yml", "docs.yml", "downloadLink"} {
+		if strings.Contains(text, stale) {
+			f.t.Fatalf("website.txt still has the retired shape %q:\n%s", stale, text)
+		}
+	}
+	marked := strings.Contains(text, "            latest: true\n")
+	if marked != latest || strings.Contains(text, "            latest: false\n") == latest {
+		f.t.Fatalf("website.txt marks the release latest=%v, want %v:\n%s", marked, latest, text)
+	}
+	if strings.Contains(text, "latestLink: /docs/skywalking-ai-sessionizer/latest/readme/") != latest {
+		f.t.Fatalf("website.txt gives the Latest documentation=%v, want %v:\n%s", !latest, latest, text)
+	}
+}
+
+// A later run cannot be told whether the release is the latest, so it reads
+// the label the promoting run set, and the website entries agree with it.
+func TestPublishAfterPromotionReadsTheLatestLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		released []string
+		args     []string
+		latest   bool
+	}{
+		{name: "latest", released: []string{"v0.2.0"}, latest: true},
+		{name: "not-latest", released: []string{"v0.4.0"}, args: []string{"--not-latest"}, latest: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.setState(releaseState{Exists: true, Prerelease: true, Released: tc.released})
+			if output, err := f.run(tc.args...); err != nil {
+				t.Fatalf("publish: %v\n%s", err, output)
+			}
+			if err := os.Remove(filepath.Join(f.dir, "dist", version, "website.txt")); err != nil {
+				t.Fatal(err)
+			}
+			if output, err := f.run(); err != nil {
+				t.Fatalf("second publish: %v\n%s", err, output)
+			}
+			f.requirePublished()
+			f.requireWebsiteLatest(tc.latest)
 		})
 	}
 }
@@ -616,6 +685,14 @@ if args[:2] == ["release", "list"]:
     tags = list(state.get("released") or [])
     if state["exists"] and not state["prerelease"]:
         tags.append(tag)
+    if "isLatest" in args[args.index("--json") + 1]:
+        # GitHub's Latest label: this release when its promotion said so,
+        # and otherwise the newest of the others.
+        if tag in tags and state.get("latest") == "true":
+            tags = [tag]
+        else:
+            others = [t for t in tags if t != tag]
+            tags = [max(others, key=lambda t: [int(n) for n in t[1:].split(".")])] if others else []
     for t in tags:
         print(t)
     sys.exit(0)
