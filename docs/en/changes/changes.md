@@ -72,6 +72,35 @@
   feed still picks up each session as it arrives. A directory an earlier build wrote without an
   interval is brought up to date instead of refused.
 
+## Install
+
+- **The Claude Code plugin installs from a marketplace.** 0.3.0 told users to run
+  `claude --plugin-dir` on the packaged plugin, which Claude Code keeps for one session only, so the
+  next plain `claude` recorded nothing and said nothing. The repository now carries
+  `.claude-plugin/marketplace.json`, and `claude plugin marketplace add` at a version's tag, then
+  `claude plugin install asz-changes@skywalking-ai-sessionizer`, keeps the plugin installed across
+  sessions. The manifest and the hooks moved to `plugins/claude-code/plugin/`, which holds only what
+  Claude Code reads and its own `LICENSE` and `NOTICE`, so no Go source reaches a user's plugin
+  cache. The manifest names no version, so the version is the tag's commit and no release can leave
+  a stale one behind. [Claude Code Plugin](../setup/claude-code-plugin.md#install) gives the commands, and
+  how to upgrade without losing records asz has not collected yet: removing the marketplace deletes
+  the plugin's data directory unless the plugin is first uninstalled with `--keep-data`.
+- **The hooks run `asz-claude-plugin` by name from `PATH`**, as Anthropic's language server plugins
+  run their servers. A binary inside the plugin would have to be committed for every platform, and
+  a source release carries no compiled file. With no binary on `PATH`, Claude Code 2.1.274 reported
+  `Executable not found in $PATH` for the hook, and the tool still ran.
+- **Each binary package holds `asz` and `asz-claude-plugin` side by side**, with `LICENSE`, `NOTICE`
+  and `licenses/`, and no `claude-code-plugin/` directory. `make build` writes both to `bin/`. The
+  package smoke test finds the plugin's binary by name on `PATH`. The candidate check in
+  `tools/release.sh`, the Homebrew formula, and the Scoop and winget manifests follow the new
+  layout, and put both binaries on the path.
+- **Quick install.** [Install](../setup/install.md#quick-install) gives one block for macOS and Linux
+  and one for Windows. Each takes the version the reader sets, downloads the package through the
+  mirror selector and its `.sha512` from downloads.apache.org, stops unless they match, checks that
+  both binaries start, and installs them where the Claude Code installer puts `claude`: `~/.local/bin`,
+  or `%USERPROFILE%\.local\bin`. The shell block ran in zsh, bash and sh on macOS, and in Debian and
+  Alpine containers. The PowerShell block ran in PowerShell 7.4.7 on Linux, not yet on Windows.
+
 ## Release
 
 - `publish` asks whether the version becomes the latest GitHub release before anything moves, and

@@ -37,14 +37,24 @@ func jsonString(s string) string {
 	return string(b)
 }
 
+// pluginDir is the directory a marketplace installs. It holds only what
+// Claude Code reads and the legal files, so no Go source is copied into a
+// user's plugin cache.
+const pluginDir = "plugin"
+
 // TestHooksRunTheBinaryWithoutAShell holds hooks/hooks.json to the exec
 // form: the binary as the command and hook as its one argument. Without
 // "args", Claude Code hands the command to a shell, and on Windows without
 // Git Bash that shell is PowerShell. PowerShell cannot parse a quoted path
 // followed by a word, so every hook failed before the plugin started. With
 // "args", Claude Code starts the binary itself, on every platform.
+//
+// The command is the bare name, which Claude Code looks up on PATH, as
+// Anthropic's own language server plugins do. The binary is installed with
+// asz, not inside the plugin, so one package installs both and the plugin
+// directory holds no binary.
 func TestHooksRunTheBinaryWithoutAShell(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("hooks", "hooks.json"))
+	data, err := os.ReadFile(filepath.Join(pluginDir, "hooks", "hooks.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +76,7 @@ func TestHooksRunTheBinaryWithoutAShell(t *testing.T) {
 		for _, g := range groups {
 			for _, h := range g.Hooks {
 				n++
-				if h["type"] != "command" || h["command"] != "${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin" || !reflect.DeepEqual(h["args"], []any{"hook"}) {
+				if h["type"] != "command" || h["command"] != "asz-claude-plugin" || !reflect.DeepEqual(h["args"], []any{"hook"}) {
 					t.Errorf("%s: %v is not the binary with the one argument hook", event, h)
 				}
 				// Claude Code ignores a shell when args is set, so naming one
@@ -79,6 +89,88 @@ func TestHooksRunTheBinaryWithoutAShell(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("hooks/hooks.json holds no hook")
+	}
+}
+
+// TestTheMarketplaceInstallsThePlugin reads .claude-plugin/marketplace.json
+// at the repository root, which is what claude plugin marketplace add reads.
+// A marketplace without owner.name, or an entry whose source is not the
+// plugin directory, fails when a user adds it, and nothing here would run.
+//
+// Neither file sets a version. A version pins the plugin to that string, and
+// Claude Code then offers no update until the string changes, so a version
+// left behind by a release would hold every user on it. Without one, the
+// version is the commit the marketplace was added at, which is the release
+// tag the install instructions name.
+func TestTheMarketplaceInstallsThePlugin(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var market struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Name string `json:"name"`
+		} `json:"owner"`
+		Plugins []map[string]any `json:"plugins"`
+	}
+	readJSON(t, filepath.Join(root, ".claude-plugin", "marketplace.json"), &market)
+	if market.Name != "skywalking-ai-sessionizer" || market.Owner.Name == "" {
+		t.Errorf("marketplace %q, owner %q: the documented install names skywalking-ai-sessionizer, and Claude Code requires an owner", market.Name, market.Owner.Name)
+	}
+	if len(market.Plugins) != 1 {
+		t.Fatalf("the marketplace lists %d plugins, want asz-changes alone", len(market.Plugins))
+	}
+	entry := market.Plugins[0]
+	if entry["name"] != "asz-changes" || entry["source"] != "./plugins/claude-code/"+pluginDir {
+		t.Errorf("entry %v is not asz-changes from ./plugins/claude-code/%s", entry, pluginDir)
+	}
+	if _, ok := entry["version"]; ok {
+		t.Errorf("the marketplace entry sets a version")
+	}
+
+	var manifest map[string]any
+	readJSON(t, filepath.Join(pluginDir, ".claude-plugin", "plugin.json"), &manifest)
+	if manifest["name"] != "asz-changes" {
+		t.Errorf("plugin.json names %v, and the marketplace entry names asz-changes", manifest["name"])
+	}
+	if _, ok := manifest["version"]; ok {
+		t.Errorf("plugin.json sets a version")
+	}
+
+	// A marketplace install copies this directory alone, so it carries its
+	// own copy of the project's license and notice.
+	for _, name := range []string{"LICENSE", "NOTICE"} {
+		want, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(pluginDir, name))
+		if err != nil || string(got) != string(want) {
+			t.Errorf("%s/%s is not the repository's %s: %v", pluginDir, name, name, err)
+		}
+	}
+
+	// Anything else in the directory would be copied into every user's
+	// plugin cache.
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		switch e.Name() {
+		case ".claude-plugin", "hooks", "LICENSE", "NOTICE":
+		default:
+			t.Errorf("%s holds %s, which a marketplace install would copy", pluginDir, e.Name())
+		}
+	}
+}
+
+func readJSON(t *testing.T, path string, v any) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, v); err != nil {
+		t.Fatalf("%s: %v", path, err)
 	}
 }
 

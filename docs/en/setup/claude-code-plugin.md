@@ -5,8 +5,9 @@ as a set of hooks, needs nothing from asz, and leaves one JSON line per observed
 data directory. asz collects those lines the way it collects Claude Code's own transcripts, and
 the conversation page shows each change beside the step that made it.
 
-The plugin is named `asz-changes`. Its code is under `plugins/claude-code/` in the repository,
-and its binary, `asz-claude-plugin`, ships beside `asz` in every binary package.
+The plugin is named `asz-changes`. Its code is under `plugins/claude-code/` in the repository, and
+what Claude Code installs, the manifest and the hooks, is under `plugins/claude-code/plugin/`. Its
+binary, `asz-claude-plugin`, ships beside `asz` in every binary package.
 
 ## What is recorded, and by whom
 
@@ -34,22 +35,138 @@ window open at the same time sees it as shared with the edit and names it.
 
 ## Install
 
-The binary package for your platform holds `claude-code-plugin/`: the plugin's manifest, its
-hooks, and its binary under `bin/`. [Install](install.md) says where to get the package, and
-where each package manager puts this directory. Point Claude Code at it:
+The plugin comes in two parts, and each has its own step. Both steps use the same version.
+
+1. **The binary.** `asz-claude-plugin` is in every binary package beside `asz`, and
+   [Quick install](install.md#quick-install) puts both on your `PATH`. The hooks run the binary by
+   its name, so Claude Code must find it on the `PATH` it starts with.
+2. **The plugin.** Claude Code installs the manifest and the hooks from the marketplace in the asz
+   repository. Set the version first, the same one as the binary: `VERSION=<version>` in a shell,
+   or `$Version = "<version>"` in PowerShell. Then, in a shell:
+
+   ```sh
+   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin &&
+     claude plugin install asz-changes@skywalking-ai-sessionizer
+   ```
+
+   or in PowerShell:
+
+   ```powershell
+   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$Version" --sparse .claude-plugin plugins/claude-code/plugin
+   if ($LASTEXITCODE -eq 0) { claude plugin install asz-changes@skywalking-ai-sessionizer }
+   ```
+
+The address ends with the version's tag, so the hooks Claude Code installs are the ones released
+with that binary, not whatever the default branch holds later. It is an HTTPS address because
+Claude Code clones a GitHub `owner/repo` shorthand over SSH, which fails on a machine with no SSH
+key for GitHub. `--sparse` keeps most of the repository out of the clone, though git still checks
+out the files beside each directory it names. What Claude Code copies into its plugin cache is the
+plugin's own directory alone: the manifest, the hooks, `LICENSE` and `NOTICE`, and no binary. The manifest names no version, so Claude Code shows the tag's commit as
+the plugin's version.
+
+Claude Code sets `CLAUDE_PLUGIN_DATA` for the plugin's hooks and creates the directory it names,
+`~/.claude/plugins/data/asz-changes-skywalking-ai-sessionizer/`, under `CLAUDE_CONFIG_DIR` when that
+is set. The plugin keeps its state and its output there. Nothing else is configured, and asz need
+not be installed for the plugin to record. asz collects the output when it runs.
+
+To check the two parts:
 
 ```sh
-claude --plugin-dir /path/to/claude-code-plugin
+asz-claude-plugin version
+claude plugin list
 ```
 
-or add it to your Claude Code settings the way the Claude Code documentation describes for a
-local plugin. Claude Code sets `CLAUDE_PLUGIN_DATA` for the plugin's hooks and creates the
-directory it names, `~/.claude/plugins/data/asz-changes-<marketplace>/`, which is where the
-plugin keeps its state and its output. Nothing else is configured, and asz need not be installed.
+A hook whose binary Claude Code cannot find never stops a tool, and records nothing. Claude Code
+2.1.274 reported `Executable not found in $PATH: "asz-claude-plugin"` for the session's start and
+end hooks, and the shell command in that session ran. When Claude Code reports that while
+`asz-claude-plugin version` works in your terminal, Claude Code started with another `PATH`. Restart
+it from that terminal. When no hook error is reported and a shell command still leaves no record,
+look in the plugin's `log/plugin.log` in its data directory: a hook that fails inside the plugin
+writes there and exits 0. An `Edit` or `Write` on the main stream leaves no plugin record by design,
+because Claude Code records that change itself.
 
-To build the plugin from a checkout, `make build` puts the binary at
-`plugins/claude-code/bin/asz-claude-plugin`, where `hooks/hooks.json` expects it, so
-`claude --plugin-dir plugins/claude-code` runs the checkout's plugin.
+### Upgrade
+
+Install the binary of the new version first, with [Quick install](install.md#quick-install) and the
+new version set. Then move the plugin to the same version, in a shell:
+
+```sh
+(
+  set -eu
+  : "${VERSION:?set VERSION to the version to move to}"
+  claude plugin uninstall asz-changes@skywalking-ai-sessionizer --keep-data
+  claude plugin marketplace remove skywalking-ai-sessionizer
+  claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin
+  claude plugin install asz-changes@skywalking-ai-sessionizer
+)
+```
+
+or in PowerShell:
+
+```powershell
+& {
+  if (-not $Version) { throw "set `$Version to the version to move to" }
+  $Steps = @(
+    @("plugin", "uninstall", "asz-changes@skywalking-ai-sessionizer", "--keep-data"),
+    @("plugin", "marketplace", "remove", "skywalking-ai-sessionizer"),
+    @("plugin", "marketplace", "add", "https://github.com/apache/skywalking-ai-sessionizer.git#v$Version", "--sparse", ".claude-plugin", "plugins/claude-code/plugin"),
+    @("plugin", "install", "asz-changes@skywalking-ai-sessionizer"))
+  foreach ($Step in $Steps) {
+    & claude @Step
+    if ($LASTEXITCODE -ne 0) { throw "claude $Step failed, so the steps after it did not run" }
+  }
+}
+```
+
+Each step is needed, in this order, and each block stops at the first step that fails. Claude Code
+2.1.274 refused to add the marketplace again at another tag while it was declared at the first one.
+Removing a marketplace uninstalls its plugins, and uninstalling a plugin deletes its data directory,
+which holds the plugin's settings and every record asz has not collected yet. `--keep-data` keeps
+that directory, and the new version goes on writing into it. If adding the marketplace fails, for
+example with no network, the plugin stays uninstalled with its data kept. Run the last two steps
+again.
+
+The blocks move a plugin installed at the default scope, `user`, which is where [Install](#install)
+puts it. Removing the marketplace removes it from every scope. If you also installed the plugin at
+the `project` or `local` scope, uninstall it there with `--keep-data` and `--scope` first.
+
+### Remove
+
+```sh
+claude plugin uninstall asz-changes@skywalking-ai-sessionizer
+claude plugin marketplace remove skywalking-ai-sessionizer
+```
+
+The uninstall deletes the data directory. Let asz collect first, or pass `--keep-data`.
+
+### From 0.3.0
+
+0.3.0 packaged the whole plugin and ran it with `claude --plugin-dir`, which lasts for one session.
+Its data directory is `asz-changes-inline`. asz still collects that directory, because it collects
+every directory named `asz-changes` or `asz-changes-<marketplace>`. The settings do not move by
+themselves. If you wrote a `settings.yaml` for 0.3.0, copy it before the first session with the
+installed plugin:
+
+```sh
+(
+  D=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/data
+  if [ -f "$D/asz-changes-inline/settings.yaml" ] && [ ! -e "$D/asz-changes-skywalking-ai-sessionizer/settings.yaml" ]; then
+    mkdir -p "$D/asz-changes-skywalking-ai-sessionizer"
+    cp "$D/asz-changes-inline/settings.yaml" "$D/asz-changes-skywalking-ai-sessionizer/"
+  fi
+)
+```
+
+### From a checkout
+
+`make build` writes `bin/asz` and `bin/asz-claude-plugin`. To run the checkout's plugin, put `bin`
+first on `PATH` and load the plugin's directory for one session:
+
+```sh
+PATH="$PWD/bin:$PATH" claude --plugin-dir plugins/claude-code/plugin
+```
+
+Its data directory is `asz-changes-inline`.
 
 `asz-claude-plugin status`, with `CLAUDE_PLUGIN_DATA` set, prints the settings in force and the
 exclusion rules they expand to.
@@ -272,20 +389,27 @@ It never stops the tool.
 
 ## The hook command
 
-`hooks/hooks.json` gives every hook the binary as its command and `hook` as its one argument:
+`hooks/hooks.json` gives every hook the binary's name as its command and `hook` as its one argument:
 
 ```json
-{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin", "args": ["hook"], "timeout": 60}
+{"type": "command", "command": "asz-claude-plugin", "args": ["hook"], "timeout": 60}
 ```
 
 The Claude Code [hooks reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
-says that when a hook has `args`, Claude Code starts `command` directly, with `args` as its
-arguments and no shell, and that no shell splits the command into words on any platform. It also
-says the plugin's directory replaces `${CLAUDE_PLUGIN_ROOT}` as plain text that no shell reads, so
-a space, an apostrophe or a `$` in that path passes through unchanged. Claude Code 2.1.260 ran the
-hooks in this form on macOS. It has not run them on Windows.
+says that when a hook has `args`, Claude Code resolves `command` as an executable on `PATH` and
+starts it directly, with `args` as its arguments and no shell, and that no shell splits the command
+into words on any platform. Claude Code 2.1.274 ran the hooks in this form on macOS. It has not run
+them on Windows.
 
-The plugin used to give one command line and no `args`:
+The command is a name and not a path inside the plugin, because the binary is installed with asz
+and the plugin holds none. Anthropic's language server plugins for Claude Code name their servers
+the same way, `gopls` for Go, and ask for the server to be installed on `PATH` first. Up to 0.3.0,
+the package carried the binary inside the plugin, and the command was
+`${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin`. A marketplace installs a plugin from the repository,
+so a plugin that held the binary would need a built copy for every platform committed there, and
+an Apache source release carries no compiled file.
+
+Before that, the plugin gave one command line and no `args`:
 `"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin" hook`. The hooks reference says Claude Code runs
 such a line in a shell, and that on Windows without Git Bash the shell is PowerShell. PowerShell's
 own documentation, in `about_Operators`, says a quoted path is shown as a string, not run, unless
@@ -307,7 +431,7 @@ unavailable.
 Each of these was read from a run of Claude Code 2.1.260 with a logging plugin, not from
 documentation:
 
-- `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` loads and fires.
+- A `hooks/hooks.json` that names `${CLAUDE_PLUGIN_ROOT}` loads and fires.
 - Every tool event carries `session_id`, `tool_use_id`, `tool_input` and `cwd`.
 - Every event inside a subagent carries `agent_id`. It is the id in the subagent transcript's file
   name.
@@ -336,6 +460,27 @@ hook ran the binary with no argument. A binary without the no-argument rule abov
 text and exited 2, and Claude Code blocked the shell command. The current binary ran as `hook` and
 recorded the change. In both forms, Claude Code handed each hook its event on a socket.
 
+On 2026-09-17, Claude Code 2.1.274 on macOS installed the plugin the way [Install](#install) says,
+with a configuration directory of its own. The repository was served from the same machine over
+HTTP with a tag on the change, because Claude Code refused a `file://` address as a marketplace
+source. The marketplace was added at the tag with `--sparse`, and the plugin installed. The plugin
+cache held `.claude-plugin/plugin.json`, `hooks/hooks.json`, `LICENSE` and `NOTICE`, under a
+directory named for the tag's commit. A headless session, with a local program answering as the
+Messages API does, ran one shell command that wrote a file:
+
+- With `asz-claude-plugin` on `PATH`, the hooks ran it by name. Its record in
+  `asz-changes-skywalking-ai-sessionizer/output/<session-id>/main.jsonl` named the file as created,
+  and `asz collect` landed the record under the session's main stream.
+- With no `asz-claude-plugin` on `PATH`, the session's start hook reported
+  `Executable not found in $PATH: "asz-claude-plugin"`, and so did its end hook. The shell command
+  ran, and no record was written.
+
+For an upgrade, a second tag was made on a changed `hooks/hooks.json`. Adding the marketplace at the
+second tag was refused while it was declared at the first. Removing the marketplace uninstalled the
+plugin and deleted its data directory, with its `settings.yaml` and an output file in it.
+Uninstalling with `--keep-data` first, then removing the marketplace, adding it at the second tag
+and installing, kept both files, and the cache then held the changed hooks.
+
 On Windows the plugin has run only outside Claude Code. CI's `packages` job runs
 `tools/package-smoke.sh` on each binary package, on a runner of the package's own platform. On
 2026-09-11, the CI of pull request #6 ran it on `windows-latest`, x86-64, and on `windows-11-arm`,
@@ -350,19 +495,21 @@ plugin's own tests on each system. Neither has run on Windows yet.
 
 Claude Code itself has not run the hooks on Windows. The hooks reference says a hook with `args`
 uses no shell and ignores `shell`, so whether Git Bash is installed should not matter. That has
-not been tried. It is also unknown whether the binary starts at all. The Windows packages hold
-`bin\asz-claude-plugin.exe`, and `hooks/hooks.json` names `bin/asz-claude-plugin`. The hooks
-reference says that on Windows, `command` must resolve to a real executable, such as a `.exe`. It
-does not say whether a path without `.exe` resolves to one.
+not been tried. It is also unknown whether the binary starts at all. `hooks/hooks.json` names
+`asz-claude-plugin`, and the file on Windows is `asz-claude-plugin.exe`. The hooks reference says
+that on Windows, `command` must resolve to a real executable, such as a `.exe`. It does not say
+whether a name without `.exe` resolves to one. The package smoke test now looks the binary up by
+that name, through Git Bash on Windows, which is not how Claude Code looks it up, and it has not
+run on Windows yet.
 
 To find out, on Windows x86-64 or ARM 64:
 
-1. Unpack the package for the machine, and start Claude Code with
-   `claude --plugin-dir <package>\claude-code-plugin`.
+1. Install the binary and the plugin as [Install](#install) says, and restart Claude Code.
 2. Ask for one shell command that writes a file.
-3. Look in the plugin's data directory. For a plugin loaded with `--plugin-dir`, Claude Code 2.1.260
-   on macOS put it at `plugins/data/asz-changes-inline` under its configuration directory. A record
-   in `output\<session-id>\main.jsonl` there that names the file means the hooks work. If
-   `log\plugin.log` does not exist, the binary never started. The likely cause is that the name did
-   not resolve, and then the Windows packages need a `hooks/hooks.json` of their own that names
-   `asz-claude-plugin.exe`.
+3. Look in `%USERPROFILE%\.claude\plugins\data\asz-changes-skywalking-ai-sessionizer`. A record in
+   `output\<session-id>\main.jsonl` there that names the file means the hooks work.
+4. Without a record, start Claude Code with `claude --debug hooks` from a terminal where
+   `Get-Command asz-claude-plugin` finds `asz-claude-plugin.exe`, and repeat step 2. If Claude Code
+   still reports `Executable not found in $PATH` for `asz-claude-plugin`, the name without `.exe` did
+   not resolve, and the plugin would need a hooks file for Windows that names `asz-claude-plugin.exe`.
+   If it reports no hook error, read `log\plugin.log` in the data directory.

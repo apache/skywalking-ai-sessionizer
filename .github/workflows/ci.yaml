@@ -98,7 +98,7 @@ jobs:
       - name: Build
         run: |
           go build -o bin/ ./cmd/asz
-          go build -o plugins/claude-code/bin/ ./plugins/claude-code
+          go build -o bin/ ./plugins/claude-code
       # The suite is split so a failure names which layer broke. The race
       # detector needs a C toolchain, which the Windows runner does not put on
       # its path, so Windows runs without it. The tests of the command and of
@@ -241,7 +241,7 @@ jobs:
         run: |
           dist/build/linux-amd64/asz version
           if [ -d plugins/claude-code ]; then
-            dist/build/linux-amd64/claude-code-plugin/bin/asz-claude-plugin version
+            dist/build/linux-amd64/asz-claude-plugin version
           else
             echo "::notice::this tree has no Claude Code plugin, so no plugin binary was run"
           fi

@@ -118,12 +118,11 @@ trap 'rm -rf "$tmp"' EXIT
 # GNU tar and in bsdtar.
 for f in $tgz; do
   tar -tvzf "$pkg_dir/$f" > "$tmp/tgz.list" 2>/dev/null || fail "$f is not a gzip tar archive"
-  for p in asz claude-code-plugin/bin/asz-claude-plugin LICENSE NOTICE \
-           claude-code-plugin/.claude-plugin/plugin.json claude-code-plugin/hooks/hooks.json; do
+  for p in asz asz-claude-plugin LICENSE NOTICE; do
     awk -v p="$p" '$NF == p { found = 1 } END { exit !found }' "$tmp/tgz.list" ||
       fail "$f does not hold $p at its root, where the Homebrew formula expects it"
   done
-  for p in asz claude-code-plugin/bin/asz-claude-plugin; do
+  for p in asz asz-claude-plugin; do
     awk -v p="$p" '$NF == p && $1 ~ /^-rwx/ { found = 1 } END { exit !found }' "$tmp/tgz.list" ||
       fail "$f holds $p without its executable bit. The formula installs it as it is, so nobody could run it."
   done
@@ -131,18 +130,17 @@ for f in $tgz; do
     fail "$f holds no file under licenses/, which the formula installs beside LICENSE"
 done
 
-# Scoop runs asz.exe from the root of the package, and winget names it by
-# that relative path. The plugin notes point at claude-code-plugin beside it.
+# Scoop runs asz.exe and asz-claude-plugin.exe from the root of the package,
+# and winget names each by that relative path.
 if command -v unzip >/dev/null 2>&1; then
   for f in "$win_x64" "$win_arm64"; do
     unzip -Z1 "$pkg_dir/$f" > "$tmp/zip.list" 2>/dev/null || fail "$f is not a zip archive"
-    for p in asz.exe claude-code-plugin/bin/asz-claude-plugin.exe \
-             claude-code-plugin/.claude-plugin/plugin.json claude-code-plugin/hooks/hooks.json; do
+    for p in asz.exe asz-claude-plugin.exe; do
       grep -Fqx "$p" "$tmp/zip.list" || fail "$f does not hold $p at its root, where the Scoop and winget manifests expect it"
     done
   done
 else
-  printf '%s: unzip is not installed, so the check that each Windows package holds asz.exe at its root was skipped\n' "$me" >&2
+  printf '%s: unzip is not installed, so the check that each Windows package holds both binaries at its root was skipped\n' "$me" >&2
 fi
 
 # The winget manifest schema. 1.12.0 is the version microsoft/winget-pkgs'
@@ -262,10 +260,9 @@ class SkywalkingAiSessionizer < Formula
   end
 
   def install
-    bin.install "asz"
-    # The plugin stays whole, because hooks/hooks.json runs the binary under
-    # its own bin/.
-    libexec.install "claude-code-plugin"
+    # The Claude Code plugin's hooks run asz-claude-plugin by name, so it
+    # goes on PATH beside asz.
+    bin.install "asz", "asz-claude-plugin"
     # Homebrew keeps a formula's license files at the root of its prefix. It
     # moves LICENSE and NOTICE there by itself, but not a directory, so
     # licenses/ goes with them here. It holds the license of every module
@@ -274,18 +271,16 @@ class SkywalkingAiSessionizer < Formula
   end
 
   def caveats
-    # The opt path stays the same across upgrades, so the directory given to
-    # Claude Code keeps working after brew upgrade.
+    # The plugin comes from the marketplace at the tag of this version, so
+    # its hooks are the ones this binary was released with.
     <<~EOS
-      The Claude Code plugin, which records which files each tool call
-      changed, is installed in:
-        #{opt_libexec}/claude-code-plugin
+      asz-claude-plugin, the binary of the Claude Code plugin that records
+      which files each tool call changed, is on your PATH. To install the
+      plugin itself into Claude Code:
+        claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v#{version}" --sparse .claude-plugin plugins/claude-code/plugin
+        claude plugin install asz-changes@skywalking-ai-sessionizer
 
-      Point Claude Code at that directory:
-        claude --plugin-dir #{opt_libexec}/claude-code-plugin
-
-      or add it to your Claude Code settings the way the Claude Code
-      documentation describes for a local plugin. See:
+      See:
         https://github.com/apache/skywalking-ai-sessionizer/blob/v#{version}/docs/en/setup/claude-code-plugin.md
     EOS
   end
@@ -296,20 +291,21 @@ class SkywalkingAiSessionizer < Formula
     # agent.call, so the program does real work, not only print its version.
     assert_match "agent.call", shell_output("#{bin}/asz glossary")
 
-    plugin = libexec/"claude-code-plugin"
-    assert_path_exists plugin/".claude-plugin/plugin.json"
-    assert_path_exists plugin/"hooks/hooks.json"
-    assert_match version.to_s, shell_output("#{plugin}/bin/asz-claude-plugin version")
+    assert_match version.to_s, shell_output("#{bin}/asz-claude-plugin version")
     # Claude Code names the plugin's data directory in CLAUDE_PLUGIN_DATA.
     # status reads the settings there and compiles the exclusion rules. With
     # no settings file it takes the defaults, the set named standard-v1.
     ENV["CLAUDE_PLUGIN_DATA"] = (testpath/"plugin-data").to_s
-    assert_match "standard-v1", shell_output("#{plugin}/bin/asz-claude-plugin status")
+    assert_match "standard-v1", shell_output("#{bin}/asz-claude-plugin status")
   end
 end
 EOF
 
 # --------------------------------------------------------------------- Scoop
+# The notes name the plugin's tag as VERSION for the reader to fill in. Scoop
+# replaces only $dir, $original_dir and $persist_dir in notes, and
+# autoupdate moves the manifest to a new version without writing its notes
+# again, so a version written here would soon name an older release.
 fill > "$out_dir/scoop/skywalking-ai-sessionizer.json" <<'EOF'
 {
     "##": [
@@ -331,11 +327,15 @@ fill > "$out_dir/scoop/skywalking-ai-sessionizer.json" <<'EOF'
             "hash": "sha512:@ARM64_SHA512@"
         }
     },
-    "bin": "asz.exe",
+    "bin": [
+        "asz.exe",
+        "asz-claude-plugin.exe"
+    ],
     "notes": [
-        "The Claude Code plugin is in $dir\\claude-code-plugin.",
-        "Point Claude Code at it with: claude --plugin-dir \"$dir\\claude-code-plugin\"",
-        "Claude Code has not yet run the plugin's hooks on Windows, so the command line in hooks/hooks.json has not run there. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code. It runs the packaged plugin with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
+        "asz-claude-plugin, the binary of the Claude Code plugin, is on the path. Install the plugin itself into Claude Code with the two commands below, with VERSION replaced by the version asz version prints.",
+        "claude plugin marketplace add \"https://github.com/apache/skywalking-ai-sessionizer.git#vVERSION\" --sparse .claude-plugin plugins/claude-code/plugin",
+        "claude plugin install asz-changes@skywalking-ai-sessionizer",
+        "Claude Code has not yet run the plugin's hooks on Windows. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code, and runs the packaged plugin by name from the path with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
     ],
     "checkver": {
         "url": "https://downloads.apache.org/skywalking/ai-sessionizer/?C=N;O=D;V=1",
@@ -382,8 +382,11 @@ NestedInstallerType: portable
 NestedInstallerFiles:
 - RelativeFilePath: asz.exe
   PortableCommandAlias: asz
+- RelativeFilePath: asz-claude-plugin.exe
+  PortableCommandAlias: asz-claude-plugin
 Commands:
 - asz
+- asz-claude-plugin
 Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/apache/skywalking-ai-sessionizer/releases/download/v@VERSION@/apache-skywalking-ai-sessionizer-@VERSION@-bin-windows-amd64.zip
@@ -419,7 +422,7 @@ Tags:
 - observability
 - skywalking
 ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/changes/changes.md
-InstallationNotes: The Claude Code plugin is the claude-code-plugin folder beside asz.exe in the package's install folder. Claude Code has not yet run the plugin's hooks on Windows, so the command line in hooks/hooks.json has not run there. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code. It runs the packaged plugin with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/setup/claude-code-plugin.md
+InstallationNotes: asz-claude-plugin, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v@VERSION@" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install asz-changes@skywalking-ai-sessionizer. Claude Code has not yet run the plugin's hooks on Windows. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code, and runs the packaged plugin by name from the path with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/setup/claude-code-plugin.md
 Documentations:
 - DocumentLabel: Documentation
   DocumentUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/README.md

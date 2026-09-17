@@ -128,19 +128,17 @@ else
 fi
 
 step "Contents"
-for f in "asz$exe" LICENSE NOTICE \
-  claude-code-plugin/.claude-plugin/plugin.json claude-code-plugin/hooks/hooks.json \
-  "claude-code-plugin/bin/asz-claude-plugin$exe"; do
+for f in "asz$exe" "asz-claude-plugin$exe" LICENSE NOTICE; do
   [ -f "$dir/$f" ] || fail "the package lacks $f"
 done
 [ -n "$(ls -A "$dir/licenses" 2>/dev/null)" ] || fail "the package's licenses directory is empty"
 if [ -z "$exe" ]; then
   # A tar that drops the mode leaves a binary nobody can start.
   [ -x "$dir/asz" ] || fail "asz lost its executable bit in the archive"
-  [ -x "$dir/claude-code-plugin/bin/asz-claude-plugin" ] || fail "the plugin lost its executable bit in the archive"
+  [ -x "$dir/asz-claude-plugin" ] || fail "the plugin lost its executable bit in the archive"
 fi
 asz="$dir/asz$exe"
-plugin="$dir/claude-code-plugin/bin/asz-claude-plugin$exe"
+plugin="$dir/asz-claude-plugin$exe"
 echo "every file is there"
 
 cd "$work"
@@ -214,11 +212,20 @@ view_pid=
 echo "the list page and the conversation page answered"
 
 # The hooks run the packaged plugin the way hooks/hooks.json has Claude Code
-# run it: the binary with the one argument hook and no shell, the event on
-# standard input, the plugin's own directory and data directory in the
-# environment. A shell command that writes a file must come out as a change.
+# run it: the binary by its name, found on PATH, with the one argument hook,
+# the event on standard input, the plugin's own directory and data
+# directory in the environment. On Windows the name has no .exe, and the
+# lookup must still find the binary. A shell command that writes a file
+# must come out as a change.
 step "The Claude Code plugin"
-CLAUDE_PLUGIN_ROOT=$(native "$dir/claude-code-plugin")
+PATH="$dir:$PATH"
+found=$(command -v asz-claude-plugin || true)
+case "$found" in
+  "$dir/asz-claude-plugin" | "$dir/asz-claude-plugin$exe") ;;
+  *) fail "asz-claude-plugin on PATH is ${found:-nothing}, not the one in $dir" ;;
+esac
+plugin=asz-claude-plugin
+CLAUDE_PLUGIN_ROOT=$(native "$tree/plugins/claude-code/plugin")
 CLAUDE_PLUGIN_DATA=$(native "$work/plugin-data")
 export CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA
 "$plugin" status >/dev/null

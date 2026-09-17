@@ -29,8 +29,10 @@ LDFLAGS     := -X main.version=$(VERSION)
 
 RELEASE_NAME := apache-skywalking-ai-sessionizer-$(VERSION)-src
 
-# The Claude Code plugin: its manifest and hooks live in the tree, and its
-# binary is built beside them, where the hooks find it.
+# The Claude Code plugin's binary. Its hooks run it by name from PATH, so it
+# is built and packaged beside asz. The plugin itself, the manifest and the
+# hooks under plugins/claude-code/plugin, is installed from the marketplace
+# and is not packaged.
 PLUGIN_DIR    := plugins/claude-code
 PLUGIN_BINARY := asz-claude-plugin
 
@@ -52,11 +54,11 @@ LICENSE_EYE_VERSION   := v0.9.0
 $(BIN_DIR):
 	@mkdir -p $(BIN_DIR)
 
-## build: compile the binary into ./bin
+## build: compile asz and the Claude Code plugin's binary into ./bin
 .PHONY: build
 build: $(BIN_DIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY) ./cmd/$(BINARY)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(PLUGIN_DIR)/bin/$(PLUGIN_BINARY) ./$(PLUGIN_DIR)
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(PLUGIN_BINARY) ./$(PLUGIN_DIR)
 
 ## test: run the whole suite, unit and end-to-end
 .PHONY: test
@@ -187,7 +189,7 @@ tidy:
 docker: ## Build the container image, as CI builds and publishes it
 	docker build --build-arg VERSION=$(VERSION) -t skywalking-ai-sessionizer:dev .
 
-## binaries: cross-compile every platform in PLATFORMS and package each, with the Claude Code plugin, the LICENSE, the NOTICE and the dependency licenses, into dist/
+## binaries: cross-compile every platform in PLATFORMS and package each, with the Claude Code plugin's binary, the LICENSE, the NOTICE and the dependency licenses, into dist/
 .PHONY: binaries
 # Two builds of one tag give the same bytes when they use the same Go, the
 # same tar and the same gzip. Go records the tag in each binary as the
@@ -219,15 +221,14 @@ binaries:
 	for t in $(PLATFORMS); do \
 	  os=$${t%/*}; arch=$${t#*/}; out=$(DIST)/build/$$os-$$arch; ext=""; \
 	  if [ "$$os" = windows ]; then ext=.exe; fi; \
-	  rm -rf $$out && mkdir -p $$out/claude-code-plugin/bin && \
+	  rm -rf $$out && mkdir -p $$out && \
 	  cp dist-material/LICENSE dist-material/NOTICE $$out/ && cp -R dist-material/licenses $$out/licenses && \
 	  echo "building $$os/$$arch" && \
 	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
-	  cp -R $(PLUGIN_DIR)/.claude-plugin $(PLUGIN_DIR)/hooks $$out/claude-code-plugin/ && \
-	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/claude-code-plugin/bin/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
+	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
 	  chmod -R u=rwX,go=rX $$out || exit 1; \
 	  if [ -n "$$stamp" ]; then find $$out -exec env TZ=UTC0 touch -t $$stamp {} + || exit 1; fi; \
-	  (cd $$out && find $(BINARY)$$ext claude-code-plugin LICENSE NOTICE licenses | LC_ALL=C sort > ../$$os-$$arch.list) || exit 1; \
+	  (cd $$out && find $(BINARY)$$ext $(PLUGIN_BINARY)$$ext LICENSE NOTICE licenses | LC_ALL=C sort > ../$$os-$$arch.list) || exit 1; \
 	  if [ "$$os" = windows ]; then \
 	    rm -f $(DIST)/$(PKG_BASE)-$$os-$$arch.zip && \
 	    (cd $$out && TZ=UTC0 zip -X -q ../../$(PKG_BASE)-$$os-$$arch.zip -@ < ../$$os-$$arch.list) || exit 1; \

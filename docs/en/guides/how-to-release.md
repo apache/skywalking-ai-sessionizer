@@ -326,8 +326,7 @@ The command takes these steps and stops at the first failure:
 6. **Verify before signing.** All expected archives must exist and pass the metadata checker and
    their SHA-512 checksums. The source archive must have one top directory with `LICENSE` and
    `NOTICE`, no font file and no compiled file named by the tag's Makefile. Each binary package
-   must contain both binaries, the plugin manifest and hooks, `LICENSE`, `NOTICE` and
-   `licenses/`. The command then signs every verified archive and verifies each signature
+   must contain both binaries, `LICENSE`, `NOTICE` and `licenses/`. The command then signs every verified archive and verifies each signature
    against the SkyWalking KEYS keyring. The CI binary checksums remain unchanged.
 7. **Run the package for this machine again.** The command unpacks the source archive in a
    temporary directory and runs its `tools/package-smoke.sh` on the signed CI package for the
@@ -379,10 +378,16 @@ writes nothing into `dist/$VERSION/`. The plan does not claim that prerelease as
   tagged source under `apache-skywalking-ai-sessionizer-$VERSION-src/`, with the fonts and local
   metadata excluded by `.gitattributes`. A build from it uses system fonts.
 - Each binary package is `apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>.tgz`, or
-  `.zip` for Windows. It contains `asz`, the complete `claude-code-plugin/`, and the binary
-  distribution's `LICENSE`, `NOTICE` and `licenses/`. Both binaries end in `.exe` on Windows.
-  These packages include the renderer's two OFL fonts and their license texts.
+  `.zip` for Windows. It contains `asz`, `asz-claude-plugin`, which is the binary of the Claude
+  Code plugin, and the binary distribution's `LICENSE`, `NOTICE` and `licenses/`. Both binaries
+  end in `.exe` on Windows. These packages include the renderer's two OFL fonts and their license
+  texts.
 - Every archive has a `.sha512` checksum and an ASCII-armored detached `.asc` signature.
+
+No package carries the Claude Code plugin's manifest and hooks. Users install them from the
+marketplace at the release tag: `.claude-plugin/marketplace.json` and `plugins/claude-code/plugin/`
+in the tagged source, which is what the source package holds. The install instructions name the
+tag, so the plugin a user installs is the one the vote approved, once the version is released.
 
 The tag's `PLATFORMS` names macOS, Linux and Windows, each on x86-64 and ARM 64. CI cross-compiles
 without cgo on Linux with its configured Go toolchain and packages with GNU tar, gzip and zip.
@@ -916,8 +921,9 @@ are conveniences.
 
 The Homebrew formula installs the voted binary package for the machine: macOS or Linux, on ARM 64
 or x86-64. It names a URL, a mirror and a sha256 for each of the four packages. It builds nothing,
-so it needs no Go. It installs `asz`, the Claude Code plugin under `libexec/claude-code-plugin`,
-and `LICENSE`, `NOTICE` and `licenses/`, and its test runs both binaries. It goes to a tap only.
+so it needs no Go. It installs `asz` and `asz-claude-plugin` on the path, and `LICENSE`, `NOTICE`
+and `licenses/`, and its test runs both binaries. Its caveats give the two commands that install
+the plugin from the marketplace at the version's tag. It goes to a tap only.
 Homebrew/homebrew-core takes a formula only when it builds from source or installs output that is
 the same on every platform, and this formula installs a binary built for each platform.
 
