@@ -1,7 +1,5 @@
 # Changes in 0.4.0
 
-> In development, not yet released. `tools/release/release.sh prepare 0.4.0` removes this note.
-
 ## Provider bodies
 
 - A new adapter, `claude-code-provider`, lands the request and response bodies Claude Code writes
