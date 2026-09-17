@@ -78,7 +78,9 @@ apache-skywalking-ai-sessionizer-<version>-bin-asz-claude-code-<arch>.deb  arch:
 On macOS or Linux:
 
 ```sh
-PKG=apache-skywalking-ai-sessionizer-$VERSION-bin-linux-amd64.tgz
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+PKG=apache-skywalking-ai-sessionizer-$VERSION-bin-$OS-$ARCH.tgz
 curl -fL -o "$PKG" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$VERSION/$PKG&action=download"
 curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.sha512"
 curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.asc"

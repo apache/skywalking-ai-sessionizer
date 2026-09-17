@@ -1067,7 +1067,7 @@ if [ "$cmd" = publish ]; then
   for p in $packages; do
     for f in "$p" "$p.asc" "$p.sha512"; do has_line "$files" "$f" || fail "$from has no $f"; done
   done
-  say "ok  $from holds the source package and $(printf '%s\n' "$platforms" | wc -l | tr -d ' ') binary packages, each with its .asc and .sha512"
+  say "ok  $from holds the source package and $(ci_packages | wc -l | tr -d ' ') binary and Debian packages, each with its .asc and .sha512"
 
   step "The voted packages in $out"
   # The GitHub release is checked against these files, and the website
@@ -1165,7 +1165,15 @@ if [ "$cmd" = publish ]; then
   # It sends a reader to the Apache release and to the signatures, never to
   # a git checkout, as the ASF release policy asks.
   release_text() {
-    git show "$tag:$dev_page" | tail -n +2 | sed '1{/^$/d;}'
+    # The changelog links other pages by a path relative to itself, which
+    # works on the website and in the repository, and not on the release
+    # page: the 0.3.0 release linked ../formats/... under /releases/. Each such
+    # link becomes an absolute one at the tag.
+    git show "$tag:$dev_page" | tail -n +2 | sed '1{/^$/d;}' |
+      BASE="$github/blob/$tag/$changes_dir/" perl -pe '
+        sub absolute { my $u = shift; $u = "changes.md$u" if $u =~ /^#/; $u = $ENV{BASE} . $u;
+          1 while $u =~ s{/(?!\.\./)[^/]+/\.\./}{/}; $u =~ s{/\./}{/}g; return $u }
+        s{\]\((?![A-Za-z][A-Za-z0-9+.-]*:)([^)\s]+)\)}{"](" . absolute($1) . ")"}ge'
     cat <<TEXT
 
 #### Where to get it
@@ -1357,6 +1365,9 @@ if [ "$no_push" = false ]; then tools="$tools gh"; fi
 need_tools $tools
 [ -z "$(git status --porcelain)" ] || fail "the working tree has changes; start from a clean tree"
 from=$(git branch --show-current)
+# The pull request goes to this branch, and it is raised after the tag is
+# pushed. From a detached HEAD there is no branch to raise it against.
+[ -n "$from" ] || fail "HEAD is not on a branch. Check out main, from which the release branch is cut"
 say "cutting the release branch from $from at $(git rev-parse --short HEAD)"
 
 step "The versions"

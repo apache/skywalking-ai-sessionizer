@@ -623,7 +623,7 @@ if tool == "git":
     elif args == ["show", tag + ":Makefile"]:
         print("PLATFORMS := linux/amd64\nDEB_PACKAGES := asz")
     elif args == ["show", tag + ":docs/en/changes/changes.md"]:
-        print("# Changes in 0.3.0\n\nFixture release.")
+        print("# Changes in 0.3.0\n\nFixture release. See [Install](../setup/install.md#verify-a-package), [this](#fixes) and [KEYS](https://downloads.apache.org/skywalking/KEYS).")
     else:
         raise AssertionError("unexpected git command: " + repr(args))
     sys.exit(0)
@@ -743,7 +743,12 @@ elif action == "upload":
 elif action == "edit":
     assert state["prerelease"], "promoted twice"
     assert "--draft=false" in rest and "--prerelease=false" in rest and option("--title") == "0.3.0", rest
-    assert "Fixture release." in pathlib.Path(option("--notes-file")).read_text()
+    notes = pathlib.Path(option("--notes-file")).read_text()
+    assert "Fixture release." in notes, notes
+    # A relative link of the changelog would resolve under /releases/.
+    assert "[Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v0.3.0/docs/en/setup/install.md#verify-a-package)" in notes, notes
+    assert "[this](https://github.com/apache/skywalking-ai-sessionizer/blob/v0.3.0/docs/en/changes/changes.md#fixes)" in notes, notes
+    assert "[KEYS](https://downloads.apache.org/skywalking/KEYS)" in notes, notes
     latest = [arg for arg in rest if arg.startswith("--latest=")]
     assert len(latest) == 1 and latest[0] in ("--latest=true", "--latest=false"), rest
     record("promote")

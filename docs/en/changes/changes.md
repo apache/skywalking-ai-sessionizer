@@ -11,8 +11,8 @@
   or by the one session whose transcript holds its message id, and waits otherwise. On by default,
   it does nothing until the variable is set. See
   [Claude Code Provider Bodies](../setup/claude-code-provider-bodies.md).
-- The kind `provider_body`, reserved until now, lands under `<session>/provider_body/`, one file per
-  session per pass. A record keeps only what its session does not hold yet: each tool definition
+- The kind `provider_body`, reserved until now, lands under `<session>/provider_body/`, in files of
+  at most `max_delta_bytes` each; only a body larger than that lands in a larger file of its own. A record keeps only what its session does not hold yet: each tool definition
   and every string of 1 KiB or more is a piece named by its SHA-256, and the front a body shares
   with the previous body of its chain is one copy. Its last part, a `provider_body/1` manifest,
   rebuilds the body byte for byte, which the adapter checks through the writer and reader before a
@@ -49,17 +49,29 @@
   every body the build wrote is landed, deletes the body files with the session's other files, and
   drops the session's lines from `_provider/seen.state`. `tests/scenarios/provider-bodies.yaml` is the
   example, with bodies cut into five files.
-- **`asz view` draws the prompt too.** The embedded renderer moves to Horizon `0ce1f8d6`, which added
-  the inspector's Prompt tab, and the page gains the files route that tab reads: `GET
+- **`asz view` draws the prompt too.** The embedded renderer moves to Horizon `53c1f63b`. Horizon
+  `0ce1f8d6` added the inspector's Prompt tab, and the page gains the files route that tab reads: `GET
   /api/c/{conversation}/files?session=&seq=` returns the landed files by sequence, at most 32 a
   request, as base64 in a JSON array. The renderer offers the tab only to a host that can read files,
   so without the route the page beside the storage root would have shown less than the SkyWalking UI.
+- **The Prompt tab reads a message in either spelling.** Claude Code sends a message of one text
+  block as a list of blocks while it is the newest, and as a plain string once it is not. The
+  renderer before Horizon `53c1f63b` took the two for different messages, so it reported an
+  ordinary growth step as a rewritten history: 60 of 62 steps on one real conversation of 94 calls.
+  It now reads both as one message. When the history does change, it says the context was replaced
+  by a summary, with how many messages became how many, or warns when the history changed without
+  getting shorter. [Claude Code Provider Bodies](../setup/claude-code-provider-bodies.md) describes
+  both spellings.
 - **A scenario writes the prompt its agent sends.** `system_prompt` and `tools` say what a stream's
   requests carry, on the scenario for the main stream and on an `agent`, `skill` or workflow child
   for its own. Before this every scenario sent the same stand-in, which advertised `Read` and `Bash`
   whatever the agent did, so a calendar assistant was drawn as a coding agent. The stand-in stays for
   a scenario that writes neither, because it is sized to make a body worth cutting. A response now
   carries the call's own `usage`, the numbers its transcript already records.
+- A scenario build records the signature it drops from every thinking block, as the adapter does.
+  The `.sd` writer recorded the drop only for reasoning whose text was already gone, so a session
+  whose reasoning kept its text folded to another conversation through the transcript writer.
+  `tests/scenarios/reasoning-text.yaml` writes both shapes in one session.
 
 ## Collection
 
@@ -102,7 +114,7 @@
   `asz-claude-code@VERSION`, keg-only, beside the current formulae, and moves `asz` and
   `asz-claude-code` only forward.
 - **The steps after the vote that write for a package manager are skills and documented steps, not
-  scripts.** `tools/release/install-manifests.sh`, which `publish` ran, is gone, and `publish` now
+  scripts.** `tools/install-manifests.sh`, which `publish` ran, is gone, and `publish` now
   writes only the announcement and the website entries. The `homebrew` skill in `.claude/skills/`
   holds the formula templates, writes the formulae of a released version, runs each through
   `brew style`, `brew audit --strict`, `brew install` and `brew test`, and opens a pull request to
@@ -167,3 +179,14 @@
   The release is marked the latest, with the Latest documentation, only when GitHub's Latest label
   names it. A run after promotion reads the label, so its entries agree with the label too. The
   release guide describes the new shape, and the steps `publish` prints name the new file.
+- The text of the GitHub release links the changelog's other pages at the tag. The changelog links
+  them by a path relative to itself, which on the 0.3.0 release page resolved under `/releases/`
+  and found nothing.
+- `tools/` is in two folders. `tools/release/` holds what makes a release: `release.sh`,
+  `ci-binaries.sh`, `ci-upload-binaries.sh`, `package-check.sh`, `dep-notices.sh` and
+  `deb-package`. `tools/test/` holds the checks CI runs and the tests of the release scripts. Folder
+  names separate their words with a hyphen. `tools/otlpdump` is gone: `TestCaptures` in
+  `internal/metrics` writes a new capture with its identifying values replaced, and checks every
+  committed capture on each run.
+- `prepare` refuses to run on a detached HEAD, where it would push the tag and then have no branch
+  to raise the pull request against.
