@@ -42,9 +42,6 @@ full GitHub release. A version with a suffix, such as
 `0.2.0-rc1`, is published under its own version tag and under its commit id, because CI tags every
 build with its commit id. It moves no floating tag, so `latest` stays where it is.
 
-The images `0.1.0` and `0.2.0` were built from the tags of versions released on GitHub before the
-project's first Apache vote. Neither is the image of an Apache release.
-
 Every image CI publishes carries `org.opencontainers.image.version` and
 `org.opencontainers.image.revision` labels, and `asz version` inside it prints the same version.
 The version is the one its git tag names when a GitHub release, or a run started by hand for that

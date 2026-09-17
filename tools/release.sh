@@ -1290,8 +1290,9 @@ YAML
   say "     program can; the ASF recommends it."
   say "  3. Submit the install manifests in $out/install, once the PMC has agreed on"
   say "     dev@skywalking.apache.org to each channel. $out/install/README.md says where each"
-  say "     one goes. The Homebrew formula and the winget files download from the GitHub"
-  say "     release, which is promoted now."
+  say "     one goes. The Homebrew formulae go to Formula/ on main in this repository, by a pull"
+  say "     request. They and the winget files download from the GitHub release, which is"
+  say "     promoted now."
   if [ -n "$old" ] && [ "$remove_old" = false ]; then
     say "  4. Later, once the website pull request that points$old at archive.apache.org"
     say "     has merged, and the Scoop bucket names $version:"

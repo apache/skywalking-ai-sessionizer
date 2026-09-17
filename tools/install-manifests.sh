@@ -30,7 +30,8 @@
 # match its .sha512.
 # It writes into OUT_DIR:
 #
-#   homebrew/skywalking-ai-sessionizer.rb   a formula that installs the macOS and Linux packages
+#   homebrew/asz.rb                         a formula that installs asz from the macOS and Linux packages
+#   homebrew/asz-claude-code.rb             a formula that installs the Claude Code plugin's binary
 #   scoop/skywalking-ai-sessionizer.json    a Scoop manifest for the Windows packages
 #   winget/manifests/a/Apache/SkyWalkingAISessionizer/VERSION/
 #                                           the three winget manifests
@@ -220,14 +221,16 @@ winget_dir=winget/manifests/a/Apache/SkyWalkingAISessionizer/$version
 mkdir -p "$out_dir/homebrew" "$out_dir/scoop" "$out_dir/$winget_dir"
 
 # ------------------------------------------------------------------ Homebrew
-fill > "$out_dir/homebrew/skywalking-ai-sessionizer.rb" <<'EOF'
-# Written by tools/install-manifests.sh in apache/skywalking-ai-sessionizer
-# from the voted binary packages of @VERSION@.
-class SkywalkingAiSessionizer < Formula
-  desc "Conversation-level observability for long-lived AI agents"
-  homepage "https://github.com/apache/skywalking-ai-sessionizer"
-  license "Apache-2.0"
-
+# Two formulae, as the install pages have two installs: asz, the collector,
+# and asz-claude-code, the binary of the Claude Code plugin. A person who
+# runs only one of them installs only its binary. Both download the same
+# package, which Homebrew keeps once in its cache.
+#
+# The tap is this repository: the formulae go to Formula/ on main, where
+# Homebrew looks first, and they carry the license header every file in the
+# tree does. tools/homebrew-check.sh runs them through Homebrew.
+homebrew_urls() {
+  cat <<'EOF'
   # Each package comes from the GitHub release of v@VERSION@, which carries
   # the voted files. Its URL keeps working after a newer version replaces
   # this one on the download site. The mirror, archive.apache.org, keeps
@@ -258,11 +261,41 @@ class SkywalkingAiSessionizer < Formula
       sha256 "@LINUX_AMD64_SHA256@"
     end
   end
+EOF
+}
+
+{
+  cat <<'EOF'
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Written by tools/install-manifests.sh in apache/skywalking-ai-sessionizer
+# from the voted binary packages of @VERSION@.
+class Asz < Formula
+  desc "Conversation-level observability for long-lived AI agents"
+  homepage "https://github.com/apache/skywalking-ai-sessionizer"
+  license "Apache-2.0"
+
+EOF
+  homebrew_urls
+  cat <<'EOF'
 
   def install
-    # The Claude Code plugin's hooks run asz-claude-plugin by name, so it
-    # goes on PATH beside asz.
-    bin.install "asz", "asz-claude-plugin"
+    bin.install "asz"
     # Homebrew keeps a formula's license files at the root of its prefix. It
     # moves LICENSE and NOTICE there by itself, but not a directory, so
     # licenses/ goes with them here. It holds the license of every module
@@ -270,27 +303,70 @@ class SkywalkingAiSessionizer < Formula
     prefix.install "LICENSE", "NOTICE", "licenses"
   end
 
-  def caveats
-    # The plugin comes from the marketplace at the tag of this version, so
-    # its hooks are the ones this binary was released with.
-    <<~EOS
-      asz-claude-plugin, the binary of the Claude Code plugin that records
-      which files each tool call changed, is on your PATH. To install the
-      plugin itself into Claude Code:
-        claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v#{version}" --sparse .claude-plugin plugins/claude-code/plugin
-        claude plugin install asz-changes@skywalking-ai-sessionizer
-
-      See:
-        https://github.com/apache/skywalking-ai-sessionizer/blob/v#{version}/docs/en/setup/claude-code-plugin.md
-    EOS
-  end
-
   test do
     assert_match version.to_s, shell_output("#{bin}/asz version")
     # glossary needs no configuration and no input, and its table names
     # agent.call, so the program does real work, not only print its version.
     assert_match "agent.call", shell_output("#{bin}/asz glossary")
+  end
+end
+EOF
+} | fill > "$out_dir/homebrew/asz.rb"
 
+{
+  cat <<'EOF'
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Written by tools/install-manifests.sh in apache/skywalking-ai-sessionizer
+# from the voted binary packages of @VERSION@.
+class AszClaudeCode < Formula
+  desc "Claude Code plugin that records which files each tool call changed"
+  homepage "https://github.com/apache/skywalking-ai-sessionizer"
+  license "Apache-2.0"
+
+EOF
+  homebrew_urls
+  cat <<'EOF'
+
+  def install
+    # The plugin's hooks run asz-claude-plugin by name, so it goes on PATH.
+    bin.install "asz-claude-plugin"
+    prefix.install "LICENSE", "NOTICE", "licenses"
+  end
+
+  def caveats
+    # A formula cannot change the user's Claude Code configuration, so the
+    # plugin itself is installed by these commands. They add the marketplace
+    # at the tag of this version, so its hooks are the ones this binary was
+    # released with.
+    <<~EOS
+      asz-claude-plugin, the binary of the Claude Code plugin, is on your
+      PATH. To install the plugin itself into Claude Code:
+        claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v#{version}" --sparse .claude-plugin plugins/claude-code/plugin
+        claude plugin install asz-changes@skywalking-ai-sessionizer
+
+      To move an installed plugin to this version without losing the records
+      asz has not collected, see:
+        https://github.com/apache/skywalking-ai-sessionizer/blob/v#{version}/docs/en/setup/claude-code-plugin.md#upgrade
+    EOS
+  end
+
+  test do
     assert_match version.to_s, shell_output("#{bin}/asz-claude-plugin version")
     # Claude Code names the plugin's data directory in CLAUDE_PLUGIN_DATA.
     # status reads the settings there and compiles the exclusion rules. With
@@ -300,6 +376,7 @@ class SkywalkingAiSessionizer < Formula
   end
 end
 EOF
+} | fill > "$out_dir/homebrew/asz-claude-code.rb"
 
 # --------------------------------------------------------------------- Scoop
 # The notes name the plugin's tag as VERSION for the reader to fill in. Scoop
@@ -441,21 +518,22 @@ announcement.
 
 **Before the first submission to each package manager, the PMC agrees to it on
 dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
-place. A tap or a bucket under github.com/apache is a new repository, which the PMC asks INFRA to
-create.
+place. The Homebrew tap is apache/skywalking-ai-sessionizer itself, so it needs no new repository.
+A Scoop bucket under github.com/apache would be one, which the PMC asks INFRA to create.
 
 **Submit a file only after @VERSION@ is on the download site,**
 <https://downloads.apache.org/skywalking/ai-sessionizer/@VERSION@/>. The Homebrew formula and the
 winget files also wait for the GitHub release of v@VERSION@, which `tools/release.sh publish`
 promotes: <https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v@VERSION@>.
-The Homebrew formula names the archive,
+The Homebrew formulae name the archive,
 <https://archive.apache.org/dist/skywalking/ai-sessionizer/@VERSION@/>, as its mirror, and the
 archive can show a new version later than the download site does. A manifest that names a file
 that is not there yet fails its review, and it fails for everyone who installs it.
 
 | File | Where it goes | What it downloads |
 | --- | --- | --- |
-| `homebrew/skywalking-ai-sessionizer.rb` | `Formula/` in a tap | the macOS or Linux package, from the GitHub release, or else from archive.apache.org |
+| `homebrew/asz.rb` | `Formula/` on main in apache/skywalking-ai-sessionizer | the macOS or Linux package, from the GitHub release, or else from archive.apache.org; installs `asz` |
+| `homebrew/asz-claude-code.rb` | the same `Formula/` | the same package; installs `asz-claude-plugin`, and its caveats give the commands that install the plugin into Claude Code |
 | `scoop/skywalking-ai-sessionizer.json` | `bucket/` in a Scoop bucket | the Windows package, from dlcdn.apache.org |
 | `winget/manifests/a/Apache/SkyWalkingAISessionizer/@VERSION@/` | the same path in microsoft/winget-pkgs | the Windows package, from the GitHub release |
 
@@ -526,29 +604,44 @@ curl -fsSL https://github.com/apache/skywalking-ai-sessionizer/releases/download
 
 ## Homebrew
 
-Test the formula in a local tap. It downloads the package for your machine from the GitHub
+Test both formulae in a local tap. Each downloads the package for your machine from the GitHub
 release, so this also checks that URL and its hash. The commands above check all four. `brew test`
-runs `asz version`, `asz glossary`, and the plugin's `version` and `status`.
+runs `asz version` and `asz glossary`, and the plugin's `version` and `status`.
 
 ```sh
 brew tap-new --no-git "$USER/asz-test"
-cp homebrew/skywalking-ai-sessionizer.rb "$(brew --repository "$USER/asz-test")/Formula/"
-brew install "$USER/asz-test/skywalking-ai-sessionizer"
-brew test "$USER/asz-test/skywalking-ai-sessionizer"
-brew audit --strict --online --formula "$USER/asz-test/skywalking-ai-sessionizer"
-brew uninstall skywalking-ai-sessionizer
+cp homebrew/asz.rb homebrew/asz-claude-code.rb "$(brew --repository "$USER/asz-test")/Formula/"
+for f in asz asz-claude-code; do
+  brew install "$USER/asz-test/$f"
+  brew test "$USER/asz-test/$f"
+  brew audit --strict --online --formula "$USER/asz-test/$f"
+  brew uninstall "$f"
+done
 brew untap "$USER/asz-test"
 ```
 
-Submit it by committing the file under `Formula/` in a tap, a GitHub repository named
-`homebrew-<name>`. People then run `brew install <owner>/<name>/skywalking-ai-sessionizer`.
-Homebrew asks people to trust a formula from a tap that is not its own, and installing by that
-full name trusts this one formula only.
+`tools/homebrew-check.sh @VERSION@ <the directory of the voted packages>`, run from the source of
+@VERSION@, does the same with no download from GitHub, and removes what it installed.
 
-Homebrew/homebrew-core does not take this formula. A formula there must build from source, or
-install output that runs on every platform, and this one installs a binary built for each
-platform. For a later version, run the script again on that version's voted packages and replace
-the file.
+Submit them with a pull request to main in apache/skywalking-ai-sessionizer that replaces both files
+under `Formula/`. The repository is the tap. Its name does not start with `homebrew-`, so people
+give its URL once, then install by the full name, which trusts that formula:
+
+```sh
+brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
+brew install apache/skywalking-ai-sessionizer/asz
+brew install apache/skywalking-ai-sessionizer/asz-claude-code
+```
+
+After that, `brew upgrade asz asz-claude-code` moves both to the formulae on main.
+
+Homebrew/homebrew-core does not take these formulae. A formula there must build from source, or
+install output that runs on every platform, and these install a binary built for each platform.
+Core also asks for public interest before it takes a new project. On 2026-09-17 its policy asked a
+GitHub project for 30 forks, 30 watchers or 75 stars, or three times that when the project submits
+itself, and for a repository at least 30 days old. Formulae of the same names that build from the
+source release could go there once the project qualifies. For a later version, run the script again
+on that version's voted packages, and replace the files on main.
 
 ## Scoop
 
@@ -605,7 +698,7 @@ if grep -rn '@[A-Z0-9_]*@' "$out_dir" >&2; then fail "a placeholder above was no
 
 cat <<DONE
 wrote the manifests for $version into $out_dir:
-  homebrew/skywalking-ai-sessionizer.rb   darwin and linux, arm64 and amd64, sha256
+  homebrew/asz.rb, asz-claude-code.rb     darwin and linux, arm64 and amd64, sha256
   scoop/skywalking-ai-sessionizer.json    windows-amd64 and windows-arm64, sha512
   $winget_dir/   schema $winget_schema, sha256
   README.md
