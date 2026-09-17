@@ -666,6 +666,17 @@ It does these steps in order.
    not one of the voted files. A missing prerelease, a missing CI file or a stray file stops the
    command before anything moves. A full release is accepted too: an earlier `publish` promoted
    it, and its files are checked again.
+
+   For a prerelease, it then asks whether `$VERSION` becomes the latest GitHub release. The label
+   also decides the `latest` image tag. The answer offered is yes when `$VERSION` is newer than
+   every full release, and no otherwise, such as for a patch of an older line or a version with a
+   suffix. `--latest` or `--not-latest` gives the answer without asking. Promotion does not move the
+   label by itself, because CI creates the prerelease with `--latest=false`. After promotion, the
+   label is changed only by hand, and `publish` refuses both options on a promoted release:
+
+   ```sh
+   gh release edit v$VERSION --repo apache/skywalking-ai-sessionizer --latest=true
+   ```
 3. **Find the candidate:**
 
    ```sh
@@ -726,7 +737,7 @@ It does these steps in order.
 
    ```sh
    gh release edit v$VERSION --repo apache/skywalking-ai-sessionizer --draft=false --prerelease=false \
-     --title $VERSION --notes-file <text>
+     --latest=<the answer> --title $VERSION --notes-file <text>
    ```
 
    The text is the tag's `docs/en/changes/changes.md` without its heading, followed by "Where to
@@ -777,8 +788,9 @@ the promotion, and `packages` runs each with `tools/package-smoke.sh` on a runne
 platform.
 
 The released event starts CI's `docker` job. That job publishes the container image to the
-GitHub container registry under `$VERSION`, and under `latest` when it is the highest version
-among full published GitHub releases. Newer candidate tags and prereleases do not affect `latest`.
+GitHub container registry under `$VERSION`, and under `latest` when GitHub names `v$VERSION` its
+latest release, as the answer in `publish` decided. Candidate tags and prereleases do not affect
+`latest`.
 The image is a convenience built from the released source. The source and binary archive
 release does not wait for the image job. If the image job fails, retry it on the release tag with `publish_image=true`:
 

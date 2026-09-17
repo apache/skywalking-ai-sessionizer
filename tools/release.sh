@@ -59,14 +59,18 @@
 #       dist/VERSION/vote-preview.txt. It refuses once a candidate of
 #       VERSION is uploaded.
 #
-#   tools/release.sh publish [VERSION] [--dry-run] [--remove-old]
+#   tools/release.sh publish [VERSION] [--dry-run] [--remove-old] [--latest | --not-latest]
 #       Run by a PMC member after the vote passed. Verify the candidate's
 #       signatures against KEYS and move it from the dev area to the release
 #       directory of dist.apache.org. The move publishes the voted packages.
 #       With the vote and the announcement, it makes the release. Then check
 #       that the GitHub prerelease holds exactly the voted files, attach any
 #       that are missing, and promote it to a full release; CI publishes the
-#       image when the released event fires. Then write the announcement,
+#       image when the released event fires. Before anything moves, it asks
+#       whether the version becomes the latest GitHub release, which also
+#       moves the latest image tag. The answer offered is yes for a version
+#       newer than every full release, and no for a patch of an older line.
+#       --latest and --not-latest give the answer without asking. Then write the announcement,
 #       the website entries and the install manifests into dist/VERSION,
 #       and print what is left to do. A run after the move skips the move
 #       and runs every later step again. --remove-old removes older versions
@@ -95,7 +99,7 @@ cmd="${1:-}"
 case "$cmd" in
   prepare)     options="--dry-run --skip-check --no-push" ;;
   candidate)   options="--dry-run --no-upload --ci-run" ;;
-  publish)     options="--dry-run --remove-old" ;;
+  publish)     options="--dry-run --remove-old --latest --not-latest" ;;
   -h|--help|"") usage; exit 0 ;;
   *) echo "unknown command: $cmd" >&2; usage >&2; exit 2 ;;
 esac
@@ -109,6 +113,7 @@ no_push=false
 no_upload=false
 ci_run=auto
 remove_old=false
+latest=""
 while [ $# -gt 0 ]; do
   arg="$1"
   shift
@@ -150,6 +155,9 @@ while [ $# -gt 0 ]; do
         --no-push) no_push=true ;;
         --no-upload) no_upload=true ;;
         --remove-old) remove_old=true ;;
+        --latest|--not-latest)
+          [ -z "$latest" ] || { echo "give only one of --latest and --not-latest" >&2; exit 2; }
+          if [ "$arg" = --latest ]; then latest=true; else latest=false; fi ;;
       esac ;;
     *)
       if [ -z "$version" ]; then version="$arg"
@@ -932,8 +940,36 @@ if [ "$cmd" = publish ]; then
   if [ "$is_prerelease" = false ]; then
     promoted=true
     say "$tag is a full GitHub release already: an earlier publish promoted it. Its files are checked again"
+    # The run that promoted decided the label. A later run leaves it alone,
+    # and says so rather than ignoring the option.
+    [ -z "$latest" ] || fail "$tag was promoted by an earlier publish, which decided whether it is the latest release. Change the label by hand: gh release edit $tag --repo $release_repo --latest=<true or false>"
   else
     say "$tag is a GitHub prerelease, promoted after the move"
+    # Promotion does not move the Latest label by itself: CI created the
+    # prerelease with --latest=false. The label also decides the latest image
+    # tag, so it is a decision, asked before anything moves.
+    released=$(gh release list --repo "$release_repo" --limit 1000 --json tagName,isDraft,isPrerelease \
+      --jq '.[] | select((.isDraft or .isPrerelease) | not) | .tagName') \
+      || fail "cannot list the GitHub releases, to offer whether $tag becomes the latest. Nothing was moved"
+    newest=$(printf '%s\n' "$released" | sed -nE '/^v[0-9]+\.[0-9]+\.[0-9]+$/p' | sort -V | tail -1)
+    offered=no
+    case "$version" in
+      *-*) ;;
+      *)
+        if [ -z "$newest" ] || [ "$(printf '%s\n%s\n' "${newest#v}" "$version" | sort -V | tail -1)" = "$version" ]; then
+          offered=yes
+        fi ;;
+    esac
+    if [ -z "$latest" ]; then
+      answer=$(ask v "Mark $version as the latest GitHub release, which also moves the latest image tag? The latest now is ${newest:-none}. yes or no" "$offered")
+      case "$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')" in
+        y|yes) latest=true ;;
+        n|no) latest=false ;;
+        *) fail "answer yes or no, not '$answer'. Nothing was moved" ;;
+      esac
+    fi
+    if [ "$latest" = true ]; then say "latest   : $version becomes the latest GitHub release and the latest image"
+    else say "latest   : ${newest:-no release} stays the latest; $version does not move the label or the latest image"; fi
   fi
   # Only names are checked here. The bytes are compared after the voted
   # files are fetched, but a missing CI file or a stray asset is found now.
@@ -1022,7 +1058,7 @@ if [ "$cmd" = publish ]; then
   say "- verify each package's signature against KEYS, before any move"
   say "- check that the GitHub release $tag holds CI's binary packages and .sha512 files as voted, attach the voted source package, .sha512 and .asc files it is missing, and check that it holds exactly the voted files"
   if [ "$promoted" = false ]; then
-    say "- promote $tag to a full GitHub release, with the text of $dev_page in $tag; CI publishes the image on the released event"
+    say "- promote $tag to a full GitHub release, with the text of $dev_page in $tag, and --latest=$latest; CI publishes the image on the released event"
   fi
   say "- write the announcement to $out/announce.txt"
   say "- write the website entries to $out/website.txt"
@@ -1096,9 +1132,10 @@ TEXT
     release_text > "$scratch/notes.md"
     current_info=$(release_identity) || fail "cannot read the GitHub release $tag again before promoting it. $resume_hint"
     [ "$current_info" = "$release_info" ] || fail "the GitHub release $tag changed while publish was checking it, so it was not promoted. Find out why, then run publish again"
-    gh release edit "$tag" --repo "$release_repo" --draft=false --prerelease=false --title "$version" --notes-file "$scratch/notes.md" \
+    gh release edit "$tag" --repo "$release_repo" --draft=false --prerelease=false --latest="$latest" --title "$version" --notes-file "$scratch/notes.md" \
       || fail "cannot promote the GitHub release $tag. $resume_hint"
-    say "promoted $tag to a full GitHub release. CI publishes the image on the released event"
+    if [ "$latest" = true ]; then say "promoted $tag to the latest GitHub release. CI publishes the image, tagged latest too, on the released event"
+    else say "promoted $tag to a full GitHub release, not the latest. CI publishes the image under $version only, on the released event"; fi
   fi
 
   announce_mail() {
