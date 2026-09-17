@@ -102,7 +102,7 @@
   `brew install` and `brew test`, and CI's `homebrew` job runs it on macOS on every change.
 - **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
   installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
-  [Install](../setup/install.md#quick-install) runs them from the version's tag in one command. The
+  [Install](../setup/install.md#install-script) runs them from the version's tag in one command. The
   plugin's own scripts, `install/claude-code-plugin.sh` and `install/claude-code-plugin.ps1`,
   install `asz-claude-plugin` and add the plugin to Claude Code at the same tag, and
   [Claude Code Plugin](../setup/claude-code-plugin.md#install) runs them. The reader sets the
@@ -121,6 +121,15 @@
   plugin's data. Before, no platform ran the plugin's hooks inside Claude Code in CI, and Windows
   never had. It passes on all six. On Windows the hooks' `asz-claude-plugin` starts
   `asz-claude-plugin.exe`, and both scripts run in Windows PowerShell and PowerShell 7.
+
+## Documentation
+
+- The setup pages say how to install, set up and use asz, and little else. Quick Start starts from an
+  installed `asz` and says where it keeps its data and its configuration. How the plugin, the provider
+  bodies, the export and the commands work inside moved to their own pages:
+  [Claude Code Plugin Internals](../adapters/claude-code-plugin.md),
+  [Claude Code Provider Bodies Internals](../adapters/claude-code-provider-bodies.md),
+  [OTLP Records](../formats/otlp.md) and [Command Line Internals](../guides/command-line-internals.md).
 
 ## Release
 

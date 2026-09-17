@@ -62,25 +62,23 @@ adapter reports it as `unavailable` rather than approximating it.
 
 ## Quick start
 
-Each release ships a signed binary package for macOS, Linux and Windows, on ARM 64 and x86-64. [Install](docs/en/setup/install.md) says where to download them and how to verify
-them. Or build from a checkout, as the [quick start](docs/en/setup/quick-start.md) does:
+Install asz, on macOS or Linux, with a version from the
+[downloads page](https://skywalking.apache.org/downloads/):
 
 ```sh
-make build                 # builds ./bin/asz
-./bin/asz sources          # list discovered sessions and their sources
-./bin/asz collect -once    # land, parse and send everything currently on disk
-./bin/asz server           # keep doing that, and serve at http://127.0.0.1:8787
+VERSION=<version>
+curl -fsSL "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh" | sh -s -- "$VERSION"
 ```
 
-Every command reads [`asz.yaml`](asz.yaml) from the working directory when no `-config` flag is
-given. The file at the repository root is the default configuration with every value written out,
-so it can be read and edited without reading Go.
+Then run it in the directory where it should keep its data, and open <http://127.0.0.1:8787>:
 
-`asz collect` is the pipeline: every period it lands what is new, parses what moved, and sends
-what `export.otlp` asks for. `asz server` runs that pipeline and serves the page in one process,
-and its list page shows when the data was last refreshed and when it will be next. `asz view`
-serves an existing storage root and only reads, which is what a root copied from another machine
-or filled by the receiver needs.
+```sh
+mkdir -p ~/asz && cd ~/asz
+asz server
+```
+
+[Install](docs/en/setup/install.md) has Windows, Homebrew and the binary packages, and
+[Quick Start](docs/en/setup/quick-start.md) the next steps.
 
 ## Documentation
 
@@ -103,30 +101,9 @@ Apache SkyWalking, SkyWalking, and the Apache feather logo are trademarks of The
 
 ## Container image
 
-CI publishes a Linux image for amd64 and arm64 to GHCR. It carries the `asz`
-binary and its license files. Docker Desktop on Windows runs it as a Linux
-container. Without Docker, use the Windows binary package from
-[Install](docs/en/setup/install.md). Mount a storage root at `/asz/data`. The
-default command is `server`, which collects and serves. With no source
-mounted, ask for `view`, which only reads:
-
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
   ghcr.io/apache/skywalking-ai-sessionizer:latest view 0.0.0.0:8787
 ```
 
-| Tag | Points at |
-| --- | --- |
-| `<version>`, such as `0.2.0` | the image built from the git tag `v<version>`, moved only by a run started by hand for that tag |
-| `latest` | the version GitHub names its latest release, which the release manager decides when promoting it after the Apache vote |
-| `main` | the development head |
-| `<commit id>` | one commit, by its complete id, moved only by a run started by hand for a tag on it |
-
-A git tag `v*` names a release candidate. CI on its push creates a GitHub
-prerelease holding the binaries it built, for developer testing and the release
-manager's SVN staging. After the Apache vote passes and the approved files move
-to the Apache release directory, the prerelease is promoted to a full release. That promotion publishes the image under that version. The image is a
-convenience, not part of the Apache release. Any `asz` command runs the same
-way: put it after the image name. See
-[Container Image](docs/en/setup/container-image.md). `make docker` builds the
-image locally.
+See [Container Image](docs/en/setup/container-image.md).

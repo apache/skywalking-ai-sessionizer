@@ -1,128 +1,82 @@
 # Configuration
 
-One YAML file. Every command reads `asz.yaml` from the working directory when no `-config` flag is
-given, and `-config FILE` names another one. The file at the repository root is the default
-configuration with every value written out, and a test holds it to the compiled defaults, so
-reading that file is reading the defaults.
+One YAML file. asz reads the file given with `-config`, else `asz.yaml` in the working directory,
+else the built-in defaults. A file may leave keys out; anything unset takes its default. A file
+that lists `adapters` replaces the whole default list.
 
-```yaml
-storage:
-  root: ./data
+[`asz.yaml`](https://github.com/apache/skywalking-ai-sessionizer/blob/main/asz.yaml) in the
+repository holds every default, written out. Download the one of your version to start from it:
 
-adapters:
-  - name: claude-code-local
-    enabled: true
-    source_root: ""
-    include: []
-    exclude:
-      - /private/tmp/**
-    collector:
-      mode: watch
-      interval: 10m
-      max_delta_bytes: 2097152
+```sh
+VERSION=$(asz version | cut -d ' ' -f 2)
+curl -fsSL -o asz.yaml "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/asz.yaml"
 ```
 
 ## storage
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `root` | `./data` | The storage root: where collected data lands and where conversations are assembled. A relative path is resolved from the working directory. |
-
-The default is ignored by git, so running the collector inside a checkout never stages private
-transcripts.
+| `root` | `./data` | Where collected data lands and conversations are assembled. A relative path is resolved from the working directory. |
 
 ## adapters
 
-A list. `claude-code-local` reads Claude Code's files from this machine. `claude-code-changes`
-reads the change records the asz Claude Code plugin writes beside them. See
-[the changes adapter](#the-changes-adapter). `claude-code-otlp` receives the runtime's own
-exporter. See [the receiver adapter](#the-receiver-adapter). Every command runs once per enabled
-adapter.
+A list of the sources asz collects from.
+
+| Adapter | On by default | Collects |
+| --- | --- | --- |
+| `claude-code-local` | yes | Claude Code's transcripts on this machine |
+| `claude-code-changes` | yes | the records of the [Claude Code plugin](claude-code-plugin.md); see [below](#the-changes-adapter) |
+| `claude-code-provider` | yes | the request and response bodies Claude Code writes when asked; see [below](#the-provider-adapter) |
+| `claude-code-otlp` | no | what Claude Code's own OpenTelemetry exporter sends; see [below](#the-receiver-adapter) |
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `name` | | `claude-code-local`, `claude-code-changes` or `claude-code-otlp` |
-| `enabled` | `true` for local and changes; `false` for the receiver | A disabled adapter is skipped by every command. |
-| `source_root` | empty | Where Claude Code keeps its files. Empty resolves it the way Claude Code does: `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME/claude`, then `~/.claude`, each followed by `projects`. Set it only to collect from a copy or a mounted directory. |
-| `include` | empty | Session filters, see below. Empty means every session is a candidate. |
-| `exclude` | `/private/tmp/**` | Session filters, see below. |
-| `metrics` | `false` | Derive the runtime's own metric family from the landed files, `claude_code.token.usage` in phase one, name for name with the runtime's exporter. See [Metrics](export-otlp.md#metrics). |
-| `listen` | none | On `claude-code-otlp` only: the address the runtime's exporter is pointed at, such as `127.0.0.1:4317`, serving gRPC and HTTP with protobuf on the one port. |
-| `metrics_lookback` | `24h` | How far back the first derivation over a root reaches. A duration such as `24h`, or a number of days such as `7d`. `0` or `none` derives everything. Later passes derive every new file whole. |
-
-Each named adapter inherits its own defaults for omitted fields. An explicit `enabled: false`
-disables it, and `exclude: []` clears the default exclusions. Naming only some adapters replaces
-the default adapter list; it does not add the other adapters back.
+| `name` | | One of the adapters above. |
+| `enabled` | see above | A disabled adapter is skipped. |
+| `source_root` | empty | Where to read from. Empty means where Claude Code keeps its files: `CLAUDE_CONFIG_DIR`, else `XDG_CONFIG_HOME/claude`, else `~/.claude`. Set it to collect from a copy. |
+| `include` | empty | [Session filters](#session-filters) a session must match. Empty means every session. |
+| `exclude` | `/private/tmp/**` | [Session filters](#session-filters) that leave a session out. `exclude: []` clears the default. |
+| `metrics` | `false` | Derive Claude Code's token metrics from the collected data. See [Metrics](export-otlp.md#metrics). |
+| `metrics_lookback` | `24h` | How far back the first derivation reaches, such as `24h` or `7d`. `0` or `none` derives everything. |
+| `listen` | none | `claude-code-otlp` only: the address to receive on, such as `127.0.0.1:4317`, gRPC and HTTP on one port. |
 
 ### Session filters
 
-A session is judged by the working directory its main transcript was recorded under. An entry that
-starts with `/` is a working directory, and `**` after it matches everything beneath. Anything else
-is a glob matched against the source directory name as Claude Code wrote it, which is the working
-directory with every separator replaced by `-`.
+A session is matched by the directory Claude Code ran in. A filter that starts with `/` is a
+directory, and `**` after it matches everything beneath it, such as `/Users/me/scratch/**`. Any
+other filter is a glob matched against Claude Code's name for the directory: the path with every
+separator replaced by `-`.
 
-A session's child agents can run in other directories, so the filter looks at the main transcript
-only. A session that merely used a scratch directory for a child agent is still collected. When the
-main transcript has been pruned, the session is judged on all of its directories together and is
-excluded only when every one of them matches, so an orphaned child stream from a real project is
-still collected.
-
-Claude Code runs its own helper agents in scratch directories under `/private/tmp`. Those sessions
-are the tool's, not yours, which is why they are excluded by default.
+The default excludes `/private/tmp/**`, where Claude Code runs its own helper agents.
 
 ## collector
 
+Set on each adapter.
+
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `mode` | `watch` | `watch` polls the source continuously. `once` makes a single pass, which is the backfill path over history that already exists. `asz collect` then exits, and `asz server` goes on serving what that pass produced. `-once` on the command line overrides the file. |
-| `interval` | `10m` | How long the pipeline sleeps between passes in watch mode. It is the whole period: `asz collect` and `asz server` land, parse and send once per interval. Both make a pass when they start, then one every interval. |
-| `max_delta_bytes` | `2097152` | How much of a growing source the collector lands in one `.sd` file, 2 MiB. A large catch-up is split into several files. When the next source line is longer than the budget, the collector reads to the end of the source instead. That file then holds the long line and every complete line after it. A file travels whole as one log record, so the largest record a receiver has to accept is the largest file, not the budget. A change applies to new files only. `asz repack` brings an existing root under a new budget. |
+| `mode` | `watch` | `watch` collects again every `interval`. `once` collects once; `asz collect` then exits. `-once` on the command line does the same. |
+| `interval` | `10m` | The time between collections. `asz collect` and `asz server` also collect when they start. |
+| `max_delta_bytes` | `2097152` | The largest file asz writes from one source, 2 MiB. A single longer record gets a file of its own. |
+
+When several adapters are enabled, asz collects from all of them together, at the shortest
+`interval` among them, and watches if any of them has `mode: watch`.
 
 ### Choosing an interval
 
-Keep the interval in minutes. A pass lands what moved since the last pass, and a landed file is
-never appended to, so every pass that finds new records writes new files. A short interval
-therefore writes many small files. Each landed file is one log record when it is
-[sent](export-otlp.md), so it also means many small records at the receiver. A longer interval
-writes fewer, larger files, up to `max_delta_bytes` each, and the page and the receiver see new
-data that much later.
-
-A few seconds is a value for tests. A [scenario build](../guides/scenario.md) writes `5s` into the
-configuration it creates, so a collector beside a feed picks each session up as it arrives.
-
-### Several local adapters
-
-`collector` is set on each adapter, but `asz collect` and `asz server` run one pipeline for all
-the enabled local adapters, `claude-code-local` and `claude-code-changes`. One pass reads them
-all. See [collect](command-line.md#collect). One pipeline has one mode and one period, so the
-settings combine:
-
-- It watches when any of them has `mode: watch`. It makes a single pass only when every one of
-  them has `mode: once`, or with `-once`.
-- It runs at the shortest `interval` among them. A source that asks for 2 seconds is still read
-  every 2 seconds when another asks for a minute.
-- `max_delta_bytes` does not combine. Each adapter cuts its own files at its own budget.
-
-A disabled adapter does not count. The receiver, `claude-code-otlp`, takes no `collector` block,
-so it does not count either. When it is the only adapter enabled, `asz collect` sends what it
-lands to `export.otlp.endpoint` every 10 minutes, the compiled default.
-
-Both commands print the result when they start, on their `source` line: `(every 10m0s)` when the
-pipeline watches, `(once)` when it does not. `asz view` collects nothing, but it checks the root
-for new rounds at the same shortest interval.
+Use minutes. Every collection that finds something new writes new files, so a short interval
+writes many small files, and sends many small records to a receiver. A longer interval shows new
+data later.
 
 ## parse
 
-```yaml
-parse:
-  max_round_bytes: 2097152
-```
-
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `max_round_bytes` | `2097152` | The largest `.sf` round file the parser writes, 2 MiB, the same budget as a landed file. A round travels whole as one log record. The parser narrows a round's input window until the round fits and leaves the rest of the evidence to the next round, so one parse pass may write several rounds. A round covering a single landed file is published whole even when larger. |
+| `max_round_bytes` | `2097152` | The largest round file the parser writes, 2 MiB. |
 
 ## export
+
+Where to send the collected data. See [Export over OpenTelemetry](export-otlp.md).
 
 ```yaml
 export:
@@ -141,68 +95,29 @@ export:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `protocol` | `grpc` | The transport: `grpc`, or `http` with a protobuf body. The SkyWalking OAP accepts both. |
-| `endpoint` | empty | Where the receiver listens. For `grpc`, `host:port`: the OAP's gRPC port, `127.0.0.1:11800` by default. For `http`, the receiver's base URL, to which `/v1/logs` is appended: the OAP's REST port, `http://127.0.0.1:12800`. Empty means `asz push` refuses to run. |
-| `tls` | `false` | For `grpc`, connect with TLS, verified against the system's roots. For `http`, the scheme of the endpoint decides. |
-| `service_name` | empty | The service every record is attributed to. Empty means the runtime that produced each session, read off its landed header: `Claude Code` for `claude-code-local`, `Mock Agent` for `mock`. One service per kind of agent. |
-| `instance_id` | empty | Sent as `service.instance.id`: who is pushing, in words the people reading the receiver recognise, for example a mailbox such as `wusheng@tetrate.io`, a name, or a machine. Empty means `user@host` of the machine running `asz push`, which is stable across restarts. |
-| `layer` | `AI_AGENT` | Sent as `service.layer`, the layer the receiver places the service in. The OAP selects its rules by layer, and a layer name is upper case with underscores. |
-| `headers` | none | Sent with every request, as gRPC metadata or as HTTP headers, for example `Authorization`. |
-| `batch_bytes` | `8388608` | How many file bytes one request carries at most, 8 MiB, which keeps a request under the 10 MiB the OAP's HTTP server accepts and well under the 50 MB its gRPC server accepts. A file larger than this is sent alone, in a request of its own. |
-| `max_bytes_per_minute` | `0` | At most this many bytes on the wire per minute: a pass waits before a request until a minute's budget covers it. Zero is no limit. See [Rate](export-otlp.md#rate). |
-| `logs` | `true` | Send the landed files and rounds, as OTLP logs. |
-| `metrics` | `true` | Send the metrics spool, as OTLP metrics. One of the two must be on. |
-
-See [Export over OpenTelemetry](export-otlp.md) for what is sent.
+| `protocol` | `grpc` | `grpc`, or `http` with a protobuf body. |
+| `endpoint` | empty | For `grpc`, `host:port`, such as the SkyWalking OAP's `127.0.0.1:11800`. For `http`, a base URL, such as `http://127.0.0.1:12800`. Empty sends nothing. |
+| `tls` | `false` | For `grpc`, connect with TLS. For `http`, the URL's scheme decides. |
+| `service_name` | empty | The service every record belongs to. Empty means the agent that produced the session, such as `Claude Code`. |
+| `instance_id` | empty | Who is sending, such as a name or an email address. Empty means `user@host`. |
+| `layer` | `AI_AGENT` | The layer the receiver puts the service in. |
+| `headers` | none | Sent with every request, such as `Authorization`. |
+| `batch_bytes` | `8388608` | The most file bytes in one request, 8 MiB. A larger file goes alone. |
+| `max_bytes_per_minute` | `0` | A limit on bytes sent per minute. `0` is no limit. |
+| `logs` | `true` | Send the collected files and rounds. |
+| `metrics` | `true` | Send the metrics. `logs` or `metrics` must be on. |
 
 ## The changes adapter
 
-```yaml
-adapters:
-  - name: claude-code-changes
-    enabled: true
-    source_root: ""
-    include: []
-    exclude:
-      - /private/tmp/**
-    collector:
-      mode: watch
-      interval: 10m
-      max_delta_bytes: 2097152
-```
-
-`claude-code-changes` lands the records the [asz Claude Code plugin](claude-code-plugin.md)
-writes: which files each shell command changed, and each edit made inside a subagent, as
-git-style hunks. Empty `source_root` resolves `plugins/data` under the same directory
-`claude-code-local` resolves, and reads every plugin directory named `asz-changes-*` under it.
-Set `source_root` to collect from a copy. The session filters are the ones above, judged by the
-workspace each session's records name. It is on by default because it costs nothing when the
-plugin is not installed: there is nothing to discover. It takes no `metrics`.
+`claude-code-changes` collects the records of the [Claude Code plugin](claude-code-plugin.md). It
+finds them under `plugins/data` in Claude Code's directory. It does nothing when the plugin is not
+installed.
 
 ## The provider adapter
 
-```yaml
-adapters:
-  - name: claude-code-provider
-    enabled: true
-    source_root: ""
-    include: []
-    exclude:
-      - /private/tmp/**
-    collector:
-      mode: watch
-      interval: 10m
-      max_delta_bytes: 2097152
-```
-
-`claude-code-provider` lands the request and response bodies Claude Code writes for its model
-provider when `OTEL_LOG_RAW_API_BODIES=file:<absolute path>` is in its environment. Empty
-`source_root` resolves `asz/provider-bodies` under the same directory `claude-code-local` resolves;
-the variable must name that directory by its absolute path. The session filters are the ones above,
-judged by the directory each session's main transcript sits under. It runs after the other local
-adapters in a pass. It is on by default because it costs nothing until the variable is set: there
-is nothing to list. It takes no `metrics`. See
-[Claude Code Provider Bodies](claude-code-provider-bodies.md).
+`claude-code-provider` collects the request and response bodies Claude Code sends to its model
+provider. Claude Code writes them only when you turn it on, as
+[Claude Code Provider Bodies](claude-code-provider-bodies.md) shows.
 
 ## The receiver adapter
 
@@ -214,19 +129,12 @@ adapters:
     metrics: true
 ```
 
-`claude-code-otlp` receives what Claude Code's own OpenTelemetry exporter sends, with the
-runtime configured as its documentation says: `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
-`OTEL_METRICS_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` at `listen`, over gRPC or
-`http/protobuf`. Phase one lands its metrics in the storage root's spool for `asz push`. Logs and
-traces are accepted and dropped. It runs while `asz collect` or `asz server` runs, beside the
-local adapter, and not with `-once`. `metrics` may be on here or on `claude-code-local`, never
-on both: the configuration refuses to load, since the two would count the same tokens twice.
+`claude-code-otlp` receives Claude Code's own metrics. Start Claude Code with:
 
-## Precedence
+```sh
+CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317 claude
+```
 
-1. `-config FILE` on the command line.
-2. `./asz.yaml` in the working directory.
-3. The compiled defaults, which are the values shown above.
-
-A file may leave keys out. Anything unset takes its default, except that a file which lists
-`adapters` replaces the whole list.
+It runs while `asz collect` or `asz server` runs, but not with `-once`. It keeps the metrics for
+[export](#export), and drops logs and traces. Turn `metrics` on here or on `claude-code-local`, not
+on both, since both would count the same tokens.

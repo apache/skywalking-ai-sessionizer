@@ -271,7 +271,7 @@ read, so its cursor stays `source_gone`.
 
 The plugin's change records are not Claude Code's files, and none of this applies to them. The
 plugin removes an output file itself once it has not been written to for `retention.ttl`, 30 days
-by default (see [Retention](../setup/claude-code-plugin.md#retention)). Their adapter sets
+by default (see [Retention](../adapters/claude-code-plugin.md#retention)). Their adapter sets
 `source_gone` only on a file that goes while a pass reads it, so the cursor of a file the plugin
 removed is left as it was.
 

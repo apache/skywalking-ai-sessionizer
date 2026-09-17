@@ -1,71 +1,35 @@
 # Container Image
 
-CI publishes a multi-platform image, `linux/amd64` and `linux/arm64`, to the GitHub container
-registry:
-
 ```text
 ghcr.io/apache/skywalking-ai-sessionizer
 ```
 
-It carries the `asz` binary, and under `/licenses` the license files a binary distribution must
-carry. The base is distroless, there is no shell, and the process runs as a non-root user. Its
-working directory is `/asz`, so the default storage root is `/asz/data`, which is declared as a
-volume, and a configuration file placed at `/asz/asz.yaml` is read the same way it is on a host.
-
-The image is a Linux image. On Windows, Docker Desktop runs it as a Linux container, so the same
-image and the same commands work there. Without Docker, use the Windows binary package that
-[Install](install.md#binary-package) describes.
-
-The image is a convenience built from the approved release tag. Promoting the GitHub prerelease
-after the Apache vote and distribution publication starts its build, as the tags below describe.
+A Linux image for `amd64` and `arm64`, which Docker Desktop also runs on macOS and Windows. It has
+no shell and runs as a non-root user. The storage root is `/asz/data`, and a configuration file at
+`/asz/asz.yaml` is read.
 
 ## Tags
 
-| Tag | Points at | Moves |
-| --- | --- | --- |
-| `<version>`, such as `0.2.0` | the image built from the git tag `v<version>` | only when a run started by hand publishes that tag again |
-| `latest` | the version GitHub names its latest release | when a GitHub prerelease is promoted as the latest release after the Apache vote, or an explicit image retry publishes that version |
-| `main` | the development head | on each push to `main` |
-| `<commit id>` | one commit, by its complete 40-character id | only when a run started by hand publishes a tag on that commit again |
+| Tag | Image |
+| --- | --- |
+| `latest` | the latest release |
+| `<version>` | that release, from the [downloads page](https://skywalking.apache.org/downloads/) |
+| `main` | the development head |
 
-The tags `0.1` and `0.2` remain from an earlier workflow, and no new `MAJOR.MINOR` tag is made,
-because a reader who pulls one cannot tell which version answered.
+## Read a storage root
 
-A git tag `v*` names a release candidate. CI on its push creates a GitHub prerelease holding the
-binaries it built, for developer testing and local SVN staging. After the Apache vote passes,
-`tools/release.sh publish` moves the approved files to the Apache release directory and promotes the
-prerelease to a full GitHub release, which publishes the image under that version. It asks whether
-the version becomes the latest GitHub release, and only then does the image move `latest`. A patch
-of an older line is usually kept off it.
-A draft or a prerelease publishes no container image. A manual image retry requires an existing
-full GitHub release. A version with a suffix, such as
-`0.2.0-rc1`, is published under its own version tag and under its commit id, because CI tags every
-build with its commit id. It moves no floating tag, so `latest` stays where it is.
-
-Every image CI publishes carries `org.opencontainers.image.version` and
-`org.opencontainers.image.revision` labels, and `asz version` inside it prints the same version.
-The version is the one its git tag names when a GitHub release, or a run started by hand for that
-tag, published the image. For a push to `main` it is the complete commit id. The revision label is
-always the complete commit id.
-
-## Serve a storage root
-
-`view` serves the page on port 8787, listening on every interface because a container's loopback
-is not reachable from outside. It only reads.
+`view` serves the page and only reads:
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
   ghcr.io/apache/skywalking-ai-sessionizer:latest view 0.0.0.0:8787
 ```
 
-This is the way to read a storage root that was collected elsewhere. The image's default command
-is `server`, which serves the same page and also collects; use `view` when nothing is mounted for
-it to collect from.
+Open <http://127.0.0.1:8787>.
 
 ## Collect from the host
 
-To collect inside the container, mount Claude Code's directory read-only and tell the adapter
-where it is. Put a configuration file beside the storage root:
+Mount Claude Code's directory read-only, and point the adapter at it with a configuration file:
 
 ```yaml
 # asz.yaml
@@ -73,15 +37,8 @@ storage:
   root: /asz/data
 adapters:
   - name: claude-code-local
-    enabled: true
     source_root: /claude/projects
-    exclude:
-      - /private/tmp/**
 ```
-
-A file that lists `adapters` replaces the whole adapter list. Each named adapter retains its
-default values for omitted fields, including its exclusions. An explicit `exclude` list replaces
-those defaults. Measured on one machine: 44 sessions with the exclude, 64 without.
 
 ```sh
 docker run --rm -p 8787:8787 \
@@ -91,32 +48,14 @@ docker run --rm -p 8787:8787 \
   ghcr.io/apache/skywalking-ai-sessionizer:latest
 ```
 
-The default command is `server`, so this lands, parses and serves on the collector's interval: once
-when it starts, then every 10 minutes unless the configuration sets another. To
-collect without serving a page, put `collect` after the image name.
-
-The container user is not the host user, so on Linux the storage root must be writable by it.
-Running with `--user "$(id -u):$(id -g)"` is the simplest way. Docker Desktop on macOS maps
-bind mounts for you.
+The default command, `server`, collects every 10 minutes and serves the page. On Linux, add
+`--user "$(id -u):$(id -g)"` so the container can write to `./data`.
 
 ## Run any command
 
-Put the command after the image name. The entrypoint is the binary.
+Put the command after the image name:
 
 ```sh
 docker run --rm -v "$PWD/data:/asz/data" ghcr.io/apache/skywalking-ai-sessionizer:latest verify
-docker run --rm ghcr.io/apache/skywalking-ai-sessionizer:latest glossary
 docker run --rm ghcr.io/apache/skywalking-ai-sessionizer:latest version
 ```
-
-## Build locally
-
-```sh
-make docker          # -> skywalking-ai-sessionizer:dev
-```
-
-The Dockerfile cross-compiles from the build host, so a multi-platform build needs no emulation
-and no third-party action. The version is passed as a build argument. `make docker` passes the
-output of `git describe --tags --always --dirty` without its leading `v`. On a tagged commit that
-is the tag, such as `0.3.0`. On any other commit it is the nearest tag, the number of commits since
-it and the short commit id, such as `0.3.0-4-g1a2b3c4`. A tree with changes adds `-dirty`.

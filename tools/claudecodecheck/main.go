@@ -20,7 +20,7 @@
 // would. It runs the commands as the pages write them, each in the shell
 // the page gives it for this system:
 //
-//  1. Install in docs/en/setup/install.md: the command that runs
+//  1. Install script in docs/en/setup/install.md: the command that runs
 //     install/asz.sh, or install/asz.ps1 on Windows, in every shell there is.
 //  2. Install in docs/en/setup/claude-code-plugin.md: the command that runs
 //     install/claude-code-plugin.sh, or .ps1. The plugin must be installed,
@@ -343,7 +343,7 @@ func (c *check) repository(git, bare string) error {
 // installAsz runs the command under Quick install in install.md in every
 // shell, each into a home of its own, and keeps the last one's asz.
 func (c *check) installAsz() error {
-	line, err := c.pageBlock("install.md", "## Quick install", "install/asz.", oneLiner())
+	line, err := c.pageBlock("install.md", "## Install script", "install/asz.", oneLiner())
 	if err != nil {
 		return err
 	}
@@ -488,7 +488,7 @@ func (c *check) missing() error {
 // upgradeByHand runs the Upgrade commands to the second tag.
 func (c *check) upgradeByHand() error {
 	step("Upgrade by hand to v%s, in %s", c.second(), filepath.Base(c.shells[0]))
-	block, err := c.pageBlock("claude-code-plugin.md", "### Upgrade", "--keep-data")
+	block, err := c.pageBlock("claude-code-plugin.md", "## Upgrade", "--keep-data")
 	if err != nil {
 		return err
 	}
@@ -759,7 +759,15 @@ func (c *check) pageBlock(page, heading string, contains ...string) (string, err
 	if len(found) != 1 {
 		return "", fmt.Errorf("%s has %d %s blocks under %q holding %q, want 1", page, len(found), lang, heading, contains)
 	}
-	block := strings.ReplaceAll(found[0], rawBase, c.base+"/raw/")
+	// A page sets the version with a placeholder, VERSION=<version>, which this
+	// check sets itself before the block.
+	var lines []string
+	for _, l := range strings.Split(found[0], "\n") {
+		if !strings.Contains(l, "<version>") {
+			lines = append(lines, l)
+		}
+	}
+	block := strings.ReplaceAll(strings.Join(lines, "\n"), rawBase, c.base+"/raw/")
 	return strings.ReplaceAll(block, gitURL, c.base+"/git/asz.git"), nil
 }
 
