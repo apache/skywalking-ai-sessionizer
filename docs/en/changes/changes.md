@@ -72,6 +72,50 @@
   feed still picks up each session as it arrives. A directory an earlier build wrote without an
   interval is brought up to date instead of refused.
 
+## Install
+
+- **The Claude Code plugin installs from a marketplace.** 0.3.0 told users to run
+  `claude --plugin-dir` on the packaged plugin, which Claude Code keeps for one session only, so the
+  next plain `claude` recorded nothing and said nothing. The repository now carries
+  `.claude-plugin/marketplace.json`, and `claude plugin marketplace add` at a version's tag, then
+  `claude plugin install asz-changes@skywalking-ai-sessionizer`, keeps the plugin installed across
+  sessions. The manifest and the hooks moved to `plugins/claude-code/plugin/`, which holds only what
+  Claude Code reads and its own `LICENSE` and `NOTICE`, so no Go source reaches a user's plugin
+  cache. The manifest names no version, so the version is the tag's commit and no release can leave
+  a stale one behind. [Claude Code Plugin](../setup/claude-code-plugin.md#install) gives the commands, and
+  how to upgrade without losing records asz has not collected yet: removing the marketplace deletes
+  the plugin's data directory unless the plugin is first uninstalled with `--keep-data`.
+- **The hooks run `asz-claude-plugin` by name from `PATH`**, as Anthropic's language server plugins
+  run their servers. A binary inside the plugin would have to be committed for every platform, and
+  a source release carries no compiled file. With no binary on `PATH`, Claude Code 2.1.274 reported
+  `Executable not found in $PATH` for the hook, and the tool still ran.
+- **Each binary package holds `asz` and `asz-claude-plugin` side by side**, with `LICENSE`, `NOTICE`
+  and `licenses/`, and no `claude-code-plugin/` directory. `make build` writes both to `bin/`. The
+  package smoke test finds the plugin's binary by name on `PATH`. The candidate check in
+  `tools/release.sh`, the Homebrew formula, and the Scoop and winget manifests follow the new
+  layout, and put both binaries on the path.
+- **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
+  installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
+  [Install](../setup/install.md#quick-install) runs them from the version's tag in one command. The
+  plugin's own scripts, `install/claude-code-plugin.sh` and `install/claude-code-plugin.ps1`,
+  install `asz-claude-plugin` and add the plugin to Claude Code at the same tag, and
+  [Claude Code Plugin](../setup/claude-code-plugin.md#install) runs them. The reader sets the
+  version. Each script downloads the package and its `.sha512`: through the mirrors for the newest
+  release, which is all downloads.apache.org holds, and from archive.apache.org for any older one.
+  It stops unless they match, checks that its binary starts, and installs it
+  where the Claude Code installer puts `claude`: `~/.local/bin`, or `%USERPROFILE%\.local\bin`.
+  Run again with a newer version, the plugin's script uninstalls the plugin with `--keep-data`
+  before it moves the marketplace, and copies a 0.3.0 `settings.yaml` over once.
+- **CI runs the install pages with Claude Code.** A new `claude-code` job runs
+  `tools/claudecodecheck` with Claude Code 2.1.274 on each binary package's platform, Linux, macOS
+  and Windows on x86-64 and ARM 64. It runs both install commands as the pages write them, the
+  plugin's upgrade by hand and by its script, and its install by hand, with only the download
+  addresses pointed at the runner. A headless session must be recorded by the plugin and collected
+  by asz, a session without the binary must still run its tool, and each upgrade must keep the
+  plugin's data. Before, no platform ran the plugin's hooks inside Claude Code in CI, and Windows
+  never had. It passes on all six. On Windows the hooks' `asz-claude-plugin` starts
+  `asz-claude-plugin.exe`, and both scripts run in Windows PowerShell and PowerShell 7.
+
 ## Release
 
 - `publish` asks whether the version becomes the latest GitHub release before anything moves, and

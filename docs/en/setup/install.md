@@ -1,8 +1,60 @@
 # Install
 
-asz is one binary, `asz`. This page lists the ways to get it, and says when each one is available.
-Every way gives the same program. The binary packages also carry the
-[Claude Code plugin](claude-code-plugin.md).
+asz is one binary, `asz`, the collector. This page lists the ways to get it, and says when each one
+is available. Every way gives the same program.
+
+The [Claude Code plugin](claude-code-plugin.md) is a second install, with its own script and its
+own page. It records which files each tool call changed, and asz collects what it records. The
+binary packages carry its binary, `asz-claude-plugin`, beside `asz`.
+
+## Quick install
+
+The install script of a version installs `asz` from that version's binary package, from 0.4.0 on.
+Set `VERSION` to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as
+released, then run the script from that version's tag.
+
+On macOS or Linux:
+
+```sh
+VERSION=<version>
+```
+
+```sh
+curl -fsSL "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh" | sh -s -- "$VERSION"
+```
+
+On Windows, in PowerShell:
+
+```powershell
+$Version = "<version>"
+```
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/asz.ps1"))) $Version
+```
+
+The download site, downloads.apache.org, holds only the newest release, and archive.apache.org
+keeps every version. So the script asks the download site for the version's `.sha512` first. When
+the download site has it, the package comes through the Apache mirrors. When it does not, both
+come from the archive, which slows down heavy use and so is not asked first. The script stops
+unless the package matches its `.sha512`. It checks that `asz` starts, and only then puts it in the
+directory where the Claude Code installer puts `claude`: `~/.local/bin`, or
+`%USERPROFILE%\.local\bin`, which the Windows script adds to your user `Path`. It checks the
+checksum and not the signature. [Verify a package](#verify-a-package) says how to check both by
+hand. Run it again with another version to install that one over it. On Windows, stop `asz` first:
+Windows does not replace the file of a running program, and the script stops before it copies.
+
+The script is `install/asz.sh`, or `install/asz.ps1`, in the source of the version. The address
+names the version's tag, so the script that runs is the one released with that version. To read it
+before it runs, download it first:
+
+```sh
+curl -fsSL -o asz.sh "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh"
+sh asz.sh "$VERSION"
+```
+
+To install the Claude Code plugin as well, run its own script, which
+[Claude Code Plugin](claude-code-plugin.md#install) gives.
 
 ## Binary package
 
@@ -23,8 +75,10 @@ SkyWalking AI Sessionizer.
 Every package holds:
 
 - `asz`, or `asz.exe` on Windows.
-- `claude-code-plugin/`, the Claude Code plugin: its manifest, its hooks, and its binary under
-  `bin/`. [Claude Code Plugin](claude-code-plugin.md) says how to point Claude Code at it.
+- `asz-claude-plugin`, or `asz-claude-plugin.exe`, the binary the Claude Code plugin's hooks run.
+  The plugin's manifest and hooks are not in the package. Claude Code installs them from the
+  marketplace at the version's tag, as [Claude Code Plugin](claude-code-plugin.md#install) says.
+  Up to 0.3.0, the package held the whole plugin under `claude-code-plugin/`.
 - `LICENSE`, `NOTICE`, and `licenses/` with the license of every module built into the binaries.
 
 The same files are in three places:
@@ -42,10 +96,11 @@ The same files are in three places:
 The GitHub releases of 0.1.0 and 0.2.0 were made before the project's first Apache vote. They are
 not Apache releases, and their packages, which CI built, are not signed.
 
+The commands below use the version you set, as in [Quick install](#quick-install).
+
 On macOS or Linux, download a package with its checksum and its signature:
 
 ```sh
-VERSION=0.3.0
 PKG=apache-skywalking-ai-sessionizer-$VERSION-bin-linux-amd64.tgz
 curl -fL -o "$PKG" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$VERSION/$PKG&action=download"
 curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.sha512"
@@ -60,8 +115,8 @@ tar -xzf "$PKG" -C asz
 ./asz/asz version
 ```
 
-Put the directory on your `PATH`, or copy `asz` into a directory that is on it. If you use the
-plugin, keep `claude-code-plugin/` whole, because its hooks run the binary under its own `bin/`.
+Put the directory on your `PATH`, or copy `asz` and `asz-claude-plugin` into a directory that is on
+it. The plugin's hooks run `asz-claude-plugin` by name, so Claude Code must find it on its `PATH`.
 
 The binaries are not notarized by Apple. A browser marks the files it downloads, and macOS may
 refuse to start a marked binary that is not notarized. `curl` does not mark what it downloads. If
@@ -70,7 +125,6 @@ macOS refuses, remove the mark: `xattr -dr com.apple.quarantine asz`.
 On Windows, in PowerShell:
 
 ```powershell
-$Version = "0.3.0"
 $Pkg = "apache-skywalking-ai-sessionizer-$Version-bin-windows-amd64.zip"
 Invoke-WebRequest -OutFile $Pkg "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
 Invoke-WebRequest -OutFile "$Pkg.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.sha512"
@@ -84,10 +138,8 @@ Expand-Archive $Pkg -DestinationPath asz
 .\asz\asz.exe version
 ```
 
-Claude Code has not yet run the plugin's hooks on Windows, so the command line in `hooks/hooks.json`
-has not run there. CI unpacks each Windows package on a Windows runner of its processor, outside
-Claude Code. It runs the packaged plugin with a `SessionStart`, a `PreToolUse`, a `PostToolUse` and
-a `SessionEnd` event on standard input.
+CI runs Claude Code with each Windows package on a Windows runner of its processor, and the plugin's
+hooks find `asz-claude-plugin.exe` by the name `asz-claude-plugin`.
 [Claude Code Plugin](claude-code-plugin.md#what-was-verified) says what was verified.
 
 ## Verify a package
@@ -139,9 +191,8 @@ The formula downloads the binary package for your machine from the GitHub releas
 That release carries the voted packages, and its URL keeps working after a newer version comes
 out. When GitHub fails, Homebrew takes the same package from archive.apache.org, which keeps every
 version. Either way, Homebrew checks the download against the sha256 of the voted package. The
-formula builds nothing, so it needs no Go. It installs `asz`, the Claude Code plugin under the
-formula's `libexec/claude-code-plugin`, and `LICENSE`, `NOTICE` and `licenses/` at the root of the
-formula's prefix. Because it installs the binary package, `asz view` draws the page with the
+formula builds nothing, so it needs no Go. It installs `asz` and `asz-claude-plugin` on your
+`PATH`, and `LICENSE`, `NOTICE` and `licenses/` at the root of the formula's prefix. Because it installs the binary package, `asz view` draws the page with the
 renderer's fonts.
 
 Once the tap is named here, install by the formula's full name:
@@ -151,15 +202,10 @@ brew install <owner>/<tap>/skywalking-ai-sessionizer
 ```
 
 Since Homebrew 6.0.0, a formula from a tap that is not Homebrew's own must be trusted before it is
-loaded. Installing by the full name trusts that one formula only. Point Claude Code at the plugin
-with:
-
-```sh
-claude --plugin-dir "$(brew --prefix skywalking-ai-sessionizer)/libexec/claude-code-plugin"
-```
-
-`brew --prefix skywalking-ai-sessionizer` prints the formula's `opt` directory, which stays the
-same across upgrades. `brew info skywalking-ai-sessionizer` prints the same plugin path.
+loaded. Installing by the full name trusts that one formula only. The formula's caveats, which
+`brew info skywalking-ai-sessionizer` prints again, give the two commands that install the plugin
+into Claude Code at the formula's version. [Claude Code Plugin](claude-code-plugin.md#install)
+gives the same commands.
 
 ## Scoop, on Windows
 
@@ -168,9 +214,8 @@ same across upgrades. `brew info skywalking-ai-sessionizer` prints the same plug
 Each release writes a Scoop manifest for Windows on x86-64 and ARM 64. The release manager submits
 it to a Scoop bucket, and this section will name the bucket once the manifest is published. The
 manifest downloads the binary package from dlcdn.apache.org, the delivery network in front of the
-download site, checks its sha512, and puts `asz` on the path. The plugin is the
-`claude-code-plugin` folder in the app's directory, which `scoop prefix skywalking-ai-sessionizer`
-prints.
+download site, checks its sha512, and puts `asz` and `asz-claude-plugin` on the path. The plugin
+itself is installed into Claude Code as [Claude Code Plugin](claude-code-plugin.md#install) says.
 
 ## winget, on Windows
 
@@ -186,8 +231,8 @@ winget install --id Apache.SkyWalkingAISessionizer
 
 The manifest downloads the binary package from the GitHub release of the version, which carries
 the voted packages and keeps its URL after a newer version comes out. It checks the package's
-sha256, and adds `asz` as a command. The plugin is the `claude-code-plugin` folder beside
-`asz.exe`, in the folder winget installs the package into.
+sha256, and adds `asz` and `asz-claude-plugin` as commands. The plugin itself is installed into
+Claude Code as [Claude Code Plugin](claude-code-plugin.md#install) says.
 
 ## Build from the source package
 
@@ -198,8 +243,9 @@ pinned Horizon commit. The source package does not carry the renderer's two font
 are under the SIL Open Font License, which the ASF keeps out of source releases. A binary built
 from it draws the page with system fonts. The binary packages carry the fonts.
 
+With `VERSION` set to a released version:
+
 ```sh
-VERSION=0.3.0
 SRC=apache-skywalking-ai-sessionizer-$VERSION-src.tgz
 curl -fL -o "$SRC" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$VERSION/$SRC&action=download"
 curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$SRC.sha512"
@@ -215,17 +261,26 @@ make build VERSION=$VERSION
 ./bin/asz version
 ```
 
-`make build` writes `bin/asz`. It writes the plugin's binary to
-`plugins/claude-code/bin/asz-claude-plugin`, where the plugin's hooks expect it, so
-`claude --plugin-dir plugins/claude-code` runs the plugin from the source. Pass `VERSION`. The
-Makefile reads the version from git, and an unpacked source package has no git history, so without
-it `asz version` prints an empty version.
+`make build` writes `bin/asz` and `bin/asz-claude-plugin`. Pass `VERSION`. The Makefile reads the
+version from git, and an unpacked source package has no git history, so without it `asz version`
+prints an empty version. Up to 0.3.0, `make build` wrote the plugin's binary to
+`plugins/claude-code/bin/` instead.
+
+To run the plugin from the source of 0.4.0 or later, put `bin` first on `PATH` and load the plugin's
+directory:
+
+```sh
+PATH="$PWD/bin:$PATH" claude --plugin-dir plugins/claude-code/plugin
+```
+
+`--plugin-dir` lasts for that one session. Its data directory is `asz-changes-inline`, not the
+`asz-changes-skywalking-ai-sessionizer` of an installed plugin.
 
 Without make, on Windows for example, run the two commands `make build` runs:
 
 ```sh
-go build -ldflags "-X main.version=0.3.0" -o bin/asz.exe ./cmd/asz
-go build -ldflags "-X main.version=0.3.0" -o plugins/claude-code/bin/asz-claude-plugin.exe ./plugins/claude-code
+go build -ldflags "-X main.version=$VERSION" -o bin/asz.exe ./cmd/asz
+go build -ldflags "-X main.version=$VERSION" -o bin/asz-claude-plugin.exe ./plugins/claude-code
 ```
 
 Leave out `.exe` on macOS and Linux. `make binaries VERSION=$VERSION` cross-compiles every
@@ -243,7 +298,7 @@ you accept a build of the tagged source that no vote checked.
 For Go users, with Go 1.27 or later:
 
 ```sh
-go install github.com/apache/skywalking-ai-sessionizer/cmd/asz@v0.3.0
+go install "github.com/apache/skywalking-ai-sessionizer/cmd/asz@v$VERSION"
 ```
 
 It installs `asz` into Go's `bin` directory, `$(go env GOPATH)/bin` unless `GOBIN` is set. It
@@ -256,8 +311,9 @@ differs from a package in four ways:
   the project's first Apache vote.
 - `asz version` prints `dev`. The Makefile sets the version at build time, and `go install` does
   not.
-- The Claude Code plugin is not installed. Take it from a binary package, or build it from the
-  source package.
+- The Claude Code plugin's binary is not installed. Take it from a binary package, or build it from
+  the source package. `go install` of `./plugins/claude-code` would name the binary `claude-code`,
+  which the plugin's hooks do not run.
 
 Measured on 2026-09-11 on macOS: `go install github.com/apache/skywalking-ai-sessionizer/cmd/asz@main`
 built commit `dd083cc`, through the Go module proxy and again from GitHub directly. The module Go

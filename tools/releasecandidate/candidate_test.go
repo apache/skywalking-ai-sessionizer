@@ -163,7 +163,7 @@ echo 'ci-binaries: artifact 456, sha256:fixture, commit fixture'
 	var packed bytes.Buffer
 	gz := gzip.NewWriter(&packed)
 	tw := tar.NewWriter(gz)
-	for _, name := range []string{"asz", "claude-code-plugin/bin/asz-claude-plugin", "claude-code-plugin/.claude-plugin/plugin.json", "claude-code-plugin/hooks/hooks.json", "LICENSE", "NOTICE", "licenses/license.txt"} {
+	for _, name := range []string{"asz", "asz-claude-plugin", "LICENSE", "NOTICE", "licenses/license.txt"} {
 		body := []byte("CI bytes for " + name + "\n")
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
 			t.Fatal(err)

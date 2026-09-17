@@ -783,13 +783,13 @@ $found"
         *.zip) listing=$(unzip -Z1 "$out/$b") || fail "cannot list $b" ;;
         *) listing=$(tar -tzf "$out/$b") || fail "cannot list $b" ;;
       esac
-      for f in "asz$exe" "claude-code-plugin/bin/asz-claude-plugin$exe" LICENSE NOTICE; do
+      for f in "asz$exe" "asz-claude-plugin$exe" LICENSE NOTICE; do
         has_line "$listing" "$f" || fail "$b has no $f"
       done
-      for d in licenses/ claude-code-plugin/.claude-plugin/ claude-code-plugin/hooks/; do
+      for d in licenses/; do
         has_prefix "$listing" "$d" || fail "$b has no $d"
       done
-      say "ok  $b: asz$exe, the Claude Code plugin, LICENSE, NOTICE and licenses/"
+      say "ok  $b: asz$exe, asz-claude-plugin$exe, LICENSE, NOTICE and licenses/"
     done
 
     step "Sign the verified archives"

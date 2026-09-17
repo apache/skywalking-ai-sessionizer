@@ -1,0 +1,13 @@
+{
+  "name": "skywalking-ai-sessionizer",
+  "owner": {"name": "Apache SkyWalking", "url": "https://skywalking.apache.org/"},
+  "description": "Claude Code plugins of Apache SkyWalking AI Sessionizer.",
+  "plugins": [
+    {
+      "name": "asz-changes",
+      "source": "./plugins/claude-code/plugin",
+      "description": "Records which files each tool call changed, for Apache SkyWalking AI Sessionizer. Needs asz-claude-plugin on PATH.",
+      "license": "Apache-2.0"
+    }
+  ]
+}

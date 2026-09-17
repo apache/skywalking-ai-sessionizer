@@ -50,6 +50,7 @@ be.
 
 ```
 asz.yaml                        default configuration, every value written out; read when no -config is given
+install/                        the install scripts: asz.sh and asz.ps1 for asz, claude-code-plugin.sh and .ps1 for the plugin; run from a version's tag
 cmd/asz/                        CLI: sources · collect · index · show · parse · conversation · view · glossary · verify
 pkg/sessiondata/                Session Data: the landed record, `.sd` — public, adapters produce these
 pkg/model/                      the conversation vocabulary: node kinds, relations, qualification
