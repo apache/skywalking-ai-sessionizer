@@ -17,26 +17,31 @@
 
 // Command claudecodecheck follows the install pages on this machine, with
 // the Claude Code that is on PATH, and fails where a person following them
-// would:
+// would. It runs the commands as the pages write them, each in the shell
+// the page gives it for this system:
 //
-//  1. The Quick install block of docs/en/setup/install.md installs asz and
-//     asz-claude-plugin from PACKAGE. On Windows that is the PowerShell block,
-//     in every PowerShell there is; elsewhere the shell block, in every
-//     shell there is.
-//  2. The commands under Install in docs/en/setup/claude-code-plugin.md add
-//     the marketplace at the version's tag and install the plugin.
+//  1. Install in docs/en/setup/install.md: the command that runs
+//     install/asz.sh, or install/asz.ps1 on Windows, in every shell there is.
+//  2. Install in docs/en/setup/claude-code-plugin.md: the command that runs
+//     install/claude-code-plugin.sh, or .ps1. The plugin must be installed,
+//     and Claude Code's cache must hold the plugin's directory alone.
 //  3. A headless Claude Code session runs one shell command. The plugin must
 //     record the file it wrote, and asz collect must land the record.
 //  4. The same session without asz-claude-plugin on PATH must still run the
 //     command, and leave no record.
-//  5. The Upgrade block moves the plugin to a second tag. The plugin's data
-//     must stay, and the next session must be recorded again.
+//  5. The Upgrade commands, by hand, move the plugin to a second tag, and the
+//     install script moves it to a third. Each time the plugin's data must
+//     stay and the next session must be recorded. The script run once more
+//     must change nothing.
+//  6. The By hand commands install the plugin into a new configuration.
 //
-// Each block is read from the page, and only its download addresses are
-// changed, to a server on 127.0.0.1 that holds PACKAGE, a git repository with
-// the marketplace at two tags, and a stand-in for the model's API. The
-// Windows block adds a directory to the user's Path, so on Windows this runs
-// only in GitHub Actions. CI runs it on each binary package's own platform.
+// Only download addresses change: the mirror selector, the download site,
+// raw.githubusercontent.com and github.com all become a server on 127.0.0.1.
+// It holds PACKAGE under three version names, this tree's install scripts, a
+// git repository with the marketplace at the three tags, and a stand-in for
+// the model's API. The Windows scripts add a directory to the user's Path,
+// so on Windows this runs only in GitHub Actions. CI runs it on each binary
+// package's own platform.
 //
 //	go run ./tools/claudecodecheck PACKAGE VERSION
 package main
@@ -45,6 +50,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,8 +75,11 @@ const (
 	// The file the stand-in model asks the shell command to write.
 	written = "claudecodecheck.txt"
 	// A settings value the plugin reads, equal to its default, so the file
-	// changes nothing and its survival across the upgrade can be checked.
+	// changes nothing and its survival across an upgrade can be checked.
 	settings = "scan_timeout: 30s\n"
+
+	rawBase = "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/"
+	gitURL  = "https://github.com/apache/skywalking-ai-sessionizer.git"
 )
 
 var windows = runtime.GOOS == "windows"
@@ -87,7 +97,7 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	os.RemoveAll(c.work)
+	_ = os.RemoveAll(c.work)
 	fmt.Printf("\n%s works with Claude Code on this machine\n", filepath.Base(c.pkg))
 }
 
@@ -97,29 +107,47 @@ type check struct {
 	work         string
 	base         string // the address of the local server
 	claude       string
-	bin          string // where the install block put the two binaries
-	config       string // Claude Code's configuration directory for this run
+	shells       []string // the shells the pages give for this system, that are here
+	aszBin       string   // where install/asz put asz
+	bin          string   // where install/claude-code-plugin put asz-claude-plugin
+	config       string   // Claude Code's configuration directory for this run
 	api          *stand
 }
 
 func step(format string, args ...any) { fmt.Printf("\n== "+format+"\n", args...) }
+
+// The three versions the local server offers, and the marketplace's tags.
+func (c *check) second() string { return c.version + "-next" }
+func (c *check) third() string  { return c.version + "-last" }
 
 func (c *check) run() error {
 	var err error
 	if c.tree, err = os.Getwd(); err != nil {
 		return err
 	}
-	if _, err := os.Stat(filepath.Join(c.tree, "docs", "en", "setup", "install.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(c.tree, "install", "asz.sh")); err != nil {
 		return errors.New("run it from the root of the repository")
 	}
 	if windows && os.Getenv("GITHUB_ACTIONS") != "true" {
-		return errors.New("the Windows install block adds a directory to the user's Path, so on Windows this runs only in GitHub Actions")
+		return errors.New("the Windows install scripts add a directory to the user's Path, so on Windows this runs only in GitHub Actions")
 	}
 	if c.claude, err = exec.LookPath("claude"); err != nil {
 		return errors.New("claude is not on PATH. Install Claude Code first")
 	}
 	if _, err := os.Stat(c.pkg + ".sha512"); err != nil {
 		return fmt.Errorf("%s.sha512 must be beside the package: %w", c.pkg, err)
+	}
+	names := []string{"sh", "bash", "zsh"}
+	if windows {
+		names = []string{"powershell", "pwsh"}
+	}
+	for _, name := range names {
+		if path, err := exec.LookPath(name); err == nil {
+			c.shells = append(c.shells, path)
+		}
+	}
+	if len(c.shells) == 0 {
+		return fmt.Errorf("none of %v is here", names)
 	}
 	if c.work, err = os.MkdirTemp("", "claudecodecheck-"); err != nil {
 		return err
@@ -131,10 +159,7 @@ func (c *check) run() error {
 	}
 	fmt.Printf("claude: %s (%s)\n", strings.TrimSpace(string(out)), c.claude)
 
-	if err := c.serve(); err != nil {
-		return err
-	}
-	for _, s := range []func() error{c.install, c.installPlugin, c.recorded, c.collect, c.missing, c.upgrade} {
+	for _, s := range []func() error{c.serve, c.installAsz, c.installPlugin, c.recorded, c.collect, c.missing, c.upgradeByHand, c.upgradeByScript, c.byHand} {
 		if err := s(); err != nil {
 			return err
 		}
@@ -142,11 +167,9 @@ func (c *check) run() error {
 	return nil
 }
 
-// serve starts the local server: the package under the path the download
-// site uses, the marketplace repository over git's HTTP protocol, and the
-// stand-in model. Claude Code refuses a file:// marketplace, and git cannot
-// clone shallowly over plain file serving, so the repository needs
-// git http-backend.
+// serve starts the local server. Claude Code refuses a file:// marketplace,
+// and git cannot clone shallowly over plain file serving, so the repository
+// is served by git http-backend.
 func (c *check) serve() error {
 	step("The local server")
 	git, err := exec.LookPath("git")
@@ -164,8 +187,8 @@ func (c *check) serve() error {
 	c.base = "http://" + ln.Addr().String()
 	c.api = &stand{}
 	mux := http.NewServeMux()
-	site := "/skywalking/ai-sessionizer/" + c.version + "/"
-	mux.Handle(site, http.StripPrefix(site, http.FileServer(http.Dir(filepath.Dir(c.pkg)))))
+	mux.HandleFunc("/skywalking/ai-sessionizer/", c.site)
+	mux.HandleFunc("/raw/", c.raw)
 	mux.Handle("/git/", &cgi.Handler{
 		Path:       git,
 		Root:       "/git",
@@ -176,15 +199,92 @@ func (c *check) serve() error {
 	mux.Handle("/v1/", c.api)
 	// The server lives as long as the check, which ends the process.
 	go func() { _ = http.Serve(ln, mux) }()
-	fmt.Printf("serving %s, the marketplace at v%s and v%s, and the model on %s\n", filepath.Base(c.pkg), c.version, c.next(), c.base)
+	// Every script may download only from addresses this check replaces,
+	// which is known before any of it runs.
+	for _, name := range []string{"asz.sh", "asz.ps1", "claude-code-plugin.sh", "claude-code-plugin.ps1"} {
+		if _, err := c.script(name); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("serving %s as %s, %s and %s, the install scripts, the marketplace at their tags, and the model on %s\n",
+		filepath.Base(c.pkg), c.version, c.second(), c.third(), c.base)
 	return nil
 }
 
-func (c *check) next() string { return c.version + "-next" }
+// site serves PACKAGE under the download site's path for each of the three
+// versions. The first version's .sha512 is the one beside PACKAGE; the
+// others name their own file, as make checksums writes them.
+func (c *check) site(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/skywalking/ai-sessionizer/")
+	version, file, _ := strings.Cut(rest, "/")
+	if version != c.version && version != c.second() && version != c.third() {
+		http.NotFound(w, r)
+		return
+	}
+	name := strings.Replace(file, "-"+version+"-", "-"+c.version+"-", 1)
+	if name != filepath.Base(c.pkg) && name != filepath.Base(c.pkg)+".sha512" {
+		http.NotFound(w, r)
+		return
+	}
+	if version == c.version || !strings.HasSuffix(file, ".sha512") {
+		http.ServeFile(w, r, filepath.Join(filepath.Dir(c.pkg), name))
+		return
+	}
+	b, err := os.ReadFile(c.pkg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sum := sha512.Sum512(b)
+	fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), strings.TrimSuffix(file, ".sha512"))
+}
 
-// repository commits the marketplace and the plugin at the version's tag,
-// then a changed plugin at a second tag for the upgrade. It also commits a
-// file outside the plugin's directory, which the plugin cache must not get.
+// raw serves this tree's install scripts under any tag, with their download
+// addresses pointed here.
+func (c *check) raw(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	if !strings.HasPrefix(strings.TrimPrefix(r.URL.Path, "/raw/"), "v") || !strings.Contains(r.URL.Path, "/install/") {
+		http.NotFound(w, r)
+		return
+	}
+	text, err := c.script(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = io.WriteString(w, text)
+}
+
+var closer = regexp.MustCompile(`https://www\.apache\.org/dyn/closer\.lua\?path=([^"&]+)&action=download`)
+
+// script reads an install script and points its download addresses at the
+// local server. A script that downloads from anywhere else is refused, so
+// a new address in a script cannot reach the network unnoticed.
+func (c *check) script(name string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(c.tree, "install", filepath.Base(name)))
+	if err != nil {
+		return "", err
+	}
+	text := string(b)
+	if len(closer.FindAllString(text, -1)) != 1 || strings.Count(text, "https://downloads.apache.org/skywalking/") != 1 {
+		return "", fmt.Errorf("install/%s no longer downloads once through closer.lua and once from downloads.apache.org, which this check replaces", name)
+	}
+	text = closer.ReplaceAllString(text, c.base+"/${1}")
+	text = strings.ReplaceAll(text, "https://downloads.apache.org/", c.base+"/")
+	text = strings.ReplaceAll(text, gitURL, c.base+"/git/asz.git")
+	// Comments may name the script's own address; commands may not.
+	for _, line := range strings.Split(text, "\n") {
+		if l := strings.TrimSpace(line); !strings.HasPrefix(l, "#") && strings.Contains(l, "https://") && !strings.Contains(l, "https://skywalking.apache.org/downloads/") {
+			return "", fmt.Errorf("install/%s downloads from an address this check does not replace: %s", name, l)
+		}
+	}
+	return text, nil
+}
+
+// repository commits the marketplace and the plugin at the first tag, and a
+// changed plugin at each later tag. It also commits a file outside the
+// plugin's directory, which the plugin cache must not get.
 func (c *check) repository(git, bare string) error {
 	src := filepath.Join(c.work, "repository")
 	for _, rel := range []string{".claude-plugin", filepath.Join("plugins", "claude-code", "plugin"), filepath.Join("plugins", "claude-code", "main.go")} {
@@ -201,16 +301,20 @@ func (c *check) repository(git, bare string) error {
 		return nil
 	}
 	manifest := filepath.Join(src, "plugins", "claude-code", "plugin", ".claude-plugin", "plugin.json")
-	for _, s := range []func() error{
+	steps := []func() error{
 		func() error { return gitIn(src, "init", "-q") },
 		func() error { return gitIn(src, "add", "-A") },
-		func() error { return gitIn(src, "commit", "-q", "-m", "the version") },
+		func() error { return gitIn(src, "commit", "-q", "-m", c.version) },
 		func() error { return gitIn(src, "tag", "v"+c.version) },
-		func() error { return appendTo(manifest, "\n") },
-		func() error { return gitIn(src, "commit", "-q", "-am", "the next version") },
-		func() error { return gitIn(src, "tag", "v"+c.next()) },
-		func() error { return gitIn(c.work, "clone", "-q", "--bare", src, bare) },
-	} {
+	}
+	for _, v := range []string{c.second(), c.third()} {
+		steps = append(steps,
+			func() error { return appendTo(manifest, "\n") },
+			func() error { return gitIn(src, "commit", "-q", "-am", v) },
+			func() error { return gitIn(src, "tag", "v"+v) })
+	}
+	steps = append(steps, func() error { return gitIn(c.work, "clone", "-q", "--bare", src, bare) })
+	for _, s := range steps {
 		if err := s(); err != nil {
 			return err
 		}
@@ -218,68 +322,56 @@ func (c *check) repository(git, bare string) error {
 	return nil
 }
 
-// install runs the Quick install block in every shell this machine has for
-// it, each into a home of its own, and keeps the last one's binaries.
-func (c *check) install() error {
-	lang, shells := "sh", []string{"sh", "bash", "zsh"}
-	if windows {
-		lang, shells = "powershell", []string{"powershell", "pwsh"}
-	}
-	block, err := c.block(filepath.Join("docs", "en", "setup", "install.md"), "## Quick install", lang, "VERSION")
+// installAsz runs the command under Quick install in install.md in every
+// shell, each into a home of its own, and keeps the last one's asz.
+func (c *check) installAsz() error {
+	line, err := c.pageBlock("install.md", "## Quick install", "install/asz.", oneLiner())
 	if err != nil {
 		return err
 	}
-	block, err = c.rewriteDownloads(block)
-	if err != nil {
-		return err
-	}
-	ran := 0
-	for _, shell := range shells {
-		path, err := exec.LookPath(shell)
-		if err != nil {
-			continue
-		}
-		step("Quick install in %s", shell)
-		home := filepath.Join(c.work, "home-"+shell)
-		if err := os.MkdirAll(home, 0o755); err != nil {
-			return err
-		}
+	for _, shell := range c.shells {
+		step("install/asz, from install.md, in %s", filepath.Base(shell))
+		home := filepath.Join(c.work, "home-asz-"+strings.TrimSuffix(filepath.Base(shell), ".exe"))
 		bin := filepath.Join(home, ".local", "bin")
-		env := withEnv(os.Environ(), "HOME="+home, "USERPROFILE="+home, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
-			"NO_PROXY=127.0.0.1", "no_proxy=127.0.0.1")
-		out, err := c.script(path, block, env, c.work)
+		out, err := c.run1(shell, line, c.version, c.homeEnv(home, nil))
 		fmt.Print(out)
 		if err != nil {
-			return fmt.Errorf("the Quick install block failed in %s: %w", shell, err)
+			return fmt.Errorf("the asz install command failed in %s: %w", shell, err)
 		}
-		for _, name := range []string{"asz", "asz-claude-plugin"} {
-			got, err := exec.Command(filepath.Join(bin, name+exe()), "version").CombinedOutput()
-			if err != nil || !strings.Contains(string(got), c.version) {
-				return fmt.Errorf("%s from the Quick install block in %s does not report %s: %w %s", name, shell, c.version, err, got)
-			}
+		if err := c.reports(filepath.Join(bin, "asz"+exe()), c.version); err != nil {
+			return err
 		}
-		c.bin = bin
-		ran++
-	}
-	if ran == 0 {
-		return fmt.Errorf("no shell here runs the %s block", lang)
+		if _, err := os.Stat(filepath.Join(bin, "asz-claude-plugin"+exe())); err == nil {
+			return errors.New("install/asz installed asz-claude-plugin too, which is the plugin's own install")
+		}
+		c.aszBin = bin
 	}
 	return nil
 }
 
-// installPlugin runs the commands under Install that add the marketplace
-// and install the plugin, then checks what Claude Code copied.
+// installPlugin runs the command under Install in claude-code-plugin.md,
+// then checks the binary, the plugin, and what Claude Code copied.
 func (c *check) installPlugin() error {
-	step("Install the plugin")
-	if err := c.pluginBlock("## Install", "claude plugin marketplace add", c.version); err != nil {
-		return err
-	}
-	list, err := c.claudeRun(nil, "plugin", "list")
+	step("install/claude-code-plugin, from claude-code-plugin.md, in %s", filepath.Base(c.shells[0]))
+	line, err := c.pageBlock("claude-code-plugin.md", "## Install", "install/claude-code-plugin.", oneLiner())
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(list, plugin+"@"+marketplace) {
-		return fmt.Errorf("claude plugin list does not show %s@%s:\n%s", plugin, marketplace, list)
+	home := filepath.Join(c.work, "home-plugin")
+	c.bin = filepath.Join(home, ".local", "bin")
+	out, err := c.run1(c.shells[0], line, c.version, c.homeEnv(home, c.claudeEnv(nil, c.config)))
+	fmt.Print(out)
+	if err != nil {
+		return fmt.Errorf("the plugin install command failed: %w", err)
+	}
+	if err := c.reports(filepath.Join(c.bin, "asz-claude-plugin"+exe()), c.version); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(c.bin, "asz"+exe())); err == nil {
+		return errors.New("install/claude-code-plugin installed asz too, which is its own install")
+	}
+	if err := c.installed(c.config); err != nil {
+		return err
 	}
 	dirs, _ := filepath.Glob(filepath.Join(c.config, "plugins", "cache", marketplace, plugin, "*"))
 	if len(dirs) != 1 {
@@ -297,37 +389,6 @@ func (c *check) installPlugin() error {
 	return nil
 }
 
-func (c *check) pluginBlock(heading, contains, version string) error {
-	lang, shell := "sh", "sh"
-	if windows {
-		lang, shell = "powershell", "pwsh"
-		if _, err := exec.LookPath(shell); err != nil {
-			shell = "powershell"
-		}
-	}
-	block, err := c.block(filepath.Join("docs", "en", "setup", "claude-code-plugin.md"), heading, lang, contains)
-	if err != nil {
-		return err
-	}
-	const github = "https://github.com/apache/skywalking-ai-sessionizer.git"
-	if !strings.Contains(block, github) {
-		return fmt.Errorf("the %s block under %s no longer names %s", lang, heading, github)
-	}
-	block = strings.ReplaceAll(block, github, c.base+"/git/asz.git")
-	path, err := exec.LookPath(shell)
-	if err != nil {
-		return err
-	}
-	env := c.claudeEnv(nil)
-	env = withEnv(env, "VERSION="+version)
-	out, err := c.script(path, block, env, c.work, version)
-	fmt.Print(out)
-	if err != nil {
-		return fmt.Errorf("the %s block under %s failed: %w", lang, heading, err)
-	}
-	return nil
-}
-
 // recorded runs a session with asz-claude-plugin on PATH. The plugin must
 // record the file the shell command wrote.
 func (c *check) recorded() error {
@@ -337,37 +398,6 @@ func (c *check) recorded() error {
 		return err
 	}
 	return c.hasRecord(id)
-}
-
-func (c *check) hasRecord(id string) error {
-	file := filepath.Join(c.data(), "output", id, "main.jsonl")
-	f, err := os.Open(file)
-	if err != nil {
-		c.showPluginLog()
-		return fmt.Errorf("the plugin wrote no record for session %s: %w", id, err)
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(nil, 16<<20)
-	for sc.Scan() {
-		var rec struct {
-			Changes []struct {
-				Path      string `json:"path"`
-				Operation string `json:"operation"`
-			} `json:"changes"`
-		}
-		if json.Unmarshal(sc.Bytes(), &rec) != nil {
-			continue
-		}
-		for _, ch := range rec.Changes {
-			if ch.Path == written && ch.Operation == "create" {
-				fmt.Printf("the plugin recorded %s as created, in %s\n", written, file)
-				return nil
-			}
-		}
-	}
-	c.showPluginLog()
-	return fmt.Errorf("no record in %s names %s as created", file, written)
 }
 
 // collect lands the plugin's records with the installed asz.
@@ -390,8 +420,8 @@ func (c *check) collect() error {
 	if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 		return err
 	}
-	cmd := exec.Command(filepath.Join(c.bin, "asz"+exe()), "collect", "-once", "-config", file)
-	cmd.Env = c.claudeEnv(nil)
+	cmd := exec.Command(filepath.Join(c.aszBin, "asz"+exe()), "collect", "-once", "-config", file)
+	cmd.Env = c.claudeEnv(nil, c.config)
 	out, err := cmd.CombinedOutput()
 	fmt.Print(string(out))
 	if err != nil {
@@ -425,11 +455,48 @@ func (c *check) missing() error {
 	return nil
 }
 
-// upgrade runs the Upgrade block to the second tag. The settings and the
-// output must stay, and the next session must be recorded.
-func (c *check) upgrade() error {
-	step("Upgrade to v%s", c.next())
-	before, err := c.claudeRun(nil, "plugin", "list")
+// upgradeByHand runs the Upgrade commands to the second tag.
+func (c *check) upgradeByHand() error {
+	step("Upgrade by hand to v%s, in %s", c.second(), filepath.Base(c.shells[0]))
+	block, err := c.pageBlock("claude-code-plugin.md", "### Upgrade", "--keep-data")
+	if err != nil {
+		return err
+	}
+	return c.moved("by hand", func() (string, error) {
+		return c.run1(c.shells[0], block, c.second(), c.claudeEnv(nil, c.config))
+	})
+}
+
+// upgradeByScript runs the plugin's install command again with the third
+// version, then once more, which must change nothing.
+func (c *check) upgradeByScript() error {
+	shell := c.shells[len(c.shells)-1]
+	step("Upgrade with install/claude-code-plugin to v%s, in %s", c.third(), filepath.Base(shell))
+	line, err := c.pageBlock("claude-code-plugin.md", "## Install", "install/claude-code-plugin.", oneLiner())
+	if err != nil {
+		return err
+	}
+	home := filepath.Join(c.work, "home-plugin")
+	env := c.homeEnv(home, c.claudeEnv(nil, c.config))
+	if err := c.moved("by the script", func() (string, error) { return c.run1(shell, line, c.third(), env) }); err != nil {
+		return err
+	}
+	step("install/claude-code-plugin at v%s again", c.third())
+	out, err := c.run1(shell, line, c.third(), env)
+	fmt.Print(out)
+	if err != nil {
+		return fmt.Errorf("running the plugin install command again failed: %w", err)
+	}
+	if !strings.Contains(out, "already") {
+		return errors.New("running the plugin install command again did not say the plugin was installed already")
+	}
+	return nil
+}
+
+// moved runs an upgrade and checks that the plugin moved to a new version,
+// kept its settings and output, and records the next session.
+func (c *check) moved(how string, upgrade func() (string, error)) error {
+	before, err := c.claudeRun(c.config, "plugin", "list")
 	if err != nil {
 		return err
 	}
@@ -440,40 +507,110 @@ func (c *check) upgrade() error {
 	if len(outputs) == 0 {
 		return errors.New("there is no output to keep across the upgrade")
 	}
-	if err := c.pluginBlock("### Upgrade", "--keep-data", c.next()); err != nil {
-		return err
+	out, err := upgrade()
+	fmt.Print(out)
+	if err != nil {
+		return fmt.Errorf("the upgrade %s failed: %w", how, err)
 	}
 	got, err := os.ReadFile(filepath.Join(c.data(), "settings.yaml"))
 	if err != nil {
-		return fmt.Errorf("the upgrade lost the plugin's settings.yaml: %w", err)
+		return fmt.Errorf("the upgrade %s lost the plugin's settings.yaml: %w", how, err)
 	}
 	if string(got) != settings {
-		return fmt.Errorf("the upgrade changed the plugin's settings.yaml to %q", got)
+		return fmt.Errorf("the upgrade %s changed the plugin's settings.yaml to %q", how, got)
 	}
 	for _, f := range outputs {
 		if _, err := os.Stat(f); err != nil {
-			return fmt.Errorf("the upgrade lost %s: %w", f, err)
+			return fmt.Errorf("the upgrade %s lost %s: %w", how, f, err)
 		}
 	}
-	after, err := c.claudeRun(nil, "plugin", "list")
+	after, err := c.claudeRun(c.config, "plugin", "list")
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(after, plugin+"@"+marketplace) || versionLine(after) == versionLine(before) {
-		return fmt.Errorf("the plugin did not move to v%s:\nbefore:\n%s\nafter:\n%s", c.next(), before, after)
+	if !strings.Contains(after, plugin+"@"+marketplace) || versionOf(after) == versionOf(before) {
+		return fmt.Errorf("the upgrade %s did not move the plugin:\nbefore:\n%s\nafter:\n%s", how, before, after)
 	}
-	fmt.Printf("moved from %s to %s, and kept settings.yaml and %d output files\n", versionLine(before), versionLine(after), len(outputs))
-	step("A session after the upgrade")
-	id, err := c.session("upgraded", []string{c.bin})
+	fmt.Printf("moved from %s to %s, and kept settings.yaml and %d output files\n", versionOf(before), versionOf(after), len(outputs))
+	id, err := c.session("after-"+strings.ReplaceAll(how, " ", "-"), []string{c.bin})
 	if err != nil {
 		return err
 	}
 	return c.hasRecord(id)
 }
 
+// byHand runs the By hand commands into a new configuration.
+func (c *check) byHand() error {
+	step("Install by hand, in %s", filepath.Base(c.shells[0]))
+	block, err := c.pageBlock("claude-code-plugin.md", "### By hand", "claude plugin marketplace add")
+	if err != nil {
+		return err
+	}
+	config := filepath.Join(c.work, "config-by-hand")
+	out, err := c.run1(c.shells[0], block, c.version, c.claudeEnv(nil, config))
+	fmt.Print(out)
+	if err != nil {
+		return fmt.Errorf("the By hand commands failed: %w", err)
+	}
+	return c.installed(config)
+}
+
+func (c *check) installed(config string) error {
+	list, err := c.claudeRun(config, "plugin", "list")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(list, plugin+"@"+marketplace) {
+		return fmt.Errorf("claude plugin list does not show %s@%s:\n%s", plugin, marketplace, list)
+	}
+	return nil
+}
+
+func (c *check) reports(binary, version string) error {
+	got, err := exec.Command(binary, "version").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s version: %w: %s", binary, err, got)
+	}
+	if !strings.Contains(string(got), version) {
+		return fmt.Errorf("%s reports %s, not %s", binary, got, version)
+	}
+	return nil
+}
+
+func (c *check) hasRecord(id string) error {
+	file := filepath.Join(c.data(), "output", id, "main.jsonl")
+	f, err := os.Open(file)
+	if err != nil {
+		c.showPluginLog()
+		return fmt.Errorf("the plugin wrote no record for session %s: %w", id, err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(nil, 16<<20)
+	for sc.Scan() {
+		var rec struct {
+			Changes []struct {
+				Path      string `json:"path"`
+				Operation string `json:"operation"`
+			} `json:"changes"`
+		}
+		if json.Unmarshal(sc.Bytes(), &rec) != nil {
+			continue
+		}
+		for _, ch := range rec.Changes {
+			if ch.Path == written && ch.Operation == "create" {
+				fmt.Printf("the plugin recorded %s as created, in %s\n", written, file)
+				return nil
+			}
+		}
+	}
+	c.showPluginLog()
+	return fmt.Errorf("no record in %s names %s as created", file, written)
+}
+
 var versionRe = regexp.MustCompile(`Version:\s*(\S+)`)
 
-func versionLine(list string) string {
+func versionOf(list string) string {
 	if m := versionRe.FindStringSubmatch(list); m != nil {
 		return m[1]
 	}
@@ -505,11 +642,10 @@ func (c *check) session(name string, path []string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.claude, "-p", "Write the file.", "--allowedTools", "Bash,PowerShell",
 		"--output-format", "stream-json", "--verbose", "--model", "claude-opus-5")
 	cmd.Dir = ws
-	cmd.Env = c.claudeEnv(path)
+	cmd.Env = c.claudeEnv(path, c.config)
 	asked := c.api.requests()
 	out, err := cmd.CombinedOutput()
-	logFile := filepath.Join(c.work, "session-"+name+".log")
-	_ = os.WriteFile(logFile, out, 0o644)
+	_ = os.WriteFile(filepath.Join(c.work, "session-"+name+".log"), out, 0o644)
 	if err != nil {
 		return "", fmt.Errorf("claude -p: %w\n%s", err, tail(out, 40))
 	}
@@ -524,10 +660,10 @@ func (c *check) session(name string, path []string) (string, error) {
 	return string(m[1]), nil
 }
 
-// claudeRun runs one claude command in this run's configuration.
-func (c *check) claudeRun(path []string, args ...string) (string, error) {
+// claudeRun runs one claude command in a configuration.
+func (c *check) claudeRun(config string, args ...string) (string, error) {
 	cmd := exec.Command(c.claude, args...)
-	cmd.Env = c.claudeEnv(path)
+	cmd.Env = c.claudeEnv(nil, config)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("claude %s: %w\n%s", strings.Join(args, " "), err, out)
@@ -536,9 +672,10 @@ func (c *check) claudeRun(path []string, args ...string) (string, error) {
 }
 
 // claudeEnv is this process's environment without what would point Claude
-// Code elsewhere. Run from inside Claude Code, the inherited CLAUDECODE and
-// CLAUDE_CODE_* variables made a child claude -p ask for a login.
-func (c *check) claudeEnv(path []string) []string {
+// Code elsewhere, with Claude Code's directory and path in front of PATH.
+// Run from inside Claude Code, the inherited CLAUDECODE and CLAUDE_CODE_*
+// variables made a child claude -p ask for a login.
+func (c *check) claudeEnv(path []string, config string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		i := strings.Index(kv, "=")
@@ -551,7 +688,7 @@ func (c *check) claudeEnv(path []string) []string {
 	dirs := append(append([]string{}, path...), filepath.Dir(c.claude), os.Getenv("PATH"))
 	return append(env,
 		"PATH="+strings.Join(dirs, string(os.PathListSeparator)),
-		"CLAUDE_CONFIG_DIR="+c.config,
+		"CLAUDE_CONFIG_DIR="+config,
 		"ANTHROPIC_BASE_URL="+c.base,
 		"ANTHROPIC_API_KEY=sk-ant-claudecodecheck",
 		"DISABLE_AUTOUPDATER=1",
@@ -559,49 +696,68 @@ func (c *check) claudeEnv(path []string) []string {
 		"NO_PROXY=127.0.0.1", "no_proxy=127.0.0.1")
 }
 
-// script runs a block from a page the way a person pastes it, with the
-// version set first. A PowerShell block runs from a file, whose exit code
-// is the last command's.
-func (c *check) script(shell, block string, env []string, dir string, version ...string) (string, error) {
-	v := c.version
-	if len(version) > 0 {
-		v = version[0]
+// homeEnv makes home the home of a script, with its .local/bin first on
+// PATH, as it is for a person whose Claude Code came from its installer.
+func (c *check) homeEnv(home string, env []string) []string {
+	if env == nil {
+		env = os.Environ()
 	}
+	path := ""
+	for _, kv := range env {
+		if strings.HasPrefix(strings.ToUpper(kv), "PATH=") {
+			path = kv[len("PATH="):]
+		}
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	return withEnv(env, "HOME="+home, "USERPROFILE="+home, "PATH="+bin+string(os.PathListSeparator)+path,
+		"NO_PROXY=127.0.0.1", "no_proxy=127.0.0.1")
+}
+
+// pageBlock reads the one block under heading, in the shell language the
+// page gives this system, whose text holds every one of contains, with raw
+// GitHub addresses pointed at the local server.
+func (c *check) pageBlock(page, heading string, contains ...string) (string, error) {
+	lang := "sh"
+	if windows {
+		lang = "powershell"
+	}
+	b, err := os.ReadFile(filepath.Join(c.tree, "docs", "en", "setup", page))
+	if err != nil {
+		return "", err
+	}
+	found := blocks(section(string(b), heading), lang, contains...)
+	if len(found) != 1 {
+		return "", fmt.Errorf("%s has %d %s blocks under %q holding %q, want 1", page, len(found), lang, heading, contains)
+	}
+	block := strings.ReplaceAll(found[0], rawBase, c.base+"/raw/")
+	return strings.ReplaceAll(block, gitURL, c.base+"/git/asz.git"), nil
+}
+
+// run1 runs a block from a page the way a person pastes it, with the version
+// set first as the page says. A PowerShell block runs from a file, whose
+// exit code is the last command's.
+func (c *check) run1(shell, block, version string, env []string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	var cmd *exec.Cmd
 	if windows {
 		file := filepath.Join(c.work, fmt.Sprintf("block-%d.ps1", time.Now().UnixNano()))
-		text := "$Version = '" + v + "'\n" + block + "\nexit $LASTEXITCODE\n"
+		text := "$Version = '" + version + "'\n" + block + "\nexit $LASTEXITCODE\n"
 		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			return "", err
 		}
 		cmd = exec.CommandContext(ctx, shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file)
 	} else {
-		cmd = exec.CommandContext(ctx, shell, "-c", "VERSION='"+v+"'\n"+block)
+		cmd = exec.CommandContext(ctx, shell, "-c", "VERSION='"+version+"'\n"+block)
 	}
 	cmd.Env = env
-	cmd.Dir = dir
+	cmd.Dir = c.work
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
-// block reads the one fenced block of lang under heading whose text holds
-// contains. The section ends at the next heading of any level, so a
-// subsection's blocks are not its parent's. A block indented under a list
-// item loses that indentation.
-func (c *check) block(page, heading, lang, contains string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(c.tree, page))
-	if err != nil {
-		return "", err
-	}
-	found := blocks(section(string(b), heading), lang, contains)
-	if len(found) != 1 {
-		return "", fmt.Errorf("%s has %d %s blocks under %q holding %q, want 1", page, len(found), lang, heading, contains)
-	}
-	return found[0], nil
-}
-
+// section is the text under heading, up to the next heading of any level,
+// so a subsection's blocks are not its parent's.
 func section(text, heading string) string {
 	var out []string
 	in, fence := false, false
@@ -625,7 +781,9 @@ func section(text, heading string) string {
 	return strings.Join(out, "\n")
 }
 
-func blocks(text, lang, contains string) []string {
+// blocks are the fenced blocks of lang in text whose text holds every one
+// of contains. A block indented under a list item loses that indentation.
+func blocks(text, lang string, contains ...string) []string {
 	var found []string
 	lines := strings.Split(text, "\n")
 	for i := 0; i < len(lines); i++ {
@@ -638,28 +796,15 @@ func blocks(text, lang, contains string) []string {
 			body = append(body, strings.TrimPrefix(lines[i], indent))
 		}
 		b := strings.Join(body, "\n") + "\n"
-		if strings.Contains(b, contains) {
+		all := true
+		for _, want := range contains {
+			all = all && strings.Contains(b, want)
+		}
+		if all {
 			found = append(found, b)
 		}
 	}
 	return found
-}
-
-var closer = regexp.MustCompile(`https://www\.apache\.org/dyn/closer\.lua\?path=([^"&]+)&action=download`)
-
-// rewriteDownloads points a Quick install block at the local server: the
-// mirror selector and the download site each become its address, and
-// nothing else in the block may leave the machine.
-func (c *check) rewriteDownloads(block string) (string, error) {
-	if len(closer.FindAllString(block, -1)) != 1 || strings.Count(block, "https://downloads.apache.org/") != 1 {
-		return "", errors.New("the Quick install block no longer downloads once through closer.lua and once from downloads.apache.org, which this check replaces")
-	}
-	block = closer.ReplaceAllString(block, c.base+"/${1}")
-	block = strings.ReplaceAll(block, "https://downloads.apache.org/", c.base+"/")
-	if strings.Contains(block, "https://") {
-		return "", errors.New("the Quick install block downloads from an address this check does not replace")
-	}
-	return block, nil
 }
 
 // stand answers as the Messages API does, enough for one tool call: while
@@ -774,6 +919,15 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// oneLiner is what the command that fetches and runs an install script
+// holds, apart from a block that downloads the script to read it first.
+func oneLiner() string {
+	if windows {
+		return "Invoke-RestMethod"
+	}
+	return "| sh -s"
+}
+
 func exe() string {
 	if windows {
 		return ".exe"
@@ -785,10 +939,10 @@ func exe() string {
 // Windows compares keys without case.
 func withEnv(env []string, set ...string) []string {
 	for _, kv := range set {
-		key := kv[:strings.Index(kv, "=")+1]
+		key := strings.ToUpper(kv[:strings.Index(kv, "=")+1])
 		out := env[:0:0]
 		for _, e := range env {
-			if !strings.HasPrefix(strings.ToUpper(e), strings.ToUpper(key)) {
+			if !strings.HasPrefix(strings.ToUpper(e), key) {
 				out = append(out, e)
 			}
 		}

@@ -94,18 +94,25 @@
   package smoke test finds the plugin's binary by name on `PATH`. The candidate check in
   `tools/release.sh`, the Homebrew formula, and the Scoop and winget manifests follow the new
   layout, and put both binaries on the path.
+- **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
+  installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
+  [Install](../setup/install.md#quick-install) runs them from the version's tag in one command. The
+  plugin's own scripts, `install/claude-code-plugin.sh` and `install/claude-code-plugin.ps1`,
+  install `asz-claude-plugin` and add the plugin to Claude Code at the same tag, and
+  [Claude Code Plugin](../setup/claude-code-plugin.md#install) runs them. The reader sets the
+  version. Each script downloads the package through the mirror selector and its `.sha512` from
+  downloads.apache.org, stops unless they match, checks that its binary starts, and installs it
+  where the Claude Code installer puts `claude`: `~/.local/bin`, or `%USERPROFILE%\.local\bin`.
+  Run again with a newer version, the plugin's script uninstalls the plugin with `--keep-data`
+  before it moves the marketplace, and copies a 0.3.0 `settings.yaml` over once.
 - **CI runs the install pages with Claude Code.** A new `claude-code` job runs
   `tools/claudecodecheck` with Claude Code 2.1.274 on each binary package's platform, Linux, macOS
-  and Windows on x86-64 and ARM 64. It follows the Quick install block, the plugin's install
-  commands and the Upgrade block as written, with only their download addresses pointed at the
-  runner, and a headless session must be recorded by the plugin and collected by asz. Before, no
-  platform ran the plugin's hooks inside Claude Code in CI, and Windows never had.
-- **Quick install.** [Install](../setup/install.md#quick-install) gives one block for macOS and Linux
-  and one for Windows. Each takes the version the reader sets, downloads the package through the
-  mirror selector and its `.sha512` from downloads.apache.org, stops unless they match, checks that
-  both binaries start, and installs them where the Claude Code installer puts `claude`: `~/.local/bin`,
-  or `%USERPROFILE%\.local\bin`. The shell block ran in zsh, bash and sh on macOS, and in Debian and
-  Alpine containers. The PowerShell block ran in PowerShell 7.4.7 on Linux, not yet on Windows.
+  and Windows on x86-64 and ARM 64. It runs both install commands as the pages write them, the
+  plugin's upgrade by hand and by its script, and its install by hand, with only the download
+  addresses pointed at the runner. A headless session must be recorded by the plugin and collected
+  by asz, a session without the binary must still run its tool, and each upgrade must keep the
+  plugin's data. Before, no platform ran the plugin's hooks inside Claude Code in CI, and Windows
+  never had.
 
 ## Release
 

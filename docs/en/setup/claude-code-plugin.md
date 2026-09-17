@@ -35,39 +35,61 @@ window open at the same time sees it as shared with the edit and names it.
 
 ## Install
 
-The plugin comes in two parts, and each has its own step. Both steps use the same version.
+The plugin is installed on its own, apart from asz, and in two parts: `asz-claude-plugin`, the
+binary its hooks run, and the plugin itself, the manifest and the hooks, in Claude Code. The plugin
+records whether asz is installed or not. [Install](install.md#quick-install) installs asz, which
+collects what the plugin records.
 
-1. **The binary.** `asz-claude-plugin` is in every binary package beside `asz`, and
-   [Quick install](install.md#quick-install) puts both on your `PATH`. The hooks run the binary by
-   its name, so Claude Code must find it on the `PATH` it starts with.
-2. **The plugin.** Claude Code installs the manifest and the hooks from the marketplace in the asz
-   repository. Set the version first, the same one as the binary: `VERSION=<version>` in a shell,
-   or `$Version = "<version>"` in PowerShell. Then, in a shell:
+The install script of a version installs both parts, from 0.4.0 on. Install Claude Code first. Set
+`VERSION` to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as
+released, the same as the asz you run, then run the script from that version's tag.
 
-   ```sh
-   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin &&
-     claude plugin install asz-changes@skywalking-ai-sessionizer
-   ```
+On macOS or Linux:
 
-   or in PowerShell:
+```sh
+VERSION=<version>
+```
 
-   ```powershell
-   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$Version" --sparse .claude-plugin plugins/claude-code/plugin
-   if ($LASTEXITCODE -eq 0) { claude plugin install asz-changes@skywalking-ai-sessionizer }
-   ```
+```sh
+curl -fsSL "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/claude-code-plugin.sh" | sh -s -- "$VERSION"
+```
 
-The address ends with the version's tag, so the hooks Claude Code installs are the ones released
-with that binary, not whatever the default branch holds later. It is an HTTPS address because
-Claude Code clones a GitHub `owner/repo` shorthand over SSH, which fails on a machine with no SSH
-key for GitHub. `--sparse` keeps most of the repository out of the clone, though git still checks
-out the files beside each directory it names. What Claude Code copies into its plugin cache is the
-plugin's own directory alone: the manifest, the hooks, `LICENSE` and `NOTICE`, and no binary. The manifest names no version, so Claude Code shows the tag's commit as
+On Windows, in PowerShell:
+
+```powershell
+$Version = "<version>"
+```
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/claude-code-plugin.ps1"))) $Version
+```
+
+The script, `install/claude-code-plugin.sh` or `install/claude-code-plugin.ps1` in the source of
+the version:
+
+1. Downloads the binary package through the Apache mirror selector and its `.sha512` from
+   downloads.apache.org itself, and stops unless the two match.
+2. Checks that `asz-claude-plugin` starts, and puts it where the Claude Code installer puts
+   `claude`: `~/.local/bin`, or `%USERPROFILE%\.local\bin`, which the Windows script adds to your
+   user `Path`. The hooks run the binary by its name, so Claude Code must find it on the `PATH` it
+   starts with. The script warns when the one your shell finds is another.
+3. Adds the marketplace at the version's tag and installs the plugin. Run again with a newer
+   version, it moves the plugin there and keeps its data, as [Upgrade](#upgrade) explains.
+
+Restart Claude Code afterwards, so it loads the plugin with the new `PATH`.
+
+The marketplace address ends with the version's tag, so the hooks Claude Code installs are the
+ones released with that binary, not whatever the default branch holds later. It is an HTTPS
+address because Claude Code clones a GitHub `owner/repo` shorthand over SSH, which fails on a
+machine with no SSH key for GitHub. `--sparse` keeps most of the repository out of the clone,
+though git still checks out the files beside each directory it names. What Claude Code copies
+into its plugin cache is the plugin's own directory alone: the manifest, the hooks, `LICENSE` and
+`NOTICE`, and no binary. The manifest names no version, so Claude Code shows the tag's commit as
 the plugin's version.
 
 Claude Code sets `CLAUDE_PLUGIN_DATA` for the plugin's hooks and creates the directory it names,
 `~/.claude/plugins/data/asz-changes-skywalking-ai-sessionizer/`, under `CLAUDE_CONFIG_DIR` when that
-is set. The plugin keeps its state and its output there. Nothing else is configured, and asz need
-not be installed for the plugin to record. asz collects the output when it runs.
+is set. The plugin keeps its state and its output there. Nothing else is configured.
 
 To check the two parts:
 
@@ -85,10 +107,33 @@ look in the plugin's `log/plugin.log` in its data directory: a hook that fails i
 writes there and exits 0. An `Edit` or `Write` on the main stream leaves no plugin record by design,
 because Claude Code records that change itself.
 
+### By hand
+
+The script's steps, for a machine where it cannot run:
+
+1. Take `asz-claude-plugin` from the [binary package](install.md#binary-package) of the version,
+   and put it in a directory on your `PATH`.
+2. Add the marketplace at the version's tag, and install the plugin. In a shell:
+
+   ```sh
+   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin &&
+     claude plugin install asz-changes@skywalking-ai-sessionizer
+   ```
+
+   or in PowerShell:
+
+   ```powershell
+   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$Version" --sparse .claude-plugin plugins/claude-code/plugin
+   if ($LASTEXITCODE -eq 0) { claude plugin install asz-changes@skywalking-ai-sessionizer }
+   ```
+
 ### Upgrade
 
-Install the binary of the new version first, with [Quick install](install.md#quick-install) and the
-new version set. Then move the plugin to the same version, in a shell:
+Run the install script again with the new version. It installs the new binary, then moves the
+plugin with the steps below, and stops at the first one that fails.
+
+By hand, install the binary of the new version first. Then move the plugin to the same version, in
+a shell:
 
 ```sh
 (
@@ -123,12 +168,13 @@ Each step is needed, in this order, and each block stops at the first step that 
 Removing a marketplace uninstalls its plugins, and uninstalling a plugin deletes its data directory,
 which holds the plugin's settings and every record asz has not collected yet. `--keep-data` keeps
 that directory, and the new version goes on writing into it. If adding the marketplace fails, for
-example with no network, the plugin stays uninstalled with its data kept. Run the last two steps
-again.
+example with no network, the plugin stays uninstalled with its data kept. Run the script again, or
+the last two steps by hand.
 
 The blocks move a plugin installed at the default scope, `user`, which is where [Install](#install)
 puts it. Removing the marketplace removes it from every scope. If you also installed the plugin at
-the `project` or `local` scope, uninstall it there with `--keep-data` and `--scope` first.
+the `project` or `local` scope, uninstall it there with `--keep-data` and `--scope` first. The
+script stops when it finds the plugin at another scope, before it changes anything in Claude Code.
 
 ### Remove
 
@@ -143,9 +189,9 @@ The uninstall deletes the data directory. Let asz collect first, or pass `--keep
 
 0.3.0 packaged the whole plugin and ran it with `claude --plugin-dir`, which lasts for one session.
 Its data directory is `asz-changes-inline`. asz still collects that directory, because it collects
-every directory named `asz-changes` or `asz-changes-<marketplace>`. The settings do not move by
-themselves. If you wrote a `settings.yaml` for 0.3.0, copy it before the first session with the
-installed plugin:
+every directory named `asz-changes` or `asz-changes-<marketplace>`. The install script copies a
+`settings.yaml` you wrote for 0.3.0 to the installed plugin's data directory, unless one is there
+already. By hand, copy it before the first session with the installed plugin:
 
 ```sh
 (
@@ -482,15 +528,19 @@ Uninstalling with `--keep-data` first, then removing the marketplace, adding it 
 and installing, kept both files, and the cache then held the changed hooks.
 
 `tools/claudecodecheck` repeats all of this on the machine it runs on, the way a person follows the
-install pages. It reads each block from the page and changes only the download addresses, to a
-server on the same machine that holds the package, the marketplace repository at two tags, and a
-stand-in for the model's API. It runs the Quick install block in every shell there is for it, the
-plugin's install commands, a session the plugin must record and asz must collect, a session with no
-`asz-claude-plugin` on `PATH`, and the Upgrade block, after which the data must still be there and
-the next session must be recorded. CI's `claude-code` job runs it with Claude Code 2.1.274 on each
-binary package's own platform: Linux, macOS and Windows, each on x86-64 and ARM 64. On 2026-09-17 it
-passed on macOS on Apple silicon, and on Linux on ARM 64 in a Debian 13.6 container and in an Alpine
-3.22.5 container, which runs Claude Code's build for musl.
+install pages. It runs the commands as the pages write them, and changes only the download
+addresses, to a server on the same machine that holds the package, the install scripts, the
+marketplace repository at three tags, and a stand-in for the model's API. It runs the asz install
+command in every shell there is for it, and the plugin's install command. A session must then be
+recorded by the plugin and collected by asz, and a session with no `asz-claude-plugin` on `PATH`
+must still run its tool. The Upgrade commands by hand move the plugin to the second tag, and the
+plugin's install command moves it to the third. After each, the plugin's data must still be there
+and the next session must be recorded. The install command run once more must change nothing, and
+the By hand commands must install the plugin into a new configuration. CI's `claude-code` job runs
+it with Claude Code 2.1.274 on each binary package's own platform: Linux, macOS and Windows, each on
+x86-64 and ARM 64. On 2026-09-17 it passed on macOS on Apple silicon. An earlier form of it, which
+ran the install steps from blocks written on the pages, passed in GitHub Actions on Linux and macOS,
+each on x86-64 and ARM 64.
 
 On Windows the plugin has run only outside Claude Code. CI's `packages` job runs
 `tools/package-smoke.sh` on each binary package, on a runner of the package's own platform. On

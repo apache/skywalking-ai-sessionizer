@@ -1,131 +1,56 @@
 # Install
 
-asz is one binary, `asz`. This page lists the ways to get it, and says when each one is available.
-Every way gives the same program. The binary packages also carry `asz-claude-plugin`, the binary
-of the [Claude Code plugin](claude-code-plugin.md).
+asz is one binary, `asz`, the collector. This page lists the ways to get it, and says when each one
+is available. Every way gives the same program.
+
+The [Claude Code plugin](claude-code-plugin.md) is a second install, with its own script and its
+own page. It records which files each tool call changed, and asz collects what it records. The
+binary packages carry its binary, `asz-claude-plugin`, beside `asz`.
 
 ## Quick install
 
-Each block below installs the binary package of one released version, 0.4.0 or later, for the
-machine it runs on. It downloads the package through the Apache mirror selector and its `.sha512`
-from downloads.apache.org itself, and stops unless the two match. It checks that both binaries
-start, and only then puts `asz` and `asz-claude-plugin` in the directory where the Claude Code
-installer puts `claude`. It checks the checksum and not the signature.
-[Verify a package](#verify-a-package) says how to check both by hand.
+The install script of a version installs `asz` from that version's binary package, from 0.4.0 on.
+Set `VERSION` to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as
+released, then run the script from that version's tag.
 
-First set the version to install, one the [downloads page](https://skywalking.apache.org/downloads/)
-lists as released: `VERSION=<version>` in a shell, or `$Version = "<version>"` in PowerShell. A block
-with no version set stops and says so. Run the block again with another version to install that
-one over it.
-
-On macOS or Linux, paste it into zsh, bash or any other POSIX shell. It runs in a subshell, so a
-failure stops the block and leaves your terminal open:
+On macOS or Linux:
 
 ```sh
-(
-  set -eu
-  : "${VERSION:?set VERSION to a released version first}"
-  case "$(uname -s)" in Darwin) OS=darwin ;; Linux) OS=linux ;; *) echo "no package for $(uname -s)" >&2; exit 1 ;; esac
-  case "$(uname -m)" in arm64|aarch64) ARCH=arm64 ;; x86_64|amd64) ARCH=amd64 ;; *) echo "no package for $(uname -m)" >&2; exit 1 ;; esac
-  PKG=apache-skywalking-ai-sessionizer-$VERSION-bin-$OS-$ARCH.tgz
-  BIN=$HOME/.local/bin
-  mkdir -p "$BIN"
-  TMP=$(mktemp -d "$BIN/.asz-install.XXXXXX")
-  trap 'rm -rf "$TMP"' EXIT
-  cd "$TMP"
-  curl -fsSL -o "$PKG" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$VERSION/$PKG&action=download"
-  curl -fsSL -o "$PKG.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.sha512"
-  WANT=$(cut -d ' ' -f 1 "$PKG.sha512")
-  if command -v sha512sum >/dev/null 2>&1; then GOT=$(sha512sum "$PKG"); else GOT=$(shasum -a 512 "$PKG"); fi
-  [ "${#WANT}" -eq 128 ] && [ "${GOT%% *}" = "$WANT" ] || { echo "the sha512 of $PKG does not match $PKG.sha512" >&2; exit 1; }
-  tar -xzf "$PKG" asz asz-claude-plugin
-  ./asz version
-  ./asz-claude-plugin version
-  mv -f asz asz-claude-plugin "$BIN/"
-  echo "installed asz and asz-claude-plugin into $BIN"
-  [ "$(command -v asz-claude-plugin || true)" = "$BIN/asz-claude-plugin" ] ||
-    echo "Put $BIN first on your PATH, in your shell profile, then restart Claude Code. The plugin's hooks look for asz-claude-plugin there." >&2
-)
+VERSION=<version>
 ```
 
-It installs into `~/.local/bin`. When the `asz-claude-plugin` your shell finds is not the one it
-installed, because `~/.local/bin` is not on `PATH` or another copy comes first, the block says so.
-Then put `~/.local/bin` first on `PATH` in your shell profile, as the Claude Code installer asks
-for `claude`, and restart Claude Code. Claude Code runs the plugin's hooks with its own `PATH`.
+```sh
+curl -fsSL "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh" | sh -s -- "$VERSION"
+```
 
 On Windows, in PowerShell:
 
 ```powershell
-& {
-  $ErrorActionPreference = "Stop"
-  $ProgressPreference = "SilentlyContinue"
-  if (-not $Version) { throw "set `$Version to a released version first" }
-  $Arch = switch ((Get-CimInstance Win32_Processor | Select-Object -First 1).Architecture) {
-    9 { "amd64" } 12 { "arm64" } default { throw "no package for this processor" } }
-  $Pkg = "apache-skywalking-ai-sessionizer-$Version-bin-windows-$Arch.zip"
-  $Bin = Join-Path $env:USERPROFILE ".local\bin"
-  $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("asz-install-" + [guid]::NewGuid())
-  New-Item -ItemType Directory -Path $Tmp | Out-Null
-  try {
-    $Zip = Join-Path $Tmp $Pkg
-    Invoke-WebRequest -UseBasicParsing -OutFile $Zip "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
-    Invoke-WebRequest -UseBasicParsing -OutFile "$Zip.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.sha512"
-    $Want = (Get-Content -LiteralPath "$Zip.sha512" -Raw).Trim().Split(" ")[0]
-    if ($Want.Length -ne 128 -or (Get-FileHash -LiteralPath $Zip -Algorithm SHA512).Hash -ne $Want) {
-      throw "the sha512 of $Pkg does not match $Pkg.sha512" }
-    Expand-Archive -LiteralPath $Zip -DestinationPath (Join-Path $Tmp "pkg")
-    foreach ($Exe in "asz.exe", "asz-claude-plugin.exe") {
-      & (Join-Path (Join-Path $Tmp "pkg") $Exe) version
-      if ($LASTEXITCODE -ne 0) { throw "$Exe does not run" } }
-    New-Item -ItemType Directory -Force -Path $Bin | Out-Null
-    foreach ($Exe in "asz.exe", "asz-claude-plugin.exe") {
-      $Old = Join-Path $Bin $Exe
-      if (Test-Path -LiteralPath $Old) {
-        try { [IO.File]::Open($Old, "Open", "ReadWrite", "None").Dispose() }
-        catch { throw "$Old is in use. Stop asz and Claude Code, then run this again." } } }
-    foreach ($Exe in "asz.exe", "asz-claude-plugin.exe") {
-      Copy-Item -LiteralPath (Join-Path (Join-Path $Tmp "pkg") $Exe) -Destination $Bin -Force }
-  } finally {
-    Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
-  }
-  Write-Host "installed asz and asz-claude-plugin into $Bin"
-  $Sep = [IO.Path]::PathSeparator
-  $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-  if (-not (($UserPath -split $Sep) -contains $Bin)) {
-    [Environment]::SetEnvironmentVariable("Path", $(if ($UserPath) { "$UserPath$Sep$Bin" } else { $Bin }), "User")
-    Write-Host "added $Bin to your user Path" }
-  if (-not (($env:PATH -split $Sep) -contains $Bin)) { $env:PATH = "$env:PATH$Sep$Bin" }
-  $Found = (Get-Command asz-claude-plugin.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-  if ($Found -ne (Join-Path $Bin "asz-claude-plugin.exe")) {
-    Write-Warning "asz-claude-plugin.exe on this Path is $(if ($Found) { $Found } else { 'not found' }), not the one in $Bin. Put $Bin before it in your Path." }
-  Write-Host "Restart Claude Code from a new terminal, so its hooks find asz-claude-plugin."
-}
+$Version = "<version>"
 ```
 
-It installs into `%USERPROFILE%\.local\bin`, where the Claude Code installer puts `claude.exe`. It
-adds that directory to your user `Path` when it is not there, and to the `Path` of the terminal it
-runs in. When the `asz-claude-plugin.exe` that terminal finds is not the one it installed, it warns.
-Restart Claude Code from a new terminal afterwards, so its hooks see the new `Path`. Stop `asz` and
-Claude Code before you install over them. Windows does not replace the file of a running program,
-so the block checks both files first, and stops before it copies either when one is in use.
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/asz.ps1"))) $Version
+```
 
-On 2026-09-17 both blocks ran against packages built from the development tree and served from
-the same machine, with only the two download addresses changed:
+The script downloads the package through the Apache mirror selector and its `.sha512` from
+downloads.apache.org itself, and stops unless the two match. It checks that `asz` starts, and only
+then puts it in the directory where the Claude Code installer puts `claude`: `~/.local/bin`, or
+`%USERPROFILE%\.local\bin`, which the Windows script adds to your user `Path`. It checks the
+checksum and not the signature. [Verify a package](#verify-a-package) says how to check both by
+hand. Run it again with another version to install that one over it. On Windows, stop `asz` first:
+Windows does not replace the file of a running program, and the script stops before it copies.
 
-- The macOS and Linux block ran in zsh, bash and sh on macOS on Apple silicon. There, a wrong
-  checksum, a version that is not on the site and no version at all each stopped the block before
-  anything was installed, left no temporary directory, and left the shell that ran it running. A
-  second run installed over the first. On Linux on ARM 64 the block installed both binaries in a
-  Debian container, with GNU tar and `sha512sum`, and in an Alpine container, with BusyBox.
-- The Windows block ran in PowerShell 7.4.7 on Linux. The package there held Linux binaries named
-  `.exe`, and a stub answered the processor query. It installed both binaries, added the directory
-  to the terminal's path, and installed again over them. With another `asz-claude-plugin.exe`
-  earlier on the path, it warned. With the installed `asz-claude-plugin.exe` held open, a wrong
-  checksum, or no version, it stopped with nothing copied and no temporary directory left. The
-  user `Path`, which Linux does not keep, and a running program's file, which Linux does not lock,
-  were not tested. It has not run on Windows or in Windows PowerShell 5.1.
+The script is `install/asz.sh`, or `install/asz.ps1`, in the source of the version. The address names the
+version's tag, so the script that runs is the one released with that version. To read it before
+it runs, download it first:
 
-The plugin itself is installed into Claude Code with two more commands, which
+```sh
+curl -fsSL -o asz.sh "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh"
+sh asz.sh "$VERSION"
+```
+
+To install the Claude Code plugin as well, run its own script, which
 [Claude Code Plugin](claude-code-plugin.md#install) gives.
 
 ## Binary package
