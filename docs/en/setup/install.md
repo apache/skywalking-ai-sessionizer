@@ -33,17 +33,20 @@ $Version = "<version>"
 & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/asz.ps1"))) $Version
 ```
 
-The script downloads the package through the Apache mirror selector and its `.sha512` from
-downloads.apache.org itself, and stops unless the two match. It checks that `asz` starts, and only
-then puts it in the directory where the Claude Code installer puts `claude`: `~/.local/bin`, or
+The download site, downloads.apache.org, holds only the newest release, and archive.apache.org
+keeps every version. So the script asks the download site for the version's `.sha512` first. When
+the download site has it, the package comes through the Apache mirrors. When it does not, both
+come from the archive, which slows down heavy use and so is not asked first. The script stops
+unless the package matches its `.sha512`. It checks that `asz` starts, and only then puts it in the
+directory where the Claude Code installer puts `claude`: `~/.local/bin`, or
 `%USERPROFILE%\.local\bin`, which the Windows script adds to your user `Path`. It checks the
 checksum and not the signature. [Verify a package](#verify-a-package) says how to check both by
 hand. Run it again with another version to install that one over it. On Windows, stop `asz` first:
 Windows does not replace the file of a running program, and the script stops before it copies.
 
-The script is `install/asz.sh`, or `install/asz.ps1`, in the source of the version. The address names the
-version's tag, so the script that runs is the one released with that version. To read it before
-it runs, download it first:
+The script is `install/asz.sh`, or `install/asz.ps1`, in the source of the version. The address
+names the version's tag, so the script that runs is the one released with that version. To read it
+before it runs, download it first:
 
 ```sh
 curl -fsSL -o asz.sh "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh"

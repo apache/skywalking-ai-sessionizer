@@ -36,12 +36,14 @@
 //  6. The By hand commands install the plugin into a new configuration.
 //
 // Only download addresses change: the mirror selector, the download site,
-// raw.githubusercontent.com and github.com all become a server on 127.0.0.1.
-// It holds PACKAGE under three version names, this tree's install scripts, a
-// git repository with the marketplace at the three tags, and a stand-in for
-// the model's API. The Windows scripts add a directory to the user's Path,
-// so on Windows this runs only in GitHub Actions. CI runs it on each binary
-// package's own platform.
+// the archive, raw.githubusercontent.com and github.com all become a server on
+// 127.0.0.1. It holds PACKAGE under three version names, this tree's install
+// scripts, a git repository with the marketplace at the three tags, and a
+// stand-in for the model's API. As on the real sites, the download site
+// holds the first two versions and the archive holds all three, so the third
+// comes from the archive. The Windows scripts add a directory to the user's
+// Path, so on Windows this runs only in GitHub Actions. CI runs it on each
+// binary package's own platform.
 //
 //	go run ./tools/claudecodecheck PACKAGE VERSION
 package main
@@ -193,7 +195,12 @@ func (c *check) serve() error {
 	c.base = "http://" + ln.Addr().String()
 	c.api = &stand{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/skywalking/ai-sessionizer/", c.site)
+	mux.HandleFunc("/skywalking/ai-sessionizer/", func(w http.ResponseWriter, r *http.Request) {
+		c.site(w, r, "/skywalking/ai-sessionizer/", c.version, c.second())
+	})
+	mux.HandleFunc("/archive/dist/skywalking/ai-sessionizer/", func(w http.ResponseWriter, r *http.Request) {
+		c.site(w, r, "/archive/dist/skywalking/ai-sessionizer/", c.version, c.second(), c.third())
+	})
 	mux.HandleFunc("/raw/", c.raw)
 	mux.Handle("/git/", &cgi.Handler{
 		Path:       git,
@@ -217,13 +224,16 @@ func (c *check) serve() error {
 	return nil
 }
 
-// site serves PACKAGE under the download site's path for each of the three
-// versions. The first version's .sha512 is the one beside PACKAGE; the
-// others name their own file, as make checksums writes them.
-func (c *check) site(w http.ResponseWriter, r *http.Request) {
-	rest := strings.TrimPrefix(r.URL.Path, "/skywalking/ai-sessionizer/")
-	version, file, _ := strings.Cut(rest, "/")
-	if version != c.version && version != c.second() && version != c.third() {
+// site serves PACKAGE under a download site's path for each of versions.
+// The first version's .sha512 is the one beside PACKAGE; the others name
+// their own file, as make checksums writes them.
+func (c *check) site(w http.ResponseWriter, r *http.Request, prefix string, versions ...string) {
+	version, file, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, prefix), "/")
+	held := false
+	for _, v := range versions {
+		held = held || v == version
+	}
+	if !held {
 		http.NotFound(w, r)
 		return
 	}
@@ -273,11 +283,13 @@ func (c *check) script(name string) (string, error) {
 		return "", err
 	}
 	text := string(b)
-	if len(closer.FindAllString(text, -1)) != 1 || strings.Count(text, "https://downloads.apache.org/skywalking/") != 1 {
-		return "", fmt.Errorf("install/%s no longer downloads once through closer.lua and once from downloads.apache.org, which this check replaces", name)
+	if len(closer.FindAllString(text, -1)) != 1 || strings.Count(text, "https://downloads.apache.org/skywalking/") != 1 ||
+		strings.Count(text, "https://archive.apache.org/dist/skywalking/") != 1 {
+		return "", fmt.Errorf("install/%s no longer names closer.lua, downloads.apache.org and archive.apache.org once each, which this check replaces", name)
 	}
 	text = closer.ReplaceAllString(text, c.base+"/${1}")
 	text = strings.ReplaceAll(text, "https://downloads.apache.org/", c.base+"/")
+	text = strings.ReplaceAll(text, "https://archive.apache.org/", c.base+"/archive/")
 	text = strings.ReplaceAll(text, gitURL, c.base+"/git/asz.git")
 	// Comments may name the script's own address; commands may not.
 	for _, line := range strings.Split(text, "\n") {
@@ -347,10 +359,22 @@ func (c *check) installAsz() error {
 		if err := c.reports(filepath.Join(bin, "asz"+exe()), c.version); err != nil {
 			return err
 		}
+		if !strings.Contains(out, "through the Apache mirrors") {
+			return errors.New("install/asz did not take the version on the download site through the mirrors")
+		}
 		if _, err := os.Stat(filepath.Join(bin, "asz-claude-plugin"+exe())); err == nil {
 			return errors.New("install/asz installed asz-claude-plugin too, which is the plugin's own install")
 		}
 		c.aszBin = bin
+	}
+	step("install/asz at v%s, which only the archive holds, in %s", c.third(), filepath.Base(c.shells[0]))
+	out, err := c.run1(c.shells[0], line, c.third(), c.homeEnv(filepath.Join(c.work, "home-asz-archive"), nil))
+	fmt.Print(out)
+	if err != nil {
+		return fmt.Errorf("the asz install command failed for a version only the archive holds: %w", err)
+	}
+	if !strings.Contains(out, "from archive.apache.org") {
+		return errors.New("install/asz did not take a version the download site does not hold from the archive")
 	}
 	return nil
 }

@@ -24,9 +24,9 @@
 #
 #   curl -fsSL "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/claude-code-plugin.sh" | sh -s -- "$VERSION"
 #
-# 1. Downloads the binary package of VERSION through the Apache mirror
-#    selector, and its sha512 from downloads.apache.org itself, and stops
-#    unless the two match.
+# 1. Downloads the binary package of VERSION through the Apache mirrors, or
+#    from archive.apache.org for a version no longer on the download site,
+#    with its sha512 from the same Apache site, and stops unless they match.
 # 2. Checks that asz-claude-plugin starts, and moves it into ~/.local/bin,
 #    where the Claude Code installer puts claude. The plugin's hooks run it by
 #    name from PATH.
@@ -74,11 +74,21 @@ tmp=$(mktemp -d "$bin/.asz-install.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM
 
-say "downloading $pkg"
-curl -fsSL -o "$tmp/$pkg" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$version/$pkg&action=download" ||
-  fail "cannot download $pkg. Is $version released, and is there a package for $os/$arch?"
-curl -fsSL -o "$tmp/$pkg.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$version/$pkg.sha512" ||
-  fail "cannot download $pkg.sha512 from downloads.apache.org"
+# The download site keeps only the newest release. A version there comes
+# through the mirrors. Any other comes from the archive, which keeps every
+# version but slows down heavy use, so it is not asked first.
+site=https://downloads.apache.org/skywalking/ai-sessionizer/$version
+archive=https://archive.apache.org/dist/skywalking/ai-sessionizer/$version
+if curl -fsSL -o "$tmp/$pkg.sha512" "$site/$pkg.sha512" 2>/dev/null; then
+  from="https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$version/$pkg&action=download"
+  say "downloading $pkg through the Apache mirrors"
+elif curl -fsSL -o "$tmp/$pkg.sha512" "$archive/$pkg.sha512"; then
+  from=$archive/$pkg
+  say "downloading $pkg from archive.apache.org, as the download site holds only the newest release"
+else
+  fail "neither downloads.apache.org nor archive.apache.org has $pkg. Is $version released, and is there a package for $os/$arch?"
+fi
+curl -fsSL -o "$tmp/$pkg" "$from" || fail "cannot download $pkg"
 want=$(cut -d ' ' -f 1 "$tmp/$pkg.sha512")
 if command -v sha512sum >/dev/null 2>&1; then got=$(sha512sum "$tmp/$pkg"); else got=$(shasum -a 512 "$tmp/$pkg"); fi
 [ "${#want}" -eq 128 ] && [ "${got%% *}" = "$want" ] || fail "the sha512 of $pkg does not match $pkg.sha512, so nothing was installed"

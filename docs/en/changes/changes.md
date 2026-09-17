@@ -100,8 +100,9 @@
   plugin's own scripts, `install/claude-code-plugin.sh` and `install/claude-code-plugin.ps1`,
   install `asz-claude-plugin` and add the plugin to Claude Code at the same tag, and
   [Claude Code Plugin](../setup/claude-code-plugin.md#install) runs them. The reader sets the
-  version. Each script downloads the package through the mirror selector and its `.sha512` from
-  downloads.apache.org, stops unless they match, checks that its binary starts, and installs it
+  version. Each script downloads the package and its `.sha512`: through the mirrors for the newest
+  release, which is all downloads.apache.org holds, and from archive.apache.org for any older one.
+  It stops unless they match, checks that its binary starts, and installs it
   where the Claude Code installer puts `claude`: `~/.local/bin`, or `%USERPROFILE%\.local\bin`.
   Run again with a newer version, the plugin's script uninstalls the plugin with `--keep-data`
   before it moves the marketplace, and copies a 0.3.0 `settings.yaml` over once.

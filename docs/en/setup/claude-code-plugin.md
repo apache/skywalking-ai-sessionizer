@@ -67,8 +67,9 @@ $Version = "<version>"
 The script, `install/claude-code-plugin.sh` or `install/claude-code-plugin.ps1` in the source of
 the version:
 
-1. Downloads the binary package through the Apache mirror selector and its `.sha512` from
-   downloads.apache.org itself, and stops unless the two match.
+1. Downloads the binary package and its `.sha512`, and stops unless the two match. The newest
+   release comes through the Apache mirrors, and an older one from archive.apache.org, as
+   [Install](install.md#quick-install) explains.
 2. Checks that `asz-claude-plugin` starts, and puts it where the Claude Code installer puts
    `claude`: `~/.local/bin`, or `%USERPROFILE%\.local\bin`, which the Windows script adds to your
    user `Path`. The hooks run the binary by its name, so Claude Code must find it on the `PATH` it

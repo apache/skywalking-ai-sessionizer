@@ -22,8 +22,9 @@
 #
 #   & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/asz.ps1"))) $Version
 #
-# It downloads the package through the Apache mirror selector and its sha512
-# from downloads.apache.org itself, stops unless the two match, checks that
+# It downloads the package through the Apache mirrors, or from
+# archive.apache.org for a version no longer on the download site, with its
+# sha512 from the same Apache site, stops unless the two match, checks that
 # asz.exe starts, and copies it into %USERPROFILE%\.local\bin, which it adds
 # to the user's Path. docs/en/setup/install.md says why.
 
@@ -43,10 +44,23 @@ $Bin = Join-Path $env:USERPROFILE ".local\bin"
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("asz-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $Tmp | Out-Null
 try {
-  Write-Host "${Me}: downloading $Pkg"
   $Zip = Join-Path $Tmp $Pkg
-  Invoke-WebRequest -UseBasicParsing -OutFile $Zip "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
-  Invoke-WebRequest -UseBasicParsing -OutFile "$Zip.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.sha512"
+  # The download site keeps only the newest release. A version there comes
+  # through the mirrors. Any other comes from the archive, which keeps every
+  # version but slows down heavy use, so it is not asked first.
+  $Site = "https://downloads.apache.org/skywalking/ai-sessionizer/$Version"
+  $Archive = "https://archive.apache.org/dist/skywalking/ai-sessionizer/$Version"
+  try {
+    Invoke-WebRequest -UseBasicParsing -OutFile "$Zip.sha512" "$Site/$Pkg.sha512"
+    $From = "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
+    Write-Host "${Me}: downloading $Pkg through the Apache mirrors"
+  } catch {
+    try { Invoke-WebRequest -UseBasicParsing -OutFile "$Zip.sha512" "$Archive/$Pkg.sha512" }
+    catch { throw "${Me}: neither downloads.apache.org nor archive.apache.org has $Pkg. Is $Version released?" }
+    $From = "$Archive/$Pkg"
+    Write-Host "${Me}: downloading $Pkg from archive.apache.org, as the download site holds only the newest release"
+  }
+  Invoke-WebRequest -UseBasicParsing -OutFile $Zip $From
   $Want = (Get-Content -LiteralPath "$Zip.sha512" -Raw).Trim().Split(" ")[0]
   if ($Want.Length -ne 128 -or (Get-FileHash -LiteralPath $Zip -Algorithm SHA512).Hash -ne $Want) {
     throw "${Me}: the sha512 of $Pkg does not match $Pkg.sha512, so nothing was installed" }
