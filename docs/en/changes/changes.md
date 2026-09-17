@@ -100,6 +100,11 @@
   then `brew install apache/skywalking-ai-sessionizer/asz` and `.../asz-claude-code`.
   `tools/homebrew-check.sh` runs both formulae through `brew style`, `brew audit --strict`,
   `brew install` and `brew test`, and CI's `homebrew` job runs it on macOS on every change.
+- **Every release stays installable with Homebrew.** Each release adds `asz@VERSION` and
+  `asz-claude-code@VERSION`, keg-only, beside the current formulae. `tools/homebrew-formula.sh`
+  writes them into `Formula/` from the released packages, checks them with Homebrew first, and
+  moves `asz` and `asz-claude-code` only forward. The `binary-distribution` skill runs it and opens
+  the pull request.
 - **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
   installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
   [Install](../setup/install.md#install-script) runs them from the version's tag in one command. The

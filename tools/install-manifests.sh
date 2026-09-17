@@ -32,6 +32,8 @@
 #
 #   homebrew/asz.rb                         a formula that installs asz from the macOS and Linux packages
 #   homebrew/asz-claude-code.rb             a formula that installs the Claude Code plugin's binary
+#   homebrew/asz@VERSION.rb, asz-claude-code@VERSION.rb
+#                                           the same, keg-only, kept for every release
 #   scoop/skywalking-ai-sessionizer.json    a Scoop manifest for the Windows packages
 #   winget/manifests/a/Apache/SkyWalkingAISessionizer/VERSION/
 #                                           the three winget manifests
@@ -378,6 +380,30 @@ end
 EOF
 } | fill > "$out_dir/homebrew/asz-claude-code.rb"
 
+# A versioned formula of each, asz@VERSION and asz-claude-code@VERSION, which
+# Formula/ keeps for every release, so an exact older version stays
+# installable after the current formulae move on. It is keg-only, as
+# Homebrew wants for an alternate version, so it does not clash with the
+# current formula's binary. The class name is Homebrew's for the file name:
+# asz@0.4.0 is AszAT040.
+homebrew_class() {
+  printf '%s' "$1" | perl -pe '$_ = ucfirst; s/[-_.\s]([a-zA-Z0-9])/\U$1/g; tr/+/x/; s/(.)@(\d)/$1AT$2/'
+}
+# Homebrew takes asz@VERSION as a version of asz only when VERSION is digits
+# and dots, which every Apache release is. A candidate's version with a
+# suffix gets no versioned formula.
+homebrew_versioned=asz
+printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*$' || homebrew_versioned=
+for f in ${homebrew_versioned:+asz asz-claude-code}; do
+  current=$(homebrew_class "$f")
+  versioned=$(homebrew_class "$f@$version")
+  CURRENT=$current VERSIONED=$versioned perl -pe \
+    's/^class \Q$ENV{CURRENT}\E < Formula$/class $ENV{VERSIONED} < Formula/; s/^(  license "Apache-2\.0"\n)/$1\n  keg_only :versioned_formula\n/' \
+    "$out_dir/homebrew/$f.rb" > "$out_dir/homebrew/$f@$version.rb"
+  grep -q "^class $versioned < Formula$" "$out_dir/homebrew/$f@$version.rb" && grep -q '^  keg_only :versioned_formula$' "$out_dir/homebrew/$f@$version.rb" ||
+    fail "could not write $f@$version.rb from $f.rb"
+done
+
 # --------------------------------------------------------------------- Scoop
 # The notes name the plugin's tag as VERSION for the reader to fill in. Scoop
 # replaces only $dir, $original_dir and $persist_dir in notes, and
@@ -699,6 +725,7 @@ if grep -rn '@[A-Z0-9_]*@' "$out_dir" >&2; then fail "a placeholder above was no
 cat <<DONE
 wrote the manifests for $version into $out_dir:
   homebrew/asz.rb, asz-claude-code.rb     darwin and linux, arm64 and amd64, sha256
+  homebrew/asz@$version.rb, asz-claude-code@$version.rb
   scoop/skywalking-ai-sessionizer.json    windows-amd64 and windows-arm64, sha512
   $winget_dir/   schema $winget_schema, sha256
   README.md

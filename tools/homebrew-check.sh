@@ -40,6 +40,9 @@ step() { printf '\n== %s\n' "$*"; }
 
 [ "$#" -eq 2 ] || { echo "usage: tools/homebrew-check.sh VERSION PKG_DIR" >&2; exit 2; }
 version=$1
+# Homebrew takes asz@VERSION as a version of asz only when VERSION is digits
+# and dots. With any other VERSION it links the versioned formula over asz.
+printf '%s' "$version" | grep -Eq '^[0-9]+(\.[0-9]+)*$' || fail "$version is not digits and dots, which a Homebrew versioned formula needs"
 [ -d "$2" ] || fail "$2 is not a directory"
 pkg_dir=$(cd "$2" && pwd)
 tree=$(cd "$(dirname "$0")/.." && pwd)
@@ -48,11 +51,13 @@ command -v perl >/dev/null 2>&1 || fail "perl is not on PATH"
 
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_HINTS=1
 tap=aszcheck/formulae
-formulae="asz asz-claude-code"
+formulae="asz asz-claude-code asz@$version asz-claude-code@$version"
 work=$(mktemp -d)
 installed=""
 cleanup() {
-  for f in $installed; do brew uninstall --formula "$f" >/dev/null 2>&1 || true; done
+  # A formula whose install stopped part way is installed but not recorded,
+  # so every one this check could have installed is removed.
+  for f in $formulae $installed; do brew uninstall --formula "$tap/$f" >/dev/null 2>&1 || true; done
   brew untap "$tap" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
@@ -98,6 +103,17 @@ brew info --formula "$tap/asz-claude-code" | grep -qF "claude plugin marketplace
 [ ! -e "$prefix/bin/asz-claude-plugin" ] || [ -e "$(brew --prefix asz-claude-code)/bin/asz-claude-plugin" ] ||
   fail "asz-claude-plugin does not come from asz-claude-code"
 [ ! -e "$(brew --prefix asz)/bin/asz-claude-plugin" ] || fail "asz installs asz-claude-plugin too, which is the plugin's own formula"
+# A versioned formula is keg-only: its binary is in its own prefix, and the
+# one on PATH stays the current formula's.
+for f in asz asz-claude-code; do
+  b=asz
+  [ "$f" = asz ] || b=asz-claude-plugin
+  "$(brew --prefix "$f@$version")/bin/$b" version | grep -qF "$version" || fail "$f@$version has no $b that reports $version"
+  case "$(readlink "$prefix/bin/$b")" in
+    *"/Cellar/$f/"*) ;;
+    *) fail "$b on Homebrew's PATH is not the one $f installed: $(readlink "$prefix/bin/$b")" ;;
+  esac
+done
 
 step "Done"
-echo "brew install asz and brew install asz-claude-code work for $version"
+echo "brew install asz, asz-claude-code, asz@$version and asz-claude-code@$version work"
