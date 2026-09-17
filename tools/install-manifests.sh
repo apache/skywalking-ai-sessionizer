@@ -335,7 +335,7 @@ fill > "$out_dir/scoop/skywalking-ai-sessionizer.json" <<'EOF'
         "asz-claude-plugin, the binary of the Claude Code plugin, is on the path. Install the plugin itself into Claude Code with the two commands below, with VERSION replaced by the version asz version prints.",
         "claude plugin marketplace add \"https://github.com/apache/skywalking-ai-sessionizer.git#vVERSION\" --sparse .claude-plugin plugins/claude-code/plugin",
         "claude plugin install asz-changes@skywalking-ai-sessionizer",
-        "Claude Code has not yet run the plugin's hooks on Windows. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code, and runs the packaged plugin by name from the path with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
+        "See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
     ],
     "checkver": {
         "url": "https://downloads.apache.org/skywalking/ai-sessionizer/?C=N;O=D;V=1",
@@ -422,7 +422,7 @@ Tags:
 - observability
 - skywalking
 ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/changes/changes.md
-InstallationNotes: asz-claude-plugin, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v@VERSION@" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install asz-changes@skywalking-ai-sessionizer. Claude Code has not yet run the plugin's hooks on Windows. CI unpacks each Windows package on a Windows runner of its processor, outside Claude Code, and runs the packaged plugin by name from the path with a SessionStart, a PreToolUse, a PostToolUse and a SessionEnd event on standard input. See https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/setup/claude-code-plugin.md
+InstallationNotes: asz-claude-plugin, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v@VERSION@" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install asz-changes@skywalking-ai-sessionizer. See https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/en/setup/claude-code-plugin.md
 Documentations:
 - DocumentLabel: Documentation
   DocumentUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v@VERSION@/docs/README.md

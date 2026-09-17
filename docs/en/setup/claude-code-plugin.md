@@ -444,8 +444,9 @@ It never stops the tool.
 The Claude Code [hooks reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
 says that when a hook has `args`, Claude Code resolves `command` as an executable on `PATH` and
 starts it directly, with `args` as its arguments and no shell, and that no shell splits the command
-into words on any platform. Claude Code 2.1.274 ran the hooks in this form on macOS. It has not run
-them on Windows.
+into words on any platform. Claude Code 2.1.274 ran the hooks in this form on Linux, macOS and
+Windows, each on x86-64 and ARM 64. On Windows the name `asz-claude-plugin` started
+`asz-claude-plugin.exe`. [What was verified](#what-was-verified) says how.
 
 The command is a name and not a path inside the plugin, because the binary is installed with asz
 and the plugin holds none. Anthropic's language server plugins for Claude Code name their servers
@@ -538,39 +539,20 @@ plugin's install command moves it to the third. After each, the plugin's data mu
 and the next session must be recorded. The install command run once more must change nothing, and
 the By hand commands must install the plugin into a new configuration. CI's `claude-code` job runs
 it with Claude Code 2.1.274 on each binary package's own platform: Linux, macOS and Windows, each on
-x86-64 and ARM 64. On 2026-09-17 it passed on macOS on Apple silicon. An earlier form of it, which
-ran the install steps from blocks written on the pages, passed in GitHub Actions on Linux and macOS,
-each on x86-64 and ARM 64.
+x86-64 and ARM 64. On 2026-09-17, in the CI of pull request #18, it passed on all six. It also
+passed on macOS on Apple silicon outside CI, and on Linux on ARM 64 in a Debian 13.6 container and
+in an Alpine 3.22.5 container, which runs Claude Code's build for musl.
 
-On Windows the plugin has run only outside Claude Code. CI's `packages` job runs
-`tools/package-smoke.sh` on each binary package, on a runner of the package's own platform. On
-2026-09-11, the CI of pull request #6 ran it on `windows-latest`, x86-64, and on `windows-11-arm`,
-ARM 64. Both jobs passed, in 30 and 33 seconds. The script unpacks the zip with `Expand-Archive`.
-It runs the packaged plugin with a `SessionStart`, a `PreToolUse`, a `PostToolUse` and a
-`SessionEnd` event on standard input, and writes a file between the two tool events. Those runs
-checked only that some file in the plugin's data directory named it. The plugin's scan writes its
-own files, which name it too, before the plugin writes the record. So those runs do not show that
-the plugin wrote its record on Windows. The script now requires the record in
-`output/<session-id>/main.jsonl` to name the file as created, and CI's unit tests now run the
-plugin's own tests on each system. Neither has run on Windows yet.
+On Windows that CI ran the check on `windows-latest`, x86-64, and on `windows-11-arm`, ARM 64. Both
+install scripts ran in Windows PowerShell and in PowerShell 7. The hooks name `asz-claude-plugin`
+without `.exe`, and they started `asz-claude-plugin.exe`: the plugin recorded the file the shell
+command wrote, and with the binary off the `Path`, Claude Code reported `Executable not found in
+$PATH` and the command still ran. The runners have Git Bash, so Claude Code's shell tool there was
+`Bash`. A Windows machine without Git Bash, where the shell tool is `PowerShell`, has not been tried.
+The hooks reference says a hook with `args` uses no shell, so the hooks should not depend on it.
 
-Claude Code itself has not run the hooks on Windows. The hooks reference says a hook with `args`
-uses no shell and ignores `shell`, so whether Git Bash is installed should not matter. That has
-not been tried. It is also unknown whether the binary starts at all. `hooks/hooks.json` names
-`asz-claude-plugin`, and the file on Windows is `asz-claude-plugin.exe`. The hooks reference says
-that on Windows, `command` must resolve to a real executable, such as a `.exe`. It does not say
-whether a name without `.exe` resolves to one. The package smoke test now looks the binary up by
-that name, through Git Bash on Windows, which is not how Claude Code looks it up, and it has not
-run on Windows yet.
-
-To find out, on Windows x86-64 or ARM 64:
-
-1. Install the binary and the plugin as [Install](#install) says, and restart Claude Code.
-2. Ask for one shell command that writes a file.
-3. Look in `%USERPROFILE%\.claude\plugins\data\asz-changes-skywalking-ai-sessionizer`. A record in
-   `output\<session-id>\main.jsonl` there that names the file means the hooks work.
-4. Without a record, start Claude Code with `claude --debug hooks` from a terminal where
-   `Get-Command asz-claude-plugin` finds `asz-claude-plugin.exe`, and repeat step 2. If Claude Code
-   still reports `Executable not found in $PATH` for `asz-claude-plugin`, the name without `.exe` did
-   not resolve, and the plugin would need a hooks file for Windows that names `asz-claude-plugin.exe`.
-   If it reports no hook error, read `log\plugin.log` in the data directory.
+The first Windows run stopped before any record. A runner's temporary directory has a short name,
+`C:\Users\RUNNER~1\...`, and Claude Code 2.1.274 refused the shell command's write under it, as "a
+suspicious Windows path pattern that requires manual approval". The plugin's `SessionStart` hook had
+run by then and exited 0. The check now works under the directory's long name. A person whose
+project sits under a short name gets the same question from Claude Code.

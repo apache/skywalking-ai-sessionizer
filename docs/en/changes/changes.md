@@ -112,7 +112,8 @@
   addresses pointed at the runner. A headless session must be recorded by the plugin and collected
   by asz, a session without the binary must still run its tool, and each upgrade must keep the
   plugin's data. Before, no platform ran the plugin's hooks inside Claude Code in CI, and Windows
-  never had.
+  never had. It passes on all six. On Windows the hooks' `asz-claude-plugin` starts
+  `asz-claude-plugin.exe`, and both scripts run in Windows PowerShell and PowerShell 7.
 
 ## Release
 

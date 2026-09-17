@@ -135,10 +135,9 @@ Expand-Archive $Pkg -DestinationPath asz
 .\asz\asz.exe version
 ```
 
-Claude Code has not yet run the plugin's hooks on Windows. CI unpacks each Windows package on a
-Windows runner of its processor, outside Claude Code. It finds `asz-claude-plugin` by name on the
-path, and runs it with a `SessionStart`, a `PreToolUse`, a `PostToolUse` and a `SessionEnd` event on
-standard input. [Claude Code Plugin](claude-code-plugin.md#what-was-verified) says what was verified.
+CI runs Claude Code with each Windows package on a Windows runner of its processor, and the plugin's
+hooks find `asz-claude-plugin.exe` by the name `asz-claude-plugin`.
+[Claude Code Plugin](claude-code-plugin.md#what-was-verified) says what was verified.
 
 ## Verify a package
 
