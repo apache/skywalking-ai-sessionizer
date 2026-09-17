@@ -62,8 +62,7 @@ adapter reports it as `unavailable` rather than approximating it.
 
 ## Quick start
 
-From 0.3.0 on, each release ships a signed binary package for macOS, Linux and Windows, on ARM 64
-and x86-64. [Install](docs/en/setup/install.md) says where to download them and how to verify
+Each release ships a signed binary package for macOS, Linux and Windows, on ARM 64 and x86-64. [Install](docs/en/setup/install.md) says where to download them and how to verify
 them. Or build from a checkout, as the [quick start](docs/en/setup/quick-start.md) does:
 
 ```sh

@@ -9,9 +9,9 @@ binary packages carry its binary, `asz-claude-plugin`, beside `asz`.
 
 ## Quick install
 
-The install script of a version installs `asz` from that version's binary package, from 0.4.0 on.
-Set `VERSION` to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as
-released, then run the script from that version's tag.
+The install script of a version installs `asz` from that version's binary package. Set `VERSION`
+to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as released, then
+run the script from that version's tag.
 
 On macOS or Linux:
 
@@ -78,7 +78,6 @@ Every package holds:
 - `asz-claude-plugin`, or `asz-claude-plugin.exe`, the binary the Claude Code plugin's hooks run.
   The plugin's manifest and hooks are not in the package. Claude Code installs them from the
   marketplace at the version's tag, as [Claude Code Plugin](claude-code-plugin.md#install) says.
-  Up to 0.3.0, the package held the whole plugin under `claude-code-plugin/`.
 - `LICENSE`, `NOTICE`, and `licenses/` with the license of every module built into the binaries.
 
 The same files are in three places:
@@ -89,12 +88,9 @@ The same files are in three places:
 - `https://archive.apache.org/dist/skywalking/ai-sessionizer/` keeps every version, also after a
   newer one replaces it on the download site. The mirror selector cannot find a version that has
   left the download site, so take such a version from the archive.
-- From 0.3.0 on, the [GitHub release](https://github.com/apache/skywalking-ai-sessionizer/releases)
-  of a version carries the same packages, `.asc` and `.sha512` files. They are uploaded only after
-  each one is checked against the download site.
-
-The GitHub releases of 0.1.0 and 0.2.0 were made before the project's first Apache vote. They are
-not Apache releases, and their packages, which CI built, are not signed.
+- The [GitHub release](https://github.com/apache/skywalking-ai-sessionizer/releases) of a version
+  carries the same packages, `.asc` and `.sha512` files. They are uploaded only after each one is
+  checked against the download site.
 
 The commands below use the version you set, as in [Quick install](#quick-install).
 
@@ -178,65 +174,15 @@ KEYS, then run the same two `gpg` commands.
 
 ## Homebrew, on macOS and Linux
 
-**Available only once its formulae are published after a release.** Until then, Homebrew does not
-know them.
-
-Each release writes two formulae from the voted binary packages, for macOS and Linux on ARM 64 and
-x86-64, one for each install: `asz`, and `asz-claude-code`, the binary of the
-[Claude Code plugin](claude-code-plugin.md). The release manager submits them to a Homebrew tap,
-and this section will name the tap once they are published there. Once it is named:
-
 ```sh
-brew tap <owner>/<name>
-brew install asz
-brew install asz-claude-code
+brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
+brew install apache/skywalking-ai-sessionizer/asz
+brew install apache/skywalking-ai-sessionizer/asz-claude-code
 ```
 
-They do not go to homebrew-core, which takes only formulae that build from source, and which asks
-for more public interest than a new project has. These formulae install a binary built for each
-platform.
-
-Each formula downloads the binary package for your machine from the GitHub release of the version.
-That release carries the voted packages, and its URL keeps working after a newer version comes
-out. When GitHub fails, Homebrew takes the same package from archive.apache.org, which keeps every
-version. Either way, Homebrew checks the download against the sha256 of the voted package. The
-formulae build nothing, so they need no Go. `asz` installs `asz`, and `asz-claude-code` installs
-`asz-claude-plugin`, each on your `PATH`, with `LICENSE`, `NOTICE` and `licenses/` at the root of
-the formula's prefix. Because they install the binary package, `asz view` draws the page with the
-renderer's fonts.
-
-Homebrew asks you to trust a tap that is not its own before it loads its formulae. A formula
-cannot change your Claude Code configuration, so `asz-claude-code` does not install the plugin
-into Claude Code. Its caveats, which `brew info asz-claude-code` prints again, give the two commands
-that do, at the formula's version. [Claude Code Plugin](claude-code-plugin.md#by-hand) gives the
-same commands.
-
-## Scoop, on Windows
-
-**Available only once its manifest is published after a release.**
-
-Each release writes a Scoop manifest for Windows on x86-64 and ARM 64. The release manager submits
-it to a Scoop bucket, and this section will name the bucket once the manifest is published. The
-manifest downloads the binary package from dlcdn.apache.org, the delivery network in front of the
-download site, checks its sha512, and puts `asz` and `asz-claude-plugin` on the path. The plugin
-itself is installed into Claude Code as [Claude Code Plugin](claude-code-plugin.md#install) says.
-
-## winget, on Windows
-
-**Available only once its manifest is published after a release.**
-
-Each release writes winget manifests for Windows on x86-64 and ARM 64. The release manager submits
-them to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). Once that repository
-accepts them:
-
-```powershell
-winget install --id Apache.SkyWalkingAISessionizer
-```
-
-The manifest downloads the binary package from the GitHub release of the version, which carries
-the voted packages and keeps its URL after a newer version comes out. It checks the package's
-sha256, and adds `asz` and `asz-claude-plugin` as commands. The plugin itself is installed into
-Claude Code as [Claude Code Plugin](claude-code-plugin.md#install) says.
+`asz-claude-code` installs `asz-claude-plugin`, the Claude Code plugin's binary. To install the
+plugin into Claude Code, run the two commands that `brew info asz-claude-code` prints. Upgrade with
+`brew upgrade asz asz-claude-code`.
 
 ## Build from the source package
 
@@ -267,11 +213,9 @@ make build VERSION=$VERSION
 
 `make build` writes `bin/asz` and `bin/asz-claude-plugin`. Pass `VERSION`. The Makefile reads the
 version from git, and an unpacked source package has no git history, so without it `asz version`
-prints an empty version. Up to 0.3.0, `make build` wrote the plugin's binary to
-`plugins/claude-code/bin/` instead.
+prints an empty version.
 
-To run the plugin from the source of 0.4.0 or later, put `bin` first on `PATH` and load the plugin's
-directory:
+To run the plugin from the source, put `bin` first on `PATH` and load the plugin's directory:
 
 ```sh
 PATH="$PWD/bin:$PATH" claude --plugin-dir plugins/claude-code/plugin
@@ -311,8 +255,7 @@ differs from a package in four ways:
 - Go fetches the module from the tag on GitHub, through the Go module proxy. That is the tagged
   source, not the signed source package the vote approved.
 - Name a version the downloads page lists as released. A tag is pushed before its vote, so
-  `@latest` can name a candidate that was never released. The tags of 0.1.0 and 0.2.0 predate
-  the project's first Apache vote.
+  `@latest` can name a candidate that was never released.
 - `asz version` prints `dev`. The Makefile sets the version at build time, and `go install` does
   not.
 - The Claude Code plugin's binary is not installed. Take it from a binary package, or build it from
@@ -326,8 +269,7 @@ downloaded held the committed conversation renderer, and the binary printed
 
 ## Not offered
 
-- **No deb or rpm package**, and no apt or yum repository. On Linux, use a binary package, the
-  source package, or Homebrew once its formula is published.
-- **The container image is pending.** [Container Image](container-image.md) describes the image
-  CI builds, and how to build it yourself. It is a convenience, not part of the Apache release, and
-  how it is published for a released version is not settled yet.
+- **No deb or rpm package**, and no apt or yum repository. On Linux, use the install script, a
+  binary package, or Homebrew.
+- **A container image** is described in [Container Image](container-image.md), with how to build
+  it yourself.

@@ -38,3 +38,9 @@ tests/adapter/claudecode/local/claudecode-files/** -text
 # packages' license files are copied from them. A build from the source
 # package serves the page in its fallback fonts.
 internal/view/conversation-view/host-shell/fonts/*.woff2 export-ignore
+
+# Formula/ holds the Homebrew formulae of the newest release, committed after
+# that release is published, because they carry its packages' sha256. The
+# source package of the next version would carry a formula for the version
+# before it, so git archive leaves them out.
+Formula/** export-ignore

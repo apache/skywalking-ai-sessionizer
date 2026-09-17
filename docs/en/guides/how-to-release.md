@@ -909,15 +909,15 @@ The Apache SkyWalking Team
 dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
 place: the winget manifests name The Apache Software Foundation as their publisher. The ASF allows
 other distribution platforms only for binaries that follow its release, licensing, branding and
-trademark policies. A Homebrew tap or a Scoop bucket under github.com/apache is a new repository,
-which the PMC asks INFRA to create.
+trademark policies. The Homebrew tap is this repository, so it needs no new repository. A Scoop
+bucket under github.com/apache would be one, which the PMC asks INFRA to create.
 
 `dist/$VERSION/install/` holds the manifests that let package managers install the version. They
 are conveniences.
 
 | File | Where it goes | What it downloads |
 | --- | --- | --- |
-| `homebrew/asz.rb`, `homebrew/asz-claude-code.rb` | a Homebrew tap | the macOS or Linux binary package, from the GitHub release, with archive.apache.org as its mirror |
+| `homebrew/asz.rb`, `homebrew/asz-claude-code.rb` | `Formula/` on main in this repository | the macOS or Linux binary package, from the GitHub release, with archive.apache.org as its mirror |
 | `scoop/skywalking-ai-sessionizer.json` | a Scoop bucket | the Windows packages, from dlcdn.apache.org |
 | `winget/manifests/a/Apache/SkyWalkingAISessionizer/$VERSION/` | microsoft/winget-pkgs | the Windows packages, from the GitHub release |
 
@@ -925,9 +925,28 @@ The two Homebrew formulae install from the voted binary package for the machine:
 ARM 64 or x86-64. Each names a URL, a mirror and a sha256 for each of the four packages. They build
 nothing, so they need no Go. `asz` installs `asz`, and `asz-claude-code` installs
 `asz-claude-plugin`, whose caveats give the two commands that install the plugin into Claude Code.
-Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary. They go to a tap
-only. Homebrew/homebrew-core takes a formula only when it builds from source, and these install a
-binary built for each platform.
+Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary.
+Homebrew/homebrew-core takes a formula only when it builds from source, and these install a binary
+built for each platform.
+
+The tap is this repository. Homebrew looks for a tap's formulae in `Formula/` first, so after
+Publish, open a pull request to main that replaces `Formula/asz.rb` and `Formula/asz-claude-code.rb`
+with the two files from `dist/$VERSION/install/homebrew/`. The formulae name the sha256 of the voted
+packages, so they cannot be committed before the vote, and the tag of a version never holds its own
+formulae. `.gitattributes` keeps `Formula/` out of the source package, which would otherwise carry
+the formulae of the version before it. Users add the tap and install by the full name, as
+[Install](../setup/install.md#homebrew-on-macos-and-linux) shows.
+
+Before the pull request, run the formulae through Homebrew on the voted packages. It writes them into
+a local tap, runs `brew style` and `brew audit --strict`, installs and tests both, and removes
+everything it installed:
+
+```sh
+tools/homebrew-check.sh $VERSION dist/$VERSION
+```
+
+CI's `homebrew` job runs the same script on every change, on packages it builds with a version of
+its own, so a change that breaks the formulae fails before a release.
 
 Submit each file only after the version is on the download site. The Homebrew formulae and the
 winget files download from the GitHub release, which [Publish](#3-publish) promotes.

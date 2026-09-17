@@ -225,6 +225,10 @@ mkdir -p "$out_dir/homebrew" "$out_dir/scoop" "$out_dir/$winget_dir"
 # and asz-claude-code, the binary of the Claude Code plugin. A person who
 # runs only one of them installs only its binary. Both download the same
 # package, which Homebrew keeps once in its cache.
+#
+# The tap is this repository: the formulae go to Formula/ on main, where
+# Homebrew looks first, and they carry the license header every file in the
+# tree does. tools/homebrew-check.sh runs them through Homebrew.
 homebrew_urls() {
   cat <<'EOF'
   # Each package comes from the GitHub release of v@VERSION@, which carries
@@ -262,6 +266,23 @@ EOF
 
 {
   cat <<'EOF'
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 # Written by tools/install-manifests.sh in apache/skywalking-ai-sessionizer
 # from the voted binary packages of @VERSION@.
 class Asz < Formula
@@ -294,6 +315,23 @@ EOF
 
 {
   cat <<'EOF'
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
 # Written by tools/install-manifests.sh in apache/skywalking-ai-sessionizer
 # from the voted binary packages of @VERSION@.
 class AszClaudeCode < Formula
@@ -480,8 +518,8 @@ announcement.
 
 **Before the first submission to each package manager, the PMC agrees to it on
 dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
-place. A tap or a bucket under github.com/apache is a new repository, which the PMC asks INFRA to
-create.
+place. The Homebrew tap is apache/skywalking-ai-sessionizer itself, so it needs no new repository.
+A Scoop bucket under github.com/apache would be one, which the PMC asks INFRA to create.
 
 **Submit a file only after @VERSION@ is on the download site,**
 <https://downloads.apache.org/skywalking/ai-sessionizer/@VERSION@/>. The Homebrew formula and the
@@ -494,8 +532,8 @@ that is not there yet fails its review, and it fails for everyone who installs i
 
 | File | Where it goes | What it downloads |
 | --- | --- | --- |
-| `homebrew/asz.rb` | `Formula/` in a tap | the macOS or Linux package, from the GitHub release, or else from archive.apache.org; installs `asz` |
-| `homebrew/asz-claude-code.rb` | `Formula/` in the same tap | the same package; installs `asz-claude-plugin`, and its caveats give the commands that install the plugin into Claude Code |
+| `homebrew/asz.rb` | `Formula/` on main in apache/skywalking-ai-sessionizer | the macOS or Linux package, from the GitHub release, or else from archive.apache.org; installs `asz` |
+| `homebrew/asz-claude-code.rb` | the same `Formula/` | the same package; installs `asz-claude-plugin`, and its caveats give the commands that install the plugin into Claude Code |
 | `scoop/skywalking-ai-sessionizer.json` | `bucket/` in a Scoop bucket | the Windows package, from dlcdn.apache.org |
 | `winget/manifests/a/Apache/SkyWalkingAISessionizer/@VERSION@/` | the same path in microsoft/winget-pkgs | the Windows package, from the GitHub release |
 
@@ -582,19 +620,28 @@ done
 brew untap "$USER/asz-test"
 ```
 
-Submit them by committing both files under `Formula/` in a tap, a GitHub repository named
-`homebrew-<name>`. People then run `brew tap <owner>/<name>` once, and after it
-`brew install asz` and `brew install asz-claude-code`. Homebrew asks people to trust a tap that is
-not its own.
+`tools/homebrew-check.sh @VERSION@ <the directory of the voted packages>`, run from the source of
+@VERSION@, does the same with no download from GitHub, and removes what it installed.
+
+Submit them with a pull request to main in apache/skywalking-ai-sessionizer that replaces both files
+under `Formula/`. The repository is the tap. Its name does not start with `homebrew-`, so people
+give its URL once, then install by the full name, which trusts that formula:
+
+```sh
+brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
+brew install apache/skywalking-ai-sessionizer/asz
+brew install apache/skywalking-ai-sessionizer/asz-claude-code
+```
+
+After that, `brew upgrade asz asz-claude-code` moves both to the formulae on main.
 
 Homebrew/homebrew-core does not take these formulae. A formula there must build from source, or
 install output that runs on every platform, and these install a binary built for each platform.
 Core also asks for public interest before it takes a new project. On 2026-09-17 its policy asked a
 GitHub project for 30 forks, 30 watchers or 75 stars, or three times that when the project submits
 itself, and for a repository at least 30 days old. Formulae of the same names that build from the
-source release could go there once the project qualifies, and the two commands would stay the
-same. For a later version, run the script again on that version's voted packages and replace the
-files.
+source release could go there once the project qualifies. For a later version, run the script again
+on that version's voted packages, and replace the files on main.
 
 ## Scoop
 

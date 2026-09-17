@@ -40,7 +40,7 @@ binary its hooks run, and the plugin itself, the manifest and the hooks, in Clau
 records whether asz is installed or not. [Install](install.md#quick-install) installs asz, which
 collects what the plugin records.
 
-The install script of a version installs both parts, from 0.4.0 on. Install Claude Code first. Set
+The install script of a version installs both parts. Install Claude Code first. Set
 `VERSION` to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as
 released, the same as the asz you run, then run the script from that version's tag.
 
@@ -78,6 +78,9 @@ the version:
    version, it moves the plugin there and keeps its data, as [Upgrade](#upgrade) explains.
 
 Restart Claude Code afterwards, so it loads the plugin with the new `PATH`.
+
+With Homebrew, install the binary with `brew install apache/skywalking-ai-sessionizer/asz-claude-code`
+([Install](install.md#homebrew-on-macos-and-linux)), then run the two commands under [By hand](#by-hand).
 
 The marketplace address ends with the version's tag, so the hooks Claude Code installs are the
 ones released with that binary, not whatever the default branch holds later. It is an HTTPS
@@ -451,9 +454,8 @@ Windows, each on x86-64 and ARM 64. On Windows the name `asz-claude-plugin` star
 
 The command is a name and not a path inside the plugin, because the binary is installed with asz
 and the plugin holds none. Anthropic's language server plugins for Claude Code name their servers
-the same way, `gopls` for Go, and ask for the server to be installed on `PATH` first. Up to 0.3.0,
-the package carried the binary inside the plugin, and the command was
-`${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin`. A marketplace installs a plugin from the repository,
+the same way, `gopls` for Go, and ask for the server to be installed on `PATH` first. A marketplace
+installs a plugin from the repository,
 so a plugin that held the binary would need a built copy for every platform committed there, and
 an Apache source release carries no compiled file.
 
