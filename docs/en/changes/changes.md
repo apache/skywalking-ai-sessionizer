@@ -1,6 +1,6 @@
 # Changes in 0.4.0
 
-> In development, not yet released. `tools/release.sh prepare 0.4.0` removes this note.
+> In development, not yet released. `tools/release/release.sh prepare 0.4.0` removes this note.
 
 ## Provider bodies
 
@@ -92,27 +92,27 @@
 - **Each binary package holds `asz` and `asz-claude-plugin` side by side**, with `LICENSE`, `NOTICE`
   and `licenses/`, and no `claude-code-plugin/` directory. `make build` writes both to `bin/`. The
   package smoke test finds the plugin's binary by name on `PATH`. The candidate check in
-  `tools/release.sh`, and the Scoop and winget manifests follow the new layout, and put both
+  `tools/release/release.sh`, and the Scoop and winget manifests follow the new layout, and put both
   binaries on the path. The Homebrew formula becomes two, one for each install: `asz` and
   `asz-claude-code`. The tap is this repository: after each release the formulae go to `Formula/`
   on main, which `.gitattributes` keeps out of the source package, and users run
   `brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer`,
   then `brew install apache/skywalking-ai-sessionizer/asz` and `.../asz-claude-code`.
-  `tools/homebrew-check.sh` runs both formulae through `brew style`, `brew audit --strict`,
+  `tools/test/homebrew-check.sh` runs both formulae through `brew style`, `brew audit --strict`,
   `brew install` and `brew test`, and CI's `homebrew` job runs it on macOS on every change.
 - **Every release stays installable with Homebrew.** Each release adds `asz@VERSION` and
-  `asz-claude-code@VERSION`, keg-only, beside the current formulae. `tools/homebrew-formula.sh`
+  `asz-claude-code@VERSION`, keg-only, beside the current formulae. `tools/release/homebrew-formula.sh`
   writes them into `Formula/` from the released packages, checks them with Homebrew first, and
   moves `asz` and `asz-claude-code` only forward. The `binary-distribution` skill runs it and opens
   the pull request.
 - **Debian packages, and an apt repository on the website.** Each release ships
   `apache-skywalking-ai-sessionizer-VERSION-bin-asz-ARCH.deb` and `...-bin-asz-claude-code-ARCH.deb`
-  for amd64 and arm64, voted and signed with the other packages. `tools/debpackage` writes them in
+  for amd64 and arm64, voted and signed with the other packages. `tools/release/deb-package` writes them in
   `make binaries` from the same staged files, with the same time, owner and modes, so a rebuild
   gives the same bytes on any machine. `https://skywalking.apache.org/apt` serves an index of every
   released version, signed with a key in KEYS, and `.htaccess` redirects that send apt to the newest
-  version on the mirrors and to every older one on archive.apache.org. `tools/aptindex` writes the
-  index and the redirects, and `tools/apt-repository.sh` checks the released packages against their
+  version on the mirrors and to every older one on archive.apache.org. `tools/release/apt-index` writes the
+  index and the redirects, and `tools/release/apt-repository.sh` checks the released packages against their
   `.sha512` and KEYS, adds them and signs the index; the `binary-distribution` skill runs it with the
   Homebrew formulae. CI's `apt` job installs two versions through Apache httpd with the same
   redirects, in Debian and Ubuntu, on amd64 and arm64. [Install](../setup/install.md) gives the
@@ -131,7 +131,7 @@
   Run again with a newer version, the plugin's script uninstalls the plugin with `--keep-data`
   before it moves the marketplace, and copies a 0.3.0 `settings.yaml` over once.
 - **CI runs the install pages with Claude Code.** A new `claude-code` job runs
-  `tools/claudecodecheck` with Claude Code 2.1.274 on each binary package's platform, Linux, macOS
+  `tools/test/claude-code-check` with Claude Code 2.1.274 on each binary package's platform, Linux, macOS
   and Windows on x86-64 and ARM 64. It runs both install commands as the pages write them, the
   plugin's upgrade by hand and by its script, and its install by hand, with only the download
   addresses pointed at the runner. A headless session must be recorded by the plugin and collected

@@ -325,7 +325,7 @@ plugin and deleted its data directory, with its `settings.yaml` and an output fi
 Uninstalling with `--keep-data` first, then removing the marketplace, adding it at the second tag
 and installing, kept both files, and the cache then held the changed hooks.
 
-`tools/claudecodecheck` repeats all of this on the machine it runs on, the way a person follows the
+`tools/test/claude-code-check` repeats all of this on the machine it runs on, the way a person follows the
 install pages. It runs the commands as the pages write them, and changes only the download
 addresses, to a server on the same machine that holds the package, the install scripts, the
 marketplace repository at three tags, and a stand-in for the model's API. It runs the asz install

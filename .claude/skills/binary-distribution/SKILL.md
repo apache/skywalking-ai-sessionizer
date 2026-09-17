@@ -69,7 +69,7 @@ cd <scratch dir>/asz
 ## 3. Homebrew: write and check the formulae, on macOS
 
 ```sh
-env -u http_proxy -u https_proxy -u all_proxy tools/homebrew-formula.sh --check <versions>
+env -u http_proxy -u https_proxy -u all_proxy tools/release/homebrew-formula.sh --check <versions>
 ```
 
 For each version it downloads the six binary packages and their `.sha512` from
@@ -94,7 +94,7 @@ the passphrase in a window of its own; tell the user to expect it.
 
 ```sh
 env -u http_proxy -u https_proxy -u all_proxy GPG_USER=<key> \
-  tools/apt-repository.sh --check <scratch dir>/website/static/apt <versions>
+  tools/release/apt-repository.sh --check <scratch dir>/website/static/apt <versions>
 ```
 
 For each version it downloads the four `.deb` packages with their `.sha512` and
@@ -146,7 +146,7 @@ Anyone who tapped runs `brew update`, then `brew upgrade asz asz-claude-code`.
 apt users run `sudo apt update && sudo apt upgrade` once the website has been
 built, which its CI does on every merge to master.
 
-`tools/release.sh publish VERSION --remove-old` removes older versions from the
+`tools/release/release.sh publish VERSION --remove-old` removes older versions from the
 download site. It must wait for the apt pull request, because until it merges
 apt downloads the previous version through the mirrors. Tell the user the pull
 request links, and remove both worktrees once they are merged.

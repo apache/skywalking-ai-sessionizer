@@ -4,7 +4,7 @@ This guide is for the release manager, and for anyone checking a release candida
 Apache SkyWalking AI Sessionizer follows the Apache release process. The SkyWalking PMC votes on a
 candidate, and only after the vote passes is anything published as an official release.
 
-A release takes three commands of `tools/release.sh`: `prepare`, `candidate` and `publish`. The
+A release takes three commands of `tools/release/release.sh`: `prepare`, `candidate` and `publish`. The
 vote comes between the last two. None of them pushes to `main`. For every command this page shows
 what it does, and lists the svn commands it runs, so a release manager can finish a step by hand
 when the script stops.
@@ -69,7 +69,7 @@ What the three commands share:
 - An option that belongs to another command is refused, never ignored.
 - When `APACHE_ID` is set, every svn command runs as `svn --username "$APACHE_ID"`. Set it when
   your local user name is not your Apache ID.
-- `tools/release.sh --help` prints every command and its options.
+- `tools/release/release.sh --help` prints every command and its options.
 
 ## Before the first release
 
@@ -142,7 +142,7 @@ name in a later commit.
 
 ```sh
 git checkout main && git pull
-tools/release.sh prepare
+tools/release/release.sh prepare
 ```
 
 It asks for the version to release and the version development moves to, or takes them as
@@ -224,7 +224,7 @@ prerelease that is incomplete or rejected explicitly before preparing its replac
 Once CI has created the prerelease with the binaries, and the prepare pull request has merged:
 
 ```sh
-GPG_USER=<key id, fingerprint or email> tools/release.sh candidate $VERSION
+GPG_USER=<key id, fingerprint or email> tools/release/release.sh candidate $VERSION
 ```
 
 `make release VERSION=$VERSION` runs the same command with `--no-upload`, writing the signed
@@ -238,7 +238,7 @@ person uploads, or uploads again, are refused. A manual run of the workflow neve
 so it cannot make a prerelease ready. To require a specific uploader run:
 
 ```sh
-tools/release.sh candidate $VERSION --ci-run <run id>
+tools/release/release.sh candidate $VERSION --ci-run <run id>
 ```
 
 `GPG_USER` picks the signing key. When it is empty, gpg's default key signs. If gpg fails without
@@ -277,7 +277,7 @@ The command takes these steps and stops at the first failure:
      https://dist.apache.org/repos/dist/dev/skywalking/ai-sessionizer/$VERSION
    ```
 
-3. **Download and verify prerelease binaries.** `tools/ci-binaries.sh` requires the expected
+3. **Download and verify prerelease binaries.** `tools/release/ci-binaries.sh` requires the expected
    public prerelease and its readiness marker. The marker must identify a completed, successful
    run and attempt of this repository's CI workflow, from the Apache repository, for the push of
    `v$VERSION` at the release commit. A fork, a branch run, a manual run, a failed run or a wrong
@@ -285,7 +285,7 @@ The command takes these steps and stops at the first failure:
    nothing else except the source package and signatures an earlier run of `candidate` attached.
    It downloads each of CI's files by its asset ID, checks GitHub's SHA-256 digest and verifies
    every package's SHA-512 checksum.
-   `tools/package-check.sh` also rejects AppleDouble `._*` files, `.DS_Store` and `__MACOSX`
+   `tools/release/package-check.sh` also rejects AppleDouble `._*` files, `.DS_Store` and `__MACOSX`
    entries inside each package. The helper rechecks the tag, release and CI run after downloading.
    It does not depend on Actions artifact retention. There is no local binary build fallback.
    If the prerelease is not ready, the command stops before signing.
@@ -331,7 +331,7 @@ The command takes these steps and stops at the first failure:
    must contain both binaries, `LICENSE`, `NOTICE` and `licenses/`. The command then signs every verified archive and verifies each signature
    against the SkyWalking KEYS keyring. The CI binary checksums remain unchanged.
 7. **Run the package for this machine again.** The command unpacks the source archive in a
-   temporary directory and runs its `tools/package-smoke.sh` on the signed CI package for the
+   temporary directory and runs its `tools/test/package-smoke.sh` on the signed CI package for the
    release manager's platform. The script and scenarios therefore come from the candidate
    source. A failed check stops the upload. A host outside the release platforms is reported and
    skips this additional local check; CI has already run all six packages.
@@ -388,7 +388,7 @@ writes nothing into `dist/$VERSION/`. The plan does not claim that prerelease as
   for each package in `DEB_PACKAGES` in the tag's Makefile and each Linux platform. `asz` installs
   `/usr/bin/asz`, and `asz-claude-code` installs `/usr/bin/asz-claude-plugin`. Each holds the same
   binary as the Linux binary package, with the same `LICENSE`, `NOTICE` and `licenses/` under
-  `/usr/share/doc/<package>/`. `tools/debpackage` writes them, so a build on macOS gives the same
+  `/usr/share/doc/<package>/`. `tools/release/deb-package` writes them, so a build on macOS gives the same
   bytes as one on Linux. `candidate` checks that each installs its binary and the licenses, and
   that its control file names the package, `$VERSION` and the architecture of its file name.
 - Every archive has a `.sha512` checksum and an ASCII-armored detached `.asc` signature.
@@ -570,13 +570,13 @@ for f in *.tgz *.zip *.deb; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.
    modules `go.mod` names. It needs no Node.js, because the conversation renderer the page draws
    with is committed, built from a pinned Horizon commit. The page draws with system fonts, because
    the source package does not carry the renderer's fonts.
-9. The binary package for your platform works on your machine. Run `tools/package-smoke.sh` from
+9. The binary package for your platform works on your machine. Run `tools/test/package-smoke.sh` from
    the source package on it, in the candidate directory where the packages are, not in the source
    directory item 8 moved into. Here the package is the one for Linux on x86-64. On Windows, run
    it in Git Bash and name the `.zip`:
 
    ```sh
-   bash apache-skywalking-ai-sessionizer-$VERSION-src/tools/package-smoke.sh \
+   bash apache-skywalking-ai-sessionizer-$VERSION-src/tools/test/package-smoke.sh \
      apache-skywalking-ai-sessionizer-$VERSION-bin-linux-amd64.tgz $VERSION
    ```
 
@@ -605,8 +605,8 @@ for f in *.tgz *.zip *.deb; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.
 
     `asz version` must report `$VERSION`, and `dpkg -L` must list `/usr/bin/asz`, and `LICENSE`,
     `NOTICE` and `licenses/` under `/usr/share/doc/asz/`. On any machine,
-    `tools/deb-list.sh` from the source package lists what a `.deb` installs, and
-    `tools/deb-list.sh --control` prints its control file.
+    `tools/release/deb-list.sh` from the source package lists what a `.deb` installs, and
+    `tools/release/deb-list.sh --control` prints its control file.
 
 ### The result
 
@@ -684,13 +684,13 @@ need not be the release manager. On a machine without the candidate, `publish` f
 files from dist.apache.org.
 
 ```sh
-tools/release.sh publish $VERSION
+tools/release/release.sh publish $VERSION
 ```
 
 It does these steps in order.
 
 1. **Check** for git, svn, shasum, tar, awk, gh, gpg, curl and cmp, and that
-   `tools/install-manifests.sh` exists, before anything moves. The script needs tar and awk, and it
+   `tools/release/install-manifests.sh` exists, before anything moves. The script needs tar and awk, and it
    runs after the move. Then check the tag, as `candidate` does.
 2. **Check the GitHub release.** It must be the release of `v$VERSION`, titled `$VERSION`, and not
    a draft. It must hold every binary archive and `.sha512` file CI attached, and no file that is
@@ -783,7 +783,7 @@ It does these steps in order.
      release only when GitHub's label names `v$VERSION`. It carries the day of the move, as svn
      records it in UTC, so a later run of `publish` writes the same date.
    - `install/`, the install manifests. It removes the old `install/` first, then runs
-     `tools/install-manifests.sh $VERSION dist/$VERSION dist/$VERSION/install`. If that script
+     `tools/release/install-manifests.sh $VERSION dist/$VERSION dist/$VERSION/install`. If that script
      fails, the move and the promotion are still done. Fix the script and run `publish` again: it
      skips the move and writes `install/` from scratch. To run the script by hand instead, remove
      `dist/$VERSION/install` first, because the script refuses a directory that is not empty.
@@ -819,7 +819,7 @@ downloads those bytes, signs them locally, stages them with the source archive f
 and attaches the source archive and signatures to the same page. `publish` checks every file
 against the release directory, then promotes that prerelease. CI also retains diagnostic workflow
 artifacts, but no step depends on them. The `binaries` job builds every platform on every run but
-the promotion, and `packages` runs each with `tools/package-smoke.sh` on a runner of its own
+the promotion, and `packages` runs each with `tools/test/package-smoke.sh` on a runner of its own
 platform.
 
 The released event starts CI's `docker` job. That job publishes the container image to the
@@ -962,7 +962,7 @@ cannot be committed before the vote, and the tag of a version never holds its ow
 After Publish, on macOS, on a branch from main:
 
 ```sh
-tools/homebrew-formula.sh --from dist --check $VERSION
+tools/release/homebrew-formula.sh --from dist --check $VERSION
 ```
 
 It runs each version's formulae through `brew style`, `brew audit --strict`, `brew install` and
@@ -992,7 +992,7 @@ Homebrew formula of an old version, which a tap keeps in its git history.
 To write the manifests again, give a new or empty directory:
 
 ```sh
-tools/install-manifests.sh $VERSION dist/$VERSION <new or empty directory>
+tools/release/install-manifests.sh $VERSION dist/$VERSION <new or empty directory>
 ```
 
 It reads the six voted binary packages in `dist/$VERSION/` and downloads nothing. It does not read
@@ -1014,11 +1014,11 @@ and every older one from archive.apache.org, which keeps every version. apt foll
 and checks the file against the index. The index is written after the vote from the voted packages,
 and is not voted on.
 
-After Publish, and at least one hour after the move, in a checkout of apache/skywalking-website on a
-branch from master:
+After Publish, and at least one hour after the move, check out a new branch from master of
+apache/skywalking-website, and run from this repository:
 
 ```sh
-GPG_USER=<your key in KEYS> tools/apt-repository.sh --from dist --check <skywalking-website>/static/apt $VERSION
+GPG_USER=<your key in KEYS> tools/release/apt-repository.sh --from dist --check <skywalking-website>/static/apt $VERSION
 ```
 
 It holds each `.deb` to its `.sha512` and its `.asc` to KEYS, installs them with apt in Debian and
@@ -1029,7 +1029,7 @@ a pull request on apache/skywalking-website with the change to `static/apt`. The
 `binary-distribution` skill in `.claude/skills/` does this with Claude Code, with the Homebrew
 formulae.
 
-CI's `apt` job runs `tools/apt-check.sh` on every change: it builds two versions, writes and signs
+CI's `apt` job runs `tools/test/apt-check.sh` on every change: it builds two versions, writes and signs
 their index, serves it with Apache httpd as the website does, and installs, downgrades, upgrades and
 removes both packages with apt.
 
@@ -1040,7 +1040,7 @@ keeps every version removed from it. A PMC member removes the older versions in 
 `publish`:
 
 ```sh
-tools/release.sh publish $VERSION --remove-old
+tools/release/release.sh publish $VERSION --remove-old
 ```
 
 `publish` refuses `--remove-old` in the run that moves the candidate. Run it only after both of

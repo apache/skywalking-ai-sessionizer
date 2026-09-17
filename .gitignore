@@ -5,10 +5,13 @@
 *.test
 *.out
 coverage.txt
-# go build ./tools/<name> run at the root drops the helper here; the
-# source package must never carry a compiled file.
-/collectorcheck
-/otlpdump
+# go build ./tools/test/<name> or ./tools/release/<name> run at the root
+# drops the helper here; the source package must never carry a compiled file.
+/claude-code-check
+/collector-check
+/otlp-dump
+/deb-package
+/apt-index
 
 # Go workspace
 go.work

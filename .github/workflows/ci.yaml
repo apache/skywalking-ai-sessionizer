@@ -169,7 +169,7 @@ jobs:
       - name: Build
         run: make build
       - name: Push into a Collector and verify its output
-        run: tools/e2e-collector.sh
+        run: tools/test/e2e-collector.sh
 
   # The conversation renderer asz view embeds is Horizon's, built from the
   # commit pinned in internal/view/conversation-view/HORIZON_COMMIT and
@@ -292,7 +292,7 @@ jobs:
           name: binaries-${{ needs.binaries.outputs.version }}
           path: dist
       # Run by hand for a tag older than this job, the tag may have no
-      # tools/package-smoke.sh, or build no package for this platform. 0.1.0
+      # tools/test/package-smoke.sh, or build no package for this platform. 0.1.0
       # and 0.2.0 have neither the script nor windows/arm64. Such an entry
       # says so and passes. A platform the tag's Makefile lists must still
       # have its package, so a package the binaries job lost fails here.
@@ -303,8 +303,8 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           EXT: ${{ matrix.ext }}
         run: |
-          if [ ! -f tools/package-smoke.sh ]; then
-            echo "::notice::this tag has no tools/package-smoke.sh, so its $PLATFORM package is not run"
+          if [ ! -f tools/test/package-smoke.sh ]; then
+            echo "::notice::this tag has no tools/test/package-smoke.sh, so its $PLATFORM package is not run"
             exit 0
           fi
           platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
@@ -314,13 +314,13 @@ jobs:
               echo "::notice::the Makefile of this tag builds no package for $PLATFORM, so there is nothing to run"
               exit 0 ;;
           esac
-          tools/package-smoke.sh "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
+          tools/test/package-smoke.sh "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
 
   # Each binary package with Claude Code, on its own platform, the way the
   # install pages tell a person to use it. The Quick install block installs
   # the package, the plugin's install commands add the marketplace at a tag,
   # and a headless session must be recorded by the plugin and collected by
-  # asz. tools/claudecodecheck says what else it runs. The package, the
+  # asz. tools/test/claude-code-check says what else it runs. The package, the
   # marketplace repository and the model's API are served on the runner, so
   # the job needs no secret. Claude Code has run the hooks on no platform but
   # the ones this job covers.
@@ -375,8 +375,8 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           EXT: ${{ matrix.ext }}
         run: |
-          if [ ! -d tools/claudecodecheck ]; then
-            echo "::notice::this tag has no tools/claudecodecheck, so Claude Code is not run"
+          if [ ! -d tools/test/claude-code-check ]; then
+            echo "::notice::this tag has no tools/test/claude-code-check, so Claude Code is not run"
             exit 0
           fi
           platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
@@ -386,7 +386,7 @@ jobs:
               echo "::notice::the Makefile of this tag builds no package for $PLATFORM, so there is nothing to run"
               exit 0 ;;
           esac
-          go run ./tools/claudecodecheck "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
+          go run ./tools/test/claude-code-check "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
 
   # The Homebrew formulae, as a release writes them, through brew style,
   # brew audit --strict, brew install and brew test. The packages are built
@@ -408,15 +408,15 @@ jobs:
       # Run by hand for a tag older than this job, the tag has no check.
       - name: Build the packages and run the formulae through Homebrew
         run: |
-          if [ ! -f tools/homebrew-check.sh ]; then
-            echo "::notice::this tag has no tools/homebrew-check.sh, so the formulae are not run"
+          if [ ! -f tools/test/homebrew-check.sh ]; then
+            echo "::notice::this tag has no tools/test/homebrew-check.sh, so the formulae are not run"
             exit 0
           fi
           make binaries checksums VERSION=0.0.0
-          tools/homebrew-check.sh 0.0.0 dist
+          tools/test/homebrew-check.sh 0.0.0 dist
 
   # The Debian packages, through the apt repository the SkyWalking website
-  # serves: tools/aptindex writes the index for two versions, Apache httpd
+  # serves: tools/release/apt-index writes the index for two versions, Apache httpd
   # serves it with its redirects, and apt in Debian and in Ubuntu installs,
   # downgrades, upgrades and removes them. The packages are built here with
   # two versions of a release's form, which the index requires, for the
@@ -443,14 +443,14 @@ jobs:
       # Run by hand for a tag older than this job, the tag has no check.
       - name: Build two versions and install them with apt
         run: |
-          if [ ! -f tools/apt-check.sh ]; then
-            echo "::notice::this tag has no tools/apt-check.sh, so apt is not run"
+          if [ ! -f tools/test/apt-check.sh ]; then
+            echo "::notice::this tag has no tools/test/apt-check.sh, so apt is not run"
             exit 0
           fi
           for v in 0.0.1 0.0.2; do
             make binaries checksums VERSION=$v PLATFORMS="linux/amd64 linux/arm64" DIST=apt/$v
           done
-          tools/apt-check.sh apt 0.0.1 0.0.2
+          tools/test/apt-check.sh apt 0.0.1 0.0.2
 
   lint:
     name: Lint
@@ -488,7 +488,7 @@ jobs:
         run: |
           platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
           debs=$(sed -nE 's/^DEB_PACKAGES[[:space:]]*:?=[[:space:]]*//p' Makefile)
-          bash tools/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" dist "$platforms" "$debs"
+          bash tools/release/ci-upload-binaries.sh "$VERSION" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" dist "$platforms" "$debs"
 
   # Candidate tags build and test their packages without publishing an image.
   # A manual image retry requires an existing public GitHub release.
@@ -540,7 +540,7 @@ jobs:
               # nothing looser: no major.minor line, since a reader who
               # pulls 0.2 cannot tell which release answered. latest is the
               # one floating tag. It follows GitHub's latest release, which
-              # tools/release.sh publish sets or leaves by asking the release
+              # tools/release/release.sh publish sets or leaves by asking the release
               # manager, so a patch of an older line does not move it.
               version="${ref#refs/tags/v}"
               tags="$tags,$image:$version"
