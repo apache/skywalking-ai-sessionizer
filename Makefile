@@ -43,10 +43,9 @@ DIST      := dist
 PKG_BASE  := apache-skywalking-ai-sessionizer-$(VERSION)-bin
 
 # The Debian packages a release ships for each Linux platform in PLATFORMS,
-# written by tools/release/deb-package. apt installs them from the repository the
-# SkyWalking website serves, which tools/release/apt-index writes. tools/release/release.sh
-# reads this line from the tag's Makefile, so a version from before it has
-# none.
+# written by tools/release/deb-package. apt installs them from the repository
+# the SkyWalking website serves. tools/release/release.sh reads this line from
+# the tag's Makefile, so a version from before it has none.
 DEB_PACKAGES := asz asz-claude-code
 
 # The GPG key that signs a release, by id, fingerprint or email. Empty means

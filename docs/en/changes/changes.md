@@ -98,26 +98,30 @@
   on main, which `.gitattributes` keeps out of the source package, and users run
   `brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer`,
   then `brew install apache/skywalking-ai-sessionizer/asz` and `.../asz-claude-code`.
-  `tools/test/homebrew-check.sh` runs both formulae through `brew style`, `brew audit --strict`,
-  `brew install` and `brew test`, and CI's `homebrew` job runs it on macOS on every change.
 - **Every release stays installable with Homebrew.** Each release adds `asz@VERSION` and
-  `asz-claude-code@VERSION`, keg-only, beside the current formulae. `tools/release/homebrew-formula.sh`
-  writes them into `Formula/` from the released packages, checks them with Homebrew first, and
-  moves `asz` and `asz-claude-code` only forward. The `binary-distribution` skill runs it and opens
-  the pull request.
+  `asz-claude-code@VERSION`, keg-only, beside the current formulae, and moves `asz` and
+  `asz-claude-code` only forward.
+- **The steps after the vote that write for a package manager are skills and documented steps, not
+  scripts.** `tools/release/install-manifests.sh`, which `publish` ran, is gone, and `publish` now
+  writes only the announcement and the website entries. The `homebrew` skill in `.claude/skills/`
+  holds the formula templates, writes the formulae of a released version, runs each through
+  `brew style`, `brew audit --strict`, `brew install` and `brew test`, and opens a pull request to
+  main. The `apt` skill adds a released version to the apt repository and opens a pull request to
+  apache/skywalking-website. The Scoop and winget manifests are in
+  [How to Release](../guides/how-to-release.md#scoop), with the commands that fill and test them,
+  and its [Release targets](../guides/how-to-release.md#release-targets) list where a released
+  version goes.
 - **Debian packages, and an apt repository on the website.** Each release ships
   `apache-skywalking-ai-sessionizer-VERSION-bin-asz-ARCH.deb` and `...-bin-asz-claude-code-ARCH.deb`
   for amd64 and arm64, voted and signed with the other packages. `tools/release/deb-package` writes them in
   `make binaries` from the same staged files, with the same time, owner and modes, so a rebuild
   gives the same bytes on any machine. `https://skywalking.apache.org/apt` serves an index of every
   released version, signed with a key in KEYS, and `.htaccess` redirects that send apt to the newest
-  version on the mirrors and to every older one on archive.apache.org. `tools/release/apt-index` writes the
-  index and the redirects, and `tools/release/apt-repository.sh` checks the released packages against their
-  `.sha512` and KEYS, adds them and signs the index; the `binary-distribution` skill runs it with the
-  Homebrew formulae. CI's `apt` job installs two versions through Apache httpd with the same
-  redirects, in Debian and Ubuntu, on amd64 and arm64. [Install](../setup/install.md) gives the
-  commands. `candidate` checks each `.deb`'s contents and control file, and `make binaries` removes
-  `.DS_Store`, `._` and `__MACOSX` files from what it packages.
+  version on the mirrors and to every older one on archive.apache.org. The `apt` skill writes them.
+  CI's `packages` job installs the Debian packages with apt on Linux, on amd64 and arm64.
+  [Install](../setup/install.md) gives the commands. `candidate` checks each `.deb`'s contents and
+  control file, and `make binaries` removes `.DS_Store`, `._` and `__MACOSX` files from what it
+  packages.
 - **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
   installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
   [Install](../setup/install.md#install-script) runs them from the version's tag in one command. The

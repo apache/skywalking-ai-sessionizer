@@ -21,6 +21,7 @@
 set -eu
 [ "$#" -gt 0 ] || { echo "usage: tools/release/package-check.sh PACKAGE..." >&2; exit 2; }
 checked=0
+reader=""
 for package in "$@"; do
   case "$package" in
     *.asc|*.sha512) continue ;;
@@ -36,7 +37,17 @@ for package in "$@"; do
         listing=$(tar -tzf "$package")
       fi ;;
     *.zip) listing=$(unzip -Z1 "$package") ;;
-    *.deb) listing=$(sh "$(dirname "$0")/deb-list.sh" "$package") ;;
+    *.deb)
+      # macOS has no dpkg-deb, so tools/release/deb-package reads the .deb.
+      # It is built once, from the tree this script sits in.
+      if [ -z "$reader" ]; then
+        reader_dir=$(mktemp -d)
+        trap 'rm -rf "$reader_dir"' EXIT
+        reader=$reader_dir/deb-package
+        (cd "$(dirname "$0")/../.." && GOWORK=off go build -o "$reader" ./tools/release/deb-package) ||
+          { echo "package-check: cannot build tools/release/deb-package, which reads a .deb. It needs Go" >&2; exit 1; }
+      fi
+      listing=$("$reader" -list "$package") ;;
     *) echo "package-check: unsupported archive $package" >&2; exit 2 ;;
   esac
   bad=$(printf '%s\n' "$listing" | grep -E '(^|/)(\._[^/]*|\.DS_Store|__MACOSX)(/|$)' || true)

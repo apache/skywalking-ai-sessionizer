@@ -112,7 +112,6 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	f.write("tools/release/install-manifests.sh", []byte("#!/bin/sh\nmkdir -p \"$3\" && echo manifests > \"$3/README.md\"\n"))
 	f.setState(releaseState{Exists: true, Prerelease: true})
 	return f
 }
@@ -248,7 +247,7 @@ func (f *fixture) requirePublished() {
 	if state := f.state(); state.Prerelease {
 		f.t.Fatal("the GitHub release was not promoted")
 	}
-	for _, name := range []string{"announce.txt", "website.txt", "install/README.md"} {
+	for _, name := range []string{"announce.txt", "website.txt"} {
 		if _, err := os.Stat(filepath.Join(f.dir, "dist", version, name)); err != nil {
 			f.t.Fatalf("publish did not write %s: %v", name, err)
 		}

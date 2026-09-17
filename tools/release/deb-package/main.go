@@ -15,12 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command debpackage writes one Debian package from the files make binaries
-// staged for a Linux platform. make binaries runs it for every package in
-// DEB_PACKAGES and every Linux platform in PLATFORMS.
+// Command deb-package writes the Debian packages of a release, and reads
+// them back for the checks.
+//
+// make binaries runs it for every package in DEB_PACKAGES and every Linux
+// platform in PLATFORMS, on the files it staged for that platform:
 //
 //	go run ./tools/release/deb-package -package asz -version 0.4.0 -arch amd64 \
 //	  -from dist/build/linux-amd64 -time 1757000000 -out FILE.deb
+//
+// tools/release/package-check.sh and release.sh candidate read a package
+// with -list, which prints each path it installs, a directory with a trailing
+// slash, and with -control, which prints its control file:
+//
+//	go run ./tools/release/deb-package -list FILE.deb
+//	go run ./tools/release/deb-package -control FILE.deb
 //
 // A package holds its binary in /usr/bin, and the LICENSE, the NOTICE and the
 // dependency licenses under /usr/share/doc/PACKAGE, as the other binary
@@ -89,9 +98,20 @@ func main() {
 	from := flag.String("from", "", "the directory make binaries staged the platform's files in")
 	epoch := flag.Int64("time", -1, "the time of every entry, in seconds since 1970")
 	out := flag.String("out", "", "the package file to write")
+	list := flag.String("list", "", "a package whose installed paths to print")
+	control := flag.String("control", "", "a package whose control file to print")
 	flag.Parse()
-	if err := run(*pkg, *version, *arch, *from, *epoch, *out); err != nil {
-		fmt.Fprintln(os.Stderr, "debpackage:", err)
+	var err error
+	switch {
+	case *list != "":
+		err = printMember(*list, "data")
+	case *control != "":
+		err = printMember(*control, "control")
+	default:
+		err = run(*pkg, *version, *arch, *from, *epoch, *out)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "deb-package:", err)
 		os.Exit(1)
 	}
 }
@@ -324,4 +344,74 @@ func arMember(w io.Writer, name string, body []byte, epoch int64) {
 	if len(body)%2 == 1 {
 		_, _ = w.Write([]byte("\n"))
 	}
+}
+
+// printMember prints what a package's data archive installs, or its control
+// file. It reads what dpkg-deb would, the ar archive and the tar archive in
+// it, because macOS has no dpkg-deb.
+func printMember(deb, part string) error {
+	body, err := os.ReadFile(deb)
+	if err != nil {
+		return err
+	}
+	archive, err := member(body, part+".tar.gz")
+	if err != nil {
+		return fmt.Errorf("%s: %w", deb, err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return fmt.Errorf("%s: %s.tar.gz: %w", deb, part, err)
+	}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %s.tar.gz: %w", deb, part, err)
+		}
+		name := strings.TrimPrefix(strings.TrimPrefix(h.Name, "./"), "/")
+		if part == "control" {
+			if name == "control" {
+				_, err := io.Copy(os.Stdout, tr)
+				return err
+			}
+			continue
+		}
+		switch {
+		case name == "" || name == ".":
+		case h.Typeflag == tar.TypeDir:
+			fmt.Println(strings.TrimSuffix(name, "/") + "/")
+		default:
+			fmt.Println(name)
+		}
+	}
+	if part == "control" {
+		return fmt.Errorf("%s holds no control file", deb)
+	}
+	return nil
+}
+
+// member returns one member of a Debian package's ar archive.
+func member(deb []byte, name string) ([]byte, error) {
+	const magic = "!<arch>\n"
+	if !bytes.HasPrefix(deb, []byte(magic)) {
+		return nil, errors.New("not a Debian package: no ar header")
+	}
+	rest := deb[len(magic):]
+	if len(rest) < 60 || strings.TrimRight(strings.TrimSpace(string(rest[:16])), "/") != "debian-binary" {
+		return nil, errors.New("not a Debian package: debian-binary is not its first member")
+	}
+	for len(rest) >= 60 {
+		size, err := strconv.Atoi(strings.TrimSpace(string(rest[48:58])))
+		if err != nil || size < 0 || 60+size > len(rest) {
+			return nil, errors.New("a damaged ar member header")
+		}
+		if strings.TrimRight(strings.TrimSpace(string(rest[:16])), "/") == name {
+			return rest[60 : 60+size], nil
+		}
+		rest = rest[min(len(rest), 60+size+size%2):]
+	}
+	return nil, fmt.Errorf("no %s member", name)
 }

@@ -315,6 +315,34 @@ jobs:
               exit 0 ;;
           esac
           tools/test/package-smoke.sh "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
+      # The Debian packages of the platform, installed with apt on the runner,
+      # as the install page and a voter do it. A tag without DEB_PACKAGES in
+      # its Makefile has none.
+      - name: Install the Debian packages
+        if: runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.binaries.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          debs=$(sed -nE 's/^DEB_PACKAGES[[:space:]]*:?=[[:space:]]*//p' Makefile)
+          if [ -z "$debs" ]; then
+            echo "::notice::the Makefile of this tag builds no Debian package"
+            exit 0
+          fi
+          files=""
+          for p in $debs; do files="$files ./dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$p-${PLATFORM#linux-}.deb"; done
+          sudo apt-get install -y $files
+          asz version | grep -F "$VERSION"
+          asz-claude-plugin version | grep -F "$VERSION"
+          test "$(command -v asz)" = /usr/bin/asz
+          for p in $debs; do
+            ls "/usr/share/doc/$p/LICENSE" "/usr/share/doc/$p/NOTICE" "/usr/share/doc/$p/licenses"
+          done
+          # dpkg --verify prints each installed file that differs from its package.
+          differ=$(dpkg --verify $debs)
+          if [ -n "$differ" ]; then echo "$differ"; exit 1; fi
+          sudo apt-get remove -y $debs
+          if command -v asz || command -v asz-claude-plugin; then echo "apt-get remove left a binary"; exit 1; fi
 
   # Each binary package with Claude Code, on its own platform, the way the
   # install pages tell a person to use it. The Quick install block installs
@@ -388,70 +416,6 @@ jobs:
           esac
           go run ./tools/test/claude-code-check "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
 
-  # The Homebrew formulae, as a release writes them, through brew style,
-  # brew audit --strict, brew install and brew test. The packages are built
-  # here with a version of a release's form, which the manifest script
-  # requires and the formulae's tests expect the binaries to report.
-  homebrew:
-    name: Homebrew
-    if: github.event_name != 'release'
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.27'
-          cache: true
-      # Run by hand for a tag older than this job, the tag has no check.
-      - name: Build the packages and run the formulae through Homebrew
-        run: |
-          if [ ! -f tools/test/homebrew-check.sh ]; then
-            echo "::notice::this tag has no tools/test/homebrew-check.sh, so the formulae are not run"
-            exit 0
-          fi
-          make binaries checksums VERSION=0.0.0
-          tools/test/homebrew-check.sh 0.0.0 dist
-
-  # The Debian packages, through the apt repository the SkyWalking website
-  # serves: tools/release/apt-index writes the index for two versions, Apache httpd
-  # serves it with its redirects, and apt in Debian and in Ubuntu installs,
-  # downgrades, upgrades and removes them. The packages are built here with
-  # two versions of a release's form, which the index requires, for the
-  # Linux platforms only. Each runner installs its own architecture.
-  apt:
-    name: apt ${{ matrix.arch }}
-    if: github.event_name != 'release'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: amd64, runner: ubuntu-latest }
-          - { arch: arm64, runner: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.27'
-          cache: true
-      # Run by hand for a tag older than this job, the tag has no check.
-      - name: Build two versions and install them with apt
-        run: |
-          if [ ! -f tools/test/apt-check.sh ]; then
-            echo "::notice::this tag has no tools/test/apt-check.sh, so apt is not run"
-            exit 0
-          fi
-          for v in 0.0.1 0.0.2; do
-            make binaries checksums VERSION=$v PLATFORMS="linux/amd64 linux/arm64" DIST=apt/$v
-          done
-          tools/test/apt-check.sh apt 0.0.1 0.0.2
-
   lint:
     name: Lint
     if: github.event_name != 'release'
@@ -469,7 +433,7 @@ jobs:
   candidate-assets:
     name: Prerelease binaries
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [license, build, source-package, lint, binaries, packages, claude-code, homebrew, apt, collector, conversation-view]
+    needs: [license, build, source-package, lint, binaries, packages, claude-code, collector, conversation-view]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -477,6 +441,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      # tools/release/package-check.sh reads the Debian packages with Go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
       - uses: actions/download-artifact@v4
         with:
           name: binaries-${{ needs.binaries.outputs.version }}
@@ -587,7 +556,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, source-package, lint, docker, binaries, packages, claude-code, homebrew, apt, collector, conversation-view, candidate-assets]
+    needs: [license, build, source-package, lint, docker, binaries, packages, claude-code, collector, conversation-view, candidate-assets]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

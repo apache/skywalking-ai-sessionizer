@@ -19,6 +19,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,6 +63,54 @@ func TestTheSameFilesGiveTheSameBytes(t *testing.T) {
 	if !bytes.HasPrefix(packages[0], []byte("!<arch>\ndebian-binary   ")) {
 		t.Fatalf("not an ar archive that starts with debian-binary: %q", packages[0][:40])
 	}
+}
+
+// The checks read a package with -list and -control, so what they print must
+// be what was written.
+func TestAPackageReadsBack(t *testing.T) {
+	deb := filepath.Join(t.TempDir(), "asz.deb")
+	if err := run("asz", "0.4.0", "amd64", staged(t), 1757000000, deb); err != nil {
+		t.Fatal(err)
+	}
+	listing := capture(t, func() error { return printMember(deb, "data") })
+	for _, want := range []string{"usr/\n", "usr/bin/asz\n", "usr/share/doc/asz/LICENSE\n", "usr/share/doc/asz/NOTICE\n", "usr/share/doc/asz/licenses/license-a.txt\n"} {
+		if !strings.Contains(listing, want) {
+			t.Fatalf("-list has no %q:\n%s", want, listing)
+		}
+	}
+	control := capture(t, func() error { return printMember(deb, "control") })
+	for _, want := range []string{"Package: asz\n", "Version: 0.4.0\n", "Architecture: amd64\n"} {
+		if !strings.Contains(control, want) {
+			t.Fatalf("-control has no %q:\n%s", want, control)
+		}
+	}
+	if err := printMember(filepath.Join(staged(t), "LICENSE"), "data"); err == nil {
+		t.Fatal("a file that is not a Debian package was read as one")
+	}
+}
+
+// capture returns what fn prints to standard output.
+func capture(t *testing.T, fn func() error) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = w
+	done := make(chan []byte)
+	go func() {
+		body, _ := io.ReadAll(r)
+		done <- body
+	}()
+	runErr := fn()
+	os.Stdout = stdout
+	_ = w.Close()
+	body := <-done
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	return string(body)
 }
 
 // make binaries removes macOS metadata before it packages. One that is

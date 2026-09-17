@@ -70,9 +70,10 @@
 #       whether the version becomes the latest GitHub release, which also
 #       moves the latest image tag. The answer offered is yes for a version
 #       newer than every full release, and no for a patch of an older line.
-#       --latest and --not-latest give the answer without asking. Then write the announcement,
-#       the website entries and the install manifests into dist/VERSION,
-#       and print what is left to do. A run after the move skips the move
+#       --latest and --not-latest give the answer without asking. Then write the announcement
+#       and the website entries into dist/VERSION, and print what is left
+#       to do: the website, the announcement, the homebrew and apt skills,
+#       and Scoop and winget. A run after the move skips the move
 #       and runs every later step again. --remove-old removes older versions
 #       from the release directory, and archive.apache.org keeps them. It is
 #       refused in the run that moves: run publish again with it once the
@@ -489,13 +490,15 @@ if [ "$cmd" = candidate ]; then
   need_tools $tools
   ci_helper=tools/release/ci-binaries.sh
   package_check=tools/release/package-check.sh
-  deb_list=tools/release/deb-list.sh
+  deb_reader=tools/release/deb-package
   [ -f "$ci_helper" ] || fail "$ci_helper is missing"
   [ -f "$package_check" ] || fail "$package_check is missing"
-  [ -f "$deb_list" ] || fail "$deb_list is missing"
+  [ -d "$deb_reader" ] || fail "$deb_reader is missing"
   fetch_tag
   platforms=$(tag_platforms)
   debs=$(tag_debs)
+  # Go reads the Debian packages, where macOS has no dpkg-deb.
+  if [ -n "$debs" ]; then need_tools go; fi
   packages=$(expected_packages)
   origin_url=$(git remote get-url origin)
   dev_dir="$dist_dev/ai-sessionizer/$version"
@@ -818,16 +821,19 @@ $found"
     # /usr/share/doc. Its control file must name the package, the version and
     # the architecture its file name gives, because the apt index is made
     # from the control file after the vote.
+    if [ -n "$debs" ]; then
+      GOWORK=off go build -o "$work/deb-package" "./$deb_reader" || fail "cannot build $deb_reader, which reads the Debian packages"
+    fi
     while read -r b p arch; do
       [ -n "$b" ] || continue
       bin=asz
       [ "$p" = asz ] || bin=asz-claude-plugin
-      listing=$(sh "$deb_list" "$out/$b" </dev/null) || fail "cannot list $b"
+      listing=$("$work/deb-package" -list "$out/$b" </dev/null) || fail "cannot list $b"
       for f in "usr/bin/$bin" "usr/share/doc/$p/LICENSE" "usr/share/doc/$p/NOTICE"; do
         has_line "$listing" "$f" || fail "$b has no /$f"
       done
       has_prefix "$listing" "usr/share/doc/$p/licenses/" || fail "$b has no /usr/share/doc/$p/licenses/"
-      control=$(sh "$deb_list" --control "$out/$b" </dev/null) || fail "cannot read the control file of $b"
+      control=$("$work/deb-package" -control "$out/$b" </dev/null) || fail "cannot read the control file of $b"
       for f in "Package: $p" "Version: $version" "Architecture: $arch"; do
         has_line "$control" "$f" || fail "the control file of $b does not say $f"
       done
@@ -949,13 +955,7 @@ fi
 if [ "$cmd" = publish ]; then
   step "The version"
   pick_version "Version the vote passed for"
-  # tar and awk are for tools/release/install-manifests.sh, which runs after the
-  # move. Checked here, a missing one stops the run before anything moves.
-  need_tools git svn shasum tar awk gh gpg curl cmp
-  manifests=tools/release/install-manifests.sh
-  # Checked before anything moves. The manifests are written after the
-  # move, and a missing script there would stop the run half done.
-  [ -f "$manifests" ] || fail "$manifests is missing. publish runs it after the move, to write the install manifests from the voted packages. Add it and run publish again; nothing has changed."
+  need_tools git svn shasum awk gh gpg curl cmp
   fetch_tag
   platforms=$(tag_platforms)
   debs=$(tag_debs)
@@ -1070,8 +1070,8 @@ if [ "$cmd" = publish ]; then
   say "ok  $from holds the source package and $(printf '%s\n' "$platforms" | wc -l | tr -d ' ') binary packages, each with its .asc and .sha512"
 
   step "The voted packages in $out"
-  # The install manifests and the GitHub release are made from these files,
-  # so each must be the one voted on. A package built again has other bytes,
+  # The GitHub release is checked against these files, and the website
+  # entries name them, so each must be the one voted on. A package built again has other bytes,
   # and a package signed again has another signature.
   fetch=""
   for p in $packages; do
@@ -1114,7 +1114,6 @@ if [ "$cmd" = publish ]; then
   fi
   say "- write the announcement to $out/announce.txt"
   say "- write the website entries to $out/website.txt"
-  say "- $manifests $version $out $out/install"
   if [ "$dry_run" = true ]; then say "dry run: no package was fetched, and nothing was moved, removed, promoted or written"; exit 0; fi
 
   mkdir -p "$out"
@@ -1319,17 +1318,6 @@ YAML
   website_entries > "$out/website.txt"
   say "wrote $out/website.txt"
 
-  step "The install manifests"
-  # The script refuses a directory that is not empty, so no file from an
-  # earlier run is submitted beside the new ones. publish owns this
-  # directory and writes it again on every run.
-  rm -rf "$out/install"
-  if [ -x "$manifests" ]; then run=("$manifests"); else run=(bash "$manifests"); fi
-  # The script refuses a directory that is not empty, so the command given
-  # on failure empties it first, or lets publish do it.
-  "${run[@]}" "$version" "$out" "$out/install" || fail "$manifests failed. The move is done and is not repeated. Fix the script, then run publish again, which skips the move and writes $out/install from scratch. Or run the script by hand: rm -rf $out/install && $manifests $version $out $out/install"
-  say "wrote $out/install"
-
   say "----"
   say "Next, in this order:"
   say "  1. At least one hour after the move, as the ASF release policy asks, open a pull"
@@ -1340,18 +1328,18 @@ YAML
   say "     $out/announce.txt to dev@skywalking.apache.org and announce@apache.org, as plain"
   say "     text from your apache.org address. Sign it with your release key if your mail"
   say "     program can; the ASF recommends it."
-  say "  3. Put $version into Homebrew and apt, with the binary-distribution skill of this"
-  say "     repository, or by hand:"
-  say "       tools/release/homebrew-formula.sh --from dist --check $version, in a pull request to main"
+  say "  3. Add $version to Homebrew with the homebrew skill in .claude/skills, which opens a"
+  say "     pull request to main in this repository."
+  n=4
   if [ -n "$debs" ]; then
-    say "       tools/release/apt-repository.sh --from dist --check <skywalking-website>/static/apt $version,"
-    say "       in a pull request to apache/skywalking-website"
+    say "  4. Add $version to the apt repository with the apt skill, which opens a pull request"
+    say "     to apache/skywalking-website."
+    n=5
   fi
-  say "     Submit the Scoop and winget manifests in $out/install, once the PMC has agreed on"
-  say "     dev@skywalking.apache.org to each channel. $out/install/README.md says where each"
-  say "     one goes. The winget files download from the GitHub release, which is promoted now."
+  say "  $n. Once the PMC has agreed on dev@skywalking.apache.org to each, move Scoop and winget"
+  say "     to $version, as docs/en/guides/how-to-release.md says."
   if [ -n "$old" ] && [ "$remove_old" = false ]; then
-    say "  4. Later, once the website pull requests that point$old at archive.apache.org"
+    say "  $((n + 1)). Later, once the website pull requests that point$old at archive.apache.org"
     say "     and add $version to the apt repository have merged, and the Scoop bucket names"
     say "     $version:"
     say "     tools/release/release.sh publish $version --remove-old"

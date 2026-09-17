@@ -7,7 +7,8 @@ candidate, and only after the vote passes is anything published as an official r
 A release takes three commands of `tools/release/release.sh`: `prepare`, `candidate` and `publish`. The
 vote comes between the last two. None of them pushes to `main`. For every command this page shows
 what it does, and lists the svn commands it runs, so a release manager can finish a step by hand
-when the script stops.
+when the script stops. After the vote, [Release targets](#release-targets) lists where the version
+goes, and the sections from [3. Publish](#3-publish) on give each step.
 
 ## What counts as a release
 
@@ -29,13 +30,43 @@ A GitHub release alone cannot provide that approval. See the
   to a full GitHub release.
 - **The container image** is a convenience. The promotion of the GitHub release starts CI's image
   job. A tag push and a default manual CI run publish no image.
-- **The Homebrew, Scoop and winget manifests** and **the apt repository** are conveniences,
-  written after the release.
+- **Homebrew, apt, Scoop and winget** are conveniences too. Each is written after the release,
+  from its voted packages.
 
 0.3.0 is the first version to go through this process. 0.1.0 and 0.2.0 were published on GitHub
 before it, as full GitHub releases carrying binary packages that CI built. No vote was held for
 them, their packages are not signed, and they are not Apache releases. Whether to mark those two
 GitHub releases as pre-releases, or to remove their packages, is for the PMC to decide.
+
+## Release targets
+
+Where a released version goes. The first row is the Apache release. Every other row is a
+convenience made from its voted files.
+
+| Target | What users get | Written by | When |
+| --- | --- | --- | --- |
+| The release directory, served by downloads.apache.org and its mirrors | the voted packages, each with its `.asc` and `.sha512` | [3. Publish](#3-publish) | right after the vote |
+| archive.apache.org | every released version, also after it leaves the release directory | Apache's infrastructure, from the release directory | by itself |
+| The GitHub release `v$VERSION` | the same files | CI creates it on the tag push, [2. Candidate](#2-candidate) attaches to it, [3. Publish](#3-publish) promotes it | at the vote, then at Publish |
+| The container image, `ghcr.io/apache/skywalking-ai-sessionizer:$VERSION` | `docker pull` | CI's `docker` job, on the released event | when Publish promotes the GitHub release |
+| The downloads page and the documentation, `data/projects.yml` in apache/skywalking-website | links to the packages, and the docs of the tag | [The website](#the-website), a pull request | at least one hour after the move |
+| The announcement | the mail to the dev and announce lists | [The announcement](#the-announcement) | once the downloads page lists the version |
+| The Homebrew tap, `Formula/` on main in this repository | `brew install` | [Homebrew](#homebrew), the `homebrew` skill, a pull request | after Publish |
+| The apt repository, `static/apt` in apache/skywalking-website | `apt install` | [apt](#apt), the `apt` skill, a pull request | at least one hour after the move |
+| A Scoop bucket | `scoop install` | [Scoop](#scoop), by hand | after Publish, once the PMC agrees |
+| microsoft/winget-pkgs | `winget install` | [winget](#winget), by hand | after Publish, once the PMC agrees |
+
+**Before the first submission to each package manager, the PMC agrees to it on
+dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
+place: the winget manifests name The Apache Software Foundation as their publisher. The ASF allows
+other distribution platforms only for binaries that follow its release, licensing, branding and
+trademark policies. The Homebrew tap is this repository, and the apt repository is the website, so
+neither needs a new repository. A Scoop bucket under github.com/apache would be one, which the PMC
+asks INFRA to create.
+
+The skills are in `.claude/skills/`, and run with Claude Code. Each checks what it wrote, and
+changes nothing but its pull request. Their files are what they write from: the `homebrew` skill
+holds the formula templates.
 
 ## The steps
 
@@ -47,8 +78,9 @@ GitHub releases as pre-releases, or to remove their packages, is for the PMC to 
 | [3. Publish](#3-publish) | a PMC member | the voted packages in the release directory, the promoted GitHub release, and the files the later steps use |
 | [The website](#the-website) | the release manager | the downloads entry and the documentation of the version |
 | [The announcement](#the-announcement) | the release manager | the mail to the dev and announce lists |
-| [Install manifests](#install-manifests) | the release manager, once the PMC agrees to each channel | the Homebrew, Scoop and winget manifests, each submitted |
-| [The apt repository](#the-apt-repository) | the release manager | the version in the apt repository on the website |
+| [Homebrew](#homebrew) | the release manager, with the `homebrew` skill | a pull request to `Formula/` on main in this repository |
+| [apt](#apt) | the release manager, with the `apt` skill | a pull request to `static/apt` in apache/skywalking-website |
+| [Scoop](#scoop) and [winget](#winget) | the release manager, once the PMC agrees to each | the manifests, submitted by hand |
 | [Later: remove old versions](#later-remove-old-versions) | a PMC member | the release directory without the versions the new one replaces |
 
 Between step 1 and step 2, the release manager waits for CI by hand. Nothing in the script waits.
@@ -403,8 +435,8 @@ without cgo on Linux with its configured Go toolchain and packages with GNU tar,
 It uses `GOWORK=off` and `GOFLAGS=-mod=readonly`. Both binaries report `$VERSION` and the Go
 version used to build them. The run must pass the whole CI workflow, including package smoke
 tests on all six platforms, and on the same six the Claude Code check, which installs each package
-and the plugin as the install pages say and runs a session the plugin must record. The `apt` job
-installs Debian packages with apt, in Debian and Ubuntu, on x86-64 and ARM 64. Only then are its
+and the plugin as the install pages say and runs a session the plugin must record. On Linux, the
+`packages` job also installs the Debian packages with apt, on x86-64 and ARM 64. Only then are its
 archives eligible for the candidate.
 
 `make binaries` remains useful for local build checks. Those archives are not the release
@@ -604,9 +636,9 @@ for f in *.tgz *.zip *.deb; do shasum -a 512 -c "$f.sha512" && gpg --verify "$f.
     ```
 
     `asz version` must report `$VERSION`, and `dpkg -L` must list `/usr/bin/asz`, and `LICENSE`,
-    `NOTICE` and `licenses/` under `/usr/share/doc/asz/`. On any machine,
-    `tools/release/deb-list.sh` from the source package lists what a `.deb` installs, and
-    `tools/release/deb-list.sh --control` prints its control file.
+    `NOTICE` and `licenses/` under `/usr/share/doc/asz/`. On any machine with Go, in the unpacked
+    source package, `go run ./tools/release/deb-package -list <file>` lists what a `.deb` installs,
+    and `go run ./tools/release/deb-package -control <file>` prints its control file.
 
 ### The result
 
@@ -689,9 +721,8 @@ tools/release/release.sh publish $VERSION
 
 It does these steps in order.
 
-1. **Check** for git, svn, shasum, tar, awk, gh, gpg, curl and cmp, and that
-   `tools/release/install-manifests.sh` exists, before anything moves. The script needs tar and awk, and it
-   runs after the move. Then check the tag, as `candidate` does.
+1. **Check** for git, svn, shasum, awk, gh, gpg, curl and cmp, before anything moves. Then check
+   the tag, as `candidate` does.
 2. **Check the GitHub release.** It must be the release of `v$VERSION`, titled `$VERSION`, and not
    a draft. It must hold every binary archive and `.sha512` file CI attached, and no file that is
    not one of the voted files. A missing prerelease, a missing CI file or a stray file stops the
@@ -725,8 +756,8 @@ It does these steps in order.
    move and does the steps after it again. Either way, every package with its `.asc` and `.sha512`
    must be there. `--remove-old` is refused unless the move is done already, as
    [Later: remove old versions](#later-remove-old-versions) says.
-4. **Hold the local files to the voted ones.** The GitHub release and the install manifests are
-   made from `dist/$VERSION/`, so each file there must be the one voted on. A package built again
+4. **Hold the local files to the voted ones.** The GitHub release is checked against
+   `dist/$VERSION/`, so each file there must be the one voted on. A package built again
    has other bytes, and a package signed again has another signature. For each package already in
    `dist/$VERSION/` with its `.asc` and `.sha512`, it reads the voted checksum and signature:
 
@@ -782,11 +813,6 @@ It does these steps in order.
    - `website.txt`, the release for `data/projects.yml` on the website. It is marked the latest
      release only when GitHub's label names `v$VERSION`. It carries the day of the move, as svn
      records it in UTC, so a later run of `publish` writes the same date.
-   - `install/`, the install manifests. It removes the old `install/` first, then runs
-     `tools/release/install-manifests.sh $VERSION dist/$VERSION dist/$VERSION/install`. If that script
-     fails, the move and the promotion are still done. Fix the script and run `publish` again: it
-     skips the move and writes `install/` from scratch. To run the script by hand instead, remove
-     `dist/$VERSION/install` first, because the script refuses a directory that is not empty.
 9. **Print the next steps**, which are the sections below, in order. They wait at least one hour
    after the move before the website change and the announcement, as the
    [ASF release policy](https://www.apache.org/legal/release-policy.html) asks. When older versions
@@ -806,7 +832,7 @@ documentation and the changelog of the tag:
 ```markdown
 #### Where to get it
 
-- The Apache release of $VERSION is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The Apache release of $VERSION is the source package. The binary packages for macOS, Linux and Windows, and the Debian packages, are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
 - The files attached to this GitHub release are the same signed packages, each with its `.asc` signature and `.sha512` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/install.md#verify-a-package) describes.
 - To build from the source package, see [Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/install.md#build-from-the-source-package).
 - Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/README.md
@@ -820,7 +846,7 @@ and attaches the source archive and signatures to the same page. `publish` check
 against the release directory, then promotes that prerelease. CI also retains diagnostic workflow
 artifacts, but no step depends on them. The `binaries` job builds every platform on every run but
 the promotion, and `packages` runs each with `tools/test/package-smoke.sh` on a runner of its own
-platform.
+platform, and installs the Debian packages with apt on Linux.
 
 The released event starts CI's `docker` job. That job publishes the container image to the
 GitHub container registry under `$VERSION`, and under `latest` when GitHub names `v$VERSION` its
@@ -877,7 +903,9 @@ By hand, the release when it is the latest is:
                 asc: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.asc
                 sha512: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.sha512
               # The same four lines for each other platform, in the order of PLATFORMS:
-              # MacOS AMD64, Linux AMD64, Linux ARM64, Windows AMD64 and Windows ARM64.
+              # MacOS AMD64, Linux AMD64, Linux ARM64, Windows AMD64 and Windows ARM64,
+              # then for each Debian package: "Debian package asz, AMD64", with the link
+              # .../apache-skywalking-ai-sessionizer-$VERSION-bin-asz-amd64.deb, and so on.
             date: Sep. 17th, 2026
 ```
 
@@ -927,111 +955,246 @@ Resources:
 The Apache SkyWalking Team
 ```
 
-## Install manifests
+## Homebrew
 
-**Before the first submission to each package manager, the PMC agrees to it on
-dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
-place: the winget manifests name The Apache Software Foundation as their publisher. The ASF allows
-other distribution platforms only for binaries that follow its release, licensing, branding and
-trademark policies. The Homebrew tap is this repository, so it needs no new repository. A Scoop
-bucket under github.com/apache would be one, which the PMC asks INFRA to create.
-
-`dist/$VERSION/install/` holds the manifests that let package managers install the version. They
-are conveniences.
-
-| File | Where it goes | What it downloads |
-| --- | --- | --- |
-| `homebrew/asz.rb`, `homebrew/asz-claude-code.rb` | `Formula/` on main in this repository | the macOS or Linux binary package, from the GitHub release, with archive.apache.org as its mirror |
-| `scoop/skywalking-ai-sessionizer.json` | a Scoop bucket | the Windows packages, from dlcdn.apache.org |
-| `winget/manifests/a/Apache/SkyWalkingAISessionizer/$VERSION/` | microsoft/winget-pkgs | the Windows packages, from the GitHub release |
-
-The two Homebrew formulae install from the voted binary package for the machine: macOS or Linux, on
-ARM 64 or x86-64. Each names a URL, a mirror and a sha256 for each of the four packages. They build
-nothing, so they need no Go. `asz` installs `asz`, and `asz-claude-code` installs
+The tap is this repository: `Formula/` on main. It holds `asz@VERSION.rb` and
+`asz-claude-code@VERSION.rb` for every release, keg-only so they do not clash, and `asz.rb` and
+`asz-claude-code.rb` for the newest. `asz` installs `asz`, and `asz-claude-code` installs
 `asz-claude-plugin`, whose caveats give the two commands that install the plugin into Claude Code.
 Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary.
+
+A formula downloads the voted binary package for the machine, macOS or Linux on ARM 64 or x86-64,
+from the GitHub release. That URL keeps working after a newer version replaces this one on the
+download site. Its mirror is archive.apache.org, which Homebrew tries only when GitHub fails, so
+everyday installs do not reach the archive, which slows down and then bans heavy use. The formulae
+name the sha256 of the voted packages, so they are written after the vote, and the tag of a version
+never holds its own formulae. `.gitattributes` keeps `Formula/` out of the source package.
 Homebrew/homebrew-core takes a formula only when it builds from source, and these install a binary
 built for each platform.
 
-The tap is this repository: `Formula/` on main. It keeps `asz@VERSION.rb` and
-`asz-claude-code@VERSION.rb` for every release, keg-only so they do not clash, and `asz.rb` and
-`asz-claude-code.rb` for the newest. The formulae name the sha256 of the voted packages, so they
-cannot be committed before the vote, and the tag of a version never holds its own formulae.
-`.gitattributes` keeps `Formula/` out of the source package.
+After Publish, on macOS, run the `homebrew` skill with Claude Code and name the version. It
+downloads the voted packages and checks each against its `.sha512`, writes both formulae of the
+version from its templates, and runs every new formula through `brew style`, `brew audit --strict`,
+`brew install` from the GitHub release, and `brew test`, removing what it installed. It moves
+`asz.rb` and `asz-claude-code.rb` only forward, so adding an older version never moves them back.
+Then it opens a pull request to main in this repository. Anyone who tapped gets the version with
+`brew update` once it merges.
 
-After Publish, on macOS, on a branch from main:
-
-```sh
-tools/release/homebrew-formula.sh --from dist --check $VERSION
-```
-
-It runs each version's formulae through `brew style`, `brew audit --strict`, `brew install` and
-`brew test`, and only then writes them into `Formula/`, moving `asz.rb` and `asz-claude-code.rb` to
-the newest version. Without `--from` it downloads released packages from the Apache sites, which is
-how older versions are added. Open a pull request with the change to `Formula/`. The
-`binary-distribution` skill in `.claude/skills/` does all of this with Claude Code.
-
-CI's `homebrew` job runs the same script on every change, on packages it builds with a version of
-its own, so a change that breaks the formulae fails before a release.
-
-Submit each file only after the version is on the download site. The Homebrew formulae and the
-winget files download from the GitHub release, which [Publish](#3-publish) promotes.
-That URL keeps working after a newer version replaces this one on the download site.
-archive.apache.org keeps every version too, but it slows down and then bans heavy use, and winget
-runs in scripts and on shared CI machines. The Homebrew formulae name the archive as their mirror,
-which Homebrew tries only when the GitHub URL fails. The archive can show a version later than the
-download site does. A manifest that names a file that is not there yet fails its review.
-`dist/$VERSION/install/README.md` checks every URL against its expected hash, and says how to test
-and submit each file.
-
-A Scoop bucket holds only its newest manifest, and that manifest names the version on the download
-site. Move the bucket to a new version before the previous version leaves the release directory.
-The winget manifests of an old version keep working, because its GitHub release stays. So does the
-Homebrew formula of an old version, which a tap keeps in its git history.
-
-To write the manifests again, give a new or empty directory:
-
-```sh
-tools/release/install-manifests.sh $VERSION dist/$VERSION <new or empty directory>
-```
-
-It reads the six voted binary packages in `dist/$VERSION/` and downloads nothing. It does not read
-the source package. It refuses a package that has no `.sha512` beside it, or that does not match
-that `.sha512`, so the manifests describe the voted bytes. It also refuses a macOS or Linux package
-that lacks a file the formula installs, or that holds `asz` or the plugin's binary without its
-executable bit, because such a formula would fail for everyone on that platform.
-
-When a manifest is accepted for the first time, add the command that installs from it to
-[Install](../setup/install.md).
-
-## The apt repository
+## apt
 
 `https://skywalking.apache.org/apt` is an apt repository: `static/apt` in apache/skywalking-website.
 It holds no package. It holds the index, which lists every released version of `asz` and
 `asz-claude-code`, signed with a key in KEYS, and a `.htaccess` that redirects each package's
 address to the voted `.deb` on the Apache download sites: the newest version through the mirrors,
-and every older one from archive.apache.org, which keeps every version. apt follows the redirect
-and checks the file against the index. The index is written after the vote from the voted packages,
-and is not voted on.
+and every older one to archive.apache.org, which keeps every version. apt follows the redirect and
+checks the file against the index. The index is written after the vote from the voted packages, and
+is not voted on.
 
-After Publish, and at least one hour after the move, check out a new branch from master of
-apache/skywalking-website, and run from this repository:
+At least one hour after the move, run the `apt` skill with Claude Code and name the version and your
+key in KEYS. It downloads the voted `.deb` files and checks each against its `.sha512` and its
+`.asc` against KEYS. It adds them to the index with `apt-ftparchive`, writes the redirects again,
+and signs the index with your key. Then it serves the result with Apache httpd, as the website does,
+and apt in Debian and Ubuntu installs every version through the redirects. Last, it opens a pull
+request to apache/skywalking-website. The website's CI publishes the change when it merges.
+
+## Scoop
+
+A Scoop bucket holds one manifest, for the newest version. It downloads the Windows packages from
+dlcdn.apache.org, the content delivery network in front of the download site, and reads their
+checksums from downloads.apache.org itself, never from a mirror. A bucket holds only its newest
+manifest, so its URL always names a version the download site still holds, as long as the bucket
+moves on before the previous version is removed. The Apache packages in Scoop's main bucket do the
+same.
+
+The manifest names the sha512 of each Windows package. Read them from downloads.apache.org:
 
 ```sh
-GPG_USER=<your key in KEYS> tools/release/apt-repository.sh --from dist --check <skywalking-website>/static/apt $VERSION
+for a in amd64 arm64; do
+  curl -fsSL "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-$a.zip.sha512"
+done
 ```
 
-It holds each `.deb` to its `.sha512` and its `.asc` to KEYS, installs them with apt in Debian and
-Ubuntu in docker, adds them to the index, and writes the redirects. It then signs the index with
-your key, and checks that apt would accept the signature with the keys from KEYS. Without `--from`
-it downloads released packages from the Apache sites, which is how older versions are added. Open
-a pull request on apache/skywalking-website with the change to `static/apt`. The
-`binary-distribution` skill in `.claude/skills/` does this with Claude Code, with the Homebrew
-formulae.
+`skywalking-ai-sessionizer.json`, with `$VERSION` and the two hashes filled in:
 
-CI's `apt` job runs `tools/test/apt-check.sh` on every change: it builds two versions, writes and signs
-their index, serves it with Apache httpd as the website does, and installs, downgrades, upgrades and
-removes both packages with apt.
+```json
+{
+    "version": "$VERSION",
+    "description": "Conversation-level observability for long-lived AI agents",
+    "homepage": "https://github.com/apache/skywalking-ai-sessionizer",
+    "license": "Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-amd64.zip",
+            "hash": "sha512:<sha512 of the windows-amd64 package>"
+        },
+        "arm64": {
+            "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-arm64.zip",
+            "hash": "sha512:<sha512 of the windows-arm64 package>"
+        }
+    },
+    "bin": [
+        "asz.exe",
+        "asz-claude-plugin.exe"
+    ],
+    "notes": [
+        "asz-claude-plugin, the binary of the Claude Code plugin, is on the path. Install the plugin itself into Claude Code with the two commands below, with VERSION replaced by the version asz version prints.",
+        "claude plugin marketplace add \"https://github.com/apache/skywalking-ai-sessionizer.git#vVERSION\" --sparse .claude-plugin plugins/claude-code/plugin",
+        "claude plugin install asz-changes@skywalking-ai-sessionizer",
+        "See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
+    ],
+    "checkver": {
+        "url": "https://downloads.apache.org/skywalking/ai-sessionizer/?C=N;O=D;V=1",
+        "regex": "href=\"(\\d+\\.\\d+\\.\\d+)/\""
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$version/apache-skywalking-ai-sessionizer-$version-bin-windows-amd64.zip"
+            },
+            "arm64": {
+                "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$version/apache-skywalking-ai-sessionizer-$version-bin-windows-arm64.zip"
+            }
+        },
+        "hash": {
+            "url": "https://downloads.apache.org/skywalking/ai-sessionizer/$version/$basename.sha512"
+        }
+    }
+}
+```
+
+The notes name the plugin's tag as `VERSION` for the reader to fill in, because `autoupdate` moves
+the manifest to a new version without writing its notes again. `$version` and `$basename` in
+`autoupdate` are Scoop's own, and stay as they are.
+
+Test it on Windows, in PowerShell. If dlcdn.apache.org answers 404 while downloads.apache.org has
+the file, it is serving a 404 it cached earlier: wait and try again.
+
+```powershell
+scoop install .\skywalking-ai-sessionizer.json
+asz version
+scoop uninstall skywalking-ai-sessionizer
+```
+
+Commit the file under `bucket/` in the bucket repository: one the project keeps, or
+ScoopInstaller/Main by pull request, which has its own rules for what it takes. From the bucket
+repository, Scoop's own scripts check the version lookup and the hashes, and `checkver.ps1` with
+`-Update` moves the manifest to a later version:
+
+```powershell
+& "$(scoop prefix scoop)\bin\checkver.ps1" -App skywalking-ai-sessionizer -Dir .\bucket
+& "$(scoop prefix scoop)\bin\checkhashes.ps1" -App skywalking-ai-sessionizer -Dir .\bucket
+```
+
+## winget
+
+microsoft/winget-pkgs keeps the manifests of every version, and `winget install --version` can still
+ask for an old one. So the manifests download from the GitHub release, whose URL never moves.
+winget runs in scripts and on shared CI machines, the heavy use archive.apache.org stops. The GitHub
+release holds the voted files, which [3. Publish](#3-publish) checked before it promoted it.
+
+The manifests name the sha256 of each Windows package, in capitals:
+
+```sh
+for a in amd64 arm64; do
+  curl -fsSL "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-$a.zip" | shasum -a 256 | tr a-f A-F
+done
+```
+
+Three files go in `manifests/a/Apache/SkyWalkingAISessionizer/$VERSION/` of a fork of
+microsoft/winget-pkgs, with `$VERSION` and the two hashes filled in. Schema 1.12.0 is what
+winget-pkgs' own `Tools/YamlCreate.ps1` writes.
+
+`Apache.SkyWalkingAISessionizer.yaml`:
+
+```yaml
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+
+PackageIdentifier: Apache.SkyWalkingAISessionizer
+PackageVersion: $VERSION
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.12.0
+```
+
+`Apache.SkyWalkingAISessionizer.installer.yaml`:
+
+```yaml
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: Apache.SkyWalkingAISessionizer
+PackageVersion: $VERSION
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+- RelativeFilePath: asz.exe
+  PortableCommandAlias: asz
+- RelativeFilePath: asz-claude-plugin.exe
+  PortableCommandAlias: asz-claude-plugin
+Commands:
+- asz
+- asz-claude-plugin
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-amd64.zip
+  InstallerSha256: <SHA256 OF THE WINDOWS-AMD64 PACKAGE>
+- Architecture: arm64
+  InstallerUrl: https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-arm64.zip
+  InstallerSha256: <SHA256 OF THE WINDOWS-ARM64 PACKAGE>
+ManifestType: installer
+ManifestVersion: 1.12.0
+```
+
+`Apache.SkyWalkingAISessionizer.locale.en-US.yaml`:
+
+```yaml
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: Apache.SkyWalkingAISessionizer
+PackageVersion: $VERSION
+PackageLocale: en-US
+Publisher: The Apache Software Foundation
+PublisherUrl: https://www.apache.org/
+PublisherSupportUrl: https://github.com/apache/skywalking/issues
+Author: Apache SkyWalking
+PackageName: Apache SkyWalking AI Sessionizer
+PackageUrl: https://github.com/apache/skywalking-ai-sessionizer
+License: Apache-2.0
+LicenseUrl: https://www.apache.org/licenses/LICENSE-2.0
+ShortDescription: Conversation-level observability for long-lived AI agents.
+Description: Apache SkyWalking AI Sessionizer, asz, assembles fragmented agent telemetry, such as transcripts, subagent streams and workflow journals, into one durable conversation structure.
+Moniker: asz
+Tags:
+- ai-agents
+- claude-code
+- observability
+- skywalking
+ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes.md
+InstallationNotes: asz-claude-plugin, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install asz-changes@skywalking-ai-sessionizer. See https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/claude-code-plugin.md
+Documentations:
+- DocumentLabel: Documentation
+  DocumentUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/README.md
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0
+```
+
+Validate and test them on Windows, from the winget-pkgs checkout:
+
+```powershell
+$dir = ".\manifests\a\Apache\SkyWalkingAISessionizer\$VERSION"
+winget validate --manifest $dir
+winget settings --enable LocalManifestFiles   # once, as administrator
+winget install --manifest $dir
+asz version
+winget uninstall --id Apache.SkyWalkingAISessionizer
+```
+
+`.\Tools\SandboxTest.ps1 $dir` runs the same install in Windows Sandbox, so nothing stays on your
+machine. Then open a pull request to microsoft/winget-pkgs that adds only this directory. Its
+pipeline validates the manifests and downloads both packages. The directory of an older version
+stays, and keeps working, because it downloads from that version's GitHub release.
+
+When a package manager accepts the project for the first time, add the command that installs from
+it to [Install](../setup/install.md).
 
 ## Later: remove old versions
 
@@ -1043,7 +1206,7 @@ keeps every version removed from it. A PMC member removes the older versions in 
 tools/release/release.sh publish $VERSION --remove-old
 ```
 
-`publish` refuses `--remove-old` in the run that moves the candidate. Run it only after both of
+`publish` refuses `--remove-old` in the run that moves the candidate. Run it only after all of
 these:
 
 1. The website pull request that points the links of the older versions at
@@ -1051,8 +1214,7 @@ these:
    downloads page links the files that would be removed.
 2. The Scoop bucket names the new version. Its manifest downloads the version it names from the
    download site, and that URL stops working when the version is removed.
-3. The website pull request that adds the new version to [the apt repository](#the-apt-repository)
-   has merged. Until then, apt downloads the older version through the mirrors, from the files that
+3. The website pull request that adds the new version to [the apt repository](#apt) has merged. Until then, apt downloads the older version through the mirrors, from the files that
    would be removed.
 
 The move is not repeated, and the steps after it run again. For each version older than

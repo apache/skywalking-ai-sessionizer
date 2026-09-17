@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -65,13 +66,21 @@ func candidateFixtureFor(t *testing.T) *candidateFixture {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"release.sh", "package-check.sh", "deb-list.sh"} {
+	for _, name := range []string{"release.sh", "package-check.sh", "deb-package/main.go"} {
 		body, err := os.ReadFile(filepath.Join("..", "..", "release", name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		write(filepath.Join(f.dir, "tools", "release", name), string(body), 0o755)
 	}
+	// candidate builds tools/release/deb-package from the checkout to read
+	// the Debian packages. It needs the standard library only.
+	goMod, err := os.ReadFile(filepath.Join("..", "..", "..", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goLine := regexp.MustCompile(`(?m)^go [0-9.]+$`).Find(goMod)
+	write(filepath.Join(f.dir, "go.mod"), "module github.com/apache/skywalking-ai-sessionizer\n\n"+string(goLine)+"\n", 0o644)
 	// A Linux platform, so the tag has Debian packages, and never this
 	// machine's, so candidate runs no package here.
 	platform, arch := "linux/amd64", "amd64"

@@ -9,9 +9,7 @@ coverage.txt
 # drops the helper here; the source package must never carry a compiled file.
 /claude-code-check
 /collector-check
-/otlp-dump
 /deb-package
-/apt-index
 
 # Go workspace
 go.work

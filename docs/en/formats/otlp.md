@@ -141,7 +141,9 @@ copy of it, and this table says exactly which part:
 The right-hand column is held to a capture of what Claude Code 2.1.260 sent to asz's receiver
 from one short session, kept under `internal/metrics/testdata` with every identifying value
 replaced, by a test that fails when the exporter sends a label or a metric this table does not
-account for. `go run ./tools/test/otlp-dump -redact FILE.pb` prints any spooled request the same way.
+account for. A new capture enters that directory only through the same test, which replaces the
+identifying values:
+`go test ./internal/metrics -run TestCaptures -capture "$PWD/FILE.pb" -capture-name NAME`.
 
 With `metrics: true` on the `claude-code-local` adapter, the collector derives the points from
 the landed files by the assembler's own rule: the usage of a call is its last fragment's in line
