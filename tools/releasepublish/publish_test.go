@@ -41,6 +41,10 @@ type releaseState struct {
 	Interrupt bool `json:"interrupt"`
 	// Replace gives the release another ID once it has been downloaded.
 	Replace bool `json:"replace"`
+	// Released are the tags of the other full releases.
+	Released []string `json:"released"`
+	// Latest is the answer the promotion was given.
+	Latest string `json:"latest"`
 }
 
 type event struct {
@@ -190,7 +194,14 @@ func (f *fixture) events(action string) []event {
 
 func (f *fixture) run(args ...string) (string, error) {
 	f.t.Helper()
+	return f.answer("", args...)
+}
+
+// answer runs publish with input as what the release manager types.
+func (f *fixture) answer(input string, args ...string) (string, error) {
+	f.t.Helper()
 	cmd := exec.Command("bash", append([]string{f.script, "publish", version}, args...)...)
+	cmd.Stdin = strings.NewReader(input)
 	cmd.Dir = f.dir
 	cmd.Env = append(os.Environ(), "PATH="+filepath.Join(f.dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"), "RELEASE_PUBLISH_FIXTURE="+f.dir)
 	output, err := cmd.CombinedOutput()
@@ -440,6 +451,72 @@ func TestPublishNeedsNoLocalCandidate(t *testing.T) {
 	}
 }
 
+// Promotion does not move GitHub's Latest label by itself, and the label
+// decides the latest image tag, so publish asks. The answer offered is yes
+// only for a version newer than every full release.
+func TestPublishAsksWhetherTheVersionBecomesLatest(t *testing.T) {
+	for _, tc := range []struct {
+		name, input string
+		released    []string
+		args        []string
+		latest      string
+	}{
+		{name: "first-release", latest: "true"},
+		{name: "newest", released: []string{"v0.2.0", "v0.1.0"}, latest: "true"},
+		{name: "patch-of-an-older-line", released: []string{"v0.4.0", "v0.2.0"}, latest: "false"},
+		{name: "answered-no", input: "no\n", released: []string{"v0.2.0"}, latest: "false"},
+		{name: "answered-yes", input: "Y\n", released: []string{"v0.4.0"}, latest: "true"},
+		{name: "not-latest-option", released: []string{"v0.2.0"}, args: []string{"--not-latest"}, latest: "false"},
+		{name: "latest-option", released: []string{"v0.4.0"}, args: []string{"--latest"}, latest: "true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.setState(releaseState{Exists: true, Prerelease: true, Released: tc.released})
+			if output, err := f.answer(tc.input, tc.args...); err != nil {
+				t.Fatalf("publish: %v\n%s", err, output)
+			}
+			f.requirePublished()
+			if got := f.state().Latest; got != tc.latest {
+				t.Fatalf("promoted with --latest=%s, want %s", got, tc.latest)
+			}
+		})
+	}
+}
+
+func TestPublishRefusesAnUnclearLatestAnswer(t *testing.T) {
+	t.Run("not-yes-or-no", func(t *testing.T) {
+		f := newFixture(t)
+		output, err := f.answer("maybe\n")
+		if err == nil || !strings.Contains(output, "answer yes or no") {
+			t.Fatalf("an unclear answer was accepted: %v\n%s", err, output)
+		}
+		f.requireNotMoved()
+	})
+	t.Run("both-options", func(t *testing.T) {
+		f := newFixture(t)
+		output, err := f.run("--latest", "--not-latest")
+		if err == nil || !strings.Contains(output, "only one of --latest and --not-latest") {
+			t.Fatalf("both options were accepted: %v\n%s", err, output)
+		}
+		f.requireNotMoved()
+	})
+	// The run that promoted decided the label, so a later run refuses to
+	// ignore the option and says how to change the label by hand.
+	t.Run("already-promoted", func(t *testing.T) {
+		f := newFixture(t)
+		if output, err := f.run(); err != nil {
+			t.Fatalf("publish: %v\n%s", err, output)
+		}
+		output, err := f.run("--not-latest")
+		if err == nil || !strings.Contains(output, "--latest=<true or false>") {
+			t.Fatalf("an option on a promoted release was accepted: %v\n%s", err, output)
+		}
+		if f.state().Latest != "true" || len(f.events("promote")) != 1 {
+			t.Fatal("the promoted release was changed")
+		}
+	})
+}
+
 func contains(list []string, name string) bool {
 	for _, item := range list {
 		if item == name {
@@ -532,10 +609,18 @@ if tool == "svn":
         raise AssertionError("unexpected svn command: " + repr(args))
     sys.exit(0)
 
-assert tool == "gh" and args[:1] == ["release"] and args[2:5] == [tag, "--repo", "apache/skywalking-ai-sessionizer"], args
-action, rest = args[1], args[5:]
 state_path = root / "state.json"
 state = json.loads(state_path.read_text())
+if args[:2] == ["release", "list"]:
+    assert args[2:4] == ["--repo", "apache/skywalking-ai-sessionizer"] and "--json" in args, args
+    tags = list(state.get("released") or [])
+    if state["exists"] and not state["prerelease"]:
+        tags.append(tag)
+    for t in tags:
+        print(t)
+    sys.exit(0)
+assert tool == "gh" and args[:1] == ["release"] and args[2:5] == [tag, "--repo", "apache/skywalking-ai-sessionizer"], args
+action, rest = args[1], args[5:]
 assets = root / "gh"
 def save():
     state_path.write_text(json.dumps(state))
@@ -580,8 +665,11 @@ elif action == "edit":
     assert state["prerelease"], "promoted twice"
     assert "--draft=false" in rest and "--prerelease=false" in rest and option("--title") == "0.3.0", rest
     assert "Fixture release." in pathlib.Path(option("--notes-file")).read_text()
+    latest = [arg for arg in rest if arg.startswith("--latest=")]
+    assert len(latest) == 1 and latest[0] in ("--latest=true", "--latest=false"), rest
     record("promote")
     state["prerelease"] = False
+    state["latest"] = latest[0].split("=", 1)[1]
     save()
 else:
     raise AssertionError("unexpected gh command: " + repr(args))

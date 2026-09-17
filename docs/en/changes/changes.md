@@ -71,3 +71,12 @@
 - A scenario build writes `interval: 5s` into the configuration it creates, so a collector beside a
   feed still picks up each session as it arrives. A directory an earlier build wrote without an
   interval is brought up to date instead of refused.
+
+## Release
+
+- `publish` asks whether the version becomes the latest GitHub release before anything moves, and
+  promotes with that answer. Before, promotion left the Latest label on the older release, because
+  CI creates the prerelease with `--latest=false`. The answer offered is yes for a version newer
+  than every full release, and no for a patch of an older line. `--latest` and `--not-latest` answer
+  without asking. The `latest` image tag follows GitHub's latest release, so one decision moves
+  both. Before, the image took the highest version on its own.

@@ -24,7 +24,7 @@ after the Apache vote and distribution publication starts its build, as the tags
 | Tag | Points at | Moves |
 | --- | --- | --- |
 | `<version>`, such as `0.2.0` | the image built from the git tag `v<version>` | only when a run started by hand publishes that tag again |
-| `latest` | the highest full published release version | when the GitHub prerelease is promoted after the Apache vote, or an explicit image retry publishes it |
+| `latest` | the version GitHub names its latest release | when a GitHub prerelease is promoted as the latest release after the Apache vote, or an explicit image retry publishes that version |
 | `main` | the development head | on each push to `main` |
 | `<commit id>` | one commit, by its complete 40-character id | only when a run started by hand publishes a tag on that commit again |
 
@@ -34,7 +34,9 @@ because a reader who pulls one cannot tell which version answered.
 A git tag `v*` names a release candidate. CI on its push creates a GitHub prerelease holding the
 binaries it built, for developer testing and local SVN staging. After the Apache vote passes,
 `tools/release.sh publish` moves the approved files to the Apache release directory and promotes the
-prerelease to a full GitHub release, which publishes the image under that version.
+prerelease to a full GitHub release, which publishes the image under that version. It asks whether
+the version becomes the latest GitHub release, and only then does the image move `latest`. A patch
+of an older line is usually kept off it.
 A draft or a prerelease publishes no container image. A manual image retry requires an existing
 full GitHub release. A version with a suffix, such as
 `0.2.0-rc1`, is published under its own version tag and under its commit id, because CI tags every

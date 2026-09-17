@@ -401,8 +401,9 @@ jobs:
               # A release is published under the version the tag names and
               # nothing looser: no major.minor line, since a reader who
               # pulls 0.2 cannot tell which release answered. latest is the
-              # one floating tag, and it names the newest release only, so
-              # promoting a patch of an older line must not drag it backwards.
+              # one floating tag. It follows GitHub's latest release, which
+              # tools/release.sh publish sets or leaves by asking the release
+              # manager, so a patch of an older line does not move it.
               version="${ref#refs/tags/v}"
               tags="$tags,$image:$version"
               case "$version" in
@@ -410,15 +411,13 @@ jobs:
                   # A pre-release such as 0.2.0-rc1 moves no floating tag.
                   ;;
                 *)
-                  # Candidate tags do not affect which approved release is latest.
-                  # The list is read on its own line: set -e stops the step
-                  # when gh fails, where the end of a pipeline would hide it
-                  # and publish the release without latest.
-                  released=$(gh api --method GET --paginate "repos/$GITHUB_REPOSITORY/releases" \
-                    --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name')
-                  highest=$(printf '%s\n' "$released" | sed -nE '/^v[0-9]+\.[0-9]+\.[0-9]+$/p' | sort -Vr | head -1)
-                  [ -n "$highest" ] || { echo "::error::no published release found for the latest tag"; exit 1; }
-                  if [ "v$version" = "$highest" ]; then tags="$tags,$image:latest"; fi ;;
+                  # Read on its own line: set -e stops the step when gh fails,
+                  # where the end of a pipeline would hide it and publish the
+                  # release without latest. The promotion sets the label in the
+                  # same request that fires this event, so it is settled here.
+                  latest=$(gh api --method GET "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+                  [ -n "$latest" ] || { echo "::error::GitHub names no latest release"; exit 1; }
+                  if [ "v$version" = "$latest" ]; then tags="$tags,$image:latest"; fi ;;
               esac ;;
           esac
           echo "tags=$tags" >> "$GITHUB_OUTPUT"

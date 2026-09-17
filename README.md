@@ -119,7 +119,7 @@ docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \
 | Tag | Points at |
 | --- | --- |
 | `<version>`, such as `0.2.0` | the image built from the git tag `v<version>`, moved only by a run started by hand for that tag |
-| `latest` | the highest full published release version, once its GitHub prerelease is promoted after the Apache vote, or an explicit image retry publishes it |
+| `latest` | the version GitHub names its latest release, which the release manager decides when promoting it after the Apache vote |
 | `main` | the development head |
 | `<commit id>` | one commit, by its complete id, moved only by a run started by hand for a tag on it |
 
