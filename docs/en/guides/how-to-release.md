@@ -917,23 +917,23 @@ are conveniences.
 
 | File | Where it goes | What it downloads |
 | --- | --- | --- |
-| `homebrew/skywalking-ai-sessionizer.rb` | a Homebrew tap | the macOS or Linux binary package, from the GitHub release, with archive.apache.org as its mirror |
+| `homebrew/asz.rb`, `homebrew/asz-claude-code.rb` | a Homebrew tap | the macOS or Linux binary package, from the GitHub release, with archive.apache.org as its mirror |
 | `scoop/skywalking-ai-sessionizer.json` | a Scoop bucket | the Windows packages, from dlcdn.apache.org |
 | `winget/manifests/a/Apache/SkyWalkingAISessionizer/$VERSION/` | microsoft/winget-pkgs | the Windows packages, from the GitHub release |
 
-The Homebrew formula installs the voted binary package for the machine: macOS or Linux, on ARM 64
-or x86-64. It names a URL, a mirror and a sha256 for each of the four packages. It builds nothing,
-so it needs no Go. It installs `asz` and `asz-claude-plugin` on the path, and `LICENSE`, `NOTICE`
-and `licenses/`, and its test runs both binaries. Its caveats give the two commands that install
-the plugin from the marketplace at the version's tag. It goes to a tap only.
-Homebrew/homebrew-core takes a formula only when it builds from source or installs output that is
-the same on every platform, and this formula installs a binary built for each platform.
+The two Homebrew formulae install from the voted binary package for the machine: macOS or Linux, on
+ARM 64 or x86-64. Each names a URL, a mirror and a sha256 for each of the four packages. They build
+nothing, so they need no Go. `asz` installs `asz`, and `asz-claude-code` installs
+`asz-claude-plugin`, whose caveats give the two commands that install the plugin into Claude Code.
+Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary. They go to a tap
+only. Homebrew/homebrew-core takes a formula only when it builds from source, and these install a
+binary built for each platform.
 
-Submit each file only after the version is on the download site. The Homebrew formula and the
+Submit each file only after the version is on the download site. The Homebrew formulae and the
 winget files download from the GitHub release, which [Publish](#3-publish) promotes.
 That URL keeps working after a newer version replaces this one on the download site.
 archive.apache.org keeps every version too, but it slows down and then bans heavy use, and winget
-runs in scripts and on shared CI machines. The Homebrew formula names the archive as its mirror,
+runs in scripts and on shared CI machines. The Homebrew formulae name the archive as their mirror,
 which Homebrew tries only when the GitHub URL fails. The archive can show a version later than the
 download site does. A manifest that names a file that is not there yet fails its review.
 `dist/$VERSION/install/README.md` checks every URL against its expected hash, and says how to test

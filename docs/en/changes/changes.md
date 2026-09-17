@@ -92,8 +92,9 @@
 - **Each binary package holds `asz` and `asz-claude-plugin` side by side**, with `LICENSE`, `NOTICE`
   and `licenses/`, and no `claude-code-plugin/` directory. `make build` writes both to `bin/`. The
   package smoke test finds the plugin's binary by name on `PATH`. The candidate check in
-  `tools/release.sh`, the Homebrew formula, and the Scoop and winget manifests follow the new
-  layout, and put both binaries on the path.
+  `tools/release.sh`, and the Scoop and winget manifests follow the new layout, and put both
+  binaries on the path. The Homebrew formula becomes two, one for each install: `asz` and
+  `asz-claude-code`, so a tap gives `brew install asz` and `brew install asz-claude-code`.
 - **Two install scripts, one for each install.** asz, the collector, and the Claude Code plugin are
   installed apart. `install/asz.sh` and `install/asz.ps1` install `asz`, and
   [Install](../setup/install.md#quick-install) runs them from the version's tag in one command. The

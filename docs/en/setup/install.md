@@ -178,34 +178,38 @@ KEYS, then run the same two `gpg` commands.
 
 ## Homebrew, on macOS and Linux
 
-**Available only once its formula is published after a release.** Until then, Homebrew does not
-know the package.
+**Available only once its formulae are published after a release.** Until then, Homebrew does not
+know them.
 
-Each release writes a formula from the voted binary packages, for macOS and Linux on ARM 64 and
-x86-64. The release manager submits it to a Homebrew tap, and this section will name the tap once
-the formula is published there. It does not go to homebrew-core, which takes only formulae that
-build from source or install output that is the same on every platform. This formula installs a
-binary built for each platform.
+Each release writes two formulae from the voted binary packages, for macOS and Linux on ARM 64 and
+x86-64, one for each install: `asz`, and `asz-claude-code`, the binary of the
+[Claude Code plugin](claude-code-plugin.md). The release manager submits them to a Homebrew tap,
+and this section will name the tap once they are published there. Once it is named:
 
-The formula downloads the binary package for your machine from the GitHub release of the version.
+```sh
+brew tap <owner>/<name>
+brew install asz
+brew install asz-claude-code
+```
+
+They do not go to homebrew-core, which takes only formulae that build from source, and which asks
+for more public interest than a new project has. These formulae install a binary built for each
+platform.
+
+Each formula downloads the binary package for your machine from the GitHub release of the version.
 That release carries the voted packages, and its URL keeps working after a newer version comes
 out. When GitHub fails, Homebrew takes the same package from archive.apache.org, which keeps every
 version. Either way, Homebrew checks the download against the sha256 of the voted package. The
-formula builds nothing, so it needs no Go. It installs `asz` and `asz-claude-plugin` on your
-`PATH`, and `LICENSE`, `NOTICE` and `licenses/` at the root of the formula's prefix. Because it installs the binary package, `asz view` draws the page with the
+formulae build nothing, so they need no Go. `asz` installs `asz`, and `asz-claude-code` installs
+`asz-claude-plugin`, each on your `PATH`, with `LICENSE`, `NOTICE` and `licenses/` at the root of
+the formula's prefix. Because they install the binary package, `asz view` draws the page with the
 renderer's fonts.
 
-Once the tap is named here, install by the formula's full name:
-
-```sh
-brew install <owner>/<tap>/skywalking-ai-sessionizer
-```
-
-Since Homebrew 6.0.0, a formula from a tap that is not Homebrew's own must be trusted before it is
-loaded. Installing by the full name trusts that one formula only. The formula's caveats, which
-`brew info skywalking-ai-sessionizer` prints again, give the two commands that install the plugin
-into Claude Code at the formula's version. [Claude Code Plugin](claude-code-plugin.md#install)
-gives the same commands.
+Homebrew asks you to trust a tap that is not its own before it loads its formulae. A formula
+cannot change your Claude Code configuration, so `asz-claude-code` does not install the plugin
+into Claude Code. Its caveats, which `brew info asz-claude-code` prints again, give the two commands
+that do, at the formula's version. [Claude Code Plugin](claude-code-plugin.md#by-hand) gives the
+same commands.
 
 ## Scoop, on Windows
 
