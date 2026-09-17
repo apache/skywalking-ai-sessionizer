@@ -152,6 +152,12 @@ func (c *check) run() error {
 	if c.work, err = os.MkdirTemp("", "claudecodecheck-"); err != nil {
 		return err
 	}
+	// A Windows runner's TEMP is a short name, C:\Users\RUNNER~1\...
+	// Claude Code 2.1.274 refused a shell command's write under it as a
+	// suspicious Windows path, so the check works under the long name.
+	if long, err := filepath.EvalSymlinks(c.work); err == nil {
+		c.work = long
+	}
 	c.config = filepath.Join(c.work, "config")
 	out, err := exec.Command(c.claude, "--version").CombinedOutput()
 	if err != nil {
