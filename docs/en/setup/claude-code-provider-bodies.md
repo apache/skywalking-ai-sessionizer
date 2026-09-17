@@ -53,9 +53,18 @@ the operating system. asz lands and sends the bodies as they are, and redacts no
 
 **How large.** In a capture with the full tool list, a main request was 121 to 196 KB, of which the
 tool schemas were 74 KB and the system prompt 10 KB, and a subagent's request 33 to 58 KB. Every
-call sends its chain's whole message list again. Earlier messages come back unchanged, apart from
-the cache marker, which moves to the newest message. So most of a body is bytes the session already
-has.
+call sends its chain's whole message list again. So most of a body is bytes the session already has.
+
+Earlier messages come back with the same text, but not always spelled the same way. Two things move
+as the list grows. The cache marker, `cache_control`, moves to the newest message. And a message of
+one text block is sent as a list of blocks while it is the newest, and as a plain string once the
+marker has left it, so the same message has two spellings depending on where it sits. A reader
+comparing one request with the next has to treat both spellings as one message: comparing them as
+written reports a history that merely grew as one that was rewritten.
+
+A compaction is the case that really does rewrite the list. It replaces the context with a summary
+and starts the list again, so the list is shorter as well as different, and the conversation records
+it as an `epoch.boundary` step with the summary beside it.
 
 ## What the adapter lands
 
