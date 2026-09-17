@@ -70,7 +70,10 @@ changes itself, and asz reads them from the transcript.
 Run the install script again with the new version. It keeps the plugin's settings and the records
 asz has not collected yet.
 
-By hand, in a shell:
+By hand, first move `asz-claude-plugin` to the new version: `brew upgrade asz-claude-code`,
+`sudo apt update && sudo apt upgrade`, or the binary from the new version's
+[binary package](install.md#binary-package). `asz-claude-plugin version` must print it. Then, in a
+shell:
 
 ```sh
 (

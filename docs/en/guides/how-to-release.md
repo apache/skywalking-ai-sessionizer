@@ -236,9 +236,10 @@ The second commit lists the version right after Current Version, so the Changelo
 no svn command.
 
 The push of the tag starts CI. It builds and tests everything: the suite on three systems, the
-source package, all six binary packages, and each package on a runner of its own platform. Only
+source package, all six binary packages and the four Debian packages, and each binary package on a
+runner of its own platform. Only
 when every job has passed does its `Prerelease binaries` job create the GitHub prerelease titled
-`$VERSION`, not marked latest, and attach the six archives and their six `.sha512` files. The
+`$VERSION`, not marked latest, and attach the ten packages, each with its `.sha512` file. The
 prerelease is created with the workflow token, so it starts no other CI run, and no image is
 published. The job downloads what it uploaded, compares every byte, and adds a readiness marker to
 the prerelease notes. The marker names the run, its attempt, the commit, and a SHA-256 fingerprint
@@ -468,6 +469,10 @@ Release Candidate:
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-linux-arm64.tgz
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-windows-amd64.zip
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-windows-arm64.zip
+   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-amd64.deb
+   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-arm64.deb
+   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-claude-code-amd64.deb
+   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-claude-code-arm64.deb
 
 Release Tag:
  * (Git Tag) v$VERSION
@@ -707,6 +712,19 @@ comes next depends on where the problem is.
   ```sh
   gh release delete v$VERSION --repo apache/skywalking-ai-sessionizer --cleanup-tag --yes
   git tag -d v$VERSION
+  ```
+
+  The prepare pull request has usually merged by then. `main` then holds
+  `docs/en/changes/changes-$VERSION.md`, lists `$VERSION` under Changelog in `docs/menu.yml`, and
+  its `changes.md` names the next version, and `prepare` refuses a version in that state. So in the
+  pull request that fixes the problem, also move `changes-$VERSION.md` back to `changes.md`, with
+  the in-development note under its heading and anything the next version's page already holds
+  added to it, and remove `$VERSION` from Changelog. Remove the old release branch too, on origin
+  only if the merge did not remove it:
+
+  ```sh
+  git branch -D release/$VERSION
+  git push origin --delete release/$VERSION
   ```
 
 ## 3. Publish
