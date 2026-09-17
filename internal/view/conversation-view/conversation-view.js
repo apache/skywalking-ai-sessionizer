@@ -1187,7 +1187,8 @@ const ENGLISH = {
   promptSettings: "Settings",
   promptBlocks: "{count} block(s), {bytes} bytes",
   promptShared: "The {count} message(s) before are as the call before sent them, {bytes} bytes.",
-  promptRewritten: "The history was rewritten, which is what a compaction does.",
+  promptRewritten: "The history before this point was rewritten, and not by a compaction.",
+  promptCompacted: "The context was replaced by a summary here, so the list starts again: {before} message(s) became {after}.",
   promptAlsoChanged: "Also changed: {what}.",
   promptAdded: "Added by this call ({count})",
   promptNothingAdded: "This request adds no message.",
@@ -1835,6 +1836,7 @@ function deltaOf(previous, current) {
   const least = Math.min(previous.messages.length, current.messages.length);
   while (shared < least && same(previous.messages[shared].raw, current.messages[shared].raw, MARKED_IN_MESSAGE)) shared++;
   if (shared < least) rewritten = true;
+  const replaced = rewritten && current.messages.length < previous.messages.length;
   const added = current.messages.slice(shared);
   let sharedBytes = 0;
   for (let i = 0; i < shared; i++) sharedBytes += size(current.messages[i].raw);
@@ -1843,6 +1845,7 @@ function deltaOf(previous, current) {
     sharedMessages: shared,
     sharedBytes,
     rewritten,
+    replaced,
     systemChanged: !same(previous.raw["system"], current.raw["system"], MARKED_IN_LIST),
     toolsChanged: !same(previous.raw["tools"], current.raw["tools"], MARKED_IN_LIST),
     settingsChanged: !same(settings(previous), settings(current), NOT_MARKED)
@@ -1866,9 +1869,17 @@ function canonical(value, markedTo, depth = 0) {
   const parts = [];
   for (const k of Object.keys(obj).sort()) {
     if (depth <= markedTo && k === "cache_control") continue;
-    parts.push(`${JSON.stringify(k)}:${canonical(obj[k], markedTo, depth + 1)}`);
+    const v = k === "content" && depth < markedTo ? plainContent(obj[k]) : obj[k];
+    parts.push(`${JSON.stringify(k)}:${canonical(v, markedTo, depth + 1)}`);
   }
   return `{${parts.join(",")}}`;
+}
+function plainContent(content) {
+  if (typeof content === "string") return [{ type: "text", text: content }];
+  if (!Array.isArray(content) || content.length !== 1) return content;
+  const only = content[0];
+  if (!only || typeof only !== "object" || only["type"] !== "text" || typeof only["text"] !== "string") return content;
+  return [{ type: "text", text: only["text"] }];
 }
 const LINE_DIFF_CAP = 400;
 function lineDiff(before, after) {
@@ -2277,7 +2288,7 @@ function drawRequest(ctx, e, read2, sides, store) {
     </div>`;
   if (!state.promptWhole) {
     if (!previous) return `${modes}<div class="acv-empty">${esc(s.promptNoPrevious)}</div>`;
-    return `${modes}${drawDelta(ctx, e, deltaOf(previous, read2), read2)}`;
+    return `${modes}${drawDelta(ctx, e, deltaOf(previous, read2), read2, previous.messages.length)}`;
   }
   const system = read2.system.length ? section(ctx, e, "system", s.promptSystem, blockSummary(ctx, read2.system), read2.system.map((b, i) => block(ctx, b, `${e.id}|req|sys|${i}`)).join("")) : "";
   const tools = read2.tools.length ? section(
@@ -2324,7 +2335,7 @@ function previousRequest(ctx, e, sides, store) {
   }
   return null;
 }
-function drawDelta(ctx, e, delta, read2) {
+function drawDelta(ctx, e, delta, read2, previousCount) {
   const { s, f } = ctx;
   const changed = [
     delta.systemChanged ? s.promptSystem : "",
@@ -2333,7 +2344,10 @@ function drawDelta(ctx, e, delta, read2) {
   ].filter(Boolean);
   const notes = [
     `<div class="acv-faint">${esc(fill(s.promptShared, { count: String(delta.sharedMessages), bytes: f.number(delta.sharedBytes) }))}</div>`,
-    delta.rewritten ? `<div class="acv-warning">${esc(s.promptRewritten)}</div>` : "",
+    // A compaction is not a fault: it is the runtime replacing the context with a summary, which the
+    // conversation records as its own step. Saying which of the two happened is the whole value of
+    // the note -- a warning on every ordinary growth would say nothing.
+    delta.replaced ? `<div class="acv-faint">${esc(fill(s.promptCompacted, { before: String(previousCount), after: String(read2.messages.length) }))}</div>` : delta.rewritten ? `<div class="acv-warning">${esc(s.promptRewritten)}</div>` : "",
     changed.length ? `<div class="acv-faint">${esc(fill(s.promptAlsoChanged, { what: changed.join(", ") }))}</div>` : ""
   ].join("");
   const added = delta.added.length ? delta.added.map((m, i) => message(ctx, m, delta.sharedMessages + i + 1, read2.messages.length, `${e.id}|req|msg|${delta.sharedMessages + i}`)).join("") : `<div class="acv-empty">${esc(s.promptNothingAdded)}</div>`;
