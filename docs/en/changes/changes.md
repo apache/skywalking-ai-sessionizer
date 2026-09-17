@@ -94,6 +94,12 @@
   package smoke test finds the plugin's binary by name on `PATH`. The candidate check in
   `tools/release.sh`, the Homebrew formula, and the Scoop and winget manifests follow the new
   layout, and put both binaries on the path.
+- **CI runs the install pages with Claude Code.** A new `claude-code` job runs
+  `tools/claudecodecheck` with Claude Code 2.1.274 on each binary package's platform, Linux, macOS
+  and Windows on x86-64 and ARM 64. It follows the Quick install block, the plugin's install
+  commands and the Upgrade block as written, with only their download addresses pointed at the
+  runner, and a headless session must be recorded by the plugin and collected by asz. Before, no
+  platform ran the plugin's hooks inside Claude Code in CI, and Windows never had.
 - **Quick install.** [Install](../setup/install.md#quick-install) gives one block for macOS and Linux
   and one for Windows. Each takes the version the reader sets, downloads the package through the
   mirror selector and its `.sha512` from downloads.apache.org, stops unless they match, checks that

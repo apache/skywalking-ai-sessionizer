@@ -315,6 +315,78 @@ jobs:
           esac
           tools/package-smoke.sh "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
 
+  # Each binary package with Claude Code, on its own platform, the way the
+  # install pages tell a person to use it. The Quick install block installs
+  # the package, the plugin's install commands add the marketplace at a tag,
+  # and a headless session must be recorded by the plugin and collected by
+  # asz. tools/claudecodecheck says what else it runs. The package, the
+  # marketplace repository and the model's API are served on the runner, so
+  # the job needs no secret. Claude Code has run the hooks on no platform but
+  # the ones this job covers.
+  claude-code:
+    name: Claude Code ${{ matrix.platform }}
+    if: github.event_name != 'release'
+    needs: binaries
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      # A fixed version, so a new Claude Code release cannot fail a pull
+      # request that did not change. Move it on purpose.
+      CLAUDE_CODE_VERSION: '2.1.274'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-amd64, runner: ubuntu-latest, ext: tgz }
+          - { platform: linux-arm64, runner: ubuntu-24.04-arm, ext: tgz }
+          - { platform: darwin-arm64, runner: macos-latest, ext: tgz }
+          - { platform: darwin-amd64, runner: macos-15-intel, ext: tgz }
+          - { platform: windows-amd64, runner: windows-latest, ext: zip }
+          - { platform: windows-arm64, runner: windows-11-arm, ext: zip }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries-${{ needs.binaries.outputs.version }}
+          path: dist
+      - name: Install Claude Code
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash -s "$CLAUDE_CODE_VERSION"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Claude Code
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ([scriptblock]::Create((Invoke-RestMethod https://claude.ai/install.ps1))) $env:CLAUDE_CODE_VERSION
+          Join-Path $env:USERPROFILE ".local\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      # Run by hand for a tag older than this job, the tag has no check.
+      - name: Follow the install pages with Claude Code
+        shell: bash
+        env:
+          VERSION: ${{ needs.binaries.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          if [ ! -d tools/claudecodecheck ]; then
+            echo "::notice::this tag has no tools/claudecodecheck, so Claude Code is not run"
+            exit 0
+          fi
+          platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)
+          case " $platforms " in
+            *" ${PLATFORM%-*}/${PLATFORM#*-} "*) ;;
+            *)
+              echo "::notice::the Makefile of this tag builds no package for $PLATFORM, so there is nothing to run"
+              exit 0 ;;
+          esac
+          go run ./tools/claudecodecheck "dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$PLATFORM.$EXT" "$VERSION"
+
   lint:
     name: Lint
     if: github.event_name != 'release'
@@ -332,7 +404,7 @@ jobs:
   candidate-assets:
     name: Prerelease binaries
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [license, build, source-package, lint, binaries, packages, collector, conversation-view]
+    needs: [license, build, source-package, lint, binaries, packages, claude-code, collector, conversation-view]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -449,7 +521,7 @@ jobs:
   result:
     name: Required
     if: always()
-    needs: [license, build, source-package, lint, docker, binaries, packages, collector, conversation-view, candidate-assets]
+    needs: [license, build, source-package, lint, docker, binaries, packages, claude-code, collector, conversation-view, candidate-assets]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any job failed

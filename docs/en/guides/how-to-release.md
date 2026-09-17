@@ -393,7 +393,9 @@ The tag's `PLATFORMS` names macOS, Linux and Windows, each on x86-64 and ARM 64.
 without cgo on Linux with its configured Go toolchain and packages with GNU tar, gzip and zip.
 It uses `GOWORK=off` and `GOFLAGS=-mod=readonly`. Both binaries report `$VERSION` and the Go
 version used to build them. The run must pass the whole CI workflow, including package smoke
-tests on all six platforms, before its archives are eligible for the candidate.
+tests on all six platforms, and on the same six the Claude Code check, which installs each package
+and the plugin as the install pages say and runs a session the plugin must record. Only then are
+its archives eligible for the candidate.
 
 `make binaries` remains useful for local build checks. Those archives are not the release
 candidate. GNU and macOS archive tools can produce different bytes even from the same files, so

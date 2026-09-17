@@ -481,6 +481,17 @@ plugin and deleted its data directory, with its `settings.yaml` and an output fi
 Uninstalling with `--keep-data` first, then removing the marketplace, adding it at the second tag
 and installing, kept both files, and the cache then held the changed hooks.
 
+`tools/claudecodecheck` repeats all of this on the machine it runs on, the way a person follows the
+install pages. It reads each block from the page and changes only the download addresses, to a
+server on the same machine that holds the package, the marketplace repository at two tags, and a
+stand-in for the model's API. It runs the Quick install block in every shell there is for it, the
+plugin's install commands, a session the plugin must record and asz must collect, a session with no
+`asz-claude-plugin` on `PATH`, and the Upgrade block, after which the data must still be there and
+the next session must be recorded. CI's `claude-code` job runs it with Claude Code 2.1.274 on each
+binary package's own platform: Linux, macOS and Windows, each on x86-64 and ARM 64. On 2026-09-17 it
+passed on macOS on Apple silicon, and on Linux on ARM 64 in a Debian 13.6 container and in an Alpine
+3.22.5 container, which runs Claude Code's build for musl.
+
 On Windows the plugin has run only outside Claude Code. CI's `packages` job runs
 `tools/package-smoke.sh` on each binary package, on a runner of the package's own platform. On
 2026-09-11, the CI of pull request #6 ran it on `windows-latest`, x86-64, and on `windows-11-arm`,
