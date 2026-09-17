@@ -37,6 +37,10 @@ brew install apache/skywalking-ai-sessionizer/asz-claude-code
 plugin into Claude Code, run the two commands that `brew info asz-claude-code` prints. Upgrade with
 `brew upgrade asz asz-claude-code`.
 
+For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>` and
+`apache/skywalking-ai-sessionizer/asz-claude-code@<version>`. Homebrew keeps them off your `PATH`;
+`brew info` shows where they are.
+
 ## Binary package
 
 The [downloads page](https://skywalking.apache.org/downloads/) links one package per platform:

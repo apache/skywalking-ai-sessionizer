@@ -929,21 +929,23 @@ Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary.
 Homebrew/homebrew-core takes a formula only when it builds from source, and these install a binary
 built for each platform.
 
-The tap is this repository. Homebrew looks for a tap's formulae in `Formula/` first, so after
-Publish, open a pull request to main that replaces `Formula/asz.rb` and `Formula/asz-claude-code.rb`
-with the two files from `dist/$VERSION/install/homebrew/`. The formulae name the sha256 of the voted
-packages, so they cannot be committed before the vote, and the tag of a version never holds its own
-formulae. `.gitattributes` keeps `Formula/` out of the source package, which would otherwise carry
-the formulae of the version before it. Users add the tap and install by the full name, as
-[Install](../setup/install.md#homebrew-on-macos-and-linux) shows.
+The tap is this repository: `Formula/` on main. It keeps `asz@VERSION.rb` and
+`asz-claude-code@VERSION.rb` for every release, keg-only so they do not clash, and `asz.rb` and
+`asz-claude-code.rb` for the newest. The formulae name the sha256 of the voted packages, so they
+cannot be committed before the vote, and the tag of a version never holds its own formulae.
+`.gitattributes` keeps `Formula/` out of the source package.
 
-Before the pull request, run the formulae through Homebrew on the voted packages. It writes them into
-a local tap, runs `brew style` and `brew audit --strict`, installs and tests both, and removes
-everything it installed:
+After Publish, on macOS, on a branch from main:
 
 ```sh
-tools/homebrew-check.sh $VERSION dist/$VERSION
+tools/homebrew-formula.sh --from dist --check $VERSION
 ```
+
+It runs each version's formulae through `brew style`, `brew audit --strict`, `brew install` and
+`brew test`, and only then writes them into `Formula/`, moving `asz.rb` and `asz-claude-code.rb` to
+the newest version. Without `--from` it downloads released packages from the Apache sites, which is
+how older versions are added. Open a pull request with the change to `Formula/`. The
+`binary-distribution` skill in `.claude/skills/` does all of this with Claude Code.
 
 CI's `homebrew` job runs the same script on every change, on packages it builds with a version of
 its own, so a change that breaks the formulae fails before a release.

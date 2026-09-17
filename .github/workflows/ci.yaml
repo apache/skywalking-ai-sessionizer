@@ -411,8 +411,8 @@ jobs:
             echo "::notice::this tag has no tools/homebrew-check.sh, so the formulae are not run"
             exit 0
           fi
-          make binaries checksums VERSION=0.0.0-ci
-          tools/homebrew-check.sh 0.0.0-ci dist
+          make binaries checksums VERSION=0.0.0
+          tools/homebrew-check.sh 0.0.0 dist
 
   lint:
     name: Lint
