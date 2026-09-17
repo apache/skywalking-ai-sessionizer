@@ -42,6 +42,12 @@ PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 win
 DIST      := dist
 PKG_BASE  := apache-skywalking-ai-sessionizer-$(VERSION)-bin
 
+# The Debian packages a release ships for each Linux platform in PLATFORMS,
+# written by tools/release/deb-package. apt installs them from the repository
+# the SkyWalking website serves. tools/release/release.sh reads this line from
+# the tag's Makefile, so a version from before it has none.
+DEB_PACKAGES := asz asz-claude-code
+
 # The GPG key that signs a release, by id, fingerprint or email. Empty means
 # gpg's default key. The key must be in the SkyWalking KEYS file.
 GPG_USER  ?=
@@ -81,7 +87,7 @@ scenarios: build
 ## e2e-collector: push a generated session into a real OpenTelemetry Collector over both transports and verify what it wrote (needs docker)
 .PHONY: e2e-collector
 e2e-collector: build
-	tools/e2e-collector.sh
+	tools/test/e2e-collector.sh
 
 ## conversation-view: rebuild the conversation renderer asz view embeds from the pinned Horizon commit (needs node 24 and pnpm)
 .PHONY: conversation-view
@@ -150,12 +156,12 @@ dep-check: $(BIN_DIR)/license-eye
 # license-eye lists every module go.mod requires, and some of them only the
 # tests of a dependency need, such as github.com/kr/text through the tests of
 # gopkg.in/yaml.v3. A binary package must account for exactly what it
-# holds. So tools/dep-notices.sh also writes a license-eye configuration
+# holds. So tools/release/dep-notices.sh also writes a license-eye configuration
 # that excludes every module the two binaries do not use on any platform.
 dep-licenses: $(BIN_DIR)/license-eye
 	@rm -rf dist-material/licenses
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && \
-	  tools/dep-notices.sh dist-material/NOTICE $$tmp/licenserc.yaml && \
+	  tools/release/dep-notices.sh dist-material/NOTICE $$tmp/licenserc.yaml && \
 	  $(BIN_DIR)/license-eye -c $$tmp/licenserc.yaml dependency resolve --summary dist-material/LICENSE.tpl --output dist-material/licenses
 	@$(MAKE) --no-print-directory font-licenses OUT=dist-material/licenses
 
@@ -172,7 +178,7 @@ font-licenses:
 dep-licenses-check: $(BIN_DIR)/license-eye
 	@tmp=$$(mktemp -d) && trap 'rm -rf "$$tmp"' EXIT && mkdir $$tmp/dist-material && \
 	  cp dist-material/LICENSE.tpl $$tmp/dist-material/ && \
-	  tools/dep-notices.sh $$tmp/dist-material/NOTICE $$tmp/licenserc.yaml && \
+	  tools/release/dep-notices.sh $$tmp/dist-material/NOTICE $$tmp/licenserc.yaml && \
 	  $(BIN_DIR)/license-eye -v warn -c $$tmp/licenserc.yaml dependency resolve --summary $$tmp/dist-material/LICENSE.tpl --output $$tmp/dist-material/licenses >/dev/null && \
 	  $(MAKE) --no-print-directory font-licenses OUT=$$tmp/dist-material/licenses && \
 	  if diff -r $$tmp/dist-material dist-material; then echo "dist-material matches the dependencies"; \
@@ -189,7 +195,7 @@ tidy:
 docker: ## Build the container image, as CI builds and publishes it
 	docker build --build-arg VERSION=$(VERSION) -t skywalking-ai-sessionizer:dev .
 
-## binaries: cross-compile every platform in PLATFORMS and package each, with the Claude Code plugin's binary, the LICENSE, the NOTICE and the dependency licenses, into dist/
+## binaries: cross-compile every platform in PLATFORMS and package each, with the Claude Code plugin's binary, the LICENSE, the NOTICE and the dependency licenses, into dist/, and every package in DEB_PACKAGES for each Linux platform
 .PHONY: binaries
 # Two builds of one tag give the same bytes when they use the same Go, the
 # same tar and the same gzip. Go records the tag in each binary as the
@@ -207,8 +213,14 @@ docker: ## Build the container image, as CI builds and publishes it
 # CI build, with GNU tar and GNU gzip, and a macOS build, with bsdtar and
 # Apple gzip, differ.
 # COPYFILE_DISABLE keeps Apple's tar from adding AppleDouble ._ entries
-# for extended attributes. The archive check also catches metadata files
-# that were present in a copied directory before tar or zip ran.
+# for extended attributes. Finder writes .DS_Store and ._ files into a
+# directory it has shown, such as dist-material/licenses, and cp copies
+# them. So they are removed from the staged files before any package is
+# written, and tools/release/package-check.sh still refuses a package, a .deb too,
+# that holds one.
+# A Debian package holds the same staged binaries. tools/release/deb-package writes it
+# with the same time, owner and modes, and with Go's own tar and gzip, so it
+# does not depend on the tar or the gzip of the machine.
 # The build ignores a go.work and the GOFLAGS of the environment. A
 # workspace changes the code a dependency is compiled from, and git does not
 # show a go.work, because it is ignored. Ignoring workspace settings also
@@ -223,6 +235,7 @@ binaries:
 	  if [ "$$os" = windows ]; then ext=.exe; fi; \
 	  rm -rf $$out && mkdir -p $$out && \
 	  cp dist-material/LICENSE dist-material/NOTICE $$out/ && cp -R dist-material/licenses $$out/licenses && \
+	  find $$out \( -name '._*' -o -name .DS_Store -o -name __MACOSX \) -prune -exec rm -rf {} + && \
 	  echo "building $$os/$$arch" && \
 	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(BINARY)$$ext ./cmd/$(BINARY) || exit 1; \
 	  CGO_ENABLED=0 GOWORK=off GOFLAGS=-mod=readonly GOOS=$$os GOARCH=$$arch $(GO) build -trimpath -ldflags "-s -w $(LDFLAGS)" -o $$out/$(PLUGIN_BINARY)$$ext ./$(PLUGIN_DIR) || exit 1; \
@@ -236,8 +249,14 @@ binaries:
 	    (cd $$out && COPYFILE_DISABLE=1 tar --format=ustar $$owner --no-recursion -cf ../$$os-$$arch.tar -T ../$$os-$$arch.list) && \
 	    gzip -n -c $(DIST)/build/$$os-$$arch.tar > $(DIST)/$(PKG_BASE)-$$os-$$arch.tgz || exit 1; \
 	  fi; \
+	  if [ "$$os" = linux ]; then \
+	    for p in $(DEB_PACKAGES); do \
+	      GOWORK=off GOFLAGS=-mod=readonly $(GO) run ./tools/release/deb-package -package $$p -version $(VERSION) -arch $$arch \
+	        -from $$out -time $${epoch:-$$(date +%s)} -out $(DIST)/$(PKG_BASE)-$$p-$$arch.deb || exit 1; \
+	    done; \
+	  fi; \
 	done
-	@sh tools/package-check.sh $(DIST)/$(PKG_BASE)-*
+	@sh tools/release/package-check.sh $(DIST)/$(PKG_BASE)-*
 	@ls -la $(DIST)/$(PKG_BASE)-*
 
 ## checksums: write a sha512 file beside every local package in dist/
@@ -248,7 +267,7 @@ binaries:
 # .sha512, and make went on to sign every package. Each file is checked
 # right after it is written.
 checksums:
-	@cd $(DIST) && for f in *.tgz *.zip; do \
+	@cd $(DIST) && for f in *.tgz *.zip *.deb; do \
 	  [ -f "$$f" ] || continue; \
 	  { shasum -a 512 "$$f" > "$$f.sha512" && shasum -a 512 --status -c "$$f.sha512"; } \
 	    || { rm -f "$$f.sha512"; echo "cannot write the sha512 of $$f, so this stops here"; exit 1; }; \
@@ -258,26 +277,26 @@ checksums:
 # because file(1) often reports a web font only as data. Fonts come under
 # licenses such as the SIL Open Font License, which the ASF puts in
 # Category B, and a Category B work must not be in a source release.
-# tools/release.sh candidate checks this in the locally archived source.
+# tools/release/release.sh candidate checks this in the locally archived source.
 FONT_FILES := \.(woff2?|ttf|otf|eot)
 
 # The file(1) types a source release must not carry, because the ASF says a
 # source release should not contain compiled code. A static library, a Go
 # object and a Go archive are application/x-archive, and a jar is
-# application/java-archive. tools/release.sh reads this line from the tag's
+# application/java-archive. tools/release/release.sh reads this line from the tag's
 # Makefile, so both refuse the same files.
 COMPILED_TYPES := application/(x-(mach-binary|executable|pie-executable|sharedlib|dosexec|object|java-applet|archive|bytecode\.python)|vnd\.microsoft\.portable-executable|java-archive|wasm)
 
 # The names of compiled files, for the ones file(1) cannot tell by type.
 # The file 5.41 that ships with macOS reports a WebAssembly module and a
-# Python .pyc as application/octet-stream. tools/release.sh reads this line
+# Python .pyc as application/octet-stream. tools/release/release.sh reads this line
 # from the tag's Makefile too.
 COMPILED_FILES := \.(a|o|so|dylib|dll|exe|lib|obj|class|jar|war|pyc|pyo|wasm)
 
-## release: download verified tag CI binaries, create the source package locally and sign all packages into dist/VERSION; upload with tools/release.sh candidate VERSION
+## release: download verified tag CI binaries, create the source package locally and sign all packages into dist/VERSION; upload with tools/release/release.sh candidate VERSION
 .PHONY: release
 release:
-	GPG_USER="$(GPG_USER)" tools/release.sh candidate "$(VERSION)" --no-upload $(if $(CI_RUN),--ci-run "$(CI_RUN)",)
+	GPG_USER="$(GPG_USER)" tools/release/release.sh candidate "$(VERSION)" --no-upload $(if $(CI_RUN),--ci-run "$(CI_RUN)",)
 
 check: vet lint license-check dep-check dep-licenses-check test
 

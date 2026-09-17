@@ -21,7 +21,7 @@
 // every kind present, and a root rebuilt from the bodies that verifies and
 // folds the same. It is what the Collector job in CI runs after asz push.
 //
-//	go run ./tools/collectorcheck ROOT LOGS.JSON
+//	go run ./tools/test/collector-check ROOT LOGS.JSON
 package main
 
 import (

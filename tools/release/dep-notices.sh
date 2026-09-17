@@ -23,7 +23,7 @@
 # and of the Claude Code plugin, on every platform in the Makefile's
 # PLATFORMS. So a module that is only needed by the tests does not appear.
 #
-#   tools/dep-notices.sh [NOTICE] [CONFIGURATION]
+#   tools/release/dep-notices.sh [NOTICE] [CONFIGURATION]
 #
 # Given CONFIGURATION, it also writes the configuration license-eye
 # resolves the binary LICENSE and licenses/ with, so that they follow the
@@ -36,7 +36,7 @@
 #
 # Used by make dep-licenses and make dep-licenses-check.
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 out="${1:-dist-material/NOTICE}"
 config="${2:-}"
 platforms=$(sed -nE 's/^PLATFORMS[[:space:]]*:?=[[:space:]]*//p' Makefile)

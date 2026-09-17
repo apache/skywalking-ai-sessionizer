@@ -32,6 +32,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	debfixture "github.com/apache/skywalking-ai-sessionizer/tools/test/deb-fixture"
 )
 
 func TestPrereleaseIsReadyOnlyAfterEveryUploadedByteIsVerified(t *testing.T) {
@@ -43,7 +45,7 @@ func TestPrereleaseIsReadyOnlyAfterEveryUploadedByteIsVerified(t *testing.T) {
 			t.Skipf("CI upload fixture needs %s", name)
 		}
 	}
-	for _, mode := range []string{"complete", "reuse-empty", "existing", "official", "api-failure", "corrupt-download", "moved-tag", "swapped-assets"} {
+	for _, mode := range []string{"complete", "complete-debs", "missing-deb", "reuse-empty", "existing", "official", "api-failure", "corrupt-download", "moved-tag", "swapped-assets"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
@@ -78,6 +80,25 @@ func TestPrereleaseIsReadyOnlyAfterEveryUploadedByteIsVerified(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(packages, name+".sha512"), []byte(sum), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			// DEB_PACKAGES names a Debian package for the Linux platform.
+			debs := ""
+			deb := "apache-skywalking-ai-sessionizer-0.3.0-bin-asz-amd64.deb"
+			if mode == "complete-debs" || mode == "missing-deb" {
+				debs = "asz"
+			}
+			if mode == "complete-debs" {
+				body, err := debfixture.Bytes("Package: asz\n", map[string]string{"usr/bin/asz": "CI binary bytes"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(packages, deb), body, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				sum := fmt.Sprintf("%x  %s\n", sha512.Sum512(body), deb)
+				if err := os.WriteFile(filepath.Join(packages, deb+".sha512"), []byte(sum), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			// CI creates the prerelease on the tag push. An empty one left by an
 			// earlier attempt of the run is reused; any other is refused.
 			release := map[string]any{"id": 789, "tag_name": "v0.3.0", "name": "0.3.0", "draft": false, "prerelease": true, "body": "Developer review only. Not an Apache release.", "assets": []any{}}
@@ -87,7 +108,7 @@ func TestPrereleaseIsReadyOnlyAfterEveryUploadedByteIsVerified(t *testing.T) {
 			case "official":
 				release["prerelease"] = false
 			}
-			if mode != "complete" && mode != "api-failure" {
+			if mode != "complete" && mode != "complete-debs" && mode != "missing-deb" && mode != "api-failure" {
 				state, _ := json.Marshal(release)
 				if err := os.WriteFile(filepath.Join(dir, "release.json"), state, 0o644); err != nil {
 					t.Fatal(err)
@@ -148,7 +169,7 @@ else: sys.exit(8)
 			if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(stub), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("bash", "../ci-upload-binaries.sh", "0.3.0", strings.Repeat("a", 40), "123", "2", packages, "linux/amd64")
+			cmd := exec.Command("bash", "../../release/ci-upload-binaries.sh", "0.3.0", strings.Repeat("a", 40), "123", "2", packages, "linux/amd64", debs)
 			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "CI_UPLOAD_FIXTURE="+dir, "CI_UPLOAD_MODE="+mode)
 			output, err := cmd.CombinedOutput()
 			if state, readErr := os.ReadFile(filepath.Join(dir, "release.json")); readErr == nil {
@@ -171,12 +192,17 @@ else: sys.exit(8)
 			fingerprint := sha256.Sum256([]byte(strings.Join(lines, "\n") + "\n"))
 			ready := strings.Contains(release["body"].(string), fmt.Sprintf("<!-- asz-ci-binaries run_id=123 run_attempt=2 commit=%s assets=%x -->", strings.Repeat("a", 40), fingerprint))
 			writes, _ := os.ReadFile(filepath.Join(dir, "writes"))
-			if mode == "complete" || mode == "reuse-empty" {
+			if mode == "complete" || mode == "complete-debs" || mode == "reuse-empty" {
 				if err != nil || !ready {
 					t.Fatalf("upload: %s\n%v; ready=%v", output, err, ready)
 				}
+				if mode == "complete-debs" {
+					if _, err := os.Stat(filepath.Join(remote, deb)); err != nil {
+						t.Fatalf("the Debian package was not attached: %v", err)
+					}
+				}
 				order := "upload\ndownload\nready\n"
-				if mode == "complete" {
+				if mode != "reuse-empty" {
 					order = "create\n" + order
 				}
 				if string(writes) != order {
@@ -193,7 +219,7 @@ else: sys.exit(8)
 				if err == nil || ready {
 					t.Fatalf("unsafe upload accepted: %s\n%v; ready=%v", output, err, ready)
 				}
-				if (mode == "existing" || mode == "official" || mode == "api-failure") && len(writes) > 0 {
+				if (mode == "existing" || mode == "official" || mode == "api-failure" || mode == "missing-deb") && len(writes) > 0 {
 					t.Fatalf("%s release was modified: %s", mode, writes)
 				}
 				if strings.Contains(string(writes), "ready") {

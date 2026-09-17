@@ -33,6 +33,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	debfixture "github.com/apache/skywalking-ai-sessionizer/tools/test/deb-fixture"
 )
 
 const (
@@ -227,8 +229,28 @@ func (f *fixture) write() {
 
 func (f *fixture) execute(selected ...string) (string, error) {
 	f.t.Helper()
+	return f.executeWith("", selected...)
+}
+
+// addDebs adds the Debian packages CI builds for DEB_PACKAGES to the release.
+func (f *fixture) addDebs(debs string) {
+	f.t.Helper()
+	for _, p := range strings.Fields(debs) {
+		for _, arch := range []string{"amd64", "arm64"} {
+			name := "apache-skywalking-ai-sessionizer-" + version + "-bin-" + p + "-" + arch + ".deb"
+			data, err := debfixture.Bytes("Package: "+p+"\n", map[string]string{"usr/bin/" + p: "fixture\n"})
+			if err != nil {
+				f.t.Fatal(err)
+			}
+			f.members = append(f.members, member{name: name, data: data}, member{name: name + ".sha512", data: []byte(fmt.Sprintf("%x  %s\n", sha512.Sum512(data), name))})
+		}
+	}
+}
+
+func (f *fixture) executeWith(debs string, selected ...string) (string, error) {
+	f.t.Helper()
 	f.write()
-	script, err := filepath.Abs(filepath.Join("..", "ci-binaries.sh"))
+	script, err := filepath.Abs(filepath.Join("..", "..", "release", "ci-binaries.sh"))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -236,7 +258,11 @@ func (f *fixture) execute(selected ...string) (string, error) {
 	if len(selected) > 0 {
 		runID = selected[0]
 	}
-	command := exec.Command("bash", script, version, commit, runID, filepath.Join(f.dir, "output"), platforms)
+	args := []string{script, version, commit, runID, filepath.Join(f.dir, "output"), platforms}
+	if debs != "" {
+		args = append(args, debs)
+	}
+	command := exec.Command("bash", args...)
 	command.Env = append(os.Environ(), "PATH="+filepath.Join(f.dir, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"), "CI_BINARY_FIXTURE="+f.dir)
 	output, err := command.CombinedOutput()
 	return string(output), err
@@ -256,6 +282,28 @@ func TestCIBinariesUsePrereleaseBuildRun(t *testing.T) {
 	output, err := f.execute("999")
 	if err == nil || !strings.Contains(output, "must name the CI run that uploaded") {
 		t.Fatalf("unrelated CI run accepted: %v\n%s", err, output)
+	}
+}
+
+// A tag whose Makefile names Debian packages has one of each for every Linux
+// platform, and the prerelease must hold them too.
+func TestCIBinariesExpectTheDebianPackages(t *testing.T) {
+	f := newFixture(t)
+	f.addDebs("asz asz-claude-code")
+	output, err := f.executeWith("asz asz-claude-code")
+	if err != nil || !strings.Contains(output, "verified 10 packages") {
+		t.Fatalf("prerelease with Debian packages rejected: %v\n%s", err, output)
+	}
+	f = newFixture(t)
+	output, err = f.executeWith("asz asz-claude-code")
+	if err == nil || !strings.Contains(output, "exactly the expected") {
+		t.Fatalf("prerelease without the Debian packages accepted: %v\n%s", err, output)
+	}
+	f = newFixture(t)
+	f.addDebs("asz")
+	output, err = f.executeWith("asz")
+	if err != nil || !strings.Contains(output, "verified 8 packages") {
+		t.Fatalf("prerelease with the asz Debian packages rejected: %v\n%s", err, output)
 	}
 }
 

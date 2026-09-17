@@ -41,6 +41,20 @@ For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>` a
 `apache/skywalking-ai-sessionizer/asz-claude-code@<version>`. Homebrew keeps them off your `PATH`;
 `brew info` shows where they are.
 
+## apt, on Debian and Ubuntu
+
+```sh
+curl -fsSL https://downloads.apache.org/skywalking/KEYS | gpg --dearmor | sudo tee /usr/share/keyrings/apache-skywalking.gpg > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/apache-skywalking.gpg] https://skywalking.apache.org/apt stable main" | sudo tee /etc/apt/sources.list.d/apache-skywalking.list
+sudo apt update
+sudo apt install asz asz-claude-code
+```
+
+`asz-claude-code` installs `asz-claude-plugin`, the Claude Code plugin's binary. Then install the
+plugin into Claude Code as [Claude Code Plugin](claude-code-plugin.md) says. Upgrade with
+`sudo apt update && sudo apt upgrade`. For an exact version, run
+`sudo apt install asz=<version> asz-claude-code=<version>`.
+
 ## Binary package
 
 The [downloads page](https://skywalking.apache.org/downloads/) links one package per platform:
@@ -52,6 +66,14 @@ apache-skywalking-ai-sessionizer-<version>-bin-windows-<arch>.zip  arch: amd64, 
 
 Each holds `asz`, `asz-claude-plugin` (the Claude Code plugin's binary), `LICENSE`, `NOTICE` and
 `licenses/`.
+
+For Debian and Ubuntu, the same page links two `.deb` packages per architecture, which
+`sudo apt install ./<file>.deb` installs:
+
+```text
+apache-skywalking-ai-sessionizer-<version>-bin-asz-<arch>.deb              arch: amd64, arm64
+apache-skywalking-ai-sessionizer-<version>-bin-asz-claude-code-<arch>.deb  arch: amd64, arm64
+```
 
 On macOS or Linux:
 

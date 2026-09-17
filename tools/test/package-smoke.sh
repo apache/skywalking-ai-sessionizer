@@ -24,7 +24,7 @@
 # binary that was never started proves nothing about the platform. A release
 # manager or a voter can run it on a candidate package for their platform.
 #
-#   tools/package-smoke.sh PACKAGE [VERSION]
+#   tools/test/package-smoke.sh PACKAGE [VERSION]
 #
 # PACKAGE is a .tgz or a .zip with its .sha512 beside it. VERSION, when given,
 # must appear in what both binaries report. The scenarios come from
@@ -32,9 +32,9 @@
 
 set -euo pipefail
 
-pkg=${1:?usage: tools/package-smoke.sh PACKAGE [VERSION]}
+pkg=${1:?usage: tools/test/package-smoke.sh PACKAGE [VERSION]}
 want=${2:-}
-tree=$(cd "$(dirname "$0")/.." && pwd)
+tree=$(cd "$(dirname "$0")/../.." && pwd)
 # Checked before the path is made absolute. For a package whose directory
 # is missing, that turns into /NAME, and the error then names a wrong path.
 [ -f "$pkg" ] || { printf 'package-smoke: %s does not exist\n' "$pkg" >&2; exit 1; }
@@ -98,7 +98,7 @@ actual=${actual%%[[:space:]]*}
 echo "$(basename "$pkg"): its sha512 matches $(basename "$sum")"
 
 step "Archive metadata"
-sh "$tree/tools/package-check.sh" "$pkg" || fail "the package contains macOS metadata"
+sh "$tree/tools/release/package-check.sh" "$pkg" || fail "the package contains macOS metadata"
 
 step "Unpack"
 dir="$work/package"

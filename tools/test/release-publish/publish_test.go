@@ -77,7 +77,7 @@ func newFixture(t *testing.T) *fixture {
 			t.Skipf("release publish tests need %s", tool)
 		}
 	}
-	script, err := filepath.Abs("../release.sh")
+	script, err := filepath.Abs("../../release/release.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	for _, kind := range []string{"src.tgz", "bin-linux-amd64.tgz"} {
+	for _, kind := range []string{"src.tgz", "bin-linux-amd64.tgz", "bin-asz-amd64.deb"} {
 		name := "apache-skywalking-ai-sessionizer-" + version + "-" + kind
 		data := []byte("voted package: " + name + "\n")
 		files := map[string][]byte{
@@ -112,7 +112,6 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	f.write("tools/install-manifests.sh", []byte("#!/bin/sh\nmkdir -p \"$3\" && echo manifests > \"$3/README.md\"\n"))
 	f.setState(releaseState{Exists: true, Prerelease: true})
 	return f
 }
@@ -248,7 +247,7 @@ func (f *fixture) requirePublished() {
 	if state := f.state(); state.Prerelease {
 		f.t.Fatal("the GitHub release was not promoted")
 	}
-	for _, name := range []string{"announce.txt", "website.txt", "install/README.md"} {
+	for _, name := range []string{"announce.txt", "website.txt"} {
 		if _, err := os.Stat(filepath.Join(f.dir, "dist", version, name)); err != nil {
 			f.t.Fatalf("publish did not write %s: %v", name, err)
 		}
@@ -355,7 +354,7 @@ func TestPublishResumesAfterTheMove(t *testing.T) {
 		}
 	}
 	f.setState(releaseState{Exists: true, Prerelease: true, Interrupt: true})
-	f.requireFailure("The move is done. Run 'tools/release.sh publish 0.3.0' again")
+	f.requireFailure("The move is done. Run 'tools/release/release.sh publish 0.3.0' again")
 	if len(f.names(releaseDir)) != len(f.voted) {
 		t.Fatal("the interrupted run did not move the candidate")
 	}
@@ -502,6 +501,9 @@ func (f *fixture) requireWebsiteLatest(latest bool) {
 			"                sha512: https://downloads.apache.org/skywalking/ai-sessionizer/" + version + "/" + pkg + "-src.tgz.sha512\n",
 		"              - name: Linux AMD64\n                type: binary\n" +
 			"                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-linux-amd64.tgz\n",
+		"              - name: Debian package asz, AMD64\n                type: binary\n" +
+			"                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-asz-amd64.deb\n" +
+			"                asc: https://downloads.apache.org/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-asz-amd64.deb.asc\n",
 		"            date: Sep. 15th, 2026\n",
 	} {
 		if !strings.Contains(text, want) {
@@ -619,7 +621,7 @@ if tool == "git":
     elif args in [["rev-parse", "-q", "--verify", "refs/tags/" + tag], ["rev-parse", tag + "^{commit}"]]:
         print(sha)
     elif args == ["show", tag + ":Makefile"]:
-        print("PLATFORMS := linux/amd64")
+        print("PLATFORMS := linux/amd64\nDEB_PACKAGES := asz")
     elif args == ["show", tag + ":docs/en/changes/changes.md"]:
         print("# Changes in 0.3.0\n\nFixture release.")
     else:

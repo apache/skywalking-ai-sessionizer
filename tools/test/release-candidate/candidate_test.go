@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -35,7 +36,9 @@ import (
 
 type candidateFixture struct {
 	dir, binaries, commands, archive, state string
-	env                                     []string
+	// debs are the Debian packages CI attached beside the archive.
+	debs []string
+	env  []string
 }
 
 func candidateFixtureFor(t *testing.T) *candidateFixture {
@@ -63,19 +66,32 @@ func candidateFixtureFor(t *testing.T) *candidateFixture {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"release.sh", "package-check.sh"} {
-		body, err := os.ReadFile(filepath.Join("..", name))
+	for _, name := range []string{"release.sh", "package-check.sh", "deb-package/main.go"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", "release", name))
 		if err != nil {
 			t.Fatal(err)
 		}
-		write(filepath.Join(f.dir, "tools", name), string(body), 0o755)
+		write(filepath.Join(f.dir, "tools", "release", name), string(body), 0o755)
 	}
-	platform := "linux/amd64"
-	if runtime.GOOS == "linux" {
-		platform = "darwin/arm64"
+	// candidate builds tools/release/deb-package from the checkout to read
+	// the Debian packages. It needs the standard library only.
+	goMod, err := os.ReadFile(filepath.Join("..", "..", "..", "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goLine := regexp.MustCompile(`(?m)^go [0-9.]+$`).Find(goMod)
+	write(filepath.Join(f.dir, "go.mod"), "module github.com/apache/skywalking-ai-sessionizer\n\n"+string(goLine)+"\n", 0o644)
+	// A Linux platform, so the tag has Debian packages, and never this
+	// machine's, so candidate runs no package here.
+	platform, arch := "linux/amd64", "amd64"
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		platform, arch = "linux/arm64", "arm64"
 	}
 	f.archive = "apache-skywalking-ai-sessionizer-0.3.0-bin-" + strings.ReplaceAll(platform, "/", "-") + ".tgz"
-	write(filepath.Join(f.dir, "Makefile"), "PLATFORMS := "+platform+"\nCOMPILED_TYPES := application/x-executable\nCOMPILED_FILES := \\.(exe|o)\n", 0o644)
+	for _, p := range []string{"asz", "asz-claude-code"} {
+		f.debs = append(f.debs, "apache-skywalking-ai-sessionizer-0.3.0-bin-"+p+"-"+arch+".deb")
+	}
+	write(filepath.Join(f.dir, "Makefile"), "PLATFORMS := "+platform+"\nDEB_PACKAGES := asz asz-claude-code\nCOMPILED_TYPES := application/x-executable\nCOMPILED_FILES := \\.(exe|o)\n", 0o644)
 	write(filepath.Join(f.dir, "LICENSE"), "Apache License fixture\n", 0o644)
 	write(filepath.Join(f.dir, "NOTICE"), "ASF fixture\n", 0o644)
 	write(filepath.Join(f.dir, "docs/en/changes/changes.md"), "# Changes in 0.3.0\n\nFixture release.\n", 0o644)
@@ -151,7 +167,7 @@ case "$*" in
 esac
 exit 1
 `, 0o755)
-	write(filepath.Join(f.dir, "tools/ci-binaries.sh"), `#!/bin/sh
+	write(filepath.Join(f.dir, "tools/release/ci-binaries.sh"), `#!/bin/sh
 printf '%s\n' "$1|$2|$3" > "$RELEASE_TEST_SELECTION"
 [ "${RELEASE_TEST_FAIL_CI:-}" != 1 ] || exit 1
 mkdir -p "$4"
@@ -180,8 +196,20 @@ echo 'ci-binaries: artifact 456, sha256:fixture, commit fixture'
 	}
 	write(filepath.Join(f.binaries, f.archive), packed.String(), 0o644)
 	write(filepath.Join(f.binaries, f.archive+".sha512"), fmt.Sprintf("%x  %s\n", sha512.Sum512(packed.Bytes()), f.archive), 0o644)
+	// The Debian packages come from the tool make binaries runs.
+	staged := filepath.Join(base, "staged")
+	for _, name := range []string{"asz", "asz-claude-plugin", "LICENSE", "NOTICE", "licenses/license.txt"} {
+		write(filepath.Join(staged, name), "CI bytes for "+name+"\n", 0o755)
+	}
+	for i, p := range []string{"asz", "asz-claude-code"} {
+		f.writeDeb(t, p, "0.3.0", arch, staged, filepath.Join(f.binaries, f.debs[i]))
+	}
 	// The prerelease holds what CI attached on the tag push.
-	for _, name := range []string{f.archive, f.archive + ".sha512"} {
+	ci := []string{f.archive, f.archive + ".sha512"}
+	for _, d := range f.debs {
+		ci = append(ci, d, d+".sha512")
+	}
+	for _, name := range ci {
 		body, err := os.ReadFile(filepath.Join(f.binaries, name))
 		if err != nil {
 			t.Fatal(err)
@@ -200,6 +228,24 @@ echo 'ci-binaries: artifact 456, sha256:fixture, commit fixture'
 	return f
 }
 
+// writeDeb writes a Debian package with tools/release/deb-package, and its .sha512.
+func (f *candidateFixture) writeDeb(t *testing.T, pkg, version, arch, staged, out string) {
+	t.Helper()
+	cmd := exec.Command("go", "run", "../../release/deb-package", "-package", pkg, "-version", version, "-arch", arch,
+		"-from", staged, "-time", "1757000000", "-out", out)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("debpackage: %s\n%v", output, err)
+	}
+	body, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := fmt.Sprintf("%x  %s\n", sha512.Sum512(body), filepath.Base(out))
+	if err := os.WriteFile(out+".sha512", []byte(sum), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *candidateFixture) run(t *testing.T, args ...string) ([]byte, error) {
 	t.Helper()
 	return f.stage(t, append([]string{"--no-upload"}, args...)...)
@@ -207,7 +253,7 @@ func (f *candidateFixture) run(t *testing.T, args ...string) ([]byte, error) {
 
 func (f *candidateFixture) stage(t *testing.T, args ...string) ([]byte, error) {
 	t.Helper()
-	cmd := exec.Command("bash", append([]string{"tools/release.sh", "candidate", "0.3.0"}, args...)...)
+	cmd := exec.Command("bash", append([]string{"tools/release/release.sh", "candidate", "0.3.0"}, args...)...)
 	cmd.Dir, cmd.Env = f.dir, f.env
 	return cmd.CombinedOutput()
 }
@@ -231,7 +277,7 @@ func names(t *testing.T, dir string) []string {
 
 func (f *candidateFixture) voted() []string {
 	var out []string
-	for _, p := range []string{"apache-skywalking-ai-sessionizer-0.3.0-src.tgz", f.archive} {
+	for _, p := range append([]string{"apache-skywalking-ai-sessionizer-0.3.0-src.tgz", f.archive}, f.debs...) {
 		out = append(out, p, p+".asc", p+".sha512")
 	}
 	sort.Strings(out)
@@ -282,6 +328,38 @@ func TestCandidateUploadsToSVNAndAttachesToThePrerelease(t *testing.T) {
 	vote, err := os.ReadFile(filepath.Join(f.dir, "dist/0.3.0/vote.txt"))
 	if err != nil || !strings.Contains(string(vote), "releases/tag/v0.3.0") {
 		t.Fatalf("vote mail does not link the prerelease: %v\n%s", err, vote)
+	}
+	for _, d := range f.debs {
+		if !strings.Contains(string(vote), d) {
+			t.Fatalf("vote mail does not give the checksum of %s:\n%s", d, vote)
+		}
+	}
+	if !strings.Contains(string(vote), "The .deb files are Debian packages") {
+		t.Fatalf("vote mail does not say what the .deb files are:\n%s", vote)
+	}
+}
+
+// The apt index is made from a Debian package's control file after the
+// vote. A package whose control file names another version than its file
+// name is refused before anything is signed.
+func TestCandidateRefusesADebianPackageOfAnotherVersion(t *testing.T) {
+	f := candidateFixtureFor(t)
+	staged := filepath.Join(filepath.Dir(f.dir), "staged")
+	arch := strings.TrimSuffix(strings.TrimPrefix(f.debs[0], "apache-skywalking-ai-sessionizer-0.3.0-bin-asz-"), ".deb")
+	for _, dir := range []string{f.binaries, filepath.Join(f.state, "gh")} {
+		for _, name := range []string{f.debs[0], f.debs[0] + ".sha512"} {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	f.writeDeb(t, "asz", "0.2.0", arch, staged, filepath.Join(f.binaries, f.debs[0]))
+	output, err := f.run(t)
+	if err == nil || !strings.Contains(string(output), "does not say Version: 0.3.0") {
+		t.Fatalf("a Debian package of another version passed: %v\n%s", err, output)
+	}
+	if n := f.packageSignatures(t); n != 0 {
+		t.Fatalf("candidate signed %d packages before refusing", n)
 	}
 }
 
@@ -358,7 +436,7 @@ func TestCandidateRefusesAnUploadedCandidateItDidNotSign(t *testing.T) {
 	if err == nil || !strings.Contains(string(output), "does not hold the same files") {
 		t.Fatalf("foreign candidate accepted: %v\n%s", err, output)
 	}
-	if got := names(t, filepath.Join(f.state, "gh")); len(got) != 2 {
+	if got := names(t, filepath.Join(f.state, "gh")); len(got) != 2+2*len(f.debs) {
 		t.Fatalf("prerelease changed to %v", got)
 	}
 }

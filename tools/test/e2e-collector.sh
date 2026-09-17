@@ -20,7 +20,7 @@
 # each transport, and verify what its file exporter wrote. Needs docker.
 # Used by the Collector job in CI and by make e2e-collector.
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 IMAGE="${OTELCOL_IMAGE:-otel/opentelemetry-collector-contrib:0.158.0}"
 # The Collector project's own OTLP exporter, telemetrygen: a real external
 # exporter to point at asz's receiver, in place of Claude Code's.
@@ -151,7 +151,7 @@ YAML
   done
   sleep 2
   docker rm -f asz-e2e-otelcol >/dev/null
-  go run ./tools/collectorcheck "$root" "$WORK/otelcol/logs.json"
+  go run ./tools/test/collector-check "$root" "$WORK/otelcol/logs.json"
 }
 
 push_over grpc "127.0.0.1:$GRPC_PORT"

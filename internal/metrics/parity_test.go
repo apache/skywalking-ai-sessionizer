@@ -37,7 +37,8 @@ import (
 // one short non-interactive Opus session on 2026-09-07, over gRPC, with
 // the values of every attribute naming a person, an account, an
 // organisation or a session replaced. testdata/claude-code-2.1.260-metrics.json
-// is the same request as the protocol's JSON.
+// is the same request as the protocol's JSON. TestCaptures writes and checks
+// both.
 func capture(t *testing.T) *collmetricspb.ExportMetricsServiceRequest {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", "claude-code-2.1.260-metrics.pb"))

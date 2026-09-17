@@ -20,7 +20,7 @@
 
 # The stages of a release, in the order they run. None of them pushes to main.
 #
-#   tools/release.sh prepare [VERSION] [NEXT] [--dry-run] [--skip-check] [--no-push]
+#   tools/release/release.sh prepare [VERSION] [NEXT] [--dry-run] [--skip-check] [--no-push]
 #       On a branch release/VERSION cut from the current commit: check the
 #       tree, the headers and the suite. docs/en/changes/changes.md is the
 #       changelog of the version in development, and must name VERSION in
@@ -38,11 +38,11 @@
 #       heading of changes.md gives the offered VERSION. A dry run installs
 #       no tool: a check whose tool is not in bin/ yet is listed, not run.
 #
-#   tools/release.sh candidate [VERSION] [--ci-run RUN_ID] [--dry-run] [--no-upload]
+#   tools/release/release.sh candidate [VERSION] [--ci-run RUN_ID] [--dry-run] [--no-upload]
 #       After CI has attached the binaries to the prerelease: download those
 #       exact archives, archive the tagged source locally, sign and verify
 #       every package in dist/VERSION, run the binary package for this
-#       machine with the tag's tools/package-smoke.sh, upload the candidate
+#       machine with the tag's tools/test/package-smoke.sh, upload the candidate
 #       to the dev area of dist.apache.org, attach the source package, its
 #       .sha512 and every .asc to the GitHub prerelease, and write the vote
 #       mail to dist/VERSION/vote.txt. The signing key must be RSA of at
@@ -59,7 +59,7 @@
 #       dist/VERSION/vote-preview.txt. It refuses once a candidate of
 #       VERSION is uploaded.
 #
-#   tools/release.sh publish [VERSION] [--dry-run] [--remove-old] [--latest | --not-latest]
+#   tools/release/release.sh publish [VERSION] [--dry-run] [--remove-old] [--latest | --not-latest]
 #       Run by a PMC member after the vote passed. Verify the candidate's
 #       signatures against KEYS and move it from the dev area to the release
 #       directory of dist.apache.org. The move publishes the voted packages.
@@ -70,9 +70,10 @@
 #       whether the version becomes the latest GitHub release, which also
 #       moves the latest image tag. The answer offered is yes for a version
 #       newer than every full release, and no for a patch of an older line.
-#       --latest and --not-latest give the answer without asking. Then write the announcement,
-#       the website entries and the install manifests into dist/VERSION,
-#       and print what is left to do. A run after the move skips the move
+#       --latest and --not-latest give the answer without asking. Then write the announcement
+#       and the website entries into dist/VERSION, and print what is left
+#       to do: the website, the announcement, the homebrew and apt skills,
+#       and Scoop and winget. A run after the move skips the move
 #       and runs every later step again. --remove-old removes older versions
 #       from the release directory, and archive.apache.org keeps them. It is
 #       refused in the run that moves: run publish again with it once the
@@ -349,6 +350,31 @@ binary_package() { # binary_package OS/ARCH
   printf '%s' "$pkg-$version-bin-$os-$arch.$ext"
 }
 
+# The Debian packages of a version are the ones DEB_PACKAGES in its tag's
+# Makefile names, one for each Linux platform. A tag from before them has no
+# such line and no Debian package.
+tag_debs() {
+  git show "$tag:Makefile" | sed -nE 's/^DEB_PACKAGES[[:space:]]*:?=[[:space:]]*//p'
+}
+
+# deb_packages prints "FILE PACKAGE ARCH" for each Debian package.
+deb_packages() {
+  local p t
+  for p in $debs; do
+    for t in $platforms; do
+      case "$t" in linux/*) printf '%s %s %s\n' "$pkg-$version-bin-$p-${t#linux/}.deb" "$p" "${t#linux/}" ;; esac
+    done
+  done
+}
+
+# ci_packages prints every package CI builds and attaches: one binary
+# package per platform, and the Debian packages.
+ci_packages() {
+  local t
+  for t in $platforms; do printf '%s\n' "$(binary_package "$t")"; done
+  deb_packages | awk '{print $1}'
+}
+
 # host_platform prints the PLATFORMS entry of the machine running this, such
 # as darwin/arm64. It prints nothing for a system or a processor that no
 # package is built for. Git Bash on Windows names the system MINGW64_NT-10.0
@@ -370,9 +396,8 @@ host_platform() {
 }
 
 expected_packages() {
-  local t
   printf '%s\n' "$pkg-$version-src.tgz"
-  for t in $platforms; do printf '%s\n' "$(binary_package "$t")"; done
+  ci_packages
 }
 
 pick_version() { # pick_version PROMPT
@@ -387,11 +412,8 @@ release_repo=apache/skywalking-ai-sessionizer
 # ci_names prints the files CI attaches to the prerelease: each binary
 # package and its .sha512. The release stages never upload these.
 ci_names() {
-  local t b
-  for t in $platforms; do
-    b=$(binary_package "$t")
-    printf '%s\n%s\n' "$b" "$b.sha512"
-  done
+  local b
+  for b in $(ci_packages); do printf '%s\n%s\n' "$b" "$b.sha512"; done
 }
 
 # release_names prints every file the GitHub release holds once candidate
@@ -466,12 +488,17 @@ if [ "$cmd" = candidate ]; then
   if [ "$no_upload" = false ]; then tools="$tools svn"; fi
   # shellcheck disable=SC2086 # the list is split on purpose
   need_tools $tools
-  ci_helper=tools/ci-binaries.sh
-  package_check=tools/package-check.sh
+  ci_helper=tools/release/ci-binaries.sh
+  package_check=tools/release/package-check.sh
+  deb_reader=tools/release/deb-package
   [ -f "$ci_helper" ] || fail "$ci_helper is missing"
   [ -f "$package_check" ] || fail "$package_check is missing"
+  [ -d "$deb_reader" ] || fail "$deb_reader is missing"
   fetch_tag
   platforms=$(tag_platforms)
+  debs=$(tag_debs)
+  # Go reads the Debian packages, where macOS has no dpkg-deb.
+  if [ -n "$debs" ]; then need_tools go; fi
   packages=$(expected_packages)
   origin_url=$(git remote get-url origin)
   dev_dir="$dist_dev/ai-sessionizer/$version"
@@ -483,7 +510,7 @@ if [ "$cmd" = candidate ]; then
   # package for this machine again before upload. The script and the scenarios
   # come from the tag, not the working tree, because a scenario newer than
   # the tag may use what the tag's binary does not have.
-  smoke=tools/package-smoke.sh
+  smoke=tools/test/package-smoke.sh
   host=$(host_platform)
   host_pkg=""
   if [ -n "$host" ] && has_line "$platforms" "$host"; then
@@ -493,6 +520,7 @@ if [ "$cmd" = candidate ]; then
   say "tag      : $tag, on origin, at commit $commit"
   say "origin   : $origin_url"
   say "packages : the source package and one binary package for each of $(printf '%s\n' "$platforms" | awk 'NR>1{printf " "} {printf "%s", $0}')"
+  if [ -n "$debs" ]; then say "debian   : $debs, for each Linux platform"; fi
   if [ -n "$host_pkg" ]; then say "machine  : $host, so $host_pkg is run before the upload"
   else say "machine  : $(uname -s) $(uname -m), which no package is built for, so none is run here"; fi
 
@@ -582,15 +610,14 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
   mkdir -m 700 "$keyring"
   step "The CI binary packages"
   if [ "$dry_run" = true ]; then
-    say "- $ci_helper $version $commit $ci_run <temporary directory> <platforms from $tag>"
+    say "- $ci_helper $version $commit $ci_run <temporary directory> <platforms from $tag> <Debian packages from $tag>"
     say "- read the prerelease's readiness marker, require its successful uploader run for $tag at $commit, and verify asset digests, package checksums and archive contents"
     say "dry run: no GitHub prerelease asset was downloaded or verified"
   else
-    bash "$ci_helper" "$version" "$commit" "$ci_run" "$work/ci" "$platforms" | tee "$work/ci-check.txt" \
+    bash "$ci_helper" "$version" "$commit" "$ci_run" "$work/ci" "$platforms" "$debs" | tee "$work/ci-check.txt" \
       || fail "no verified CI binary packages are available. Wait for the CI run of the $tag push to create the prerelease and attach the binaries. If a job failed, rerun it; if the prerelease is incomplete or was rejected, remove it explicitly first, as the release guide describes. --ci-run must match its successful uploader run"
     if [ "$resume" = true ]; then
-      for t in $platforms; do
-        p=$(binary_package "$t")
+      for p in $(ci_packages); do
         for f in "$p" "$p.sha512"; do
           cmp -s "$work/ci/$f" "$out/$f" || fail "$out/$f is not the file CI attached to the prerelease, so the uploaded candidate is not the one CI built. Remove $dev_dir and run candidate again"
         done
@@ -730,8 +757,7 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
     rm -f "$out/vote.txt" "$out/vote-preview.txt"
     for p in $packages; do rm -f "$out/$p" "$out/$p.asc" "$out/$p.sha512"; done
     mkdir -p "$out"
-    for t in $platforms; do
-      p=$(binary_package "$t")
+    for p in $(ci_packages); do
       cp "$work/ci/$p" "$work/ci/$p.sha512" "$out/"
     done
     grep '^ci-binaries:' "$work/ci-check.txt" > "$out/ci-provenance.txt"
@@ -746,7 +772,7 @@ Fonts are under licenses such as the SIL Open Font License, which the ASF puts i
       sh "$package_check" "$out/$p" || fail "$p has forbidden archive metadata"
     done
     extra=""
-    for f in "$out"/*.tgz "$out"/*.zip; do
+    for f in "$out"/*.tgz "$out"/*.zip "$out"/*.deb; do
       [ -f "$f" ] || continue
       has_line "$packages" "${f##*/}" || extra="$extra ${f##*/}"
     done
@@ -791,6 +817,28 @@ $found"
       done
       say "ok  $b: asz$exe, asz-claude-plugin$exe, LICENSE, NOTICE and licenses/"
     done
+    # A Debian package installs one binary, and the same licenses under
+    # /usr/share/doc. Its control file must name the package, the version and
+    # the architecture its file name gives, because the apt index is made
+    # from the control file after the vote.
+    if [ -n "$debs" ]; then
+      GOWORK=off go build -o "$work/deb-package" "./$deb_reader" || fail "cannot build $deb_reader, which reads the Debian packages"
+    fi
+    while read -r b p arch; do
+      [ -n "$b" ] || continue
+      bin=asz
+      [ "$p" = asz ] || bin=asz-claude-plugin
+      listing=$("$work/deb-package" -list "$out/$b" </dev/null) || fail "cannot list $b"
+      for f in "usr/bin/$bin" "usr/share/doc/$p/LICENSE" "usr/share/doc/$p/NOTICE"; do
+        has_line "$listing" "$f" || fail "$b has no /$f"
+      done
+      has_prefix "$listing" "usr/share/doc/$p/licenses/" || fail "$b has no /usr/share/doc/$p/licenses/"
+      control=$("$work/deb-package" -control "$out/$b" </dev/null) || fail "cannot read the control file of $b"
+      for f in "Package: $p" "Version: $version" "Architecture: $arch"; do
+        has_line "$control" "$f" || fail "the control file of $b does not say $f"
+      done
+      say "ok  $b: $p $version $arch, /usr/bin/$bin, and LICENSE, NOTICE and licenses/ in /usr/share/doc/$p"
+    done <<< "$(deb_packages)"
 
     step "Sign the verified archives"
     for p in $packages; do
@@ -833,7 +881,7 @@ $found"
     # The prerelease then holds every file of the vote, so a voter can take
     # the signatures from either place. dist.apache.org stays the one the
     # vote is about.
-    sync_release_assets "$out" "The candidate is on $dev_dir. Run 'tools/release.sh candidate $version' again from this checkout: it signs and uploads nothing again, and attaches what is missing."
+    sync_release_assets "$out" "The candidate is on $dev_dir. Run 'tools/release/release.sh candidate $version' again from this checkout: it signs and uploads nothing again, and attaches what is missing."
   fi
 
   step "The vote mail"
@@ -871,7 +919,7 @@ Notes for voters:
  * The binary archives are the unchanged packages CI attached to the GitHub prerelease after all its checks passed on the tag push, verified below. Only the source archive was created locally. The release manager signed every archive after checking its contents and checksums, and attached the source archive and every signature to the same prerelease.
 $(sed 's/^ci-binaries:/ */' "$out/ci-provenance.txt")
  * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. \`make conversation-view-check\`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
- * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.
+ * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.$(if [ -n "$debs" ]; then printf '\n * The .deb files are Debian packages of the same Linux binaries, one for asz and one for asz-claude-plugin, with the same LICENSE, NOTICE and licenses/ under /usr/share/doc. apt installs them from the index on the SkyWalking website, which lists released versions only and is written after the vote.'; fi)
 
 Voting will start now and will remain open for at least 72 hours. All PMC members are requested to give their votes.
 
@@ -898,7 +946,7 @@ MAIL
     say "  2. After at least 72 hours, count the votes. The vote passes with at least three"
     say "     binding +1 votes and more binding +1 than binding -1 votes. Send the result to"
     say "     dev@skywalking.apache.org, with the subject [RESULT][VOTE] and every vote listed."
-    say "  3. If it passed, a PMC member runs: tools/release.sh publish $version"
+    say "  3. If it passed, a PMC member runs: tools/release/release.sh publish $version"
   fi
   exit 0
 fi
@@ -907,15 +955,10 @@ fi
 if [ "$cmd" = publish ]; then
   step "The version"
   pick_version "Version the vote passed for"
-  # tar and awk are for tools/install-manifests.sh, which runs after the
-  # move. Checked here, a missing one stops the run before anything moves.
-  need_tools git svn shasum tar awk gh gpg curl cmp
-  manifests=tools/install-manifests.sh
-  # Checked before anything moves. The manifests are written after the
-  # move, and a missing script there would stop the run half done.
-  [ -f "$manifests" ] || fail "$manifests is missing. publish runs it after the move, to write the install manifests from the voted packages. Add it and run publish again; nothing has changed."
+  need_tools git svn shasum awk gh gpg curl cmp
   fetch_tag
   platforms=$(tag_platforms)
+  debs=$(tag_debs)
   packages=$(expected_packages)
   dev_dir="$dist_dev/ai-sessionizer/$version"
   rel_parent="$dist_release/ai-sessionizer"
@@ -1013,11 +1056,13 @@ if [ "$cmd" = publish ]; then
     files="$dev_files"
   fi
   # The downloads page links the older versions in the release directory
-  # until the website pull request points them at the archive, and the
-  # Scoop bucket names the previous version until it moves on. Removing them
-  # in the run that moves would break both, so removal is a later run.
+  # until the website pull request points them at the archive, the apt
+  # repository on the website sends apt to the mirrors for the previous
+  # version until it lists this one, and the Scoop bucket names the previous
+  # version until it moves on. Removing them in the run that moves would
+  # break all three, so removal is a later run.
   if [ "$remove_old" = true ] && [ "$moved" = false ]; then
-    fail "--remove-old runs only after the move, in a later run. Run publish without it now. Once the website pull request that points the older versions at archive.apache.org has merged, and the Scoop bucket names $version, run: tools/release.sh publish $version --remove-old"
+    fail "--remove-old runs only after the move, in a later run. Run publish without it now. Once the website pull requests that point the older versions at archive.apache.org and add $version to the apt repository have merged, and the Scoop bucket names $version, run: tools/release/release.sh publish $version --remove-old"
   fi
   for p in $packages; do
     for f in "$p" "$p.asc" "$p.sha512"; do has_line "$files" "$f" || fail "$from has no $f"; done
@@ -1025,8 +1070,8 @@ if [ "$cmd" = publish ]; then
   say "ok  $from holds the source package and $(printf '%s\n' "$platforms" | wc -l | tr -d ' ') binary packages, each with its .asc and .sha512"
 
   step "The voted packages in $out"
-  # The install manifests and the GitHub release are made from these files,
-  # so each must be the one voted on. A package built again has other bytes,
+  # The GitHub release is checked against these files, and the website
+  # entries name them, so each must be the one voted on. A package built again has other bytes,
   # and a package signed again has another signature.
   fetch=""
   for p in $packages; do
@@ -1069,7 +1114,6 @@ if [ "$cmd" = publish ]; then
   fi
   say "- write the announcement to $out/announce.txt"
   say "- write the website entries to $out/website.txt"
-  say "- $manifests $version $out $out/install"
   if [ "$dry_run" = true ]; then say "dry run: no package was fetched, and nothing was moved, removed, promoted or written"; exit 0; fi
 
   mkdir -p "$out"
@@ -1126,14 +1170,14 @@ if [ "$cmd" = publish ]; then
 
 #### Where to get it
 
-- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows$(if [ -n "$debs" ]; then printf ', and the Debian packages,'; fi) are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
 - The files attached to this GitHub release are the same signed packages, each with its \`.asc\` signature and \`.sha512\` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install]($github/blob/$tag/docs/en/setup/install.md#verify-a-package) describes.
 - To build from the source package, see [Install]($github/blob/$tag/docs/en/setup/install.md#build-from-the-source-package).
 - Documentation: $github/blob/$tag/docs/README.md
 - Full changelog: $github/blob/$tag/docs/en/changes/changes.md
 TEXT
   }
-  resume_hint="The move is done. Run 'tools/release.sh publish $version' again: it skips the move and resumes here."
+  resume_hint="The move is done. Run 'tools/release/release.sh publish $version' again: it skips the move and resumes here."
   sync_release_assets "$out" "$resume_hint"
   if [ "$promoted" = false ]; then
     release_text > "$scratch/notes.md"
@@ -1259,6 +1303,13 @@ YAML
       printf '                asc: %s\n' "$downloads/$version/$b.asc"
       printf '                sha512: %s\n' "$downloads/$version/$b.sha512"
     done
+    while read -r b p arch; do
+      [ -n "$b" ] || continue
+      printf '              - name: Debian package %s, %s\n                type: binary\n' "$p" "$(printf '%s' "$arch" | tr '[:lower:]' '[:upper:]')"
+      printf '                link: %s\n' "$closer/$version/$b"
+      printf '                asc: %s\n' "$downloads/$version/$b.asc"
+      printf '                sha512: %s\n' "$downloads/$version/$b.sha512"
+    done <<< "$(deb_packages)"
     printf '            date: %s\n' "$(site_date "$published_on")"
   }
 
@@ -1266,17 +1317,6 @@ YAML
   say "wrote $out/announce.txt"
   website_entries > "$out/website.txt"
   say "wrote $out/website.txt"
-
-  step "The install manifests"
-  # The script refuses a directory that is not empty, so no file from an
-  # earlier run is submitted beside the new ones. publish owns this
-  # directory and writes it again on every run.
-  rm -rf "$out/install"
-  if [ -x "$manifests" ]; then run=("$manifests"); else run=(bash "$manifests"); fi
-  # The script refuses a directory that is not empty, so the command given
-  # on failure empties it first, or lets publish do it.
-  "${run[@]}" "$version" "$out" "$out/install" || fail "$manifests failed. The move is done and is not repeated. Fix the script, then run publish again, which skips the move and writes $out/install from scratch. Or run the script by hand: rm -rf $out/install && $manifests $version $out $out/install"
-  say "wrote $out/install"
 
   say "----"
   say "Next, in this order:"
@@ -1288,15 +1328,21 @@ YAML
   say "     $out/announce.txt to dev@skywalking.apache.org and announce@apache.org, as plain"
   say "     text from your apache.org address. Sign it with your release key if your mail"
   say "     program can; the ASF recommends it."
-  say "  3. Submit the install manifests in $out/install, once the PMC has agreed on"
-  say "     dev@skywalking.apache.org to each channel. $out/install/README.md says where each"
-  say "     one goes. The Homebrew formulae go to Formula/ on main in this repository, by a pull"
-  say "     request. They and the winget files download from the GitHub release, which is"
-  say "     promoted now."
+  say "  3. Add $version to Homebrew with the homebrew skill in .claude/skills, which opens a"
+  say "     pull request to main in this repository."
+  n=4
+  if [ -n "$debs" ]; then
+    say "  4. Add $version to the apt repository with the apt skill, which opens a pull request"
+    say "     to apache/skywalking-website."
+    n=5
+  fi
+  say "  $n. Once the PMC has agreed on dev@skywalking.apache.org to each, move Scoop and winget"
+  say "     to $version, as docs/en/guides/how-to-release.md says."
   if [ -n "$old" ] && [ "$remove_old" = false ]; then
-    say "  4. Later, once the website pull request that points$old at archive.apache.org"
-    say "     has merged, and the Scoop bucket names $version:"
-    say "     tools/release.sh publish $version --remove-old"
+    say "  $((n + 1)). Later, once the website pull requests that point$old at archive.apache.org"
+    say "     and add $version to the apt repository have merged, and the Scoop bucket names"
+    say "     $version:"
+    say "     tools/release/release.sh publish $version --remove-old"
   fi
   exit 0
 fi
@@ -1417,7 +1463,7 @@ if doit; then
   cat > "$dev_page" <<PAGE
 # Changes in $next
 
-> In development, not yet released. \`tools/release.sh prepare $next\` removes this note.
+> In development, not yet released. \`tools/release/release.sh prepare $next\` removes this note.
 PAGE
   git add "$page" "$menu" "$dev_page"
   git commit -q -m "Open $next
@@ -1442,14 +1488,14 @@ not pushed. When ready:
   gh pr create --base $from --head $branch --title "Prepare the $version candidate and open $next"
 The CI run of the tag push creates the GitHub prerelease $tag and attaches the binaries.
 Once it has, and the pull request has merged, sign and upload the candidate:
-  tools/release.sh candidate $version
+  tools/release/release.sh candidate $version
 NEXT
   exit 0
 fi
 git push -u origin "$branch"
 git push origin "$tag"
 gh pr create --base "$from" --head "$branch" --title "Prepare the $version candidate and open $next" \
-  --body "The first commit removes the in-development note from the $version changelog, docs/en/changes/changes.md. Tag $tag is on it, and is the candidate for the vote. The second commit moves the changelog to changes-$version.md, lists $version under Changelog, and opens $next in a new changes.md. The CI run of the $tag push creates the GitHub prerelease and attaches the binaries. After that and this merge, run \`tools/release.sh candidate $version\` to sign the candidate, upload it for the vote and attach its signatures to the prerelease."
+  --body "The first commit removes the in-development note from the $version changelog, docs/en/changes/changes.md. Tag $tag is on it, and is the candidate for the vote. The second commit moves the changelog to changes-$version.md, lists $version under Changelog, and opens $next in a new changes.md. The CI run of the $tag push creates the GitHub prerelease and attaches the binaries. After that and this merge, run \`tools/release/release.sh candidate $version\` to sign the candidate, upload it for the vote and attach its signatures to the prerelease."
 say "pushed $branch and $tag, and opened the pull request."
 say "Next: wait for the CI run of the $tag push to create the GitHub prerelease $tag with the binaries,"
-say "and for the pull request to merge. Then: tools/release.sh candidate $version"
+say "and for the pull request to merge. Then: tools/release/release.sh candidate $version"

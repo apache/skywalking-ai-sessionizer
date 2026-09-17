@@ -45,7 +45,7 @@
 // Path, so on Windows this runs only in GitHub Actions. CI runs it on each
 // binary package's own platform.
 //
-//	go run ./tools/claudecodecheck PACKAGE VERSION
+//	go run ./tools/test/claude-code-check PACKAGE VERSION
 package main
 
 import (
@@ -88,7 +88,7 @@ var windows = runtime.GOOS == "windows"
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./tools/claudecodecheck PACKAGE VERSION")
+		fmt.Fprintln(os.Stderr, "usage: go run ./tools/test/claude-code-check PACKAGE VERSION")
 		os.Exit(2)
 	}
 	c := &check{pkg: os.Args[1], version: os.Args[2]}

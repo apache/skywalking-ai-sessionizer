@@ -17,13 +17,15 @@
 # under the License.
 
 # Download the CI-built binary packages from the tag's GitHub prerelease.
-# Usage: tools/ci-binaries.sh VERSION COMMIT RUN_ID OUT_DIR "OS/ARCH ..."
-# OUT_DIR must be new or empty. PLATFORMS comes from the release tag's Makefile.
+# Usage: tools/release/ci-binaries.sh VERSION COMMIT RUN_ID OUT_DIR "OS/ARCH ..." ["DEB_PACKAGES"]
+# OUT_DIR must be new or empty. PLATFORMS and DEB_PACKAGES come from the
+# release tag's Makefile.
 # An empty RUN_ID or auto uses the run recorded by CI after uploading its files.
 # Only GitHub API reads are made. No package is installed before its run,
 # release identity, asset digests, checksums and archive checks have passed.
 set -euo pipefail
-[ "$#" -eq 5 ] || { echo 'usage: tools/ci-binaries.sh VERSION COMMIT RUN_ID OUT_DIR "OS/ARCH ..."' >&2; exit 2; }
+[ "$#" -eq 5 ] || [ "$#" -eq 6 ] || { echo 'usage: tools/release/ci-binaries.sh VERSION COMMIT RUN_ID OUT_DIR "OS/ARCH ..." ["DEB_PACKAGES"]' >&2; exit 2; }
+[ "$#" -eq 6 ] || set -- "$@" ""
 command -v python3 >/dev/null || { echo 'ci-binaries: python3 is required' >&2; exit 1; }
 command -v gh >/dev/null || { echo 'ci-binaries: gh is required' >&2; exit 1; }
 script_dir=$(cd "$(dirname "$0")" && pwd)
@@ -139,7 +141,7 @@ def release_assets(base, release_id, expected, signed, run=None):
 
 
 def main():
-    version, commit, run_id, directory, platform_text, package_check = sys.argv[1:]
+    version, commit, run_id, directory, platform_text, deb_text, package_check = sys.argv[1:]
     require(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?", version), "invalid release version")
     require(re.fullmatch(r"[0-9a-f]{40}", commit), "COMMIT must be the complete commit SHA")
     automatic = run_id in ("", "auto")
@@ -153,6 +155,16 @@ def main():
         os_name, arch = platform.split("/")
         extension = "zip" if os_name == "windows" else "tgz"
         packages.append(f"apache-skywalking-ai-sessionizer-{version}-bin-{os_name}-{arch}.{extension}")
+    # DEB_PACKAGES in the tag's Makefile names the Debian packages, one for
+    # each Linux platform. A tag from before them passes none.
+    debs = deb_text.split()
+    require(len(debs) == len(set(debs)) and set(debs) <= {"asz", "asz-claude-code"},
+            "DEB_PACKAGES must name distinct packages among asz and asz-claude-code")
+    for name in debs:
+        for platform in platforms:
+            os_name, arch = platform.split("/")
+            if os_name == "linux":
+                packages.append(f"apache-skywalking-ai-sessionizer-{version}-bin-{name}-{arch}.deb")
     expected = set(packages + [name + ".sha512" for name in packages])
     source = f"apache-skywalking-ai-sessionizer-{version}-src.tgz"
     signed = {source, source + ".sha512"} | {name + ".asc" for name in packages + [source]}
