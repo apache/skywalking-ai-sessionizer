@@ -1,134 +1,55 @@
 # Quick Start
 
-This page takes a machine that has used Claude Code and turns its history into conversations you
-can read. Nothing in Claude Code changes: no plugin, no hook script, no environment variable. The
-collector reads files that are already on disk, so it also works on history written before it was
-installed.
+Turn the Claude Code history on this machine into conversations you can read. Nothing in Claude
+Code needs to change, and history written before asz was installed is included.
 
-## Get the binary
+## 1. Install
 
-Each release ships a signed binary package for macOS, Linux and Windows.
-[Install](install.md) says where to download the one for your platform, and how to verify it.
-Unpack it, put `asz` on your path, and check it:
+[Install](install.md) `asz`. Check it:
 
 ```sh
 asz version
 ```
 
-Or build it yourself.
+## 2. Run
 
-## Build
-
-Go 1.27 or later. The module depends on a YAML parser and on the OpenTelemetry protocol's Go
-modules for the push.
+asz keeps its data in `./data` under the directory you run it in. Pick one, and start the server
+there:
 
 ```sh
-git clone https://github.com/apache/skywalking-ai-sessionizer.git
-cd skywalking-ai-sessionizer
-make build          # -> ./bin/asz
-./bin/asz version
+mkdir -p ~/asz && cd ~/asz
+asz server
 ```
 
-Every command reads `asz.yaml` from the working directory when no `-config` flag is given. The
-file at the repository root is the default configuration with every value written out, so the
-commands below work as they are. See [Configuration](configuration.md) to change where data comes
-from or goes.
+Open <http://127.0.0.1:8787>. `asz server` collects when it starts and then every 10 minutes, and
+the list page shows when it last did.
 
-## See what is there
+## 3. Configure
+
+asz reads `asz.yaml` from the same directory, or the file given with `-config`. Without one it uses
+the defaults. To change them, download the default configuration of your version into that
+directory and edit it:
 
 ```sh
-./bin/asz sources
+VERSION=$(asz version | cut -d ' ' -f 2)
+curl -fsSL -o asz.yaml "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/asz.yaml"
 ```
 
-```text
-source root: /Users/me/.claude/projects
-filtered   : 20 session(s) excluded by config
+[Configuration](configuration.md) describes every setting. The common ones:
 
-SESSION                               DIRS  STREAMS  META  JOURNAL  MANIFEST
-0438c73b-2367-4ed5-9de3-13ef9a17ed01  2     132      131   14       14
-04b56e12-fae2-4413-a7c1-f18911a1463f  1     1        0     0        0
-```
+- `storage.root`: where the data goes.
+- `collector.interval` of an adapter: how often it collects. A shorter interval shows new data
+  sooner and writes more, smaller files.
+- `export.otlp.endpoint`: send the data to an OpenTelemetry receiver, such as the SkyWalking OAP.
+  See [Export over OpenTelemetry](export-otlp.md).
 
-One row per session: how many directories its files are spread across, how many execution
-streams it has (the main transcript plus one per child agent), and how many child-agent sidecars,
-workflow journals and manifests were found. The source directory is resolved the way Claude Code
-resolves it: `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME`, then `~/.claude`. Sessions under
-`/private/tmp` are Claude Code's own helper agents and are excluded by default.
-
-## Land the history
+## Other commands
 
 ```sh
-./bin/asz collect -once
+asz sources          # the sessions asz found, and their files
+asz collect -once    # collect once, without serving the page
+asz verify           # check the collected data against its digests
 ```
 
-```text
-[17:14:09] refreshed: sessions=44 landed=5867 records=359292 rounds=44 (2m39.473s)
-```
-
-One pass does the whole pipeline. Every source file is read from its cursor onward and written
-into the storage root as Session Data, then indexed, then every session that moved is parsed into
-a round, and then, when `export.otlp.endpoint` names a receiver, what is on disk is sent. The line
-above is one machine's first pass, measured on 2026-09-03: 44 sessions, 5,867 source files,
-359,292 records, in 2 minutes 39 seconds. Later passes read only what is new; the next pass on the
-same machine landed one source in 933 ms. A pass that could not do everything says so on standard
-error and exits non-zero, so a script can tell. Re-running is safe: landing is idempotent by
-design.
-
-## Assemble
-
-`collect` already parsed. `asz parse` does that step on its own, which is what to run on a storage
-root that arrived without a collector, or to re-read one after a repack:
-
-```sh
-./bin/asz parse
-```
-
-```text
-SESSION                               ROUND  SEQ   NODES  RELS  UNRES  TALKS  RUNS  STEPS  TOOLS        CHILDREN
-0438c73b-2367-4ed5-9de3-13ef9a17ed01  1      305   17249  703   0      357    445   11473  5620/5620    131/131
-04b56e12-fae2-4413-a7c1-f18911a1463f  1      1     409    11    0      11     11    277    146/146      0/0
-04c6e9de-3b81-4106-a08b-e75259c33ca4  1      1     5      0     0      0      0     2      0/0          0/0
-…
-44 round(s) written
-```
-
-Each session becomes one conversation, and each parse appends one round to its chain when
-something changed. `TOOLS` and `CHILDREN` show how many tool calls and child-agent launches were
-joined to their results, out of how many exist. A second run with nothing new writes no rounds.
-
-## Read
-
-```sh
-./bin/asz server
-```
-
-Open `http://127.0.0.1:8787`. The list page shows every conversation; a conversation page shows
-its talks, its execution streams, the flow on a time axis, and the evidence behind every step.
-
-On a machine with Claude Code, `asz server` alone is enough. It runs the collector and the parser
-itself, once when it starts and then every 10 minutes by default, and the list page shows when the
-data was last refreshed and when it will be next. A shorter
-[interval](configuration.md#choosing-an-interval) shows new data sooner and writes more, smaller
-files. The two steps above are worth running once to see what each does.
-
-## Check
-
-```sh
-./bin/asz verify
-```
-
-```text
-checked 44 session(s), 5867 stream(s), 359292 records
-checked 44 conversation chain(s), 44 round(s)
-all landed data is contiguous and matches its digests
-```
-
-Every landed file is checked against its digest and every chain against its own commit digests.
-This needs no source files and no collector, so it also works on a storage root copied from
-another machine.
-
-## Where it went
-
-Everything is under the storage root, `./data` by default. Landed files are write-once, the index
-is derived and disposable, and the round chain is append-only. Deleting the directory starts over.
-See [Storage Root](../formats/storage-root.md).
+[Command Line](command-line.md) lists every command. To record which files each tool call changed,
+install the [Claude Code plugin](claude-code-plugin.md). To start over, stop asz and delete `./data`.

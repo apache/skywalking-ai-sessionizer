@@ -1,25 +1,16 @@
 # Install
 
-asz is one binary, `asz`, the collector. This page lists the ways to get it, and says when each one
-is available. Every way gives the same program.
+asz runs on macOS, Linux and Windows, on x86-64 and ARM 64. To record which files each tool call
+changed, also install the [Claude Code plugin](claude-code-plugin.md).
 
-The [Claude Code plugin](claude-code-plugin.md) is a second install, with its own script and its
-own page. It records which files each tool call changed, and asz collects what it records. The
-binary packages carry its binary, `asz-claude-plugin`, beside `asz`.
+## Install script
 
-## Quick install
-
-The install script of a version installs `asz` from that version's binary package. Set `VERSION`
-to a version the [downloads page](https://skywalking.apache.org/downloads/) lists as released, then
-run the script from that version's tag.
+Use a version from the [downloads page](https://skywalking.apache.org/downloads/).
 
 On macOS or Linux:
 
 ```sh
 VERSION=<version>
-```
-
-```sh
 curl -fsSL "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh" | sh -s -- "$VERSION"
 ```
 
@@ -27,150 +18,12 @@ On Windows, in PowerShell:
 
 ```powershell
 $Version = "<version>"
-```
-
-```powershell
 & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/asz.ps1"))) $Version
 ```
 
-The download site, downloads.apache.org, holds only the newest release, and archive.apache.org
-keeps every version. So the script asks the download site for the version's `.sha512` first. When
-the download site has it, the package comes through the Apache mirrors. When it does not, both
-come from the archive, which slows down heavy use and so is not asked first. The script stops
-unless the package matches its `.sha512`. It checks that `asz` starts, and only then puts it in the
-directory where the Claude Code installer puts `claude`: `~/.local/bin`, or
-`%USERPROFILE%\.local\bin`, which the Windows script adds to your user `Path`. It checks the
-checksum and not the signature. [Verify a package](#verify-a-package) says how to check both by
-hand. Run it again with another version to install that one over it. On Windows, stop `asz` first:
-Windows does not replace the file of a running program, and the script stops before it copies.
-
-The script is `install/asz.sh`, or `install/asz.ps1`, in the source of the version. The address
-names the version's tag, so the script that runs is the one released with that version. To read it
-before it runs, download it first:
-
-```sh
-curl -fsSL -o asz.sh "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$VERSION/install/asz.sh"
-sh asz.sh "$VERSION"
-```
-
-To install the Claude Code plugin as well, run its own script, which
-[Claude Code Plugin](claude-code-plugin.md#install) gives.
-
-## Binary package
-
-Each release ships one binary package for each platform. The release manager signs every package,
-and the PMC votes on them together with the source package. Once a version is released, the
-[SkyWalking downloads page](https://skywalking.apache.org/downloads/) links its packages under
-SkyWalking AI Sessionizer.
-
-| Platform | Package |
-| --- | --- |
-| macOS, Apple silicon | `apache-skywalking-ai-sessionizer-<version>-bin-darwin-arm64.tgz` |
-| macOS, Intel | `apache-skywalking-ai-sessionizer-<version>-bin-darwin-amd64.tgz` |
-| Linux, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-amd64.tgz` |
-| Linux, ARM 64 | `apache-skywalking-ai-sessionizer-<version>-bin-linux-arm64.tgz` |
-| Windows, x86-64 | `apache-skywalking-ai-sessionizer-<version>-bin-windows-amd64.zip` |
-| Windows, ARM 64 | `apache-skywalking-ai-sessionizer-<version>-bin-windows-arm64.zip` |
-
-Every package holds:
-
-- `asz`, or `asz.exe` on Windows.
-- `asz-claude-plugin`, or `asz-claude-plugin.exe`, the binary the Claude Code plugin's hooks run.
-  The plugin's manifest and hooks are not in the package. Claude Code installs them from the
-  marketplace at the version's tag, as [Claude Code Plugin](claude-code-plugin.md#install) says.
-- `LICENSE`, `NOTICE`, and `licenses/` with the license of every module built into the binaries.
-
-The same files are in three places:
-
-- `https://downloads.apache.org/skywalking/ai-sessionizer/<version>/` holds the versions users
-  should choose, each package with its `.asc` and `.sha512`. The downloads page links the packages
-  through the Apache mirror selector, and the `.asc` and `.sha512` files here.
-- `https://archive.apache.org/dist/skywalking/ai-sessionizer/` keeps every version, also after a
-  newer one replaces it on the download site. The mirror selector cannot find a version that has
-  left the download site, so take such a version from the archive.
-- The [GitHub release](https://github.com/apache/skywalking-ai-sessionizer/releases) of a version
-  carries the same packages, `.asc` and `.sha512` files. They are uploaded only after each one is
-  checked against the download site.
-
-The commands below use the version you set, as in [Quick install](#quick-install).
-
-On macOS or Linux, download a package with its checksum and its signature:
-
-```sh
-PKG=apache-skywalking-ai-sessionizer-$VERSION-bin-linux-amd64.tgz
-curl -fL -o "$PKG" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$VERSION/$PKG&action=download"
-curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.sha512"
-curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.asc"
-```
-
-[Verify it](#verify-a-package), then unpack it and check that it runs:
-
-```sh
-mkdir asz
-tar -xzf "$PKG" -C asz
-./asz/asz version
-```
-
-Put the directory on your `PATH`, or copy `asz` and `asz-claude-plugin` into a directory that is on
-it. The plugin's hooks run `asz-claude-plugin` by name, so Claude Code must find it on its `PATH`.
-
-The binaries are not notarized by Apple. A browser marks the files it downloads, and macOS may
-refuse to start a marked binary that is not notarized. `curl` does not mark what it downloads. If
-macOS refuses, remove the mark: `xattr -dr com.apple.quarantine asz`.
-
-On Windows, in PowerShell:
-
-```powershell
-$Pkg = "apache-skywalking-ai-sessionizer-$Version-bin-windows-amd64.zip"
-Invoke-WebRequest -OutFile $Pkg "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
-Invoke-WebRequest -OutFile "$Pkg.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.sha512"
-Invoke-WebRequest -OutFile "$Pkg.asc" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.asc"
-```
-
-[Verify it](#verify-a-package), then unpack it:
-
-```powershell
-Expand-Archive $Pkg -DestinationPath asz
-.\asz\asz.exe version
-```
-
-CI runs Claude Code with each Windows package on a Windows runner of its processor, and the plugin's
-hooks find `asz-claude-plugin.exe` by the name `asz-claude-plugin`.
-[Claude Code Plugin](claude-code-plugin.md#what-was-verified) says what was verified.
-
-## Verify a package
-
-Verify every package before you use it, the source package too. A package may come from a mirror,
-so take the `.sha512`, the `.asc` and the KEYS file from downloads.apache.org itself, never from a
-mirror. KEYS holds the public keys of the SkyWalking release managers.
-
-```sh
-shasum -a 512 -c "$PKG.sha512"
-curl -fLO https://downloads.apache.org/skywalking/KEYS
-gpg --import KEYS
-gpg --verify "$PKG.asc" "$PKG"
-```
-
-`shasum` must print the file name and `OK`. On Linux, `sha512sum -c "$PKG.sha512"` does the same.
-`gpg` must print `Good signature`, and nothing about an expired or revoked key: no `[expired]`
-after the name, no `Note: This key has expired!`, and no warning that the key or a subkey
-`has been revoked by its owner`. gpg 2.5.18 prints `Good signature` and exits 0 for an expired or
-revoked key too, and the
-[ASF release signing guide](https://infra.apache.org/release-signing.html) counts a signature as
-valid only when gpg verifies it as good and does not complain about an expired or revoked key. If
-gpg does complain, the package is not verified: do not use it, and ask on
-`dev@skywalking.apache.org`. gpg may also warn that the key is not certified with a trusted
-signature. That warning only says your own keyring does not vouch for the key. It does not say
-the signature is bad.
-
-On Windows, in PowerShell, this must print `True`:
-
-```powershell
-(Get-FileHash -Algorithm SHA512 $Pkg).Hash -eq (Get-Content "$Pkg.sha512").Split(" ")[0]
-```
-
-For the signature, install [Gpg4win](https://www.gpg4win.org/), which provides `gpg`. Download
-KEYS, then run the same two `gpg` commands.
+The script checks the package's sha512 and puts `asz` in `~/.local/bin`, or
+`%USERPROFILE%\.local\bin` on Windows, which it adds to your `Path`. Run it again with another
+version to upgrade. On Windows, stop `asz` first.
 
 ## Homebrew, on macOS and Linux
 
@@ -184,16 +37,76 @@ brew install apache/skywalking-ai-sessionizer/asz-claude-code
 plugin into Claude Code, run the two commands that `brew info asz-claude-code` prints. Upgrade with
 `brew upgrade asz asz-claude-code`.
 
+## Binary package
+
+The [downloads page](https://skywalking.apache.org/downloads/) links one package per platform:
+
+```text
+apache-skywalking-ai-sessionizer-<version>-bin-<os>-<arch>.tgz    os: darwin, linux; arch: amd64, arm64
+apache-skywalking-ai-sessionizer-<version>-bin-windows-<arch>.zip  arch: amd64, arm64
+```
+
+Each holds `asz`, `asz-claude-plugin` (the Claude Code plugin's binary), `LICENSE`, `NOTICE` and
+`licenses/`.
+
+On macOS or Linux:
+
+```sh
+PKG=apache-skywalking-ai-sessionizer-$VERSION-bin-linux-amd64.tgz
+curl -fL -o "$PKG" "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$VERSION/$PKG&action=download"
+curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.sha512"
+curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$PKG.asc"
+```
+
+[Verify it](#verify-a-package), then unpack it and put `asz` on your `PATH`:
+
+```sh
+mkdir asz && tar -xzf "$PKG" -C asz
+./asz/asz version
+```
+
+If macOS refuses to start a binary a browser downloaded, run `xattr -dr com.apple.quarantine asz`.
+
+On Windows, in PowerShell:
+
+```powershell
+$Pkg = "apache-skywalking-ai-sessionizer-$Version-bin-windows-amd64.zip"
+Invoke-WebRequest -OutFile $Pkg "https://www.apache.org/dyn/closer.lua?path=skywalking/ai-sessionizer/$Version/$Pkg&action=download"
+Invoke-WebRequest -OutFile "$Pkg.sha512" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.sha512"
+Invoke-WebRequest -OutFile "$Pkg.asc" "https://downloads.apache.org/skywalking/ai-sessionizer/$Version/$Pkg.asc"
+Expand-Archive $Pkg -DestinationPath asz
+.\asz\asz.exe version
+```
+
+A version that is no longer on downloads.apache.org is under
+`https://archive.apache.org/dist/skywalking/ai-sessionizer/`. Each GitHub release carries the same
+files.
+
+## Verify a package
+
+Take the `.sha512`, the `.asc` and KEYS from downloads.apache.org, not from a mirror.
+
+```sh
+shasum -a 512 -c "$PKG.sha512"
+curl -fLO https://downloads.apache.org/skywalking/KEYS
+gpg --import KEYS
+gpg --verify "$PKG.asc" "$PKG"
+```
+
+`shasum` must print `OK`. `gpg` must print `Good signature`, with no word that the key has expired
+or has been revoked. If it has, do not use the package, and ask on `dev@skywalking.apache.org`. A
+warning that the key is not certified with a trusted signature is expected.
+
+On Windows, in PowerShell, this must print `True`. For the signature, install
+[Gpg4win](https://www.gpg4win.org/) and run the same `gpg` commands.
+
+```powershell
+(Get-FileHash -Algorithm SHA512 $Pkg).Hash -eq (Get-Content "$Pkg.sha512").Split(" ")[0]
+```
+
 ## Build from the source package
 
-The source package is the Apache release itself. It builds with Go 1.27 or later, the version
-`go.mod` declares, and the build downloads the Go modules `go.mod` names. It needs no Node.js,
-because the conversation renderer the page draws with is committed in the source, built from a
-pinned Horizon commit. The source package does not carry the renderer's two fonts, because they
-are under the SIL Open Font License, which the ASF keeps out of source releases. A binary built
-from it draws the page with system fonts. The binary packages carry the fonts.
-
-With `VERSION` set to a released version:
+With Go 1.27 or later:
 
 ```sh
 SRC=apache-skywalking-ai-sessionizer-$VERSION-src.tgz
@@ -202,7 +115,7 @@ curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$SRC.
 curl -fLO "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/$SRC.asc"
 ```
 
-[Verify it](#verify-a-package), with `$SRC` in place of `$PKG`. Then:
+[Verify it](#verify-a-package) with `$SRC` in place of `$PKG`, then:
 
 ```sh
 tar -xzf "$SRC"
@@ -211,65 +124,21 @@ make build VERSION=$VERSION
 ./bin/asz version
 ```
 
-`make build` writes `bin/asz` and `bin/asz-claude-plugin`. Pass `VERSION`. The Makefile reads the
-version from git, and an unpacked source package has no git history, so without it `asz version`
-prints an empty version.
-
-To run the plugin from the source, put `bin` first on `PATH` and load the plugin's directory:
-
-```sh
-PATH="$PWD/bin:$PATH" claude --plugin-dir plugins/claude-code/plugin
-```
-
-`--plugin-dir` lasts for that one session. Its data directory is `asz-changes-inline`, not the
-`asz-changes-skywalking-ai-sessionizer` of an installed plugin.
-
-Without make, on Windows for example, run the two commands `make build` runs:
+`make build` writes `bin/asz` and `bin/asz-claude-plugin`. Without make, on Windows for example:
 
 ```sh
 go build -ldflags "-X main.version=$VERSION" -o bin/asz.exe ./cmd/asz
 go build -ldflags "-X main.version=$VERSION" -o bin/asz-claude-plugin.exe ./plugins/claude-code
 ```
 
-Leave out `.exe` on macOS and Linux. `make binaries VERSION=$VERSION` cross-compiles every
-platform into `dist/`, the way the binary packages are built.
-
-A git checkout builds the same way, and there the Makefile takes the version from the nearest tag.
-See [Quick Start](quick-start.md#build).
+A build from source draws the page with system fonts. The binary packages carry the page's fonts.
 
 ## go install
 
-**This builds from the source repository, not from the Apache release.** The Apache release is
-the signed source package above, and the binary packages built from it. Use `go install` only if
-you accept a build of the tagged source that no vote checked.
-
-For Go users, with Go 1.27 or later:
+This builds the tagged source, not the voted release:
 
 ```sh
 go install "github.com/apache/skywalking-ai-sessionizer/cmd/asz@v$VERSION"
 ```
 
-It installs `asz` into Go's `bin` directory, `$(go env GOPATH)/bin` unless `GOBIN` is set. It
-differs from a package in four ways:
-
-- Go fetches the module from the tag on GitHub, through the Go module proxy. That is the tagged
-  source, not the signed source package the vote approved.
-- Name a version the downloads page lists as released. A tag is pushed before its vote, so
-  `@latest` can name a candidate that was never released.
-- `asz version` prints `dev`. The Makefile sets the version at build time, and `go install` does
-  not.
-- The Claude Code plugin's binary is not installed. Take it from a binary package, or build it from
-  the source package. `go install` of `./plugins/claude-code` would name the binary `claude-code`,
-  which the plugin's hooks do not run.
-
-Measured on 2026-09-11 on macOS: `go install github.com/apache/skywalking-ai-sessionizer/cmd/asz@main`
-built commit `dd083cc`, through the Go module proxy and again from GitHub directly. The module Go
-downloaded held the committed conversation renderer, and the binary printed
-`asz dev (go1.27.1 darwin/arm64)`.
-
-## Not offered
-
-- **No deb or rpm package**, and no apt or yum repository. On Linux, use the install script, a
-  binary package, or Homebrew.
-- **A container image** is described in [Container Image](container-image.md), with how to build
-  it yourself.
+`asz version` then prints `dev`, and the Claude Code plugin's binary is not installed.

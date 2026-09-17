@@ -17,6 +17,7 @@ make test           # the whole suite, with the race detector
 make test-e2e       # the scenarios, the chain tests and the boundary rules, verbose
 make scenarios      # every scenario through the built command, as CI runs them
 make check          # vet, lint, license headers, dependency licenses, tests: what CI runs
+make docker         # the container image, as skywalking-ai-sessionizer:dev
 make help           # every target
 ```
 

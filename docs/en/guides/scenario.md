@@ -182,7 +182,7 @@ enough, is kept without a line.
 
 One pipeline works on a root at a time. A pipeline over a root a `claude-code` build wrote holds
 `DIR/_scenario/.lock` for as long as it runs, and a second one waits and says so.
-[collect](../setup/command-line.md#a-scenario-root) shows what each prints.
+[collect](command-line-internals.md#a-scenario-root) shows what each prints.
 
 A build refuses to write a session whose marker says a pipeline is removing it. Building a
 one-shot or `--repeat` scenario into the same directory again, after its sessions were removed,

@@ -382,8 +382,8 @@
   Code has not run either form on Windows. With no argument and its event on standard input, the
   binary now runs as `hook`, so a Claude Code that drops the argument does not block a tool with
   the usage text's exit status 2.
-  [The hook command](../setup/claude-code-plugin.md#the-hook-command) describes the form, and
-  [What was verified](../setup/claude-code-plugin.md#what-was-verified) says what is still unknown
+  [The hook command](../adapters/claude-code-plugin.md#the-hook-command) describes the form, and
+  [What was verified](../adapters/claude-code-plugin.md#what-was-verified) says what is still unknown
   on Windows.
 
 ## Metrics
