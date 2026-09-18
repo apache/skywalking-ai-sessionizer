@@ -18,10 +18,15 @@ with archive.apache.org as its mirror. That URL keeps working after the version 
 site. Users run:
 
 ```sh
+brew trust https://github.com/apache/skywalking-ai-sessionizer
 brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
 brew install apache/skywalking-ai-sessionizer/asz apache/skywalking-ai-sessionizer/asz-claude-code
 brew install apache/skywalking-ai-sessionizer/asz@0.4.0
 ```
+
+Homebrew 7 loads a tap that is not its own only after `brew trust`, and this tap must be trusted by
+its URL, because the repository is not named `homebrew-skywalking-ai-sessionizer`. The check below
+needs no trust: it names each formula in full, which Homebrew takes as trusting that one.
 
 The user names one version or several. Each must be released: voted, on the download site or the
 archive, and its GitHub release promoted. 0.4.0 is the first version these templates fit; before
