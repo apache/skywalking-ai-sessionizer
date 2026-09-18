@@ -165,6 +165,9 @@ docker run -d --name asz-apt-site --network asz-apt -v "$APT:/usr/local/apache2/
   -v "$W/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro" httpd:2.4
 for image in debian:stable ubuntu:24.04; do
   docker run --rm --network asz-apt -v "$W/keys.gpg:/keys.gpg:ro" -e NEWEST="$newest" -e OLDER="<the added versions other than the newest>" "$image" bash -euc '
+    # The redirects lead to https, and these images carry no certificates.
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq && apt-get install -y -qq ca-certificates > /dev/null
     install -m 644 /keys.gpg /usr/share/keyrings/apache-skywalking.gpg
     echo "deb [signed-by=/usr/share/keyrings/apache-skywalking.gpg] http://asz-apt-site/apt stable main" > /etc/apt/sources.list.d/apache-skywalking.list
     apt-get update
@@ -183,7 +186,7 @@ docker network rm asz-apt
 
 Each image must install every version, and the log must show a `302` for each package. A download
 that fails for the newest version means the mirrors do not have it yet: wait and run this step
-again.
+again. A certificate error means `ca-certificates` was not installed in the image first.
 
 ## 7. Open the pull request to the website
 
