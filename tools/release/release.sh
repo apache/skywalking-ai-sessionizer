@@ -1256,7 +1256,10 @@ MAIL
   # The shape is that of a release in data/projects.yml in
   # apache/skywalking-website, which gives both the downloads page and the
   # documentation. A package is linked through the mirror selector, and its
-  # signature and checksum through downloads.apache.org.
+  # signature and checksum through downloads.apache.org. The page lists the
+  # source package and the binary archives. The Debian packages are beside
+  # them in the release directory, and apt installs them from the repository
+  # on the website, so the page does not list them too.
   website_entries() {
     local t b
     cat <<YAML
@@ -1311,13 +1314,6 @@ YAML
       printf '                asc: %s\n' "$downloads/$version/$b.asc"
       printf '                sha512: %s\n' "$downloads/$version/$b.sha512"
     done
-    while read -r b p arch; do
-      [ -n "$b" ] || continue
-      printf '              - name: Debian package %s, %s\n                type: binary\n' "$p" "$(printf '%s' "$arch" | tr '[:lower:]' '[:upper:]')"
-      printf '                link: %s\n' "$closer/$version/$b"
-      printf '                asc: %s\n' "$downloads/$version/$b.asc"
-      printf '                sha512: %s\n' "$downloads/$version/$b.sha512"
-    done <<< "$(deb_packages)"
     printf '            date: %s\n' "$(site_date "$published_on")"
   }
 

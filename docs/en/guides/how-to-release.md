@@ -49,7 +49,7 @@ convenience made from its voted files.
 | archive.apache.org | every released version, also after it leaves the release directory | Apache's infrastructure, from the release directory | by itself |
 | The GitHub release `v$VERSION` | the same files | CI creates it on the tag push, [2. Candidate](#2-candidate) attaches to it, [3. Publish](#3-publish) promotes it | at the vote, then at Publish |
 | The container image, `ghcr.io/apache/skywalking-ai-sessionizer:$VERSION` | `docker pull` | CI's `docker` job, on the released event | when Publish promotes the GitHub release |
-| The downloads page and the documentation, `data/projects.yml` in apache/skywalking-website | links to the packages, and the docs of the tag | [The website](#the-website), a pull request | at least one hour after the move |
+| The downloads page and the documentation, `data/projects.yml` in apache/skywalking-website | links to the source package and the binary archives, and the docs of the tag | [The website](#the-website), a pull request | at least one hour after the move |
 | The announcement | the mail to the dev and announce lists | [The announcement](#the-announcement) | once the downloads page lists the version |
 | The Homebrew tap, `Formula/` on main in this repository | `brew install` | [Homebrew](#homebrew), the `homebrew` skill, a pull request | after Publish |
 | The apt repository, `static/apt` in apache/skywalking-website | `apt install` | [apt](#apt), the `apt` skill, a pull request | at least one hour after the move |
@@ -885,6 +885,10 @@ changes. Then open a pull request on
 [apache/skywalking-website](https://github.com/apache/skywalking-website) with the release in
 `dist/$VERSION/website.txt`.
 
+The downloads page lists the source package and the binary archives. The Debian packages are beside
+them in the release directory, with their signatures and checksums, and apt installs them from
+[the apt repository](#apt), so the page does not list them too.
+
 The website keeps every project in one file, `data/projects.yml`. A release there gives both the
 downloads page and the documentation of its version. Find the project whose `repo` is
 `skywalking-ai-sessionizer`, and add the release to its list under `releases`. The project must
@@ -921,9 +925,7 @@ By hand, the release when it is the latest is:
                 asc: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.asc
                 sha512: https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-darwin-arm64.tgz.sha512
               # The same four lines for each other platform, in the order of PLATFORMS:
-              # MacOS AMD64, Linux AMD64, Linux ARM64, Windows AMD64 and Windows ARM64,
-              # then for each Debian package: "Debian package asz, AMD64", with the link
-              # .../apache-skywalking-ai-sessionizer-$VERSION-bin-asz-amd64.deb, and so on.
+              # MacOS AMD64, Linux AMD64, Linux ARM64, Windows AMD64 and Windows ARM64.
             date: Sep. 17th, 2026
 ```
 

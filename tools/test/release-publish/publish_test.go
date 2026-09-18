@@ -501,16 +501,15 @@ func (f *fixture) requireWebsiteLatest(latest bool) {
 			"                sha512: https://downloads.apache.org/skywalking/ai-sessionizer/" + version + "/" + pkg + "-src.tgz.sha512\n",
 		"              - name: Linux AMD64\n                type: binary\n" +
 			"                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-linux-amd64.tgz\n",
-		"              - name: Debian package asz, AMD64\n                type: binary\n" +
-			"                link: https://www.apache.org/dyn/closer.lua/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-asz-amd64.deb\n" +
-			"                asc: https://downloads.apache.org/skywalking/ai-sessionizer/" + version + "/" + pkg + "-bin-asz-amd64.deb.asc\n",
 		"            date: Sep. 15th, 2026\n",
 	} {
 		if !strings.Contains(text, want) {
 			f.t.Fatalf("website.txt has no %q:\n%s", want, text)
 		}
 	}
-	for _, stale := range []string{"releases.yml", "docs.yml", "downloadLink"} {
+	// The Debian packages are in the release directory, and apt installs
+	// them. The downloads page lists the source and the binary archives.
+	for _, stale := range []string{"releases.yml", "docs.yml", "downloadLink", ".deb"} {
 		if strings.Contains(text, stale) {
 			f.t.Fatalf("website.txt still has the retired shape %q:\n%s", stale, text)
 		}
