@@ -28,10 +28,16 @@ version to upgrade. On Windows, stop `asz` first.
 ## Homebrew, on macOS and Linux
 
 ```sh
+brew trust https://github.com/apache/skywalking-ai-sessionizer
 brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
 brew install apache/skywalking-ai-sessionizer/asz
 brew install apache/skywalking-ai-sessionizer/asz-claude-code
 ```
+
+Homebrew 7 loads a tap that is not one of its own only after `brew trust`. Trust it by the same URL
+you tap: for this tap, the name `apache/skywalking-ai-sessionizer` does not match, because the
+repository is not named `homebrew-skywalking-ai-sessionizer`. Without it, `brew tap` stops with
+`Refusing to load formula ... from untrusted tap`.
 
 `asz-claude-code` installs `asz-claude-plugin`, the Claude Code plugin's binary. To install the
 plugin into Claude Code, run the two commands that `brew info asz-claude-code` prints. Upgrade with

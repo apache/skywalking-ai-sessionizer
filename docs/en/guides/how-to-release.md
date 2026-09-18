@@ -977,6 +977,10 @@ The Apache SkyWalking Team
 
 ## Homebrew
 
+Users trust the tap by its URL before they tap it, as [Install](../setup/install.md#homebrew-on-macos-and-linux)
+says. Homebrew 7 loads a tap that is not its own only after `brew trust`, and a `user/repository`
+trust entry matches only a tap at its default remote, which this one is not.
+
 The tap is this repository: `Formula/` on main. It holds `asz@VERSION.rb` and
 `asz-claude-code@VERSION.rb` for every release, keg-only so they do not clash, and `asz.rb` and
 `asz-claude-code.rb` for the newest. `asz` installs `asz`, and `asz-claude-code` installs
