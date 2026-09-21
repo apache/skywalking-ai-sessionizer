@@ -167,6 +167,22 @@ type Adapter struct {
 	// for the runtime's exporter, such as 127.0.0.1:4317, over gRPC and
 	// HTTP with protobuf on the one port.
 	Listen string `yaml:"listen"`
+	// Token, on langsmith-ingest, is required in the x-api-key header.
+	// Empty accepts any key, which is what a local collector wants: the
+	// client insists on sending one and has nothing to prove.
+	Token string `yaml:"token"`
+	// ThreadKeys, on langsmith-ingest, are the run metadata keys that may
+	// carry the thread, in the order they are tried. An application that
+	// names its own says so here.
+	ThreadKeys []string `yaml:"thread_keys"`
+	// Scope, on langsmith-ingest, names the dimensions that together own a
+	// conversation, in order: "project" is the client's project name and
+	// anything else is a metadata key. A bare thread key is not an
+	// identity, because two applications can both use the project
+	// "production" and the thread "123". Dropping "project" merges every
+	// project that shares a thread key, which is a choice to make rather
+	// than one to discover.
+	Scope []string `yaml:"scope"`
 	// MetricsLookback bounds the first derivation over a root that has
 	// history: a minute older than this is not derived. A duration such as
 	// 24h or 7d; empty means 24h; 0 or none means everything.
@@ -187,8 +203,9 @@ func (a *Adapter) UnmarshalYAML(node *yaml.Node) error {
 	type plain Adapter
 	value := plain{Name: name.Name, Enabled: true}
 	for _, def := range Default().Adapters {
-		if def.Name == name.Name {
+		if sameAdapter(def.Name, name.Name) {
 			value = plain(def)
+			value.Name = name.Name
 			break
 		}
 	}
@@ -234,6 +251,10 @@ const (
 	// Claude Code plugin writes beside Claude Code's own files. Pull
 	// posture, like the local adapter, and the plugin needs nothing from
 	// it: it discovers and tails what the plugin has already written.
+	AdapterChanges = "changes"
+	// AdapterClaudeCodeChanges is what that adapter was called until 0.5.0.
+	// A configuration written then still names it, so it is accepted and
+	// read as the same adapter rather than skipped as an unknown one.
 	AdapterClaudeCodeChanges = "claude-code-changes"
 	// AdapterClaudeCodeProvider reads the request and response bodies
 	// Claude Code writes for its model provider when
@@ -241,6 +262,11 @@ const (
 	// local adapter: Claude Code writes the files, and this adapter finds
 	// each body's session and lands it.
 	AdapterClaudeCodeProvider = "claude-code-provider"
+	// AdapterLangSmithIngest receives what the LangSmith tracing client
+	// sends. Push posture: an application built on LangChain or LangGraph
+	// already carries that client, so four environment variables are the
+	// whole integration and nothing in the application changes.
+	AdapterLangSmithIngest = "langsmith-ingest"
 )
 
 // Default returns the configuration used when none is supplied.
@@ -268,10 +294,21 @@ func Default() *Config {
 			Listen:  "127.0.0.1:4317",
 			Metrics: true,
 		}, {
+			// The LangSmith tracing client, received. Off until pointed
+			// at: the file names the address an application would be
+			// given, and the defaults are what that client documents.
+			Name:       AdapterLangSmithIngest,
+			Enabled:    false,
+			Listen:     "127.0.0.1:1985",
+			ThreadKeys: []string{"thread_id", "session_id", "conversation_id"},
+			Scope:      []string{"project", "thread"},
+			Collector: Collector{Mode: ModeWatch, Interval: DefaultInterval,
+				MaxDeltaBytes: 2 << 20},
+		}, {
 			// The plugin's output, beside the runtime's own files. On by
 			// default because it costs nothing when the plugin is not
 			// installed: there is nothing to discover.
-			Name:    AdapterClaudeCodeChanges,
+			Name:    AdapterChanges,
 			Enabled: true,
 			Exclude: []string{"/private/tmp/**"},
 			Collector: Collector{
@@ -303,6 +340,29 @@ func Default() *Config {
 	}
 }
 
+// sameAdapter reports whether two names are the same adapter.
+//
+// An adapter that was renamed answers to both names, so the defaults have to
+// be found under either. Matching the literal name meant a configuration
+// written before the rename found no defaults at all and silently lost them,
+// including the exclusion that keeps the tool's own sessions out.
+func sameAdapter(a, b string) bool {
+	return a == b || (isChanges(a) && isChanges(b))
+}
+
+// isChanges reports whether a name is the change-record adapter, under either
+// the name it has now or the one it had until 0.5.0.
+func isChanges(name string) bool {
+	return name == AdapterChanges || name == AdapterClaudeCodeChanges
+}
+
+// isReceiver reports whether an adapter is a server rather than a reader. A
+// receiver polls nothing and lands no transcript of its own, so the collector
+// settings do not apply to it.
+func isReceiver(name string) bool {
+	return name == AdapterClaudeCodeOTLP
+}
+
 // Load reads a YAML config, applying defaults for anything unset. An empty
 // path returns Default.
 func Load(path string) (*Config, error) {
@@ -328,7 +388,7 @@ func Load(path string) (*Config, error) {
 		for i := range cfg.Adapters {
 			// A receiver is a server: it polls nothing and lands no
 			// transcript, so the collector settings do not apply to it.
-			if cfg.Adapters[i].Name != AdapterClaudeCodeOTLP {
+			if !isReceiver(cfg.Adapters[i].Name) {
 				cfg.Adapters[i].Collector.applyDefaults()
 			}
 		}
@@ -409,13 +469,34 @@ func (c *Config) Validate() error {
 		if a.Name == AdapterClaudeCodeLocal && a.Enabled && a.Metrics {
 			localMetrics = true
 		}
+		if a.Name == AdapterLangSmithIngest {
+			if a.Enabled && a.Listen == "" {
+				return fmt.Errorf("config: adapter %q needs listen, the address LANGSMITH_ENDPOINT is pointed at, such as 127.0.0.1:1985", a.Name)
+			}
+			if a.Metrics || a.MetricsLookback != "" || a.SourceRoot != "" ||
+				len(a.Include) > 0 || len(a.Exclude) > 0 {
+				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, token, thread_keys, scope and collector, not source_root, include, exclude, metrics or metrics_lookback", a.Name)
+			}
+			// It takes a period and a byte budget, unlike the metrics
+			// receiver: what it accepts waits in an inbox until a pass
+			// converts it, and one request can be larger than a landed file
+			// should be. A single turn with a 20 KB command and a 32 KB
+			// result measured 3 MB.
+			if len(a.Scope) == 0 {
+				return fmt.Errorf("config: adapter %q needs scope, the dimensions that own a conversation; the default is [project, thread]", a.Name)
+			}
+			if len(a.ThreadKeys) == 0 {
+				return fmt.Errorf("config: adapter %q needs thread_keys, the metadata keys that may carry the thread", a.Name)
+			}
+			continue
+		}
 		if a.Name == AdapterClaudeCodeOTLP {
 			if a.Collector != (Collector{}) || a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 || a.MetricsLookback != "" {
 				return fmt.Errorf("config: adapter %q is a receiver: it takes listen and metrics, not collector, source_root, include, exclude or metrics_lookback", a.Name)
 			}
 			continue
 		}
-		if a.Name == AdapterClaudeCodeChanges && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
+		if isChanges(a.Name) && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
 			return fmt.Errorf("config: adapter %q reads change records only: it takes source_root, include, exclude and collector, not metrics, metrics_lookback or listen", a.Name)
 		}
 		if a.Name == AdapterClaudeCodeProvider && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {

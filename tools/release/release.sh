@@ -809,13 +809,17 @@ $found"
         *.zip) listing=$(unzip -Z1 "$out/$b") || fail "cannot list $b" ;;
         *) listing=$(tar -tzf "$out/$b") || fail "cannot list $b" ;;
       esac
-      for f in "asz$exe" "asz-claude-plugin$exe" LICENSE NOTICE; do
+      # asz-claude-plugin was the recorder's name until 0.5.0, so a tag from
+      # either side of the rename is verifiable here.
+      recorder=asz-changes
+      has_line "$listing" "asz-changes$exe" || recorder=asz-claude-plugin
+      for f in "asz$exe" "$recorder$exe" LICENSE NOTICE; do
         has_line "$listing" "$f" || fail "$b has no $f"
       done
       for d in licenses/; do
         has_prefix "$listing" "$d" || fail "$b has no $d"
       done
-      say "ok  $b: asz$exe, asz-claude-plugin$exe, LICENSE, NOTICE and licenses/"
+      say "ok  $b: asz$exe, $recorder$exe, LICENSE, NOTICE and licenses/"
     done
     # A Debian package installs one binary, and the same licenses under
     # /usr/share/doc. Its control file must name the package, the version and
@@ -826,10 +830,18 @@ $found"
     fi
     while read -r b p arch; do
       [ -n "$b" ] || continue
-      bin=asz
-      [ "$p" = asz ] || bin=asz-claude-plugin
+      # A package installs the one binary it is named for. asz-claude-code
+      # was the recorder's package until 0.5.0, so a tag from before the
+      # rename is verifiable here too.
+      case "$p" in
+        asz) bin=asz ;;
+        asz-changes) bin=asz-changes ;;
+        asz-claude-code) bin=asz-claude-plugin ;;
+        *) fail "$b is a package this does not know: $p" ;;
+      esac
       listing=$("$work/deb-package" -list "$out/$b" </dev/null) || fail "cannot list $b"
-      for f in "usr/bin/$bin" "usr/share/doc/$p/LICENSE" "usr/share/doc/$p/NOTICE"; do
+      [ -z "$bin" ] || has_line "$listing" "usr/bin/$bin" || fail "$b has no /usr/bin/$bin"
+      for f in "usr/share/doc/$p/LICENSE" "usr/share/doc/$p/NOTICE"; do
         has_line "$listing" "$f" || fail "$b has no /$f"
       done
       has_prefix "$listing" "usr/share/doc/$p/licenses/" || fail "$b has no /usr/share/doc/$p/licenses/"
@@ -919,7 +931,7 @@ Notes for voters:
  * The binary archives are the unchanged packages CI attached to the GitHub prerelease after all its checks passed on the tag push, verified below. Only the source archive was created locally. The release manager signed every archive after checking its contents and checksums, and attached the source archive and every signature to the same prerelease.
 $(sed 's/^ci-binaries:/ */' "$out/ci-provenance.txt")
  * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. \`make conversation-view-check\`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
- * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.$(if [ -n "$debs" ]; then printf '\n * The .deb files are Debian packages of the same Linux binaries, one for asz and one for asz-claude-plugin, with the same LICENSE, NOTICE and licenses/ under /usr/share/doc. apt installs them from the index on the SkyWalking website, which lists released versions only and is written after the vote.'; fi)
+ * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.$(if [ -n "$debs" ]; then printf '\n * The .deb files are Debian packages of the same Linux binaries, one for asz and one for the change recorder, with the same LICENSE, NOTICE and licenses/ under /usr/share/doc. apt installs them from the index on the SkyWalking website, which lists released versions only and is written after the vote.'; fi)
 
 Voting will start now and will remain open for at least 72 hours. All PMC members are requested to give their votes.
 

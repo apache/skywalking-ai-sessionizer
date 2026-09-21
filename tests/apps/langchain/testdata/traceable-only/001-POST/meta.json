@@ -1,0 +1,112 @@
+{
+  "at": 17.95,
+  "body_bytes": 3692,
+  "encoding": "none",
+  "headers": {
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+    "Content-Length": "3692",
+    "Content-Type": "multipart/form-data; boundary=bbe7dd8734464cad9e7642ae7e3d46e3",
+    "Host": "127.0.0.1:8930",
+    "User-Agent": "langsmith-py/0.13.0-httpx2",
+    "x-api-key": "asz-harness"
+  },
+  "method": "POST",
+  "n": 1,
+  "parts": [
+    {
+      "bytes": 345,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-308c-7382-80da-87fd5c3ebe18\"",
+        "Content-Length": "345",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-308c-7382-80da-87fd5c3ebe18"
+    },
+    {
+      "bytes": 28,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-308c-7382-80da-87fd5c3ebe18.inputs\"",
+        "Content-Length": "28",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-308c-7382-80da-87fd5c3ebe18.inputs"
+    },
+    {
+      "bytes": 46,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-308c-7382-80da-87fd5c3ebe18.outputs\"",
+        "Content-Length": "46",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-308c-7382-80da-87fd5c3ebe18.outputs"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-308c-7382-80da-87fd5c3ebe18.events\"",
+        "Content-Length": "2",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-308c-7382-80da-87fd5c3ebe18.events"
+    },
+    {
+      "bytes": 458,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-308c-7382-80da-87fd5c3ebe18.extra\"",
+        "Content-Length": "458",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-308c-7382-80da-87fd5c3ebe18.extra"
+    },
+    {
+      "bytes": 459,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-309e-7653-b443-f3a8131d0c75\"",
+        "Content-Length": "459",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-309e-7653-b443-f3a8131d0c75"
+    },
+    {
+      "bytes": 20,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-309e-7653-b443-f3a8131d0c75.inputs\"",
+        "Content-Length": "20",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-309e-7653-b443-f3a8131d0c75.inputs"
+    },
+    {
+      "bytes": 38,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-309e-7653-b443-f3a8131d0c75.outputs\"",
+        "Content-Length": "38",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-309e-7653-b443-f3a8131d0c75.outputs"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-309e-7653-b443-f3a8131d0c75.events\"",
+        "Content-Length": "2",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-309e-7653-b443-f3a8131d0c75.events"
+    },
+    {
+      "bytes": 458,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-309e-7653-b443-f3a8131d0c75.extra\"",
+        "Content-Length": "458",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-309e-7653-b443-f3a8131d0c75.extra"
+    }
+  ],
+  "path": "/runs/multipart",
+  "redacted": true,
+  "wire_bytes": 3692
+}

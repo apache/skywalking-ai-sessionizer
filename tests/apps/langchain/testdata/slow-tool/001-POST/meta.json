@@ -1,0 +1,436 @@
+{
+  "at": 4.17,
+  "body_bytes": 30057,
+  "encoding": "none",
+  "headers": {
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+    "Content-Length": "30057",
+    "Content-Type": "multipart/form-data; boundary=b84d3cb0ae2046efa5ff6d90cd6ee4a1",
+    "Host": "127.0.0.1:8930",
+    "User-Agent": "langsmith-py/0.13.0-httpx2",
+    "x-api-key": "asz-harness"
+  },
+  "method": "POST",
+  "n": 1,
+  "parts": [
+    {
+      "bytes": 296,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fab9-7da3-8b35-939c22a02d84\"",
+        "Content-Length": "296",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fab9-7da3-8b35-939c22a02d84"
+    },
+    {
+      "bytes": 63,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fab9-7da3-8b35-939c22a02d84.inputs\"",
+        "Content-Length": "63",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fab9-7da3-8b35-939c22a02d84.inputs"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fab9-7da3-8b35-939c22a02d84.outputs\"",
+        "Content-Length": "2",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fab9-7da3-8b35-939c22a02d84.outputs"
+    },
+    {
+      "bytes": 60,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fab9-7da3-8b35-939c22a02d84.events\"",
+        "Content-Length": "60",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fab9-7da3-8b35-939c22a02d84.events"
+    },
+    {
+      "bytes": 489,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fab9-7da3-8b35-939c22a02d84.extra\"",
+        "Content-Length": "489",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fab9-7da3-8b35-939c22a02d84.extra"
+    },
+    {
+      "bytes": 466,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cafefc5d0eb\"",
+        "Content-Length": "466",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cafefc5d0eb"
+    },
+    {
+      "bytes": 178,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.inputs\"",
+        "Content-Length": "178",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.inputs"
+    },
+    {
+      "bytes": 856,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.outputs\"",
+        "Content-Length": "856",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.events"
+    },
+    {
+      "bytes": 688,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.extra\"",
+        "Content-Length": "688",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cafefc5d0eb.extra"
+    },
+    {
+      "bytes": 528,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cbdfffb6081\"",
+        "Content-Length": "528",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cbdfffb6081"
+    },
+    {
+      "bytes": 178,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cbdfffb6081.inputs\"",
+        "Content-Length": "178",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cbdfffb6081.inputs"
+    },
+    {
+      "bytes": 856,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cbdfffb6081.outputs\"",
+        "Content-Length": "856",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cbdfffb6081.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cbdfffb6081.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cbdfffb6081.events"
+    },
+    {
+      "bytes": 688,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-faca-7e72-820f-7cbdfffb6081.extra\"",
+        "Content-Length": "688",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-faca-7e72-820f-7cbdfffb6081.extra"
+    },
+    {
+      "bytes": 593,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-744309c23d5f\"",
+        "Content-Length": "593",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-744309c23d5f"
+    },
+    {
+      "bytes": 178,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-744309c23d5f.inputs\"",
+        "Content-Length": "178",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-744309c23d5f.inputs"
+    },
+    {
+      "bytes": 852,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-744309c23d5f.outputs\"",
+        "Content-Length": "852",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-744309c23d5f.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-744309c23d5f.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-744309c23d5f.events"
+    },
+    {
+      "bytes": 749,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-744309c23d5f.extra\"",
+        "Content-Length": "749",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-744309c23d5f.extra"
+    },
+    {
+      "bytes": 642,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-745dc959a29f\"",
+        "Content-Length": "642",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-745dc959a29f"
+    },
+    {
+      "bytes": 178,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-745dc959a29f.inputs\"",
+        "Content-Length": "178",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-745dc959a29f.inputs"
+    },
+    {
+      "bytes": 152,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-745dc959a29f.outputs\"",
+        "Content-Length": "152",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-745dc959a29f.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-745dc959a29f.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-745dc959a29f.events"
+    },
+    {
+      "bytes": 749,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-745dc959a29f.extra\"",
+        "Content-Length": "749",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-745dc959a29f.extra"
+    },
+    {
+      "bytes": 644,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-7462ba8969ab\"",
+        "Content-Length": "644",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-7462ba8969ab"
+    },
+    {
+      "bytes": 203,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-7462ba8969ab.inputs\"",
+        "Content-Length": "203",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-7462ba8969ab.inputs"
+    },
+    {
+      "bytes": 1438,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-7462ba8969ab.outputs\"",
+        "Content-Length": "1438",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-7462ba8969ab.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-7462ba8969ab.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-7462ba8969ab.events"
+    },
+    {
+      "bytes": 1659,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-7462ba8969ab.extra\"",
+        "Content-Length": "1659",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-7462ba8969ab.extra"
+    },
+    {
+      "bytes": 264,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-facb-7431-946b-7462ba8969ab.serialized\"",
+        "Content-Length": "264",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-facb-7431-946b-7462ba8969ab.serialized"
+    },
+    {
+      "bytes": 533,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-125058d8c382\"",
+        "Content-Length": "533",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-125058d8c382"
+    },
+    {
+      "bytes": 1020,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-125058d8c382.inputs\"",
+        "Content-Length": "1020",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-125058d8c382.inputs"
+    },
+    {
+      "bytes": 1317,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-125058d8c382.outputs\"",
+        "Content-Length": "1317",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-125058d8c382.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-125058d8c382.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-125058d8c382.events"
+    },
+    {
+      "bytes": 688,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-125058d8c382.extra\"",
+        "Content-Length": "688",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-125058d8c382.extra"
+    },
+    {
+      "bytes": 420,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-126a687501d2\"",
+        "Content-Length": "420",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-126a687501d2"
+    },
+    {
+      "bytes": 1222,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-126a687501d2.inputs\"",
+        "Content-Length": "1222",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-126a687501d2.inputs"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-126a687501d2.outputs\"",
+        "Content-Length": "2",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-126a687501d2.outputs"
+    },
+    {
+      "bytes": 60,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-126a687501d2.events\"",
+        "Content-Length": "60",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-126a687501d2.events"
+    },
+    {
+      "bytes": 686,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-126a687501d2.extra\"",
+        "Content-Length": "686",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-126a687501d2.extra"
+    },
+    {
+      "bytes": 482,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-127b3c56f372\"",
+        "Content-Length": "482",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-127b3c56f372"
+    },
+    {
+      "bytes": 69,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-127b3c56f372.inputs\"",
+        "Content-Length": "69",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-127b3c56f372.inputs"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-127b3c56f372.outputs\"",
+        "Content-Length": "2",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-127b3c56f372.outputs"
+    },
+    {
+      "bytes": 60,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-127b3c56f372.events\"",
+        "Content-Length": "60",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-127b3c56f372.events"
+    },
+    {
+      "bytes": 800,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6c-fad2-7361-b035-127b3c56f372.extra\"",
+        "Content-Length": "800",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6c-fad2-7361-b035-127b3c56f372.extra"
+    }
+  ],
+  "path": "/runs/multipart",
+  "redacted": true,
+  "wire_bytes": 30057
+}

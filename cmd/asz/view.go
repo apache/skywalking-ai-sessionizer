@@ -26,7 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
@@ -49,7 +48,7 @@ func cmdView(cfg *config.Config, _ []config.Adapter, _ bool) error {
 		return err
 	}
 	zone := storage.NewZone(zoneRoot)
-	srv := view.New(zone, claudecode.Glossary())
+	srv := view.NewWithGlossaries(zone, glossaries())
 	ids, err := srv.List()
 	if err != nil {
 		return err
@@ -145,7 +144,7 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 		return err
 	}
 	zone := storage.NewZone(zoneRoot)
-	srv := view.New(zone, claudecode.Glossary())
+	srv := view.NewWithGlossaries(zone, glossaries())
 
 	ref, err := newRefresher(srv, zone, ads, cfg.Parse.MaxRoundBytes, once)
 	if err != nil {

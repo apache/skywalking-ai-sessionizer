@@ -32,6 +32,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeotlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
@@ -179,7 +180,8 @@ func main() {
 			continue
 		}
 		switch ad.Name {
-		case config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges, config.AdapterClaudeCodeProvider:
+		case config.AdapterClaudeCodeLocal, config.AdapterChanges, config.AdapterClaudeCodeChanges,
+			config.AdapterClaudeCodeProvider:
 			local = append(local, ad)
 		case config.AdapterClaudeCodeOTLP:
 			if cmd != "collect" && cmd != "server" {
@@ -192,6 +194,23 @@ func main() {
 			if err := startReceiver(cfg, ad); err != nil {
 				fatal(err)
 			}
+		case config.AdapterLangSmithIngest:
+			if cmd != "collect" && cmd != "server" {
+				continue
+			}
+			if *once {
+				fmt.Fprintf(os.Stderr, "%s: the receiver runs in watch mode only; not started with -once\n", ad.Name)
+				continue
+			}
+			if err := startLangSmith(cfg, ad); err != nil {
+				fatal(err)
+			}
+			// Unlike the metrics receiver, this one feeds the pipeline: what
+			// it accepts becomes landed Session Data, which has to be parsed
+			// and served like anything else. So it joins the adapters a pass
+			// reads, and a root fed by it alone is a whole pipeline rather
+			// than a push.
+			local = append(local, ad)
 		default:
 			fmt.Fprintf(os.Stderr, "skipping unknown adapter %q\n", ad.Name)
 		}
@@ -204,8 +223,9 @@ func main() {
 	// parsed, verified and pushed.
 	switch cmd {
 	case "sources":
+		local = withoutReceivers(local)
 		if len(local) == 0 {
-			fatal(fmt.Errorf("%s: no enabled %s, %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterClaudeCodeChanges, config.AdapterClaudeCodeProvider))
+			fatal(fmt.Errorf("%s: no enabled %s, %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterChanges, config.AdapterClaudeCodeProvider))
 		}
 		for _, ad := range local {
 			if err := run(cfg, ad, *once); err != nil {
@@ -274,8 +294,45 @@ func startReceiver(cfg *config.Config, ad config.Adapter) error {
 	return nil
 }
 
+// startLangSmith opens a langsmith-ingest receiver and leaves it listening for
+// the life of the process. What it accepts waits in the inbox; the pipeline's
+// next pass converts it, which is why this only starts the listener.
+func startLangSmith(cfg *config.Config, ad config.Adapter) error {
+	zoneRoot, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
+		return err
+	}
+	r := &langsmith.Receiver{Zone: storage.NewZone(zoneRoot), Listen: ad.Listen, Token: ad.Token}
+	if err := r.Start(); err != nil {
+		return err
+	}
+	receivers++
+	guarded := "any key accepted"
+	if ad.Token != "" {
+		guarded = "a token is required"
+	}
+	fmt.Printf("receiver    : %s on %s; point LANGSMITH_ENDPOINT at it; %s\n",
+		ad.Name, r.Addr(), guarded)
+	return nil
+}
+
+// withoutReceivers drops the adapters that have no source to list. A receiver
+// discovers nothing: what it will land is whatever is sent to it.
+func withoutReceivers(ads []config.Adapter) []config.Adapter {
+	var out []config.Adapter
+	for _, ad := range ads {
+		if ad.Name != config.AdapterLangSmithIngest {
+			out = append(out, ad)
+		}
+	}
+	return out
+}
+
 func cmdSources(cfg *config.Config, ad config.Adapter, once bool) error {
-	if ad.Name == config.AdapterClaudeCodeChanges {
+	if ad.Name == config.AdapterChanges || ad.Name == config.AdapterClaudeCodeChanges {
 		return cmdSourcesChanges(cfg, ad, once)
 	}
 	if ad.Name == config.AdapterClaudeCodeProvider {

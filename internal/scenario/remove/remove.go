@@ -853,7 +853,7 @@ func (p *pass) landed(s *session) (*landedSet, verdict) {
 		src := info.Src
 		switch name, _, _ := strings.Cut(info.Adapter, "/"); name {
 		case claudecode.Name:
-		case claudecodechanges.Name:
+		case claudecodechanges.Name, claudecodechanges.NameWas:
 			src = changesPrefix + src
 		case claudecodeprovider.Name:
 			// A provider file holds many bodies, and each record names the

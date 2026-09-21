@@ -413,13 +413,13 @@ writes nothing into `dist/$VERSION/`. The plan does not claim that prerelease as
   tagged source under `apache-skywalking-ai-sessionizer-$VERSION-src/`, with the fonts and local
   metadata excluded by `.gitattributes`. A build from it uses system fonts.
 - Each binary package is `apache-skywalking-ai-sessionizer-$VERSION-bin-<os>-<arch>.tgz`, or
-  `.zip` for Windows. It contains `asz`, `asz-claude-plugin`, which is the binary of the Claude
+  `.zip` for Windows. It contains `asz`, `asz-changes`, which is the binary of the Claude
   Code plugin, and the binary distribution's `LICENSE`, `NOTICE` and `licenses/`. Both binaries
   end in `.exe` on Windows. These packages include the renderer's two OFL fonts and their license
   texts.
 - Each Debian package is `apache-skywalking-ai-sessionizer-$VERSION-bin-<package>-<arch>.deb`, one
   for each package in `DEB_PACKAGES` in the tag's Makefile and each Linux platform. `asz` installs
-  `/usr/bin/asz`, and `asz-claude-code` installs `/usr/bin/asz-claude-plugin`. Each holds the same
+  `/usr/bin/asz`, and `asz-claude-code` installs `/usr/bin/asz-changes`. Each holds the same
   binary as the Linux binary package, with the same `LICENSE`, `NOTICE` and `licenses/` under
   `/usr/share/doc/<package>/`. `tools/release/deb-package` writes them, so a build on macOS gives the same
   bytes as one on Linux. `candidate` checks that each installs its binary and the licenses, and
@@ -984,7 +984,7 @@ trust entry matches only a tap at its default remote, which this one is not.
 The tap is this repository: `Formula/` on main. It holds `asz@VERSION.rb` and
 `asz-claude-code@VERSION.rb` for every release, keg-only so they do not clash, and `asz.rb` and
 `asz-claude-code.rb` for the newest. `asz` installs `asz`, and `asz-claude-code` installs
-`asz-claude-plugin`, whose caveats give the two commands that install the plugin into Claude Code.
+`asz-changes`, whose caveats give the two commands that install the plugin into Claude Code.
 Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary.
 
 A formula downloads the voted binary package for the machine, macOS or Linux on ARM 64 or x86-64,
@@ -1058,12 +1058,12 @@ done
     },
     "bin": [
         "asz.exe",
-        "asz-claude-plugin.exe"
+        "asz-changes.exe"
     ],
     "notes": [
-        "asz-claude-plugin, the binary of the Claude Code plugin, is on the path. Install the plugin itself into Claude Code with the two commands below, with VERSION replaced by the version asz version prints.",
+        "asz-changes, the binary of the Claude Code plugin, is on the path. Install the plugin itself into Claude Code with the two commands below, with VERSION replaced by the version asz version prints.",
         "claude plugin marketplace add \"https://github.com/apache/skywalking-ai-sessionizer.git#vVERSION\" --sparse .claude-plugin plugins/claude-code/plugin",
-        "claude plugin install asz-changes@skywalking-ai-sessionizer",
+        "claude plugin install file-changes@skywalking-ai-sessionizer",
         "See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
     ],
     "checkver": {
@@ -1152,11 +1152,11 @@ NestedInstallerType: portable
 NestedInstallerFiles:
 - RelativeFilePath: asz.exe
   PortableCommandAlias: asz
-- RelativeFilePath: asz-claude-plugin.exe
-  PortableCommandAlias: asz-claude-plugin
+- RelativeFilePath: asz-changes.exe
+  PortableCommandAlias: asz-changes
 Commands:
 - asz
-- asz-claude-plugin
+- asz-changes
 Installers:
 - Architecture: x64
   InstallerUrl: https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-amd64.zip
@@ -1193,7 +1193,7 @@ Tags:
 - observability
 - skywalking
 ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes.md
-InstallationNotes: asz-claude-plugin, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install asz-changes@skywalking-ai-sessionizer. See https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/claude-code-plugin.md
+InstallationNotes: asz-changes, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install file-changes@skywalking-ai-sessionizer. See https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/claude-code-plugin.md
 Documentations:
 - DocumentLabel: Documentation
   DocumentUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/README.md

@@ -88,10 +88,10 @@ func candidateFixtureFor(t *testing.T) *candidateFixture {
 		platform, arch = "linux/arm64", "arm64"
 	}
 	f.archive = "apache-skywalking-ai-sessionizer-0.3.0-bin-" + strings.ReplaceAll(platform, "/", "-") + ".tgz"
-	for _, p := range []string{"asz", "asz-claude-code"} {
+	for _, p := range []string{"asz", "asz-changes"} {
 		f.debs = append(f.debs, "apache-skywalking-ai-sessionizer-0.3.0-bin-"+p+"-"+arch+".deb")
 	}
-	write(filepath.Join(f.dir, "Makefile"), "PLATFORMS := "+platform+"\nDEB_PACKAGES := asz asz-claude-code\nCOMPILED_TYPES := application/x-executable\nCOMPILED_FILES := \\.(exe|o)\n", 0o644)
+	write(filepath.Join(f.dir, "Makefile"), "PLATFORMS := "+platform+"\nDEB_PACKAGES := asz asz-changes\nCOMPILED_TYPES := application/x-executable\nCOMPILED_FILES := \\.(exe|o)\n", 0o644)
 	write(filepath.Join(f.dir, "LICENSE"), "Apache License fixture\n", 0o644)
 	write(filepath.Join(f.dir, "NOTICE"), "ASF fixture\n", 0o644)
 	write(filepath.Join(f.dir, "docs/en/changes/changes.md"), "# Changes in 0.3.0\n\nFixture release.\n", 0o644)
@@ -179,7 +179,7 @@ echo 'ci-binaries: artifact 456, sha256:fixture, commit fixture'
 	var packed bytes.Buffer
 	gz := gzip.NewWriter(&packed)
 	tw := tar.NewWriter(gz)
-	for _, name := range []string{"asz", "asz-claude-plugin", "LICENSE", "NOTICE", "licenses/license.txt"} {
+	for _, name := range []string{"asz", "asz-changes", "LICENSE", "NOTICE", "licenses/license.txt"} {
 		body := []byte("CI bytes for " + name + "\n")
 		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
 			t.Fatal(err)
@@ -198,10 +198,10 @@ echo 'ci-binaries: artifact 456, sha256:fixture, commit fixture'
 	write(filepath.Join(f.binaries, f.archive+".sha512"), fmt.Sprintf("%x  %s\n", sha512.Sum512(packed.Bytes()), f.archive), 0o644)
 	// The Debian packages come from the tool make binaries runs.
 	staged := filepath.Join(base, "staged")
-	for _, name := range []string{"asz", "asz-claude-plugin", "LICENSE", "NOTICE", "licenses/license.txt"} {
+	for _, name := range []string{"asz", "asz-changes", "LICENSE", "NOTICE", "licenses/license.txt"} {
 		write(filepath.Join(staged, name), "CI bytes for "+name+"\n", 0o755)
 	}
-	for i, p := range []string{"asz", "asz-claude-code"} {
+	for i, p := range []string{"asz", "asz-changes"} {
 		f.writeDeb(t, p, "0.3.0", arch, staged, filepath.Join(f.binaries, f.debs[i]))
 	}
 	// The prerelease holds what CI attached on the tag push.

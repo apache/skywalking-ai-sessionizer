@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -157,8 +158,8 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 // names is described by the adapter's glossary, which also carries the
 // runtime's word for it. The rest are the landed envelope's own fields, and
 // the format describes those itself.
-func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
-	g := s.glossary
+func (s *Server) apiGlossary(w http.ResponseWriter, r *http.Request) {
+	g := s.glossaryFor(r.URL.Query().Get("dialect"))
 	if g == nil {
 		writeJSONStatus(w, http.StatusNotFound, map[string]string{"error": "no glossary was supplied for this storage root"})
 		return
@@ -171,9 +172,96 @@ func (s *Server) apiGlossary(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeJSON(w, map[string]any{
 		"dialect": g.Dialect,
-		"terms":   terms,
-		"fields":  sessiondata.Fields(),
+		// dialects says what else this root holds, for a reader that wants
+		// another. The page asks for one and ignores this.
+		"dialects": s.dialects(),
+		"terms":    terms,
+		"fields":   sessiondata.Fields(),
 	})
+}
+
+// glossaryFor picks the vocabulary to answer with.
+//
+// An asked-for dialect wins. Otherwise it is the one the root's own landed
+// files were read in, so a root of LangChain conversations is not described in
+// Claude Code's words. A root holding both answers with whichever its sessions
+// name first, which is why dialects is in the response.
+func (s *Server) glossaryFor(asked string) *model.Glossary {
+	if len(s.glossaries) == 0 {
+		return s.glossary
+	}
+	if asked != "" {
+		return s.glossaries[asked]
+	}
+	for _, dialect := range s.dialects() {
+		if g, ok := s.glossaries[dialect]; ok {
+			return g
+		}
+	}
+	// Nothing landed yet. One registered vocabulary is still an answer.
+	if len(s.glossaries) == 1 {
+		for _, g := range s.glossaries {
+			return g
+		}
+	}
+	return nil
+}
+
+// dialectOf reads which vocabulary a session's records were landed in. It
+// comes from the data, because that is what a reader is looking at.
+//
+// A session holds more than conversation records: file changes land beside
+// them in a dialect of their own. Whichever file came first used to decide
+// the whole session, so a session whose changes landed first rendered in the
+// changes vocabulary and the runtime's own words were not available at all.
+// The conversation's records decide it, and the rest only when there are
+// none.
+func dialectOf(z *storage.Zone, session string) string {
+	files, err := storage.LandedFiles(z, session)
+	if err != nil {
+		return ""
+	}
+	var fallback string
+	for _, f := range files {
+		file, err := os.Open(f.Path)
+		if err != nil {
+			continue
+		}
+		reader, err := sessiondata.NewReader(file)
+		_ = file.Close()
+		if err != nil {
+			continue
+		}
+		header := reader.Header()
+		if header.Dialect == "" {
+			continue
+		}
+		if header.Kind == sessiondata.KindTranscript {
+			return header.Dialect
+		}
+		if fallback == "" {
+			fallback = header.Dialect
+		}
+	}
+	return fallback
+}
+
+// dialects are the vocabularies the root's landed files were read in.
+func (s *Server) dialects() []string {
+	seen := map[string]bool{}
+	var out []string
+	listed, err := s.List()
+	if err != nil {
+		return nil
+	}
+	for _, session := range listed {
+		if d := dialectOf(s.zone, session); d != "" && !seen[d] {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 var viewPath = regexp.MustCompile(`^/api/c/([^/]+)/view$`)
@@ -253,9 +341,13 @@ func (c *Conversation) overview() *overview {
 		quality[r.Quality]++
 	}
 
+	// A child agent's talk, and only that. An auxiliary stream is not a
+	// child - it is the same agent carrying a different prompt - so reading
+	// "not main" as "child" here reported a subagent the program did not
+	// have, while the round's own count said one.
 	childStream := map[string]bool{}
 	for _, st := range c.Streams() {
-		if !strings.Contains(string(st.Attrs), `"role":"main"`) {
+		if strings.Contains(string(st.Attrs), `"role":"child"`) {
 			childStream[st.Stream] = true
 		}
 	}

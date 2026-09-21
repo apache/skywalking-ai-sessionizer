@@ -128,17 +128,17 @@ else
 fi
 
 step "Contents"
-for f in "asz$exe" "asz-claude-plugin$exe" LICENSE NOTICE; do
+for f in "asz$exe" "asz-changes$exe" LICENSE NOTICE; do
   [ -f "$dir/$f" ] || fail "the package lacks $f"
 done
 [ -n "$(ls -A "$dir/licenses" 2>/dev/null)" ] || fail "the package's licenses directory is empty"
 if [ -z "$exe" ]; then
   # A tar that drops the mode leaves a binary nobody can start.
   [ -x "$dir/asz" ] || fail "asz lost its executable bit in the archive"
-  [ -x "$dir/asz-claude-plugin" ] || fail "the plugin lost its executable bit in the archive"
+  [ -x "$dir/asz-changes" ] || fail "the plugin lost its executable bit in the archive"
 fi
 asz="$dir/asz$exe"
-plugin="$dir/asz-claude-plugin$exe"
+plugin="$dir/asz-changes$exe"
 echo "every file is there"
 
 cd "$work"
@@ -219,12 +219,12 @@ echo "the list page and the conversation page answered"
 # must come out as a change.
 step "The Claude Code plugin"
 PATH="$dir:$PATH"
-found=$(command -v asz-claude-plugin || true)
+found=$(command -v asz-changes || true)
 case "$found" in
-  "$dir/asz-claude-plugin" | "$dir/asz-claude-plugin$exe") ;;
-  *) fail "asz-claude-plugin on PATH is ${found:-nothing}, not the one in $dir" ;;
+  "$dir/asz-changes" | "$dir/asz-changes$exe") ;;
+  *) fail "asz-changes on PATH is ${found:-nothing}, not the one in $dir" ;;
 esac
-plugin=asz-claude-plugin
+plugin=asz-changes
 CLAUDE_PLUGIN_ROOT=$(native "$tree/plugins/claude-code/plugin")
 CLAUDE_PLUGIN_DATA=$(native "$work/plugin-data")
 export CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA

@@ -1,0 +1,295 @@
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f13b-72a2-9fc4-6f1430dc0912"
+Content-Type: application/json
+Content-Length: 342
+
+{"id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","start_time":"2026-09-20T10:46:45.819052+00:00","tags":[],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"LangGraph","run_type":"chain","end_time":"2026-09-20T10:46:45.847114+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f13b-72a2-9fc4-6f1430dc0912.inputs"
+Content-Type: application/json
+Content-Length: 56
+
+{"messages":[{"role":"user","content":"Check prod-1."}]}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f13b-72a2-9fc4-6f1430dc0912.outputs"
+Content-Type: application/json
+Content-Length: 2
+
+{}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f13b-72a2-9fc4-6f1430dc0912.events"
+Content-Type: application/json
+Content-Length: 119
+
+[{"name":"start","time":"2026-09-20T10:46:45.819052+00:00"},{"name":"error","time":"2026-09-20T10:46:45.847114+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f13b-72a2-9fc4-6f1430dc0912.extra"
+Content-Type: application/json
+Content-Length: 495
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f13b-72a2-9fc4-6f1430dc0912.error"
+Content-Type: application/json
+Content-Length: 5806
+
+"RuntimeError('the cluster API refused the request')Traceback (most recent call last):\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py\", line 2967, in stream\n    for _ in runner.tick(\n             ^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py\", line 207, in tick\n    run_with_retry(\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py\", line 617, in run_with_retry\n    return task.proc.invoke(task.input, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py\", line 707, in invoke\n    input = context.run(step.invoke, input, config, **kwargs)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py\", line 447, in invoke\n    ret = self.func(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 822, in _func\n    outputs = list(\n              ^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 619, in result_iterator\n    yield _result_or_cancel(fs.pop())\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 317, in _result_or_cancel\n    return fut.result(timeout)\n           ^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 456, in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 401, in __get_result\n    raise self._exception\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/thread.py\", line 59, in run\n    result = self.fn(*self.args, **self.kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/runnables/config.py\", line 650, in _wrapped_fn\n    return contexts.pop().run(fn, *args)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 1046, in _run_one\n    return self._execute_tool_sync(tool_request, input_type, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 1006, in _execute_tool_sync\n    content = _handle_tool_error(e, flag=self._handle_tool_errors)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 434, in _handle_tool_error\n    content = flag(e)  # type: ignore [assignment, call-arg]\n              ^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 391, in _default_handle_tool_errors\n    raise e\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 958, in _execute_tool_sync\n    response = tool.invoke(call_args, config)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 764, in invoke\n    return self.run(tool_input, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 1132, in run\n    raise error_to_raise\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 1098, in run\n    response = context.run(self._run, *tool_args, **tool_kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/structured.py\", line 152, in _run\n    return self.func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/agents.py\", line 53, in failing_tool\n    raise RuntimeError(\"the cluster API refused the request\")\n\n\nRuntimeError: the cluster API refused the request\n\n\nDuring task with name 'tools' and id 'f3fbde1c-4192-87c8-37cc-7dfadd08969b'"
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-445e77035114"
+Content-Type: application/json
+Content-Length: 466
+
+{"id":"01a0be6c-f14c-7bc1-beb0-445e77035114","start_time":"2026-09-20T10:46:45.836273+00:00","parent_run_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","tags":["graph:step:1"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645836273Z01a0be6c-f14c-7bc1-beb0-445e77035114","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"agent","run_type":"chain","end_time":"2026-09-20T10:46:45.843682+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-445e77035114.inputs"
+Content-Type: application/json
+Content-Length: 171
+
+{"messages":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"}],"remaining_steps":10006}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-445e77035114.outputs"
+Content-Type: application/json
+Content-Length: 862
+
+{"messages":[{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0","tool_calls":[{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-445e77035114.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:45.836273+00:00"},{"name":"end","time":"2026-09-20T10:46:45.843682+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-445e77035114.extra"
+Content-Type: application/json
+Content-Length: 694
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-44677cb85085"
+Content-Type: application/json
+Content-Length: 528
+
+{"id":"01a0be6c-f14c-7bc1-beb0-44677cb85085","start_time":"2026-09-20T10:46:45.836508+00:00","parent_run_id":"01a0be6c-f14c-7bc1-beb0-445e77035114","tags":["seq:step:1"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645836273Z01a0be6c-f14c-7bc1-beb0-445e77035114.20260920T104645836508Z01a0be6c-f14c-7bc1-beb0-44677cb85085","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"call_model","run_type":"chain","end_time":"2026-09-20T10:46:45.843435+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-44677cb85085.inputs"
+Content-Type: application/json
+Content-Length: 171
+
+{"messages":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"}],"remaining_steps":10006}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-44677cb85085.outputs"
+Content-Type: application/json
+Content-Length: 862
+
+{"messages":[{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0","tool_calls":[{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-44677cb85085.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:45.836508+00:00"},{"name":"end","time":"2026-09-20T10:46:45.843435+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-44677cb85085.extra"
+Content-Type: application/json
+Content-Length: 694
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-447cbade0714"
+Content-Type: application/json
+Content-Length: 593
+
+{"id":"01a0be6c-f14c-7bc1-beb0-447cbade0714","start_time":"2026-09-20T10:46:45.836653+00:00","parent_run_id":"01a0be6c-f14c-7bc1-beb0-44677cb85085","tags":["seq:step:1"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645836273Z01a0be6c-f14c-7bc1-beb0-445e77035114.20260920T104645836508Z01a0be6c-f14c-7bc1-beb0-44677cb85085.20260920T104645836653Z01a0be6c-f14c-7bc1-beb0-447cbade0714","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"RunnableSequence","run_type":"chain","end_time":"2026-09-20T10:46:45.843384+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-447cbade0714.inputs"
+Content-Type: application/json
+Content-Length: 171
+
+{"messages":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"}],"remaining_steps":10006}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-447cbade0714.outputs"
+Content-Type: application/json
+Content-Length: 858
+
+{"output":{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0","tool_calls":[{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}}}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-447cbade0714.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:45.836653+00:00"},{"name":"end","time":"2026-09-20T10:46:45.843384+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-447cbade0714.extra"
+Content-Type: application/json
+Content-Length: 755
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-4487429765e7"
+Content-Type: application/json
+Content-Length: 642
+
+{"id":"01a0be6c-f14c-7bc1-beb0-4487429765e7","start_time":"2026-09-20T10:46:45.836782+00:00","parent_run_id":"01a0be6c-f14c-7bc1-beb0-447cbade0714","tags":["seq:step:1"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645836273Z01a0be6c-f14c-7bc1-beb0-445e77035114.20260920T104645836508Z01a0be6c-f14c-7bc1-beb0-44677cb85085.20260920T104645836653Z01a0be6c-f14c-7bc1-beb0-447cbade0714.20260920T104645836782Z01a0be6c-f14c-7bc1-beb0-4487429765e7","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"Prompt","run_type":"chain","end_time":"2026-09-20T10:46:45.836844+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-4487429765e7.inputs"
+Content-Type: application/json
+Content-Length: 171
+
+{"messages":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"}],"remaining_steps":10006}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-4487429765e7.outputs"
+Content-Type: application/json
+Content-Length: 145
+
+{"output":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"}]}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-4487429765e7.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:45.836782+00:00"},{"name":"end","time":"2026-09-20T10:46:45.836844+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14c-7bc1-beb0-4487429765e7.extra"
+Content-Type: application/json
+Content-Length: 755
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14d-7c61-a5f0-1212d34b018b"
+Content-Type: application/json
+Content-Length: 644
+
+{"id":"01a0be6c-f14d-7c61-a5f0-1212d34b018b","start_time":"2026-09-20T10:46:45.837162+00:00","parent_run_id":"01a0be6c-f14c-7bc1-beb0-447cbade0714","tags":["seq:step:2"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645836273Z01a0be6c-f14c-7bc1-beb0-445e77035114.20260920T104645836508Z01a0be6c-f14c-7bc1-beb0-44677cb85085.20260920T104645836653Z01a0be6c-f14c-7bc1-beb0-447cbade0714.20260920T104645837162Z01a0be6c-f14d-7c61-a5f0-1212d34b018b","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"ChatOpenAI","run_type":"llm","end_time":"2026-09-20T10:46:45.843308+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14d-7c61-a5f0-1212d34b018b.inputs"
+Content-Type: application/json
+Content-Length: 196
+
+{"messages":[[{"lc":1,"type":"constructor","id":["langchain","schema","messages","HumanMessage"],"kwargs":{"content":"Check prod-1.","type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"}}]]}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14d-7c61-a5f0-1212d34b018b.outputs"
+Content-Type: application/json
+Content-Length: 1449
+
+{"generations":[[{"text":"","generation_info":{"finish_reason":"tool_calls","logprobs":null},"type":"ChatGeneration","message":{"lc":1,"type":"constructor","id":["langchain","schema","messages","AIMessage"],"kwargs":{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0","tool_calls":[{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"}],"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}},"invalid_tool_calls":[]}}}]],"llm_output":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6"},"run":null,"type":"LLMResult"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14d-7c61-a5f0-1212d34b018b.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:45.837162+00:00"},{"name":"end","time":"2026-09-20T10:46:45.843308+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14d-7c61-a5f0-1212d34b018b.extra"
+Content-Type: application/json
+Content-Length: 1653
+
+{"invocation_params":{"model":"tool-error","model_name":"tool-error","stream":false,"temperature":0.0,"_type":"openai-chat","stop":null,"tools":[{"type":"function","function":{"name":"failing_tool","description":"A tool that fails.","parameters":{"properties":{"cluster":{"default":"prod-1","type":"string"},"question":{"default":"","type":"string"},"text":{"default":"","type":"string"}},"type":"object"}}}]},"options":{"stop":null},"batch_size":1,"metadata":{"thread_id":"thread-tool-error","ls_integration":"langchain_chat_model","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","ls_provider":"openai","ls_model_name":"tool-error","ls_model_type":"chat","ls_temperature":0.0,"lc_versions":{"langchain-core":"1.6.3","langchain-openai":"1.6.2"},"model":"tool-error","model_name":"tool-error","stream":false,"temperature":0.0,"_type":"openai-chat","stop":null,"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}},"LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"},"tool_call_count":1}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f14d-7c61-a5f0-1212d34b018b.serialized"
+Content-Type: application/json
+Content-Length: 270
+
+{"lc":1,"type":"constructor","id":["langchain","chat_models","openai","ChatOpenAI"],"kwargs":{"model_name":"tool-error","temperature":0.0,"openai_api_key":{"lc":1,"type":"secret","id":["OPENAI_API_KEY"]},"openai_api_base":"http://127.0.0.1:8931/v1"},"name":"ChatOpenAI"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f153-7823-ad12-319c3ebbca2f"
+Content-Type: application/json
+Content-Length: 533
+
+{"id":"01a0be6c-f153-7823-ad12-319c3ebbca2f","start_time":"2026-09-20T10:46:45.843511+00:00","parent_run_id":"01a0be6c-f14c-7bc1-beb0-445e77035114","tags":["seq:step:3"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645836273Z01a0be6c-f14c-7bc1-beb0-445e77035114.20260920T104645843511Z01a0be6c-f153-7823-ad12-319c3ebbca2f","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"should_continue","run_type":"chain","end_time":"2026-09-20T10:46:45.843599+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f153-7823-ad12-319c3ebbca2f.inputs"
+Content-Type: application/json
+Content-Length: 1019
+
+{"messages":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0","tool_calls":[{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}}}],"remaining_steps":10006}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f153-7823-ad12-319c3ebbca2f.outputs"
+Content-Type: application/json
+Content-Length: 1317
+
+{"output":["Send(node='tools', arg={'__type': 'tool_call_with_context', 'tool_call': {'name': 'failing_tool', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_failing_tool_6', 'type': 'tool_call'}, 'state': {'messages': [HumanMessage(content='Check prod-1.', additional_kwargs={}, response_metadata={}, id='d35326d1-8916-419a-8fac-e64630603e9e'), AIMessage(content='', additional_kwargs={'refusal': None}, response_metadata={'token_usage': {'completion_tokens': 10, 'prompt_tokens': 106, 'total_tokens': 116, 'completion_tokens_details': None, 'prompt_tokens_details': {'audio_tokens': None, 'cache_write_tokens': None, 'cached_tokens': 5, 'image_tokens': None, 'text_tokens': None}}, 'model_provider': 'openai', 'model_name': 'tool-error', 'system_fingerprint': None, 'id': 'chatcmpl-6', 'finish_reason': 'tool_calls', 'logprobs': None}, id='lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0', tool_calls=[{'name': 'failing_tool', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_failing_tool_6', 'type': 'tool_call'}], invalid_tool_calls=[], usage_metadata={'input_tokens': 106, 'output_tokens': 10, 'total_tokens': 116, 'input_token_details': {'cache_read': 5}, 'output_token_details': {}})], 'remaining_steps': 10006}})"]}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f153-7823-ad12-319c3ebbca2f.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:45.843511+00:00"},{"name":"end","time":"2026-09-20T10:46:45.843599+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f153-7823-ad12-319c3ebbca2f.extra"
+Content-Type: application/json
+Content-Length: 694
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:7d7a606e-82ef-1a44-5844-508f9d9600de","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13e8b6083a90"
+Content-Type: application/json
+Content-Length: 466
+
+{"id":"01a0be6c-f154-7893-9fad-13e8b6083a90","start_time":"2026-09-20T10:46:45.844048+00:00","parent_run_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","tags":["graph:step:2"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645844048Z01a0be6c-f154-7893-9fad-13e8b6083a90","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"tools","run_type":"chain","end_time":"2026-09-20T10:46:45.845833+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13e8b6083a90.inputs"
+Content-Type: application/json
+Content-Length: 1222
+
+{"__type":"tool_call_with_context","tool_call":{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"},"state":{"messages":[{"content":"Check prod-1.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"d35326d1-8916-419a-8fac-e64630603e9e"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":106,"total_tokens":116,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"tool-error","system_fingerprint":null,"id":"chatcmpl-6","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f14d-7c61-a5f0-1212d34b018b-0","tool_calls":[{"name":"failing_tool","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_failing_tool_6","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":106,"output_tokens":10,"total_tokens":116,"input_token_details":{"cache_read":5},"output_token_details":{}}}],"remaining_steps":10006}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13e8b6083a90.outputs"
+Content-Type: application/json
+Content-Length: 2
+
+{}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13e8b6083a90.events"
+Content-Type: application/json
+Content-Length: 119
+
+[{"name":"start","time":"2026-09-20T10:46:45.844048+00:00"},{"name":"error","time":"2026-09-20T10:46:45.845833+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13e8b6083a90.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["__pregel_push"],"langgraph_path":["__pregel_push",0,false],"langgraph_checkpoint_ns":"tools:f3fbde1c-4192-87c8-37cc-7dfadd08969b","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13e8b6083a90.error"
+Content-Type: application/json
+Content-Length: 5012
+
+"RuntimeError('the cluster API refused the request')Traceback (most recent call last):\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py\", line 707, in invoke\n    input = context.run(step.invoke, input, config, **kwargs)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py\", line 447, in invoke\n    ret = self.func(*args, **kwargs)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 822, in _func\n    outputs = list(\n              ^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 619, in result_iterator\n    yield _result_or_cancel(fs.pop())\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 317, in _result_or_cancel\n    return fut.result(timeout)\n           ^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 456, in result\n    return self.__get_result()\n           ^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py\", line 401, in __get_result\n    raise self._exception\n\n\n  File \"/asz/home/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/concurrent/futures/thread.py\", line 59, in run\n    result = self.fn(*self.args, **self.kwargs)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/runnables/config.py\", line 650, in _wrapped_fn\n    return contexts.pop().run(fn, *args)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 1046, in _run_one\n    return self._execute_tool_sync(tool_request, input_type, config)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 1006, in _execute_tool_sync\n    content = _handle_tool_error(e, flag=self._handle_tool_errors)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 434, in _handle_tool_error\n    content = flag(e)  # type: ignore [assignment, call-arg]\n              ^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 391, in _default_handle_tool_errors\n    raise e\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langgraph/prebuilt/tool_node.py\", line 958, in _execute_tool_sync\n    response = tool.invoke(call_args, config)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 764, in invoke\n    return self.run(tool_input, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 1132, in run\n    raise error_to_raise\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 1098, in run\n    response = context.run(self._run, *tool_args, **tool_kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/structured.py\", line 152, in _run\n    return self.func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/agents.py\", line 53, in failing_tool\n    raise RuntimeError(\"the cluster API refused the request\")\n\n\nRuntimeError: the cluster API refused the request"
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13f36531000d"
+Content-Type: application/json
+Content-Length: 529
+
+{"id":"01a0be6c-f154-7893-9fad-13f36531000d","start_time":"2026-09-20T10:46:45.844280+00:00","parent_run_id":"01a0be6c-f154-7893-9fad-13e8b6083a90","tags":["seq:step:1"],"dotted_order":"20260920T104645819052Z01a0be6c-f13b-72a2-9fc4-6f1430dc0912.20260920T104645844048Z01a0be6c-f154-7893-9fad-13e8b6083a90.20260920T104645844280Z01a0be6c-f154-7893-9fad-13f36531000d","trace_id":"01a0be6c-f13b-72a2-9fc4-6f1430dc0912","session_name":"asz-harness","name":"failing_tool","run_type":"tool","end_time":"2026-09-20T10:46:45.844975+00:00"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13f36531000d.inputs"
+Content-Type: application/json
+Content-Length: 69
+
+{"cluster":"prod-1","question":"check prod-1","text":"some findings"}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13f36531000d.outputs"
+Content-Type: application/json
+Content-Length: 2
+
+{}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13f36531000d.events"
+Content-Type: application/json
+Content-Length: 119
+
+[{"name":"start","time":"2026-09-20T10:46:45.844280+00:00"},{"name":"error","time":"2026-09-20T10:46:45.844975+00:00"}]
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13f36531000d.extra"
+Content-Type: application/json
+Content-Length: 806
+
+{"color":"green","tool_call_id":"call_failing_tool_6","metadata":{"thread_id":"thread-tool-error","ls_integration":"langgraph","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["__pregel_push"],"langgraph_path":["__pregel_push",0,false],"langgraph_checkpoint_ns":"tools:f3fbde1c-4192-87c8-37cc-7dfadd08969b","checkpoint_ns":"tools:f3fbde1c-4192-87c8-37cc-7dfadd08969b","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--01938a5c3ffe4c70993e055b27143c2e
+Content-Disposition: form-data; name="post.01a0be6c-f154-7893-9fad-13f36531000d.error"
+Content-Type: application/json
+Content-Length: 910
+
+"RuntimeError('the cluster API refused the request')Traceback (most recent call last):\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/base.py\", line 1098, in run\n    response = context.run(self._run, *tool_args, **tool_kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/.venv/lib/python3.12/site-packages/langchain_core/tools/structured.py\", line 152, in _run\n    return self.func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n\n  File \"/asz/harness/agents.py\", line 53, in failing_tool\n    raise RuntimeError(\"the cluster API refused the request\")\n\n\nRuntimeError: the cluster API refused the request"
+--01938a5c3ffe4c70993e055b27143c2e--

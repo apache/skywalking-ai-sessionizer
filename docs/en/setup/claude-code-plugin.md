@@ -24,41 +24,41 @@ $Version = "<version>"
 & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/claude-code-plugin.ps1"))) $Version
 ```
 
-The script puts `asz-claude-plugin` in `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows, and
+The script puts `asz-changes` in `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows, and
 installs the plugin into Claude Code. Restart Claude Code afterwards.
 
-With Homebrew, install the binary with `brew install apache/skywalking-ai-sessionizer/asz-claude-code`
-instead, then run the commands under [By hand](#by-hand).
+With Homebrew, install the binary with `brew install apache/skywalking-ai-sessionizer/asz`, which
+carries both programs, then run the commands under [By hand](#by-hand).
 
 ### By hand
 
-1. Put `asz-claude-plugin` from the [binary package](install.md#binary-package) in a directory on
+1. Put `asz-changes` from the [binary package](install.md#binary-package) in a directory on
    your `PATH`.
 2. Install the plugin. In a shell:
 
    ```sh
    claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin &&
-     claude plugin install asz-changes@skywalking-ai-sessionizer
+     claude plugin install file-changes@skywalking-ai-sessionizer
    ```
 
    In PowerShell:
 
    ```powershell
    claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$Version" --sparse .claude-plugin plugins/claude-code/plugin
-   if ($LASTEXITCODE -eq 0) { claude plugin install asz-changes@skywalking-ai-sessionizer }
+   if ($LASTEXITCODE -eq 0) { claude plugin install file-changes@skywalking-ai-sessionizer }
    ```
 
 ## Check
 
 ```sh
-asz-claude-plugin version
+asz-changes version
 claude plugin list
 ```
 
-The plugin writes its records under `~/.claude/plugins/data/asz-changes-skywalking-ai-sessionizer/`,
+The plugin writes its records under `~/.claude/plugins/data/file-changes-skywalking-ai-sessionizer/`,
 or under `CLAUDE_CONFIG_DIR` when that is set. If a shell command leaves no record there:
 
-- If Claude Code reports `Executable not found in $PATH: "asz-claude-plugin"`, it cannot find the
+- If Claude Code reports `Executable not found in $PATH: "asz-changes"`, it cannot find the
   binary. Put the binary's directory on `PATH`, and start Claude Code from that terminal.
 - Otherwise, read `log/plugin.log` in the same directory.
 
@@ -70,19 +70,19 @@ changes itself, and asz reads them from the transcript.
 Run the install script again with the new version. It keeps the plugin's settings and the records
 asz has not collected yet.
 
-By hand, first move `asz-claude-plugin` to the new version: `brew upgrade asz-claude-code`,
+By hand, first move `asz-changes` to the new version: `brew upgrade asz`,
 `sudo apt update && sudo apt upgrade`, or the binary from the new version's
-[binary package](install.md#binary-package). `asz-claude-plugin version` must print it. Then, in a
+[binary package](install.md#binary-package). `asz-changes version` must print it. Then, in a
 shell:
 
 ```sh
 (
   set -eu
   : "${VERSION:?set VERSION to the version to move to}"
-  claude plugin uninstall asz-changes@skywalking-ai-sessionizer --keep-data
+  claude plugin uninstall file-changes@skywalking-ai-sessionizer --keep-data
   claude plugin marketplace remove skywalking-ai-sessionizer
   claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin
-  claude plugin install asz-changes@skywalking-ai-sessionizer
+  claude plugin install file-changes@skywalking-ai-sessionizer
 )
 ```
 
@@ -92,10 +92,10 @@ In PowerShell:
 & {
   if (-not $Version) { throw "set `$Version to the version to move to" }
   $Steps = @(
-    @("plugin", "uninstall", "asz-changes@skywalking-ai-sessionizer", "--keep-data"),
+    @("plugin", "uninstall", "file-changes@skywalking-ai-sessionizer", "--keep-data"),
     @("plugin", "marketplace", "remove", "skywalking-ai-sessionizer"),
     @("plugin", "marketplace", "add", "https://github.com/apache/skywalking-ai-sessionizer.git#v$Version", "--sparse", ".claude-plugin", "plugins/claude-code/plugin"),
-    @("plugin", "install", "asz-changes@skywalking-ai-sessionizer"))
+    @("plugin", "install", "file-changes@skywalking-ai-sessionizer"))
   foreach ($Step in $Steps) {
     & claude @Step
     if ($LASTEXITCODE -ne 0) { throw "claude $Step failed, so the steps after it did not run" }
@@ -109,7 +109,7 @@ plugin's data.
 ## Remove
 
 ```sh
-claude plugin uninstall asz-changes@skywalking-ai-sessionizer
+claude plugin uninstall file-changes@skywalking-ai-sessionizer
 claude plugin marketplace remove skywalking-ai-sessionizer
 ```
 
@@ -149,5 +149,5 @@ size_cap: 1048576
   seconds, after which Claude Code stops the hook and nothing is recorded.
 - `size_cap`: record a larger file by its hash only.
 
-With `CLAUDE_PLUGIN_DATA` set to the data directory, `asz-claude-plugin status` prints the settings
-in force, and `asz-claude-plugin prune` applies the retention rules now.
+With `CLAUDE_PLUGIN_DATA` set to the data directory, `asz-changes status` prints the settings
+in force, and `asz-changes prune` applies the retention rules now.

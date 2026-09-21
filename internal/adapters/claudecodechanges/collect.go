@@ -18,6 +18,8 @@
 package claudecodechanges
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -126,13 +128,13 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	if err := state.RecoverNextSeq(sessionDir); err != nil {
 		return err
 	}
-	var ix *index.Index
-	if ixState.Schema == index.Schema {
-		if loaded, ok, lerr := index.Load(indexDir, s.ID); lerr == nil && ok {
-			ix = loaded
-		}
+	// Only an index that agrees with its saved state is extended; one that
+	// does not is built again. See index.LoadFor for the crash it guards.
+	ix, ok, err := index.LoadFor(indexDir, s.ID, ixState)
+	if err != nil {
+		return err
 	}
-	if ix == nil {
+	if !ok {
 		ix = index.New(s.ID)
 		ixState = storage.NewIndexState(s.ID)
 	}
@@ -195,10 +197,39 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	return state.Save(statePath, now)
 }
 
+// cursorFor is where one source's position is kept.
+//
+// Two installations of the plugin can write the same session and stream: the
+// old plugin name and the new one both land under the same data directory,
+// and a session id is the same in both. They are different files, and one
+// cursor for both is wrong in a way that stops collection for good - once
+// the newer file passes the older one's length, the older is read against a
+// position past its end, which is a truncation conflict, and after that
+// neither file is collected again.
+//
+// The first source to arrive keeps the plain name, so nothing already
+// landed is landed twice. Any other source gets its own, named for the
+// source itself so it is the same name on every pass.
+func cursorFor(dir string, src Source) (string, error) {
+	plain := filepath.Join(dir, prefix+".cursor")
+	held, err := storage.LoadCursor(plain, storage.CursorAppend, src.Rel)
+	if err != nil {
+		return "", err
+	}
+	if held.Source == "" || held.Source == src.Rel {
+		return plain, nil
+	}
+	sum := sha256.Sum256([]byte(src.Rel))
+	return filepath.Join(dir, prefix+"-"+hex.EncodeToString(sum[:])[:12]+".cursor"), nil
+}
+
 // collectSource lands one window of one file, and says whether more waits.
 func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.SessionState, st *Stats, now time.Time) (landed, more bool, err error) {
 	dir := c.Zone.StreamDir(src.Session, src.Stream)
-	cursorPath := filepath.Join(dir, prefix+".cursor")
+	cursorPath, err := cursorFor(dir, src)
+	if err != nil {
+		return false, false, err
+	}
 	cur, err := storage.LoadCursor(cursorPath, storage.CursorAppend, src.Rel)
 	if err != nil {
 		return false, false, err

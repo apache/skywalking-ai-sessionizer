@@ -27,6 +27,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
@@ -135,10 +136,12 @@ func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error
 		Endpoint:    otlp.EndpointOf(o.Protocol, o.Endpoint, o.TLS),
 		Version:     version,
 		ServiceName: o.ServiceName,
-		Runtimes:    map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName, claudecodeprovider.Name: claudecodeprovider.RuntimeName, mock.Name: mock.RuntimeName},
-		InstanceID:  o.InstanceID,
-		Layer:       o.Layer,
-		BatchBytes:  o.BatchBytes,
+		Runtimes: map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName,
+			claudecodechanges.NameWas: claudecodechanges.RuntimeName,
+			langsmith.Name:            langsmith.RuntimeName, claudecodeprovider.Name: claudecodeprovider.RuntimeName, mock.Name: mock.RuntimeName},
+		InstanceID: o.InstanceID,
+		Layer:      o.Layer,
+		BatchBytes: o.BatchBytes,
 
 		MaxBytesPerMinute: o.MaxBytesPerMinute,
 		NoLogs:            !o.SendLogs(),

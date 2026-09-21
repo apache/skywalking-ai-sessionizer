@@ -54,7 +54,11 @@ class Asz < Formula
   end
 
   def install
-    bin.install "asz"
+    # Both binaries, from the one archive. Until 0.5.0 there were two
+    # formulae fetching the identical archive and checksum and installing one
+    # binary each, which only invited a machine to end up with asz of one
+    # version and the recorder of another.
+    bin.install "asz", "asz-changes"
     # Homebrew keeps a formula's license files at the root of its prefix. It
     # moves LICENSE and NOTICE there by itself, but not a directory, so
     # licenses/ goes with them here. It holds the license of every module
@@ -67,5 +71,8 @@ class Asz < Formula
     # glossary needs no configuration and no input, and its table names
     # agent.call, so the program does real work, not only print its version.
     assert_match "agent.call", shell_output("#{bin}/asz glossary")
+    # The recorder answers without a data directory, which is what a machine
+    # with no agent runtime installed can check.
+    assert_match version.to_s, shell_output("#{bin}/asz-changes version")
   end
 end

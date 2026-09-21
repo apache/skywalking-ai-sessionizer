@@ -162,7 +162,7 @@ and the pass says why once, on standard error, as `kept: every marked session: <
 
 - There is no `export.otlp.endpoint`, so nothing is sent.
 - `export.otlp.logs` or `export.otlp.metrics` is switched off.
-- The `claude-code-changes` adapter is switched off, or reads anything but
+- The `changes` adapter is switched off, or reads anything but
   `DIR/_source/plugins/data`, where the build wrote the plugin's output.
 - `push.state` in the root records files sent to another receiver, or to one it cannot name.
 - The source directory is one of the places Claude Code keeps its files, holds one, or lies inside

@@ -27,10 +27,10 @@
 # 1. Downloads the binary package of VERSION through the Apache mirrors, or
 #    from archive.apache.org for a version no longer on the download site,
 #    with its sha512 from the same Apache site, and stops unless they match.
-# 2. Checks that asz-claude-plugin starts, and moves it into ~/.local/bin,
+# 2. Checks that asz-changes starts, and moves it into ~/.local/bin,
 #    where the Claude Code installer puts claude. The plugin's hooks run it by
 #    name from PATH.
-# 3. Installs the asz-changes plugin into Claude Code from the marketplace at
+# 3. Installs the file-changes plugin into Claude Code from the marketplace at
 #    the tag of VERSION. A plugin at another tag is uninstalled with its data
 #    kept first, because removing the marketplace would delete the records
 #    asz has not collected yet.
@@ -98,16 +98,16 @@ curl -fsSL -o "$tmp/$pkg" "$from" || fail "cannot download $pkg"
 want=$(cut -d ' ' -f 1 "$tmp/$pkg.sha512")
 if command -v sha512sum >/dev/null 2>&1; then got=$(sha512sum "$tmp/$pkg"); else got=$(shasum -a 512 "$tmp/$pkg"); fi
 [ "${#want}" -eq 128 ] && [ "${got%% *}" = "$want" ] || fail "the sha512 of $pkg does not match $pkg.sha512, so nothing was installed"
-tar -xzf "$tmp/$pkg" -C "$tmp" asz-claude-plugin
-"$tmp/asz-claude-plugin" version
-mv -f "$tmp/asz-claude-plugin" "$bin/asz-claude-plugin"
-say "installed asz-claude-plugin into $bin"
-if [ "$(command -v asz-claude-plugin || true)" != "$bin/asz-claude-plugin" ]; then
-  say "Put $bin first on your PATH, in your shell profile, then restart Claude Code. The plugin's hooks look for asz-claude-plugin there." >&2
+tar -xzf "$tmp/$pkg" -C "$tmp" asz-changes
+"$tmp/asz-changes" version
+mv -f "$tmp/asz-changes" "$bin/asz-changes"
+say "installed asz-changes into $bin"
+if [ "$(command -v asz-changes || true)" != "$bin/asz-changes" ]; then
+  say "Put $bin first on your PATH, in your shell profile, then restart Claude Code. The plugin's hooks look for asz-changes there." >&2
 fi
 
 market=skywalking-ai-sessionizer
-id=asz-changes@$market
+id=file-changes@$market
 tag=v$version
 
 # Both lists are JSON, one key per line. A value is read from the line of
@@ -124,17 +124,27 @@ ref=$(printf '%s\n' "$markets" | awk -v name="$market" '
   this && /"ref":/ { sub(/.*"ref": *"/, ""); sub(/".*/, ""); print }')
 
 for scope in $scopes; do
-  [ "$scope" = user ] || fail "asz-changes is installed at the $scope scope. Uninstall it there with --keep-data first. Moving the marketplace removes it from every scope, and deletes its data."
+  [ "$scope" = user ] || fail "file-changes is installed at the $scope scope. Uninstall it there with --keep-data first. Moving the marketplace removes it from every scope, and deletes its data."
 done
 
-# 0.3.0 ran the plugin with --plugin-dir, whose data directory is
-# asz-changes-inline. Its settings move to the installed plugin's directory
-# once, before the first session.
+# A plugin's data directory is named after the plugin, so a rename would
+# otherwise start it empty: the settings gone, and any change record asz had
+# not collected yet left where nothing will look. Both earlier names are
+# carried across once, before the first session, so a rename costs nothing.
+#
+#   asz-changes-inline   0.3.0, loaded with --plugin-dir
+#   asz-changes-$market  0.4.0, before this plugin was named file-changes
 data=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/data
-if [ -f "$data/asz-changes-inline/settings.yaml" ] && [ ! -e "$data/asz-changes-$market/settings.yaml" ]; then
-  mkdir -p "$data/asz-changes-$market"
-  cp "$data/asz-changes-inline/settings.yaml" "$data/asz-changes-$market/"
-  say "copied the settings of the plugin loaded with --plugin-dir"
+here="$data/file-changes-$market"
+if [ ! -e "$here" ]; then
+  for was in "$data/asz-changes-$market" "$data/asz-changes-inline"; do
+    [ -d "$was" ] || continue
+    mkdir -p "$here"
+    (cd "$was" && tar cf - .) | (cd "$here" && tar xf -) ||
+      fail "could not copy $was to $here; nothing was changed"
+    say "carried the plugin data over from $(basename "$was")"
+    break
+  done
 fi
 
 if [ "$declared" = yes ] && [ "$ref" = "$tag" ] && [ -n "$scopes" ]; then

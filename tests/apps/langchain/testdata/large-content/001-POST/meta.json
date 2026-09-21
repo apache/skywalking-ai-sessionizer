@@ -1,0 +1,715 @@
+{
+  "at": 10.84,
+  "body_bytes": 1343153,
+  "encoding": "none",
+  "headers": {
+    "Accept": "application/json",
+    "Accept-Encoding": "gzip, deflate",
+    "Connection": "keep-alive",
+    "Content-Length": "1343153",
+    "Content-Type": "multipart/form-data; boundary=78f0c96fe3c54a079fe08b33a01fe6d7",
+    "Host": "127.0.0.1:8930",
+    "User-Agent": "langsmith-py/0.13.0-httpx2",
+    "x-api-key": "asz-harness"
+  },
+  "method": "POST",
+  "n": 1,
+  "parts": [
+    {
+      "bytes": 342,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b\"",
+        "Content-Length": "342",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b"
+    },
+    {
+      "bytes": 68,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.inputs\"",
+        "Content-Length": "68",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.inputs"
+    },
+    {
+      "bytes": 84306,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.outputs\"",
+        "Content-Length": "84306",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.events"
+    },
+    {
+      "bytes": 490,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.extra\"",
+        "Content-Length": "490",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14bb-72f0-8bc9-cf212c19db7b.extra"
+    },
+    {
+      "bytes": 466,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803\"",
+        "Content-Length": "466",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803"
+    },
+    {
+      "bytes": 183,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.inputs\"",
+        "Content-Length": "183",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.inputs"
+    },
+    {
+      "bytes": 49264,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.outputs\"",
+        "Content-Length": "49264",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.events"
+    },
+    {
+      "bytes": 689,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.extra\"",
+        "Content-Length": "689",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c6fe413ee803.extra"
+    },
+    {
+      "bytes": 528,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c70b256319c1\"",
+        "Content-Length": "528",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c70b256319c1"
+    },
+    {
+      "bytes": 183,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.inputs\"",
+        "Content-Length": "183",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.inputs"
+    },
+    {
+      "bytes": 49264,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.outputs\"",
+        "Content-Length": "49264",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.events"
+    },
+    {
+      "bytes": 689,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.extra\"",
+        "Content-Length": "689",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c70b256319c1.extra"
+    },
+    {
+      "bytes": 593,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c71da603c11c\"",
+        "Content-Length": "593",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c71da603c11c"
+    },
+    {
+      "bytes": 183,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.inputs\"",
+        "Content-Length": "183",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.inputs"
+    },
+    {
+      "bytes": 49260,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.outputs\"",
+        "Content-Length": "49260",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.events"
+    },
+    {
+      "bytes": 750,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.extra\"",
+        "Content-Length": "750",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c71da603c11c.extra"
+    },
+    {
+      "bytes": 642,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0\"",
+        "Content-Length": "642",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0"
+    },
+    {
+      "bytes": 183,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.inputs\"",
+        "Content-Length": "183",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.inputs"
+    },
+    {
+      "bytes": 16272,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.outputs\"",
+        "Content-Length": "16272",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.events"
+    },
+    {
+      "bytes": 750,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.extra\"",
+        "Content-Length": "750",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c72940f4dbe0.extra"
+    },
+    {
+      "bytes": 644,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c736b1bba705\"",
+        "Content-Length": "644",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c736b1bba705"
+    },
+    {
+      "bytes": 16371,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.inputs\"",
+        "Content-Length": "16371",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.inputs"
+    },
+    {
+      "bytes": 49847,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.outputs\"",
+        "Content-Length": "49847",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.events"
+    },
+    {
+      "bytes": 1728,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.extra\"",
+        "Content-Length": "1728",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.extra"
+    },
+    {
+      "bytes": 265,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.serialized\"",
+        "Content-Length": "265",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14cd-7bf2-99aa-c736b1bba705.serialized"
+    },
+    {
+      "bytes": 533,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d5-7092-b5dd-cd4f30724116\"",
+        "Content-Length": "533",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d5-7092-b5dd-cd4f30724116"
+    },
+    {
+      "bytes": 49433,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d5-7092-b5dd-cd4f30724116.inputs\"",
+        "Content-Length": "49433",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d5-7092-b5dd-cd4f30724116.inputs"
+    },
+    {
+      "bytes": 104533,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d5-7092-b5dd-cd4f30724116.outputs\"",
+        "Content-Length": "104533",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d5-7092-b5dd-cd4f30724116.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d5-7092-b5dd-cd4f30724116.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d5-7092-b5dd-cd4f30724116.events"
+    },
+    {
+      "bytes": 689,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d5-7092-b5dd-cd4f30724116.extra\"",
+        "Content-Length": "689",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d5-7092-b5dd-cd4f30724116.extra"
+    },
+    {
+      "bytes": 466,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bafc2837c617\"",
+        "Content-Length": "466",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bafc2837c617"
+    },
+    {
+      "bytes": 98042,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bafc2837c617.inputs\"",
+        "Content-Length": "98042",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bafc2837c617.inputs"
+    },
+    {
+      "bytes": 34166,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bafc2837c617.outputs\"",
+        "Content-Length": "34166",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bafc2837c617.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bafc2837c617.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bafc2837c617.events"
+    },
+    {
+      "bytes": 687,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bafc2837c617.extra\"",
+        "Content-Length": "687",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bafc2837c617.extra"
+    },
+    {
+      "bytes": 528,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bb087f9763cc\"",
+        "Content-Length": "528",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bb087f9763cc"
+    },
+    {
+      "bytes": 48476,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bb087f9763cc.inputs\"",
+        "Content-Length": "48476",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bb087f9763cc.inputs"
+    },
+    {
+      "bytes": 34162,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bb087f9763cc.outputs\"",
+        "Content-Length": "34162",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bb087f9763cc.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bb087f9763cc.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bb087f9763cc.events"
+    },
+    {
+      "bytes": 801,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d6-7572-aa86-bb087f9763cc.extra\"",
+        "Content-Length": "801",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d6-7572-aa86-bb087f9763cc.extra"
+    },
+    {
+      "bytes": 466,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddc959c6a1da\"",
+        "Content-Length": "466",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddc959c6a1da"
+    },
+    {
+      "bytes": 83629,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.inputs\"",
+        "Content-Length": "83629",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.inputs"
+    },
+    {
+      "bytes": 715,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.outputs\"",
+        "Content-Length": "715",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.events"
+    },
+    {
+      "bytes": 689,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.extra\"",
+        "Content-Length": "689",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddc959c6a1da.extra"
+    },
+    {
+      "bytes": 528,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dddada88ba44\"",
+        "Content-Length": "528",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dddada88ba44"
+    },
+    {
+      "bytes": 83629,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dddada88ba44.inputs\"",
+        "Content-Length": "83629",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dddada88ba44.inputs"
+    },
+    {
+      "bytes": 715,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dddada88ba44.outputs\"",
+        "Content-Length": "715",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dddada88ba44.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dddada88ba44.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dddada88ba44.events"
+    },
+    {
+      "bytes": 689,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dddada88ba44.extra\"",
+        "Content-Length": "689",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dddada88ba44.extra"
+    },
+    {
+      "bytes": 593,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dde6da0436ba\"",
+        "Content-Length": "593",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dde6da0436ba"
+    },
+    {
+      "bytes": 83629,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dde6da0436ba.inputs\"",
+        "Content-Length": "83629",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dde6da0436ba.inputs"
+    },
+    {
+      "bytes": 711,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dde6da0436ba.outputs\"",
+        "Content-Length": "711",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dde6da0436ba.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dde6da0436ba.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dde6da0436ba.events"
+    },
+    {
+      "bytes": 750,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-dde6da0436ba.extra\"",
+        "Content-Length": "750",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-dde6da0436ba.extra"
+    },
+    {
+      "bytes": 642,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe\"",
+        "Content-Length": "642",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe"
+    },
+    {
+      "bytes": 83629,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.inputs\"",
+        "Content-Length": "83629",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.inputs"
+    },
+    {
+      "bytes": 99718,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.outputs\"",
+        "Content-Length": "99718",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.events"
+    },
+    {
+      "bytes": 750,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.extra\"",
+        "Content-Length": "750",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d7-74f3-8639-ddf4a7afbbbe.extra"
+    },
+    {
+      "bytes": 644,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d8-71e0-bd67-e34ddd045850\"",
+        "Content-Length": "644",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d8-71e0-bd67-e34ddd045850"
+    },
+    {
+      "bytes": 99953,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d8-71e0-bd67-e34ddd045850.inputs\"",
+        "Content-Length": "99953",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d8-71e0-bd67-e34ddd045850.inputs"
+    },
+    {
+      "bytes": 1301,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d8-71e0-bd67-e34ddd045850.outputs\"",
+        "Content-Length": "1301",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d8-71e0-bd67-e34ddd045850.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d8-71e0-bd67-e34ddd045850.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d8-71e0-bd67-e34ddd045850.events"
+    },
+    {
+      "bytes": 1708,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d8-71e0-bd67-e34ddd045850.extra\"",
+        "Content-Length": "1708",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d8-71e0-bd67-e34ddd045850.extra"
+    },
+    {
+      "bytes": 265,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14d8-71e0-bd67-e34ddd045850.serialized\"",
+        "Content-Length": "265",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14d8-71e0-bd67-e34ddd045850.serialized"
+    },
+    {
+      "bytes": 533,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14da-7ae0-ba58-3f52ad223b26\"",
+        "Content-Length": "533",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14da-7ae0-ba58-3f52ad223b26"
+    },
+    {
+      "bytes": 84330,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.inputs\"",
+        "Content-Length": "84330",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.inputs"
+    },
+    {
+      "bytes": 20,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.outputs\"",
+        "Content-Length": "20",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.outputs"
+    },
+    {
+      "bytes": 117,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.events\"",
+        "Content-Length": "117",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.events"
+    },
+    {
+      "bytes": 689,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.extra\"",
+        "Content-Length": "689",
+        "Content-Type": "application/json"
+      },
+      "name": "post.01a0be6d-14da-7ae0-ba58-3f52ad223b26.extra"
+    }
+  ],
+  "path": "/runs/multipart",
+  "redacted": true,
+  "wire_bytes": 1343153
+}

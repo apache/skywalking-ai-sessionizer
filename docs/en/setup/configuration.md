@@ -25,9 +25,13 @@ A list of the sources asz collects from.
 | Adapter | On by default | Collects |
 | --- | --- | --- |
 | `claude-code-local` | yes | Claude Code's transcripts on this machine |
-| `claude-code-changes` | yes | the records of the [Claude Code plugin](claude-code-plugin.md); see [below](#the-changes-adapter) |
+| `changes` | yes | what a tool call changed on disk, from the [Claude Code](claude-code-plugin.md) or [LangChain](langchain-plugin.md) plugin; see [below](#the-changes-adapter) |
 | `claude-code-provider` | yes | the request and response bodies Claude Code writes when asked; see [below](#the-provider-adapter) |
 | `claude-code-otlp` | no | what Claude Code's own OpenTelemetry exporter sends; see [below](#the-receiver-adapter) |
+| `langsmith-ingest` | no | what the LangSmith tracing client sends, from a LangChain or LangGraph application; see [LangChain and LangGraph](langchain.md) |
+
+`changes` was called `claude-code-changes` until 0.5.0, because only Claude Code wrote those
+records. A configuration that still names it is read as the same adapter.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -109,7 +113,7 @@ export:
 
 ## The changes adapter
 
-`claude-code-changes` collects the records of the [Claude Code plugin](claude-code-plugin.md). It
+`changes` collects the records of the [Claude Code plugin](claude-code-plugin.md). It
 finds them under `plugins/data` in Claude Code's directory. It does nothing when the plugin is not
 installed.
 

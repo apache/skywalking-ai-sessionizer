@@ -405,7 +405,7 @@ lost file leaves no gap when another landed file holds the same records, as afte
 pass. A cursor never travels, so in a root rebuilt from a push, a lost last file leaves no gap.
 
 Which streams have an append cursor depends on what landed them. `claude-code-local` gives one to a
-transcript and a workflow journal, and `claude-code-changes` to the plugin's change records.
+transcript and a workflow journal, and `changes` to the plugin's change records.
 `claude-code-local` reads a child agent's sidecar, a workflow manifest and a workflow script whole,
 with a snapshot cursor. So in a root it collected, a lost file of one of them is found only by the
 round chain, and a root with no rounds does not show it. A scenario `sd` build gives each of them

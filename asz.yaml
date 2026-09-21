@@ -102,7 +102,62 @@ adapters:
   # Code's own files and needs nothing from asz; this adapter discovers
   # and tails them, and the view joins each record to its step. On by
   # default because it costs nothing when the plugin is not installed.
-  - name: claude-code-changes
+  - name: langsmith-ingest
+    # The LangSmith tracing client, received. An application built on
+    # LangChain or LangGraph already carries that client, because langsmith is
+    # a dependency of langchain-core, so pointing it here is the whole
+    # integration and nothing in the application changes:
+    #
+    #   LANGSMITH_TRACING=true
+    #   LANGSMITH_ENDPOINT=http://<this address>
+    #   LANGSMITH_API_KEY=<anything token accepts>
+    #   LANGSMITH_PROJECT=<a name>
+    #
+    # Off until pointed at.
+    enabled: false
+
+    # The address to serve on. It binds locally by default because what
+    # arrives here is whole prompts and whole tool output. A client in another
+    # container needs an address it can reach, and then a token.
+    listen: 127.0.0.1:1985
+
+    # Required in the x-api-key header when set. Empty accepts any key: the
+    # client insists on sending one and has nothing to prove to a collector on
+    # the same machine.
+    token: ""
+
+    # The run metadata keys that may carry the thread, in the order they are
+    # tried. These three are what the client documents; an application that
+    # names its own says so here.
+    thread_keys:
+      - thread_id
+      - session_id
+      - conversation_id
+
+    # The dimensions that together own a conversation, in order. "project" is
+    # the client's project name and anything else is a metadata key.
+    #
+    # A bare thread key is not an identity: two applications can both use the
+    # project "production" and the thread "123", and merging them would put two
+    # histories in one conversation while every join stayed valid. Dropping
+    # "project" merges every project that shares a thread key, which is a
+    # choice to make here rather than one to discover later.
+    scope:
+      - project
+      - thread
+
+    collector:
+      # What the receiver accepts waits in an inbox until a pass converts it,
+      # so this is how often that happens.
+      mode: watch
+      interval: 10m
+      # The largest landed file a conversion writes. One request can carry
+      # more than this: a single turn with a 20 KB command and a 32 KB result
+      # measured 3 MB, so a request is cut across files rather than landing as
+      # one. A record larger than the budget lands alone in a file of its own.
+      max_delta_bytes: 2097152
+
+  - name: changes
     enabled: true
 
     # Where the plugin's output is. Leave empty to resolve it the way the

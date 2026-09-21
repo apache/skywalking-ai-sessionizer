@@ -1,0 +1,188 @@
+[
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": "t1"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "prod",
+      "t1"
+    ],
+    "id": "ls-prod-t1-352066090c5f"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "session_id": "s1"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "prod",
+      "s1"
+    ],
+    "id": "ls-prod-s1-2442dae416a5"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "conversation_id": "c1"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "prod",
+      "c1"
+    ],
+    "id": "ls-prod-c1-7ee11279419c"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "session_id": "s1",
+      "thread_id": "t1"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "prod",
+      "t1"
+    ],
+    "id": "ls-prod-t1-352066090c5f"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": ""
+    },
+    "keys": null,
+    "scope": null,
+    "values": null,
+    "id": ""
+  },
+  {
+    "project": "prod",
+    "metadata": {},
+    "keys": null,
+    "scope": null,
+    "values": null,
+    "id": ""
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": 7
+    },
+    "keys": null,
+    "scope": null,
+    "values": null,
+    "id": ""
+  },
+  {
+    "project": "",
+    "metadata": {
+      "thread_id": "t1"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "",
+      "t1"
+    ],
+    "id": "ls-t1-0d71f3941cb2"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "tenant_id": "acme"
+    },
+    "keys": [
+      "tenant_id"
+    ],
+    "scope": null,
+    "values": [
+      "prod",
+      "acme"
+    ],
+    "id": "ls-prod-acme-0da74a0cd96d"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": "t1",
+      "tenant_id": "acme"
+    },
+    "keys": null,
+    "scope": [
+      "project",
+      "tenant_id",
+      "thread"
+    ],
+    "values": [
+      "prod",
+      "acme",
+      "t1"
+    ],
+    "id": "ls-prod-acme-t1-0e41fb8b367c"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": "t1"
+    },
+    "keys": null,
+    "scope": [
+      "thread"
+    ],
+    "values": [
+      "t1"
+    ],
+    "id": "ls-t1-d76c7dd2bd17"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": "t1"
+    },
+    "keys": null,
+    "scope": [
+      "project",
+      "thread",
+      "missing"
+    ],
+    "values": [
+      "prod",
+      "t1",
+      ""
+    ],
+    "id": "ls-prod-t1-f4cbeee35892"
+  },
+  {
+    "project": "../outside",
+    "metadata": {
+      "thread_id": "team/customer"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "../outside",
+      "team/customer"
+    ],
+    "id": "ls-outside-team-customer-2a5e51ddced3"
+  },
+  {
+    "project": "prod",
+    "metadata": {
+      "thread_id": "конференция"
+    },
+    "keys": null,
+    "scope": null,
+    "values": [
+      "prod",
+      "конференция"
+    ],
+    "id": "ls-prod-70a56a65c9ed"
+  }
+]

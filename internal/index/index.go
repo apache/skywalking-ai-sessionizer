@@ -33,7 +33,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry, Block or Body
 // changes; a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 13
+const Schema = 14
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -121,6 +121,12 @@ const (
 	// NOT a result, and treating it as one attributes an empty output to every
 	// asynchronous delegation.
 	FlagLaunchAck
+	// FlagAuxiliary marks a record whose child stream is a plain model call
+	// the agent made inside its own work, not a child agent. The stream is
+	// kept apart so the continuity check does not run across it, and the
+	// call that opened it stays a tool step. Set by the adapter from what it
+	// saw directly under the tool; never inferred here.
+	FlagAuxiliary
 )
 
 // Has reports whether every bit in f is set.

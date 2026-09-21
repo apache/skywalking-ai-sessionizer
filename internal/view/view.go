@@ -54,6 +54,10 @@ type Server struct {
 	statusMu sync.Mutex
 	status   Status
 
+	// glossaries hold each runtime's words, by dialect. A root can carry
+	// conversations from more than one, so which to serve is decided from
+	// what the root holds rather than from what the command was built with.
+	glossaries map[string]*model.Glossary
 	// glossary says what the runtime calls each name the model uses. It is
 	// supplied by whoever wires the server, never imported from an adapter,
 	// so the side that reads never depends on the side that collects.
@@ -65,6 +69,18 @@ type Server struct {
 // available to the page.
 func New(z *storage.Zone, glossary *model.Glossary) *Server {
 	return &Server{zone: z, loaded: map[string]*Conversation{}, status: Status{Mode: ModeStatic}, glossary: glossary}
+}
+
+// NewWithGlossaries is New for a root that can hold more than one runtime.
+//
+// The page asks for one glossary as it loads, so one is chosen: the dialect
+// the root's own landed files were read in. A root holding two runtimes still
+// gets one answer, which is a limit of that contract rather than of this —
+// serving both would need the page to ask per conversation.
+func NewWithGlossaries(z *storage.Zone, glossaries map[string]*model.Glossary) *Server {
+	s := New(z, nil)
+	s.glossaries = glossaries
+	return s
 }
 
 // Conversation is one folded chain, with the times its rounds do not carry.
@@ -209,6 +225,16 @@ func (c *Conversation) Span(n *sessionflow.Node) (int64, int64) {
 }
 
 // Talks returns the conversation's talks in the order they happened.
+//
+// Across streams that order is their time, not their landed position. A
+// position orders records within one stream, which is the only place it
+// means anything: a child's file can land before its parent's, because one
+// request carries both and the files are written per stream. Ordering by
+// position put a sub-agent's turn before the turn that delegated to it,
+// and the document says its talks are in time order.
+//
+// Position still decides between talks that share a time, or where a talk
+// has no observed time at all, so the order stays the same on every read.
 func (c *Conversation) Talks() []*sessionflow.Node {
 	var out []*sessionflow.Node
 	for _, n := range c.View.Nodes {
@@ -216,7 +242,27 @@ func (c *Conversation) Talks() []*sessionflow.Node {
 			out = append(out, n)
 		}
 	}
-	return sessionflow.InOrder(out)
+	began := make(map[string]int64, len(out))
+	for _, n := range out {
+		from, _ := c.Span(n)
+		began[n.ID] = from
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := began[out[i].ID], began[out[j].ID]
+		// A total order, so the sort is defined: every timed talk before
+		// every untimed one, timed talks by time, position only among
+		// equals. Deciding some pairs by time and others by position was
+		// not transitive, and a sort over that could leave two timed talks
+		// reversed and give a different order on the next read.
+		switch {
+		case (a != 0) != (b != 0):
+			return a != 0
+		case a != b:
+			return a < b
+		}
+		return sessionflow.Before(out[i], out[j])
+	})
+	return out
 }
 
 // Streams returns the conversation's execution streams, parent lineage first.

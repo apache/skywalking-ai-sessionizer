@@ -26,6 +26,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -68,6 +69,65 @@ func Discover(root string) ([]Session, error) {
 	return sessions, nil
 }
 
+// outputDir is one directory of change records, and what it sits under.
+type outputDir struct {
+	under string // the plugin directory, or empty when the root is the data directory
+	dir   string
+}
+
+// outputDirs finds every place change records are written under a root.
+//
+// There are two layouts, because there are two ways the recorder is given a
+// data directory. Claude Code hands each plugin its own, under
+// plugins/data/<plugin>-<marketplace>, so the root holds one directory per
+// plugin. Any other runtime is told a directory outright with
+// ASZ_CHANGES_DATA, and there is no plugin layer at all — the records are
+// directly under it.
+//
+// Reading only the first would mean a root configured the second way
+// discovers nothing, silently: the recorder writes, the adapter finds no
+// session, and the conversation never mentions the files it wrote.
+func outputDirs(root string, entries []os.DirEntry) []outputDir {
+	var out []outputDir
+	if info, err := os.Stat(filepath.Join(root, "output")); err == nil && info.IsDir() {
+		out = append(out, outputDir{dir: filepath.Join(root, "output")})
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || !isPluginDir(name) {
+			continue
+		}
+		out = append(out, outputDir{under: name, dir: filepath.Join(root, name, "output")})
+	}
+	return out
+}
+
+// isPluginDir reports whether a directory is one the plugin's data lives in,
+// under any name the plugin has had.
+func isPluginDir(name string) bool {
+	for _, plugin := range PluginNames {
+		if name == plugin || strings.HasPrefix(name, plugin+"-") {
+			return true
+		}
+	}
+	return false
+}
+
+// aszSessionRe matches a session directory asz itself derived.
+//
+// The recorder writes under whatever session id it was told, and Claude Code's
+// is a UUID. Another runtime's is not: a LangChain conversation lands under a
+// name derived from its project and thread, because a supplied thread key is
+// never safe as a path. Both shapes are accepted, and nothing else is, so the
+// guard still holds — a stray file is not landed as evidence.
+var aszSessionRe = regexp.MustCompile(`^ls-[a-z0-9-]*[0-9a-f]{12}$`)
+
+// isSessionDir reports whether a directory under output is one the recorder
+// wrote for a session.
+func isSessionDir(name string) bool {
+	return claudecode.IsSessionID(name) || aszSessionRe.MatchString(name)
+}
+
 // DiscoverWithWarnings is Discover with the non-fatal problems it met.
 func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, err error) {
 	plugins, err := os.ReadDir(root)
@@ -78,12 +138,8 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 		return nil, nil, err
 	}
 	byID := map[string]*Session{}
-	for _, p := range plugins {
-		name := p.Name()
-		if !p.IsDir() || (name != PluginName && !strings.HasPrefix(name, PluginName+"-")) {
-			continue
-		}
-		out := filepath.Join(root, name, "output")
+	for _, p := range outputDirs(root, plugins) {
+		name, out := p.under, p.dir
 		dirs, err := os.ReadDir(out)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -93,7 +149,7 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 		}
 		for _, d := range dirs {
 			id := d.Name()
-			if !d.IsDir() || !claudecode.IsSessionID(id) {
+			if !d.IsDir() || !isSessionDir(id) {
 				continue
 			}
 			files, err := os.ReadDir(filepath.Join(out, id))

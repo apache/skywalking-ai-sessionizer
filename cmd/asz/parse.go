@@ -145,8 +145,14 @@ func printDocument(zoneRoot, id, format string) error {
 // A reader who knows their own agent product recognises its words; a reader
 // comparing two products needs one vocabulary. Neither is the right default for
 // both, so the choice is theirs and nothing is lost either way.
-func termsFor(mode string) func(string) string {
-	g := claudecode.Glossary()
+func termsFor(mode, dialect string) func(string) string {
+	g, ok := glossaryFor(dialect)
+	if !ok {
+		// A dialect this command does not know renders in the model's own
+		// names. Inventing a runtime's word for it would be worse than
+		// saying nothing.
+		return func(u string) string { return u }
+	}
 	switch mode {
 	case "native":
 		return g.Native
@@ -162,8 +168,21 @@ func termsFor(mode string) func(string) string {
 }
 
 // cmdGlossary prints what a runtime calls the things the model names.
+//
+// It takes the dialect to print, because a root can hold sessions from more
+// than one runtime and there is no single answer. With none it prints the
+// dialects there are.
 func cmdGlossary(_ *config.Config, _ config.Adapter, _ bool) error {
-	g := claudecode.Glossary()
+	wanted := claudecode.Dialect
+	if given := arg(0); given != "" {
+		wanted = given
+	}
+	g, ok := glossaryFor(wanted)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "asz glossary: no dialect %q; this command knows %s\n",
+			wanted, strings.Join(dialectNames(), " and "))
+		os.Exit(2)
+	}
 	fmt.Printf("dialect %s\n\n", g.Dialect)
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "MODEL\tRUNTIME\tWHERE\tNOTE")
@@ -222,7 +241,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 	fmt.Printf("  entities   %d nodes, %d relations, %d unresolved (%d still open)\n\n",
 		len(v.Nodes), len(v.Relations), len(v.Unresolved), len(v.OpenUnresolved()))
 
-	term := termsFor(termMode)
+	term := termsFor(termMode, dialectOf(storage.NewZone(zoneRoot), id))
 	byKind := map[string]int{}
 	for _, n := range v.Nodes {
 		byKind[n.Kind]++

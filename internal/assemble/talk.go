@@ -100,7 +100,7 @@ func (b *builder) stage7Talks() {
 		// streams do carry several cycles, and every one of them belongs to this
 		// single Talk.
 		var cur *talk
-		if s.Role == model.StreamChild {
+		if s.Role != model.StreamMain {
 			cur = b.newTalkKeyed(s, s.epochs[0], sessionflow.NodeID("talk", s.Name))
 			cur.mark(ref(entries[0]))
 		}
@@ -175,7 +175,7 @@ func (b *builder) runFor(e *index.Entry) uint32 {
 // Everything else continues the interaction in progress. A background agent
 // finishing is mechanically a new run, but nobody said anything.
 func (b *builder) startsTalk(run uint32, s *streamInfo) bool {
-	if s.Role == model.StreamChild {
+	if s.Role != model.StreamMain {
 		return false
 	}
 	stated := false
@@ -273,9 +273,10 @@ func (b *builder) emitTalks() {
 			parent = t.Epoch.NodeID
 		}
 		trigger := model.TriggerExternal
-		if t.Stream.Role == model.StreamChild {
+		if t.Stream.Role != model.StreamMain {
 			// A delegated prompt is input to the child, but it did not come from
-			// outside the agent - the parent wrote it.
+			// outside the agent - the parent wrote it. The same holds for a
+			// prompt the agent wrote for a plain call of its own.
 			trigger = model.TriggerUnknown
 		}
 		b.node(sessionflow.Node{

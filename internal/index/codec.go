@@ -24,6 +24,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
 // magic identifies an index file and guards against reading an unrelated one.
@@ -297,4 +299,33 @@ func decodeBlock(b []byte, k *Block) {
 	k.Name = le.Uint32(b[11:])
 	k.Adds = le.Uint32(b[15:])
 	k.Dels = le.Uint32(b[19:])
+}
+
+// LoadFor loads a session's index only if it agrees with its saved state.
+//
+// The index is written before its state is saved, by every collector that
+// extends it. A crash between the two leaves an index that already holds
+// what the state says it does not, and extending it from the state's
+// watermark adds those records a second time. A record with an id is kept
+// once; a record with none - a conversation's name - is not told apart from
+// its copy, and a stream's record count stops matching its files.
+//
+// So an index is taken only when its entry count is what the state saved.
+// Otherwise it is treated as absent: the index is derived and disposable,
+// and building it again from the files cannot double anything. Every
+// writer of the index has to take it through here, because a guard in one
+// of them is defeated when another runs first after the crash and saves
+// counts that match.
+func LoadFor(dir, session string, state *storage.IndexState) (*Index, bool, error) {
+	if state == nil || state.Schema != Schema {
+		return nil, false, nil
+	}
+	ix, ok, err := Load(dir, session)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	if len(ix.Entries) != state.Entries {
+		return nil, false, nil
+	}
+	return ix, true, nil
 }

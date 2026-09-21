@@ -88,6 +88,13 @@ var dupIn = regexp.MustCompile(`^<&(\d+|-)`)
 
 // IsReadOnly reports whether the command cannot change the working tree.
 func IsReadOnly(cmd string) bool {
+	// No command at all is not a read-only command: it is a tool that is not
+	// a shell. Returning true here would skip the scan for every tool of
+	// every runtime whose tools take arguments rather than a command line,
+	// which is all of them but this one.
+	if strings.TrimSpace(cmd) == "" {
+		return false
+	}
 	segs, redirect, subst := split(cmd)
 	if redirect || subst {
 		return false

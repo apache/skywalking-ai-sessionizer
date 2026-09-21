@@ -35,10 +35,20 @@ Conversation                          durable identity · ownership boundary
        │        ├ Input
        │        └ Run                 the agent loop
        │           └ Step × N         the leaves — see "Step layer"
-       └ ExecutionStream  child × N   independent context per child agent
-          └ Talk (typically 1)
-             └ Run → Step × N
+       ├ ExecutionStream  child × N   independent context per child agent
+       │  └ Talk (typically 1)
+       │     └ Run → Step × N
+       └ ExecutionStream  auxiliary × N  a plain model call the agent made, with a prompt of its own
+          └ Talk (1) → Run → Step
 ```
+
+A **child** stream is a program the agent started: it has a loop and a context of its own, and the
+call that started it is an `agent.call`. An **auxiliary** stream is not a second agent. It is the
+same agent making one model call inside its own work — a tool whose body is a model call, say —
+with a prompt that does not continue the caller's. It is a stream only so the continuity check
+does not run across it; the call that opened it stays a tool step, and the caller's context
+continues unchanged around it. What tells the two apart is what ran directly under the call: a
+chain of any kind is a program, only model calls are a plain call. When in doubt it is a child.
 
 `Segment` sits above `Session` and **cuts across every stream beneath it**: it is a time window
 chosen for commit, not a branch of the stream tree. A segment is committed only once all of its

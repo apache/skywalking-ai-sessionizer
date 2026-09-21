@@ -34,7 +34,7 @@ RELEASE_NAME := apache-skywalking-ai-sessionizer-$(VERSION)-src
 # hooks under plugins/claude-code/plugin, is installed from the marketplace
 # and is not packaged.
 PLUGIN_DIR    := plugins/claude-code
-PLUGIN_BINARY := asz-claude-plugin
+PLUGIN_BINARY := asz-changes
 
 # The platforms a release ships binaries for. Every one is cross-compiled
 # from any host: the binary is pure Go and needs no C toolchain.
@@ -46,7 +46,7 @@ PKG_BASE  := apache-skywalking-ai-sessionizer-$(VERSION)-bin
 # written by tools/release/deb-package. apt installs them from the repository
 # the SkyWalking website serves. tools/release/release.sh reads this line from
 # the tag's Makefile, so a version from before it has none.
-DEB_PACKAGES := asz asz-claude-code
+DEB_PACKAGES := asz asz-changes
 
 # The GPG key that signs a release, by id, fingerprint or email. Empty means
 # gpg's default key. The key must be in the SkyWalking KEYS file.
@@ -70,6 +70,14 @@ build: $(BIN_DIR)
 .PHONY: test
 test:
 	$(GO) test -race -count=1 ./...
+	@$(MAKE) --no-print-directory test-langchain-shim
+
+## test-langchain-shim: the Python half of the agreement with the receiver
+.PHONY: test-langchain-shim
+test-langchain-shim:
+	@command -v python3 >/dev/null 2>&1 \
+		&& python3 -m unittest discover -s plugins/langchain/tests \
+		|| echo "python3 is not installed; the LangChain shim tests were skipped"
 
 ## test-e2e: the scenarios, the chain tests and the boundary rules, verbose
 .PHONY: test-e2e
@@ -83,6 +91,16 @@ scenarios: build
 		case $$f in *.expect.yaml) continue;; esac; \
 		echo "== $$f"; $(BIN_DIR)/asz scenario check $$f || exit 1; \
 	done
+
+## langchain-capture: run the LangChain demo application and recapture its fixtures (needs python3 and uv)
+.PHONY: langchain-capture
+langchain-capture:
+	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed; see tests/apps/langchain/README.md"; exit 1; }
+	@cd tests/apps/langchain && \
+		{ [ -d .venv ] || uv venv --python 3.12 .venv >/dev/null; } && \
+		VIRTUAL_ENV=.venv uv pip install -q langgraph==1.2.11 langchain-core==1.6.3 \
+			langchain-openai==1.6.2 langsmith==0.13.0 && \
+		./.venv/bin/python run.py && ./.venv/bin/python measure.py
 
 ## e2e-collector: push a generated session into a real OpenTelemetry Collector over both transports and verify what it wrote (needs docker)
 .PHONY: e2e-collector
