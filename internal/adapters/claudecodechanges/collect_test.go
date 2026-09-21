@@ -19,6 +19,7 @@ package claudecodechanges_test
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -214,5 +215,167 @@ func TestMatchJudgesTheWorkspace(t *testing.T) {
 	}
 	if !claudecodechanges.Match(claudecode.NewMatcher(nil, []string{"/elsewhere/**"}), sessions[0]) {
 		t.Fatal("a session outside the exclusion was not collected")
+	}
+}
+
+// Two recorder directories read by one configuration - a shim's flat
+// directory and another - can each hold the same session under the same
+// relative path. They are different files: one cursor for both read the
+// second against the first's position, a truncation conflict that stopped
+// both for good. Each is landed behind a cursor that names its root.
+func TestTheSameSessionInTwoRecorderRootsIsTwoSources(t *testing.T) {
+	zone := storage.NewZone(t.TempDir())
+	rootA, rootB := t.TempDir(), t.TempDir()
+	appendTo(t, filepath.Join(rootA, "output", session, "main.jsonl"), line("a/c1", "main", "toolu_1", "/w"))
+	appendTo(t, filepath.Join(rootB, "output", session, "main.jsonl"), line("b/c1", "main", "toolu_1", "/w")+line("b/c2", "main", "toolu_2", "/w"))
+	all := func(claudecodechanges.Session) bool { return true }
+	a := claudecodechanges.New(rootA, zone, 0)
+	b := claudecodechanges.New(rootB, zone, 0)
+	for name, c := range map[string]*claudecodechanges.Collector{"a": a, "b": b} {
+		st, err := c.CollectAll(all)
+		if err != nil || len(st.Errors) > 0 || st.Conflicts != 0 {
+			t.Fatalf("%s: %+v err=%v", name, st, err)
+		}
+	}
+	appendTo(t, filepath.Join(rootA, "output", session, "main.jsonl"), line("a/c2", "main", "toolu_2", "/w"))
+	st, err := a.CollectAll(all)
+	if err != nil || len(st.Errors) > 0 || st.Conflicts != 0 || st.Records != 1 {
+		t.Fatalf("a line the first root gained: %+v err=%v; want one record and no conflict", st, err)
+	}
+	if st, err := b.CollectAll(all); err != nil || st.Conflicts != 0 || st.Records != 0 {
+		t.Fatalf("the second root, unchanged: %+v err=%v; want nothing and no conflict", st, err)
+	}
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil || len(files) != 3 {
+		t.Fatalf("%d landed files, want three: two roots, then the first root's second line (%v)", len(files), err)
+	}
+}
+
+// A cursor from before 0.5.0 names no root. It belongs to the root whose
+// file it describes - its tail digest says which - and not to the first
+// root to read the same relative path, which could be the other one. And
+// it is written with its root on the next pass, even one that lands
+// nothing, so the question is asked once.
+func TestALegacyCursorBelongsToTheRootWhoseFileItDescribes(t *testing.T) {
+	zone := storage.NewZone(t.TempDir())
+	rootA, rootB := t.TempDir(), t.TempDir()
+	appendTo(t, filepath.Join(rootA, "output", session, "main.jsonl"), line("a/c1", "main", "toolu_1", "/w"))
+	appendTo(t, filepath.Join(rootB, "output", session, "main.jsonl"), line("b/c1", "main", "toolu_1", "/w")+line("b/c2", "main", "toolu_2", "/w"))
+	all := func(claudecodechanges.Session) bool { return true }
+	a := claudecodechanges.New(rootA, zone, 0)
+	if st, err := a.CollectAll(all); err != nil || st.Records != 1 {
+		t.Fatalf("a: %+v err=%v", st, err)
+	}
+	// The cursor as 0.4.0 wrote it: no origin.
+	cursor := filepath.Join(zone.StreamDir(session, "main"), "changes.cursor")
+	raw, err := os.ReadFile(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(l, "origin") {
+			kept = append(kept, l)
+		}
+	}
+	if err := os.WriteFile(cursor, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The other root reads the same relative path first. The cursor does
+	// not describe its file, so it takes one of its own and lands whole.
+	b := claudecodechanges.New(rootB, zone, 0)
+	if st, err := b.CollectAll(all); err != nil || st.Conflicts != 0 || st.Records != 2 {
+		t.Fatalf("b against a legacy cursor of a: %+v err=%v; want two records and no conflict", st, err)
+	}
+	if raw, _ := os.ReadFile(cursor); strings.Contains(string(raw), "origin") {
+		t.Fatalf("b wrote its root into a's cursor:\n%s", raw)
+	}
+	// A's pass lands nothing and still writes its root into its cursor.
+	if st, err := a.CollectAll(all); err != nil || st.Conflicts != 0 || st.Records != 0 {
+		t.Fatalf("a, unchanged: %+v err=%v", st, err)
+	}
+	if raw, _ := os.ReadFile(cursor); !strings.Contains(string(raw), "origin") {
+		t.Fatalf("a's unchanged pass did not claim its cursor:\n%s", raw)
+	}
+	appendTo(t, filepath.Join(rootA, "output", session, "main.jsonl"), line("a/c2", "main", "toolu_2", "/w"))
+	if st, err := a.CollectAll(all); err != nil || st.Conflicts != 0 || st.Records != 1 {
+		t.Fatalf("a's next line: %+v err=%v", st, err)
+	}
+}
+
+// Two files can share their last megabyte and differ before it. A legacy
+// cursor claimed on the bytes before its offset alone would let the other
+// root skip everything it holds before that window, silently. The file's
+// identity decides with the bytes, so the other root lands all of its own.
+//
+// The two first lines are the same length, so the shared tail sits at the
+// same offset in both files and the digests before that offset are equal;
+// the test holds that before it collects, or it would prove nothing.
+func TestALegacyCursorIsNotClaimedOnASharedTailAlone(t *testing.T) {
+	zone := storage.NewZone(t.TempDir())
+	rootA, rootB := t.TempDir(), t.TempDir()
+	var shared strings.Builder
+	for i := 0; shared.Len() < (1<<20)+(64<<10); i++ {
+		shared.WriteString(line(fmt.Sprintf("s/c%d", i), "main", fmt.Sprintf("toolu_s%d", i), "/w"))
+	}
+	sharedLines := strings.Count(shared.String(), "\n")
+	fileA := filepath.Join(rootA, "output", session, "main.jsonl")
+	fileB := filepath.Join(rootB, "output", session, "main.jsonl")
+	first := func(id, tool string) string { return line(id, "main", tool, "/w") }
+	if len(first("a/c1", "toolu_a")) != len(first("b/c1", "toolu_b")) {
+		t.Fatal("the two first lines differ in length, so the tails would not sit at one offset")
+	}
+	appendTo(t, fileA, first("a/c1", "toolu_a")+shared.String())
+	appendTo(t, fileB, first("b/c1", "toolu_b")+shared.String())
+	all := func(claudecodechanges.Session) bool { return true }
+	a := claudecodechanges.New(rootA, zone, 0)
+	for {
+		st, err := a.CollectAll(all)
+		if err != nil || len(st.Errors) > 0 || st.Conflicts != 0 {
+			t.Fatalf("a: %+v err=%v", st, err)
+		}
+		if st.Pending == 0 {
+			break
+		}
+	}
+	cursor := filepath.Join(zone.StreamDir(session, "main"), "changes.cursor")
+	raw, err := os.ReadFile(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	var offset int64
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.HasPrefix(l, "offset") {
+			fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(l, "offset")), "%d", &offset)
+		}
+		if !strings.HasPrefix(l, "origin") {
+			kept = append(kept, l)
+		}
+	}
+	if err := os.WriteFile(cursor, []byte(strings.Join(kept, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The precondition: at a's offset, the bytes before it digest the same
+	// in both files, so the bytes alone cannot tell the two apart.
+	da, errA := claudecode.TailDigestAt(fileA, offset)
+	db, errB := claudecode.TailDigestAt(fileB, offset)
+	if errA != nil || errB != nil || offset == 0 || da != db {
+		t.Fatalf("the tails at offset %d do not digest the same (%v %v %s %s), so this test would prove nothing", offset, errA, errB, da, db)
+	}
+	b := claudecodechanges.New(rootB, zone, 0)
+	records := 0
+	for {
+		st, err := b.CollectAll(all)
+		if err != nil || len(st.Errors) > 0 || st.Conflicts != 0 {
+			t.Fatalf("b: %+v err=%v", st, err)
+		}
+		records += st.Records
+		if st.Pending == 0 {
+			break
+		}
+	}
+	if want := 1 + sharedLines; records != want {
+		t.Fatalf("b landed %d records, want all %d of its own: a cursor read from a's file was claimed on the shared tail", records, want)
 	}
 }

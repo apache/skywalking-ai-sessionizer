@@ -368,11 +368,25 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 		return nil, err
 	}
 	hdr := rd.Header()
+	res := &result{lastEnd: map[string]time.Time{}}
+	// The metric is Claude Code's own family, derived from its transcripts
+	// alone. A root can hold another runtime's conversations beside them,
+	// and those carry calls and usage too, so without this a LangChain
+	// session's tokens went out as claude_code.token.usage. Every landed
+	// header names a dialect; the reader refuses one that does not. The
+	// mock dialect is a scenario writing Claude Code's shape directly, and
+	// the scenarios hold its metrics to the Claude Code build's.
+	if d, _, _ := strings.Cut(hdr.Dialect, "/"); d != "claude-code" && d != "mock" {
+		if _, err := io.Copy(h, f); err != nil {
+			return nil, err
+		}
+		res.digest = hex.EncodeToString(h.Sum(nil))
+		return res, nil
+	}
 	source := SourceSubagent
 	if hdr.Stream == "main" {
 		source = SourceMain
 	}
-	res := &result{lastEnd: map[string]time.Time{}}
 	calls := map[string]*call{}
 	var order []string
 	var last *call

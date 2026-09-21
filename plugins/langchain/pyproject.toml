@@ -22,6 +22,7 @@ description = "Records what a LangChain agent's tool calls changed on disk, for 
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Apache SkyWalking" }]
 keywords = ["skywalking", "observability", "langchain", "langgraph", "agent"]
 dependencies = ["langchain-core>=0.3"]

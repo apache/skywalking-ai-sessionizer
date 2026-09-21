@@ -264,3 +264,16 @@ func extractUUID(line []byte) string {
 	}
 	return string(rest[:j])
 }
+
+// Identity is a source file's identity as a cursor records it: the inode on
+// Unix, the file index on Windows, and the device or volume beside it. Zero
+// when the platform gives none. It is for a reader that has to say whether
+// a cursor was read from this file and not from another with the same bytes
+// at its end.
+func Identity(path string) (dev, ino uint64, err error) {
+	info, err := statSource(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	return info.dev, info.ino, nil
+}

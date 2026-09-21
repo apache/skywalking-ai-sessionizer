@@ -53,6 +53,7 @@ convenience made from its voted files.
 | The announcement | the mail to the dev and announce lists | [The announcement](#the-announcement) | once the downloads page lists the version |
 | The Homebrew tap, `Formula/` on main in this repository | `brew install` | [Homebrew](#homebrew), the `homebrew` skill, a pull request | after Publish |
 | The apt repository, `static/apt` in apache/skywalking-website | `apt install` | [apt](#apt), the `apt` skill, a pull request | at least one hour after the move |
+| PyPI, `apache-skywalking-asz-langchain` | `pip install` | [PyPI](#pypi), the `pypi` skill, by hand | after Publish |
 | A Scoop bucket | `scoop install` | [Scoop](#scoop), by hand | after Publish, once the PMC agrees |
 | microsoft/winget-pkgs | `winget install` | [winget](#winget), by hand | after Publish, once the PMC agrees |
 
@@ -80,6 +81,7 @@ holds the formula templates.
 | [The announcement](#the-announcement) | the release manager | the mail to the dev and announce lists |
 | [Homebrew](#homebrew) | the release manager, with the `homebrew` skill | a pull request to `Formula/` on main in this repository |
 | [apt](#apt) | the release manager, with the `apt` skill | a pull request to `static/apt` in apache/skywalking-website |
+| [PyPI](#pypi) | the release manager, with the `pypi` skill | the LangChain plugin, built from the voted source package and uploaded |
 | [Scoop](#scoop) and [winget](#winget) | the release manager, once the PMC agrees to each | the manifests, submitted by hand |
 | [Later: remove old versions](#later-remove-old-versions) | a PMC member | the release directory without the versions the new one replaces |
 
@@ -981,11 +983,11 @@ Users trust the tap by its URL before they tap it, as [Install](../setup/install
 says. Homebrew 7 loads a tap that is not its own only after `brew trust`, and a `user/repository`
 trust entry matches only a tap at its default remote, which this one is not.
 
-The tap is this repository: `Formula/` on main. It holds `asz@VERSION.rb` and
-`asz-claude-code@VERSION.rb` for every release, keg-only so they do not clash, and `asz.rb` and
-`asz-claude-code.rb` for the newest. `asz` installs `asz`, and `asz-claude-code` installs
-`asz-changes`, whose caveats give the two commands that install the plugin into Claude Code.
-Each installs `LICENSE`, `NOTICE` and `licenses/`, and its test runs its binary.
+The tap is this repository: `Formula/` on main. It holds `asz@VERSION.rb` for every release,
+keg-only so they do not clash, and `asz.rb` for the newest. From 0.5.0 one formula installs both
+programs, `asz` and `asz-changes`, with `LICENSE`, `NOTICE` and `licenses/`, and its test runs
+both. Versions before 0.5.0 keep the two formulae they were released with, `asz@VERSION.rb` and
+`asz-claude-code@VERSION.rb`, which stay as they are.
 
 A formula downloads the voted binary package for the machine, macOS or Linux on ARM 64 or x86-64,
 from the GitHub release. That URL keeps working after a newer version replaces this one on the
@@ -997,10 +999,11 @@ Homebrew/homebrew-core takes a formula only when it builds from source, and thes
 built for each platform.
 
 After Publish, on macOS, run the `homebrew` skill with Claude Code and name the version. It
-downloads the voted packages and checks each against its `.sha512`, writes both formulae of the
-version from its templates, and runs every new formula through `brew style`, `brew audit --strict`,
+downloads the voted packages and checks each against its `.sha512`, writes the version's formula
+from its template, and runs every new formula through `brew style`, `brew audit --strict`,
 `brew install` from the GitHub release, and `brew test`, removing what it installed. It moves
-`asz.rb` and `asz-claude-code.rb` only forward, so adding an older version never moves them back.
+`asz.rb` only forward, so adding an older version never moves it back, and it deletes
+`asz-claude-code.rb` when 0.5.0 is added.
 Then it opens a pull request to main in this repository. Anyone who tapped gets the version with
 `brew update` once it merges.
 
@@ -1008,7 +1011,7 @@ Then it opens a pull request to main in this repository. Anyone who tapped gets 
 
 `https://skywalking.apache.org/apt` is an apt repository: `static/apt` in apache/skywalking-website.
 It holds no package. It holds the index, which lists every released version of `asz` and
-`asz-claude-code`, signed with a key in KEYS, and a `.htaccess` that redirects each package's
+`asz-changes` (`asz-claude-code` before 0.5.0), signed with a key in KEYS, and a `.htaccess` that redirects each package's
 address to the voted `.deb` on the Apache download sites: the newest version through the mirrors,
 and every older one to archive.apache.org, which keeps every version. apt follows the redirect and
 checks the file against the index. The index is written after the vote from the voted packages, and
@@ -1020,6 +1023,20 @@ key in KEYS. It downloads the voted `.deb` files and checks each against its `.s
 and signs the index with your key. Then it serves the result with Apache httpd, as the website does,
 and apt in Debian and Ubuntu installs every version through the redirects. Last, it opens a pull
 request to apache/skywalking-website. The website's CI publishes the change when it merges.
+
+## PyPI
+
+`apache-skywalking-asz-langchain`, the LangChain plugin under `plugins/langchain`, is in the voted
+source package, and is published to PyPI as a convenience after the vote, as the Homebrew tap and
+the apt repository are written after it. The version on PyPI is the released version, which
+`prepare` writes into `plugins/langchain/pyproject.toml`; nothing is uploaded for a candidate.
+
+After Publish, run the `pypi` skill with Claude Code and name the version. It downloads the voted
+source package and checks it against its `.sha512` and its `.asc` against KEYS, builds the sdist
+and the wheel from `plugins/langchain` inside it with `python -m build`, checks both with
+`twine check`, installs the wheel into a fresh environment and runs `asz-langchain status`, and
+uploads both with `twine upload` under the project's PyPI account. The wheel carries `LICENSE` and
+`NOTICE`, which `pyproject.toml` names.
 
 ## Scoop
 

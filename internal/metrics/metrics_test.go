@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,10 +83,18 @@ func records(c call, main bool, ord *uint64) []*sessiondata.Record {
 
 func land(t *testing.T, z *storage.Zone, session, stream string, seq uint64, calls []call) string {
 	t.Helper()
+	return landAs(t, z, session, stream, seq, calls, "claude-code/1")
+}
+
+// landAs lands a transcript under a dialect. The metric is derived from
+// Claude Code's transcripts, so every fixture is one unless a test says
+// otherwise.
+func landAs(t *testing.T, z *storage.Zone, session, stream string, seq uint64, calls []call, dialect string) string {
+	t.Helper()
 	path := filepath.Join(z.StreamDir(session, stream), storage.LandedName("transcript", storage.Stamp(time.Unix(int64(seq), 0)), seq))
 	err := storage.WriteAtomic(path, storage.PermLanded, func(w io.Writer) error {
 		hdr := &sessiondata.Header{Seq: seq, At: "2026-09-07T00:00:00Z", Kind: sessiondata.KindTranscript,
-			Adapter: "test/0", Dialect: "test/1", Src: session + "/" + stream, Session: session, Stream: stream}
+			Adapter: "test/0", Dialect: dialect, Src: session + "/" + stream, Session: session, Stream: stream}
 		sw, err := sessiondata.NewWriter(w, hdr)
 		if err != nil {
 			return err
@@ -398,4 +407,39 @@ func TestLookbackAndReceivedMetricsBoundTheFirstPass(t *testing.T) {
 	if got, _ := points(t, z2); total(got["main/input/m#s1"]) != 6 {
 		t.Fatalf("what the receiver already landed must not be derived again: %v", got)
 	}
+}
+
+// TestAnotherRuntimesTranscriptDerivesNothing.
+//
+// The metric is Claude Code's own family. A root can hold a LangChain
+// conversation beside Claude Code's, landed by the receiver with calls and
+// usage of its own, and those tokens went out as claude_code.token.usage
+// because the derivation read every transcript in the root.
+func TestAnotherRuntimesTranscriptDerivesNothing(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	c := call{id: "c1", model: "m", at: base, frags: 1, in: 4, out: 60}
+	landAs(t, z, "ls-agent-thread-1-abcdef012345", "main", 1, []call{c}, "langsmith/1")
+	land(t, z, "s1", "main", 1, []call{c})
+	d := deriver(z, base.Add(time.Hour), metrics.Options{})
+	st, err := d.Pass(nil)
+	if err != nil || len(st.Errors) > 0 {
+		t.Fatal(err, st)
+	}
+	got, _ := points(t, z)
+	for series := range got {
+		if strings.Contains(series, "#ls-") {
+			t.Errorf("%s was derived from a LangChain session", series)
+		}
+	}
+	if n := total(got["main/output/m#s1"]); n != 60 {
+		t.Errorf("the Claude Code session derived %v output tokens, want 60; series: %v", n, seriesOf(got))
+	}
+}
+
+func seriesOf(m map[string][]got) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

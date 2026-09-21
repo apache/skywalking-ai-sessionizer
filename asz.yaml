@@ -264,8 +264,8 @@ export:
     # with underscores.
     layer: AI_AGENT
     # Sent with every request, as gRPC metadata or as HTTP headers, for
-    # example
-    #   headers: { Authorization: "Bearer ..." }
+    # example { Authorization: "Bearer ..." }. Empty sends none.
+    headers: {}
     # How many file bytes one request carries at most; a file larger than
     # this is sent alone. 8 MiB keeps a request under the 10 MiB the OAP's
     # HTTP server accepts.

@@ -68,6 +68,22 @@
   own records were landed in. A root can hold conversations from more than one runtime, and the
   runtime's words have to be the ones belonging to what is being read.
 
+- The `changes` adapter may be named once per recorder directory, so a machine that runs Claude
+  Code's plugin and a LangChain shim collects both. Two entries that read one directory are
+  refused, and the adapter's old name counts as the same adapter; before, a second entry silently
+  replaced the first.
+
+- `claude_code.token.usage` is derived from Claude Code's transcripts alone. A LangChain
+  conversation in the same root carries calls and usage too, and was counted into it.
+
+- A session sent before its transcript landed - the recorder's files often come first - is
+  attributed by the name asz gave it, so a LangChain session's change records no longer leave
+  under Claude Code's name.
+
+- The LangChain plugin is published to PyPI after the vote, as the Homebrew tap and the apt
+  repository are written after it. [How to Release](../guides/how-to-release.md#pypi) has the
+  step, the `pypi` skill does it, and `prepare` writes the version into the plugin.
+
 ## Renamed
 
 The change recorder is not Claude Code's: it records what any runtime's tool call changed, and a
@@ -110,6 +126,32 @@ every artifact would cost more than the upgrade does.
   `Refusing to load formula ... from untrusted tap`.
 
 ## Release
+
+- The install scripts put `asz-changes` beside `asz`, as Homebrew and apt do. `asz-changes` says
+  its own name in its help and its version, where it still said `asz-claude-plugin`.
+
+- A failing test of the LangChain plugin fails `make check`; it was reported as Python not
+  installed.
+
+- `asz.yaml` writes `headers` out, and the test that holds it to spelling out every value reads
+  the file's keys rather than the loaded values, which the defaults had filled in.
+
+- A scenario's coverage check judges each change file against the cursor it was landed behind,
+  as collection does, and a cursor names the recorder root its file is under: two roots can hold
+  one session under one relative path, and one cursor for both stopped both. A cursor from
+  before 0.5.0 belongs to the root whose file it was read from, by the file's device and inode
+  and the bytes before its offset together, and is written with that root on the next pass; one whose
+  file was copied or restored since is read again from the start, and the index keeps the first
+  record of an id. A session with two plugin directories was never reported as
+  covered, so a scenario's removal waited for ever.
+
+- [Configuration](../setup/configuration.md#more-than-one-agent) says which of several agents,
+  instances and machines one asz serves, and what needs one process each.
+
+- [Upgrading from 0.4.0](../setup/install.md#upgrading-from-040) is one ordered list. The plugin
+  installer finds the plugin under its old name and uninstalls it with its data kept, copies the
+  data beside the new directory and renames it into place - so a copy that stops half way is
+  done again rather than skipped - and finds Claude Code's directory the way asz does.
 
 - The downloads page lists the source package and the binary archives only. `publish` listed the
   Debian packages there too, beside the archives of the same binaries. They stay in the release

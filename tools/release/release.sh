@@ -1449,12 +1449,17 @@ if doit; then
   # Remove only the note's own lines and one blank line after them. A
   # heading written straight under the note must stay in the changelog.
   awk '/^> In development/{skip=1; next} skip && /^>/{next} skip && /^$/{skip=0; next} {skip=0; print}' "$dev_page" > "$dev_page.tmp" && mv "$dev_page.tmp" "$dev_page"
-  git add "$dev_page"
+  # The Python plugin carries its version in its own file, which pip reads,
+  # so the candidate names the version there too.
+  pyproject=plugins/langchain/pyproject.toml
+  sed "s/^version = \".*\"/version = \"$version\"/" "$pyproject" > "$pyproject.tmp" && mv "$pyproject.tmp" "$pyproject"
+  git add "$dev_page" "$pyproject"
   git commit -q -m "Prepare the $version candidate
 
 The changelog of $version loses its in-development note and keeps its
 path, docs/en/changes/changes.md, which the menu and the welcome page
-link. The tag goes on this commit, as the candidate for the vote."
+link, and the Python plugin's version is $version. The tag goes on this
+commit, as the candidate for the vote."
   # The tag is the candidate the vote is about, not the release, so its
   # message does not call it one, and neither does the commit.
   git tag -a "$tag" -m "$project $version"

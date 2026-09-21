@@ -15,14 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Command asz-claude-plugin is the asz Claude Code plugin: it records
-// which files each tool call changed.
+// Command asz-changes records which files each tool call changed. Under
+// Claude Code it is the file-changes plugin's hook; under LangChain the
+// asz-langchain shim runs it.
 //
 // It runs as a Claude Code hook, one short process per event, and keeps
 // its state on disk under the plugin's data directory. It needs nothing
 // from asz: no server, no endpoint, no acknowledgement. Its only output is
 // one JSON line per observed call, appended to a file per stream of a
-// session, which the asz claude-code-changes adapter tails when asz runs.
+// session, which the asz changes adapter tails when asz runs.
 //
 // A shell command is observed with a scan of the workspace before and
 // after it, unless the command is classified read-only. An editing tool
@@ -75,13 +76,13 @@ func dataDir() string {
 // version is set at build time from the tag or the commit.
 var version = "dev"
 
-const usage = `asz-claude-plugin - the asz Claude Code plugin: which files each tool call changed
+const usage = `asz-changes - records which files each tool call changed, for asz
 
 Usage:
-  asz-claude-plugin hook      run as a Claude Code hook; reads the event from standard input
-  asz-claude-plugin status    print the settings in force and the exclusion rules they expand to
-  asz-claude-plugin prune     drop idle snapshot bytes and expired output now
-  asz-claude-plugin version   print the version
+  asz-changes hook      run as a hook; reads the event from standard input
+  asz-changes status    print the settings in force and the exclusion rules they expand to
+  asz-changes prune     drop idle snapshot bytes and expired output now
+  asz-changes version   print the version
 
 With no command, it runs as hook when standard input is a pipe, a socket, a
 file, or anything else that is not a terminal or another character device.
@@ -95,7 +96,7 @@ func main() {
 	case "hook":
 		os.Exit(runHook(os.Stdin, dataDir(), os.Getenv("CLAUDE_PROJECT_DIR"), time.Now()))
 	case "version":
-		fmt.Printf("asz-claude-plugin %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("asz-changes %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	case "status":
 		if err := status(); err != nil {
 			fmt.Fprintln(os.Stderr, err)

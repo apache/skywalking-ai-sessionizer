@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -210,23 +211,77 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 // The first source to arrive keeps the plain name, so nothing already
 // landed is landed twice. Any other source gets its own, named for the
 // source itself so it is the same name on every pass.
-func cursorFor(dir string, src Source) (string, error) {
+//
+// A source is its path relative to its recorder root, and the root: two
+// recorder directories read by one collector configuration can each hold
+// the same session under the same relative path - a shim's flat directory
+// and another one - and they are different files. A cursor written before
+// 0.5.0 names no root. It belongs to the root whose file it was read from,
+// which the cursor says twice: the file's identity, and the bytes before
+// its offset. A root whose file is another takes a cursor of its own
+// rather than reading its file against another's position, which is the
+// conflict that stopped both for good.
+func cursorFor(dir, root string, src Source) (string, error) {
 	plain := filepath.Join(dir, prefix+".cursor")
 	held, err := storage.LoadCursor(plain, storage.CursorAppend, src.Rel)
 	if err != nil {
 		return "", err
 	}
-	if held.Source == "" || held.Source == src.Rel {
+	switch {
+	case held.Source == "", held.Source == src.Rel && held.Origin == root:
+		return plain, nil
+	case held.Source == src.Rel && held.Origin == "" && describes(held, src.Path):
 		return plain, nil
 	}
-	sum := sha256.Sum256([]byte(src.Rel))
+	sum := sha256.Sum256([]byte(root + "\n" + src.Rel))
 	return filepath.Join(dir, prefix+"-"+hex.EncodeToString(sum[:])[:12]+".cursor"), nil
+}
+
+// describes reports whether a cursor that names no root was read from this
+// file: nothing consumed yet, or the file is the one the cursor recorded -
+// the same device and the same inode, since two filesystems can give one
+// inode number to unrelated files - and the digest of the window before
+// the offset is the cursor's. The bytes alone are not enough: two files
+// can share their last megabyte and differ before it, and a cursor claimed
+// on the bytes alone would skip what the other file holds before them. A
+// file that cannot be read is not claimed. A legacy cursor whose file was
+// since copied, restored or reached through another mount, so its identity
+// changed, is not claimed either: that source is read again from its start
+// behind a cursor of its own, and the index keeps the first record it
+// holds for an id.
+func describes(cur *storage.Cursor, path string) bool {
+	if cur.Offset == 0 {
+		return true
+	}
+	if cur.TailSHA256 == "" || cur.Ino == 0 {
+		return false
+	}
+	dev, ino, err := claudecode.Identity(path)
+	if err != nil || ino == 0 || ino != cur.Ino || dev != cur.Dev {
+		return false
+	}
+	got, err := claudecode.TailDigestAt(path, int64(cur.Offset))
+	return err == nil && got == cur.TailSHA256
+}
+
+// origin is how this collector's root is written into a cursor, with
+// forward slashes so it reads the same on every pass. A root inside the
+// storage root - a scenario's, which a test copies whole to another place
+// - is written relative to it, so the copy keeps its cursors; any other
+// root is written absolute, since a source directory that moves is a
+// different source.
+func (c *Collector) origin() string {
+	root := filepath.Clean(c.SourceRoot)
+	if rel, err := filepath.Rel(c.Zone.Root(), root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(root)
 }
 
 // collectSource lands one window of one file, and says whether more waits.
 func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.SessionState, st *Stats, now time.Time) (landed, more bool, err error) {
 	dir := c.Zone.StreamDir(src.Session, src.Stream)
-	cursorPath, err := cursorFor(dir, src)
+	cursorPath, err := cursorFor(dir, c.origin(), src)
 	if err != nil {
 		return false, false, err
 	}
@@ -234,6 +289,11 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 	if err != nil {
 		return false, false, err
 	}
+	// A cursor from before 0.5.0 names no root. It is written once with
+	// this one, even on a pass that lands nothing, so the next root to
+	// read the same relative path finds it claimed.
+	claim := cur.Origin == ""
+	cur.Origin = c.origin()
 	if cur.State == storage.CursorConflict {
 		st.Conflicts++
 		return false, false, nil
@@ -260,6 +320,9 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		if chunk.Moved {
 			cur.Dev, cur.Ino = chunk.Dev, chunk.Ino
 			cur.Size, cur.MTime = chunk.Size, chunk.MTime
+			return false, false, cur.Save(cursorPath, now)
+		}
+		if claim {
 			return false, false, cur.Save(cursorPath, now)
 		}
 		return false, false, nil

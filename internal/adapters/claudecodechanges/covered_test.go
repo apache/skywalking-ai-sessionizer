@@ -106,3 +106,29 @@ func TestCoveredRefusesTwoFilesForOneStream(t *testing.T) {
 		t.Fatalf("two files for one stream: covered=%v err=%v", ok, err)
 	}
 }
+
+// After a pass, the first source of a stream is landed behind the plain
+// cursor and the second behind one of its own, so each is judged against
+// the cursor it was landed behind, and the session is covered. Judging both
+// against the plain cursor said neither was landed, and a scenario's removal
+// waited for ever.
+func TestCoveredJudgesEachFileByItsOwnCursorAfterAPass(t *testing.T) {
+	src := t.TempDir()
+	appendTo(t, filepath.Join(src, "asz-changes-inline", "output", session, "main.jsonl"), line("p1/c1", "main", "toolu_1", "/w"))
+	appendTo(t, filepath.Join(src, "asz-changes-market", "output", session, "main.jsonl"), line("p2/c1", "main", "toolu_1", "/w"))
+	c := claudecodechanges.New(src, storage.NewZone(t.TempDir()), 0)
+	if st, err := c.CollectAll(func(claudecodechanges.Session) bool { return true }); err != nil || len(st.Errors) > 0 || st.Records != 2 {
+		t.Fatalf("collect: %+v err=%v", st, err)
+	}
+	sessions, err := claudecodechanges.Discover(src)
+	if err != nil || len(sessions) != 1 || len(sessions[0].Sources) != 2 {
+		t.Fatalf("discover: %+v err=%v", sessions, err)
+	}
+	if ok, reason, err := c.Covered(sessions[0]); err != nil || !ok {
+		t.Fatalf("after a pass over two files of one stream: covered=%v reason=%q err=%v", ok, reason, err)
+	}
+	appendTo(t, filepath.Join(src, "asz-changes-market", "output", session, "main.jsonl"), line("p2/c2", "main", "toolu_2", "/w"))
+	if ok, _, err := c.Covered(sessions[0]); err != nil || ok {
+		t.Fatalf("a line the second file gained since the pass reads as landed: covered=%v err=%v", ok, err)
+	}
+}
