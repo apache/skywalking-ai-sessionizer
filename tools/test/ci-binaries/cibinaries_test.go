@@ -289,13 +289,13 @@ func TestCIBinariesUsePrereleaseBuildRun(t *testing.T) {
 // platform, and the prerelease must hold them too.
 func TestCIBinariesExpectTheDebianPackages(t *testing.T) {
 	f := newFixture(t)
-	f.addDebs("asz asz-claude-code")
-	output, err := f.executeWith("asz asz-claude-code")
+	f.addDebs("asz asz-changes")
+	output, err := f.executeWith("asz asz-changes")
 	if err != nil || !strings.Contains(output, "verified 10 packages") {
 		t.Fatalf("prerelease with Debian packages rejected: %v\n%s", err, output)
 	}
 	f = newFixture(t)
-	output, err = f.executeWith("asz asz-claude-code")
+	output, err = f.executeWith("asz asz-changes")
 	if err == nil || !strings.Contains(output, "exactly the expected") {
 		t.Fatalf("prerelease without the Debian packages accepted: %v\n%s", err, output)
 	}

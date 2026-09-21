@@ -120,6 +120,29 @@ func (b *builder) stage2Streams() {
 		Attrs: attrs(a),
 	})
 
+	// A stream that is a plain model call the agent made inside its own
+	// work, rather than a child agent. The record that opened it says so;
+	// it is the adapter's evidence, and it is read here rather than
+	// worked out, because nothing in the index says what ran under a tool.
+	// Later evidence can only make it a child, never the other way: a
+	// model call can arrive before the program it turns out to be part of,
+	// and the record that opened the stream then said auxiliary. A later
+	// record opening the same stream without the flag is that program
+	// arriving, and it wins. Claude Code's records never carry the flag, so
+	// nothing changes for them.
+	auxiliary := map[uint32]bool{}
+	program := map[uint32]bool{}
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Child == 0 {
+			continue
+		}
+		if e.Flags.Has(index.FlagAuxiliary) {
+			auxiliary[e.Child] = true
+		} else {
+			program[e.Child] = true
+		}
+	}
 	for _, i := range b.canonical {
 		e := &b.ix.Entries[i]
 		if e.Stream == 0 {
@@ -129,8 +152,11 @@ func (b *builder) stage2Streams() {
 		if !ok {
 			name := b.str(e.Stream)
 			role := model.StreamChild
-			if name == "main" {
+			switch {
+			case name == "main":
 				role = model.StreamMain
+			case auxiliary[e.Stream] && !program[e.Stream]:
+				role = model.StreamAuxiliary
 			}
 			s = &streamInfo{
 				ID: e.Stream, Name: name, Role: role,

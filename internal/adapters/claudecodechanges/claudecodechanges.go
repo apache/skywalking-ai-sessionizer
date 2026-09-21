@@ -36,7 +36,16 @@ import (
 )
 
 // Name is the adapter identifier used in configuration and in landed headers.
-const Name = "claude-code-changes"
+//
+// It is "changes" and not "claude-code-changes" because the records are not
+// Claude Code's: the program that writes them records what any runtime's tool
+// call changed, and a LangChain application produces the same shape.
+const Name = "changes"
+
+// NameWas is what this adapter was called until 0.5.0. A configuration
+// written then still names it, and every header landed then carries it
+// forever, so both are read wherever a name is matched.
+const NameWas = "claude-code-changes"
 
 // Version is the adapter's contract version, recorded in landed headers.
 const Version = "0.1.0"
@@ -46,14 +55,24 @@ const Version = "0.1.0"
 // between the source and the landed record.
 const Dialect = "asz-changes/1"
 
-// PluginName is the plugin's name in its manifest. Claude Code names the
-// plugin's data directory after it, with the marketplace it was installed
-// from as a suffix, so discovery matches the prefix.
-const PluginName = "asz-changes"
+// PluginNames are the names the Claude Code plugin has had. Claude Code names
+// the plugin's data directory after it, with the marketplace it was installed
+// from as a suffix, so discovery matches each as a prefix.
+//
+// Both are read because a rename must not orphan what the old one wrote. The
+// installer copies the directory across, and a machine that upgraded some
+// other way still has its records found here.
+var PluginNames = []string{"file-changes", "asz-changes"}
 
-// RuntimeName is the service the records are attributed to when pushed:
-// they describe Claude Code sessions, so they belong to the same service
-// as the transcripts.
+// PluginName is the plugin's current name.
+const PluginName = "file-changes"
+
+// RuntimeName is the service the records are attributed to when pushed.
+//
+// A change record says which session it belongs to and nothing about which
+// runtime produced it, so the runtime is taken from the session's other
+// landed files rather than assumed here. This is the fallback for a session
+// that has none of them yet.
 const RuntimeName = "Claude Code"
 
 // ResolveSourceRoot determines where the plugin keeps its output: the

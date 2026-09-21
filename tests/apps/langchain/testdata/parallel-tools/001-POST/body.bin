@@ -1,0 +1,523 @@
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f392-7bc1-abae-680c03f0fab0"
+Content-Type: application/json
+Content-Length: 342
+
+{"id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","start_time":"2026-09-20T10:46:46.418820+00:00","tags":[],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"LangGraph","run_type":"chain","end_time":"2026-09-20T10:46:46.447967+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f392-7bc1-abae-680c03f0fab0.inputs"
+Content-Type: application/json
+Content-Length: 63
+
+{"messages":[{"role":"user","content":"Check both clusters."}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f392-7bc1-abae-680c03f0fab0.outputs"
+Content-Type: application/json
+Content-Length: 2317
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"},{"content":"answer 8","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8","finish_reason":"stop","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3ad-7643-81d4-f6b6da9b2732-0","tool_calls":[],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f392-7bc1-abae-680c03f0fab0.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.418820+00:00"},{"name":"end","time":"2026-09-20T10:46:46.447967+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f392-7bc1-abae-680c03f0fab0.extra"
+Content-Type: application/json
+Content-Length: 493
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a3-7610-a946-2e0db7989e3d"
+Content-Type: application/json
+Content-Length: 466
+
+{"id":"01a0be6c-f3a3-7610-a946-2e0db7989e3d","start_time":"2026-09-20T10:46:46.435855+00:00","parent_run_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","tags":["graph:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646435855Z01a0be6c-f3a3-7610-a946-2e0db7989e3d","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"agent","run_type":"chain","end_time":"2026-09-20T10:46:46.443378+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a3-7610-a946-2e0db7989e3d.inputs"
+Content-Type: application/json
+Content-Length: 178
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}],"remaining_steps":10006}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a3-7610-a946-2e0db7989e3d.outputs"
+Content-Type: application/json
+Content-Length: 1014
+
+{"messages":[{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a3-7610-a946-2e0db7989e3d.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.435855+00:00"},{"name":"end","time":"2026-09-20T10:46:46.443378+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a3-7610-a946-2e0db7989e3d.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f22011a7646d"
+Content-Type: application/json
+Content-Length: 528
+
+{"id":"01a0be6c-f3a4-7821-8698-f22011a7646d","start_time":"2026-09-20T10:46:46.436113+00:00","parent_run_id":"01a0be6c-f3a3-7610-a946-2e0db7989e3d","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646435855Z01a0be6c-f3a3-7610-a946-2e0db7989e3d.20260920T104646436113Z01a0be6c-f3a4-7821-8698-f22011a7646d","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"call_model","run_type":"chain","end_time":"2026-09-20T10:46:46.443120+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f22011a7646d.inputs"
+Content-Type: application/json
+Content-Length: 178
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}],"remaining_steps":10006}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f22011a7646d.outputs"
+Content-Type: application/json
+Content-Length: 1014
+
+{"messages":[{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f22011a7646d.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.436113+00:00"},{"name":"end","time":"2026-09-20T10:46:46.443120+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f22011a7646d.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f23810e1aa83"
+Content-Type: application/json
+Content-Length: 593
+
+{"id":"01a0be6c-f3a4-7821-8698-f23810e1aa83","start_time":"2026-09-20T10:46:46.436264+00:00","parent_run_id":"01a0be6c-f3a4-7821-8698-f22011a7646d","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646435855Z01a0be6c-f3a3-7610-a946-2e0db7989e3d.20260920T104646436113Z01a0be6c-f3a4-7821-8698-f22011a7646d.20260920T104646436264Z01a0be6c-f3a4-7821-8698-f23810e1aa83","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"RunnableSequence","run_type":"chain","end_time":"2026-09-20T10:46:46.443070+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f23810e1aa83.inputs"
+Content-Type: application/json
+Content-Length: 178
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}],"remaining_steps":10006}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f23810e1aa83.outputs"
+Content-Type: application/json
+Content-Length: 1010
+
+{"output":{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f23810e1aa83.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.436264+00:00"},{"name":"end","time":"2026-09-20T10:46:46.443070+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f23810e1aa83.extra"
+Content-Type: application/json
+Content-Length: 753
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f24eacecf155"
+Content-Type: application/json
+Content-Length: 642
+
+{"id":"01a0be6c-f3a4-7821-8698-f24eacecf155","start_time":"2026-09-20T10:46:46.436400+00:00","parent_run_id":"01a0be6c-f3a4-7821-8698-f23810e1aa83","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646435855Z01a0be6c-f3a3-7610-a946-2e0db7989e3d.20260920T104646436113Z01a0be6c-f3a4-7821-8698-f22011a7646d.20260920T104646436264Z01a0be6c-f3a4-7821-8698-f23810e1aa83.20260920T104646436400Z01a0be6c-f3a4-7821-8698-f24eacecf155","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"Prompt","run_type":"chain","end_time":"2026-09-20T10:46:46.436462+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f24eacecf155.inputs"
+Content-Type: application/json
+Content-Length: 178
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}],"remaining_steps":10006}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f24eacecf155.outputs"
+Content-Type: application/json
+Content-Length: 152
+
+{"output":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f24eacecf155.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.436400+00:00"},{"name":"end","time":"2026-09-20T10:46:46.436462+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f24eacecf155.extra"
+Content-Type: application/json
+Content-Length: 753
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f2570f2ed415"
+Content-Type: application/json
+Content-Length: 644
+
+{"id":"01a0be6c-f3a4-7821-8698-f2570f2ed415","start_time":"2026-09-20T10:46:46.436782+00:00","parent_run_id":"01a0be6c-f3a4-7821-8698-f23810e1aa83","tags":["seq:step:2"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646435855Z01a0be6c-f3a3-7610-a946-2e0db7989e3d.20260920T104646436113Z01a0be6c-f3a4-7821-8698-f22011a7646d.20260920T104646436264Z01a0be6c-f3a4-7821-8698-f23810e1aa83.20260920T104646436782Z01a0be6c-f3a4-7821-8698-f2570f2ed415","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"ChatOpenAI","run_type":"llm","end_time":"2026-09-20T10:46:46.442996+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f2570f2ed415.inputs"
+Content-Type: application/json
+Content-Length: 203
+
+{"messages":[[{"lc":1,"type":"constructor","id":["langchain","schema","messages","HumanMessage"],"kwargs":{"content":"Check both clusters.","type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}}]]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f2570f2ed415.outputs"
+Content-Type: application/json
+Content-Length: 1599
+
+{"generations":[[{"text":"","generation_info":{"finish_reason":"tool_calls","logprobs":null},"type":"ChatGeneration","message":{"lc":1,"type":"constructor","id":["langchain","schema","messages","AIMessage"],"kwargs":{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}},"invalid_tool_calls":[]}}}]],"llm_output":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7"},"run":null,"type":"LLMResult"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f2570f2ed415.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.436782+00:00"},{"name":"end","time":"2026-09-20T10:46:46.442996+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f2570f2ed415.extra"
+Content-Type: application/json
+Content-Length: 1656
+
+{"invocation_params":{"model":"parallel","model_name":"parallel","stream":false,"temperature":0.0,"_type":"openai-chat","stop":null,"tools":[{"type":"function","function":{"name":"lookup_status","description":"Look up the health of a cluster.","parameters":{"properties":{"cluster":{"default":"prod-1","type":"string"},"question":{"default":"","type":"string"},"text":{"default":"","type":"string"}},"type":"object"}}}]},"options":{"stop":null},"batch_size":1,"metadata":{"thread_id":"thread-parallel","ls_integration":"langchain_chat_model","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","ls_provider":"openai","ls_model_name":"parallel","ls_model_type":"chat","ls_temperature":0.0,"lc_versions":{"langchain-core":"1.6.3","langchain-openai":"1.6.2"},"model":"parallel","model_name":"parallel","stream":false,"temperature":0.0,"_type":"openai-chat","stop":null,"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}},"LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"},"tool_call_count":2}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3a4-7821-8698-f2570f2ed415.serialized"
+Content-Type: application/json
+Content-Length: 268
+
+{"lc":1,"type":"constructor","id":["langchain","chat_models","openai","ChatOpenAI"],"kwargs":{"model_name":"parallel","temperature":0.0,"openai_api_key":{"lc":1,"type":"secret","id":["OPENAI_API_KEY"]},"openai_api_base":"http://127.0.0.1:8931/v1"},"name":"ChatOpenAI"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-223ed1e448cd"
+Content-Type: application/json
+Content-Length: 533
+
+{"id":"01a0be6c-f3ab-7460-b982-223ed1e448cd","start_time":"2026-09-20T10:46:46.443193+00:00","parent_run_id":"01a0be6c-f3a3-7610-a946-2e0db7989e3d","tags":["seq:step:3"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646435855Z01a0be6c-f3a3-7610-a946-2e0db7989e3d.20260920T104646443193Z01a0be6c-f3ab-7460-b982-223ed1e448cd","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"should_continue","run_type":"chain","end_time":"2026-09-20T10:46:46.443269+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-223ed1e448cd.inputs"
+Content-Type: application/json
+Content-Length: 1178
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}}],"remaining_steps":10006}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-223ed1e448cd.outputs"
+Content-Type: application/json
+Content-Length: 2973
+
+{"output":["Send(node='tools', arg={'__type': 'tool_call_with_context', 'tool_call': {'name': 'lookup_status', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_lookup_status_7', 'type': 'tool_call'}, 'state': {'messages': [HumanMessage(content='Check both clusters.', additional_kwargs={}, response_metadata={}, id='19fd8f49-c441-4c25-81ad-b86f5eea3bfb'), AIMessage(content='', additional_kwargs={'refusal': None}, response_metadata={'token_usage': {'completion_tokens': 10, 'prompt_tokens': 107, 'total_tokens': 117, 'completion_tokens_details': None, 'prompt_tokens_details': {'audio_tokens': None, 'cache_write_tokens': None, 'cached_tokens': 5, 'image_tokens': None, 'text_tokens': None}}, 'model_provider': 'openai', 'model_name': 'parallel', 'system_fingerprint': None, 'id': 'chatcmpl-7', 'finish_reason': 'tool_calls', 'logprobs': None}, id='lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0', tool_calls=[{'name': 'lookup_status', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_lookup_status_7', 'type': 'tool_call'}, {'name': 'lookup_status', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_lookup_status_1007', 'type': 'tool_call'}], invalid_tool_calls=[], usage_metadata={'input_tokens': 107, 'output_tokens': 10, 'total_tokens': 117, 'input_token_details': {'cache_read': 5}, 'output_token_details': {}})], 'remaining_steps': 10006}})","Send(node='tools', arg={'__type': 'tool_call_with_context', 'tool_call': {'name': 'lookup_status', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_lookup_status_1007', 'type': 'tool_call'}, 'state': {'messages': [HumanMessage(content='Check both clusters.', additional_kwargs={}, response_metadata={}, id='19fd8f49-c441-4c25-81ad-b86f5eea3bfb'), AIMessage(content='', additional_kwargs={'refusal': None}, response_metadata={'token_usage': {'completion_tokens': 10, 'prompt_tokens': 107, 'total_tokens': 117, 'completion_tokens_details': None, 'prompt_tokens_details': {'audio_tokens': None, 'cache_write_tokens': None, 'cached_tokens': 5, 'image_tokens': None, 'text_tokens': None}}, 'model_provider': 'openai', 'model_name': 'parallel', 'system_fingerprint': None, 'id': 'chatcmpl-7', 'finish_reason': 'tool_calls', 'logprobs': None}, id='lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0', tool_calls=[{'name': 'lookup_status', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_lookup_status_7', 'type': 'tool_call'}, {'name': 'lookup_status', 'args': {'cluster': 'prod-1', 'question': 'check prod-1', 'text': 'some findings'}, 'id': 'call_lookup_status_1007', 'type': 'tool_call'}], invalid_tool_calls=[], usage_metadata={'input_tokens': 107, 'output_tokens': 10, 'total_tokens': 117, 'input_token_details': {'cache_read': 5}, 'output_token_details': {}})], 'remaining_steps': 10006}})"]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-223ed1e448cd.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.443193+00:00"},{"name":"end","time":"2026-09-20T10:46:46.443269+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-223ed1e448cd.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:4a6af451-86db-b809-495c-6b7909b5f7c3","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-224f889e51bb"
+Content-Type: application/json
+Content-Length: 466
+
+{"id":"01a0be6c-f3ab-7460-b982-224f889e51bb","start_time":"2026-09-20T10:46:46.443871+00:00","parent_run_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","tags":["graph:step:2"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646443871Z01a0be6c-f3ab-7460-b982-224f889e51bb","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"tools","run_type":"chain","end_time":"2026-09-20T10:46:46.444886+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-224f889e51bb.inputs"
+Content-Type: application/json
+Content-Length: 1383
+
+{"__type":"tool_call_with_context","tool_call":{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},"state":{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}}],"remaining_steps":10006}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-224f889e51bb.outputs"
+Content-Type: application/json
+Content-Length: 199
+
+{"messages":[{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","tool_call_id":"call_lookup_status_7","status":"success"}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-224f889e51bb.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.443871+00:00"},{"name":"end","time":"2026-09-20T10:46:46.444886+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ab-7460-b982-224f889e51bb.extra"
+Content-Type: application/json
+Content-Length: 690
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["__pregel_push"],"langgraph_path":["__pregel_push",0,false],"langgraph_checkpoint_ns":"tools:7050c43c-f059-a3b0-6c2c-2245493e70cd","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d047693e4272"
+Content-Type: application/json
+Content-Length: 530
+
+{"id":"01a0be6c-f3ac-7a92-b812-d047693e4272","start_time":"2026-09-20T10:46:46.444095+00:00","parent_run_id":"01a0be6c-f3ab-7460-b982-224f889e51bb","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646443871Z01a0be6c-f3ab-7460-b982-224f889e51bb.20260920T104646444095Z01a0be6c-f3ac-7a92-b812-d047693e4272","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"lookup_status","run_type":"tool","end_time":"2026-09-20T10:46:46.444282+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d047693e4272.inputs"
+Content-Type: application/json
+Content-Length: 69
+
+{"cluster":"prod-1","question":"check prod-1","text":"some findings"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d047693e4272.outputs"
+Content-Type: application/json
+Content-Length: 195
+
+{"output":{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","tool_call_id":"call_lookup_status_7","status":"success"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d047693e4272.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.444095+00:00"},{"name":"end","time":"2026-09-20T10:46:46.444282+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d047693e4272.extra"
+Content-Type: application/json
+Content-Length: 805
+
+{"color":"green","tool_call_id":"call_lookup_status_7","metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["__pregel_push"],"langgraph_path":["__pregel_push",0,false],"langgraph_checkpoint_ns":"tools:7050c43c-f059-a3b0-6c2c-2245493e70cd","checkpoint_ns":"tools:7050c43c-f059-a3b0-6c2c-2245493e70cd","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d05bcdf6af22"
+Content-Type: application/json
+Content-Length: 466
+
+{"id":"01a0be6c-f3ac-7a92-b812-d05bcdf6af22","start_time":"2026-09-20T10:46:46.444361+00:00","parent_run_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","tags":["graph:step:2"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646444361Z01a0be6c-f3ac-7a92-b812-d05bcdf6af22","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"tools","run_type":"chain","end_time":"2026-09-20T10:46:46.445081+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d05bcdf6af22.inputs"
+Content-Type: application/json
+Content-Length: 1386
+
+{"__type":"tool_call_with_context","tool_call":{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"},"state":{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}}],"remaining_steps":10006}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d05bcdf6af22.outputs"
+Content-Type: application/json
+Content-Length: 202
+
+{"messages":[{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","tool_call_id":"call_lookup_status_1007","status":"success"}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d05bcdf6af22.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.444361+00:00"},{"name":"end","time":"2026-09-20T10:46:46.445081+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d05bcdf6af22.extra"
+Content-Type: application/json
+Content-Length: 690
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["__pregel_push"],"langgraph_path":["__pregel_push",1,false],"langgraph_checkpoint_ns":"tools:bccee2a0-ecba-26ee-4ec6-7d5cd1373363","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d06779e42f9e"
+Content-Type: application/json
+Content-Length: 530
+
+{"id":"01a0be6c-f3ac-7a92-b812-d06779e42f9e","start_time":"2026-09-20T10:46:46.444606+00:00","parent_run_id":"01a0be6c-f3ac-7a92-b812-d05bcdf6af22","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646444361Z01a0be6c-f3ac-7a92-b812-d05bcdf6af22.20260920T104646444606Z01a0be6c-f3ac-7a92-b812-d06779e42f9e","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"lookup_status","run_type":"tool","end_time":"2026-09-20T10:46:46.444812+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d06779e42f9e.inputs"
+Content-Type: application/json
+Content-Length: 69
+
+{"cluster":"prod-1","question":"check prod-1","text":"some findings"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d06779e42f9e.outputs"
+Content-Type: application/json
+Content-Length: 198
+
+{"output":{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","tool_call_id":"call_lookup_status_1007","status":"success"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d06779e42f9e.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.444606+00:00"},{"name":"end","time":"2026-09-20T10:46:46.444812+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ac-7a92-b812-d06779e42f9e.extra"
+Content-Type: application/json
+Content-Length: 808
+
+{"color":"green","tool_call_id":"call_lookup_status_1007","metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["__pregel_push"],"langgraph_path":["__pregel_push",1,false],"langgraph_checkpoint_ns":"tools:bccee2a0-ecba-26ee-4ec6-7d5cd1373363","checkpoint_ns":"tools:bccee2a0-ecba-26ee-4ec6-7d5cd1373363","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f67edac612a5"
+Content-Type: application/json
+Content-Length: 466
+
+{"id":"01a0be6c-f3ad-7643-81d4-f67edac612a5","start_time":"2026-09-20T10:46:46.445360+00:00","parent_run_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","tags":["graph:step:3"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646445360Z01a0be6c-f3ad-7643-81d4-f67edac612a5","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"agent","run_type":"chain","end_time":"2026-09-20T10:46:46.447694+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f67edac612a5.inputs"
+Content-Type: application/json
+Content-Length: 1639
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"}],"remaining_steps":10004}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f67edac612a5.outputs"
+Content-Type: application/json
+Content-Length: 716
+
+{"messages":[{"content":"answer 8","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8","finish_reason":"stop","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3ad-7643-81d4-f6b6da9b2732-0","tool_calls":[],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f67edac612a5.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.445360+00:00"},{"name":"end","time":"2026-09-20T10:46:46.447694+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f67edac612a5.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f68f8a4b36df"
+Content-Type: application/json
+Content-Length: 528
+
+{"id":"01a0be6c-f3ad-7643-81d4-f68f8a4b36df","start_time":"2026-09-20T10:46:46.445429+00:00","parent_run_id":"01a0be6c-f3ad-7643-81d4-f67edac612a5","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646445360Z01a0be6c-f3ad-7643-81d4-f67edac612a5.20260920T104646445429Z01a0be6c-f3ad-7643-81d4-f68f8a4b36df","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"call_model","run_type":"chain","end_time":"2026-09-20T10:46:46.447528+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f68f8a4b36df.inputs"
+Content-Type: application/json
+Content-Length: 1639
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"}],"remaining_steps":10004}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f68f8a4b36df.outputs"
+Content-Type: application/json
+Content-Length: 716
+
+{"messages":[{"content":"answer 8","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8","finish_reason":"stop","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3ad-7643-81d4-f6b6da9b2732-0","tool_calls":[],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}}}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f68f8a4b36df.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.445429+00:00"},{"name":"end","time":"2026-09-20T10:46:46.447528+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f68f8a4b36df.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f69240f05c73"
+Content-Type: application/json
+Content-Length: 593
+
+{"id":"01a0be6c-f3ad-7643-81d4-f69240f05c73","start_time":"2026-09-20T10:46:46.445559+00:00","parent_run_id":"01a0be6c-f3ad-7643-81d4-f68f8a4b36df","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646445360Z01a0be6c-f3ad-7643-81d4-f67edac612a5.20260920T104646445429Z01a0be6c-f3ad-7643-81d4-f68f8a4b36df.20260920T104646445559Z01a0be6c-f3ad-7643-81d4-f69240f05c73","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"RunnableSequence","run_type":"chain","end_time":"2026-09-20T10:46:46.447487+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f69240f05c73.inputs"
+Content-Type: application/json
+Content-Length: 1639
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"}],"remaining_steps":10004}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f69240f05c73.outputs"
+Content-Type: application/json
+Content-Length: 712
+
+{"output":{"content":"answer 8","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8","finish_reason":"stop","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3ad-7643-81d4-f6b6da9b2732-0","tool_calls":[],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}}}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f69240f05c73.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.445559+00:00"},{"name":"end","time":"2026-09-20T10:46:46.447487+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f69240f05c73.extra"
+Content-Type: application/json
+Content-Length: 753
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6a50396c778"
+Content-Type: application/json
+Content-Length: 642
+
+{"id":"01a0be6c-f3ad-7643-81d4-f6a50396c778","start_time":"2026-09-20T10:46:46.445622+00:00","parent_run_id":"01a0be6c-f3ad-7643-81d4-f69240f05c73","tags":["seq:step:1"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646445360Z01a0be6c-f3ad-7643-81d4-f67edac612a5.20260920T104646445429Z01a0be6c-f3ad-7643-81d4-f68f8a4b36df.20260920T104646445559Z01a0be6c-f3ad-7643-81d4-f69240f05c73.20260920T104646445622Z01a0be6c-f3ad-7643-81d4-f6a50396c778","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"Prompt","run_type":"chain","end_time":"2026-09-20T10:46:46.445676+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6a50396c778.inputs"
+Content-Type: application/json
+Content-Length: 1639
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"}],"remaining_steps":10004}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6a50396c778.outputs"
+Content-Type: application/json
+Content-Length: 1613
+
+{"output":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"}]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6a50396c778.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.445622+00:00"},{"name":"end","time":"2026-09-20T10:46:46.445676+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6a50396c778.extra"
+Content-Type: application/json
+Content-Length: 753
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6b6da9b2732"
+Content-Type: application/json
+Content-Length: 644
+
+{"id":"01a0be6c-f3ad-7643-81d4-f6b6da9b2732","start_time":"2026-09-20T10:46:46.445802+00:00","parent_run_id":"01a0be6c-f3ad-7643-81d4-f69240f05c73","tags":["seq:step:2"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646445360Z01a0be6c-f3ad-7643-81d4-f67edac612a5.20260920T104646445429Z01a0be6c-f3ad-7643-81d4-f68f8a4b36df.20260920T104646445559Z01a0be6c-f3ad-7643-81d4-f69240f05c73.20260920T104646445802Z01a0be6c-f3ad-7643-81d4-f6b6da9b2732","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"ChatOpenAI","run_type":"llm","end_time":"2026-09-20T10:46:46.447437+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6b6da9b2732.inputs"
+Content-Type: application/json
+Content-Length: 1846
+
+{"messages":[[{"lc":1,"type":"constructor","id":["langchain","schema","messages","HumanMessage"],"kwargs":{"content":"Check both clusters.","type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"}},{"lc":1,"type":"constructor","id":["langchain","schema","messages","AIMessage"],"kwargs":{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}},"invalid_tool_calls":[]}},{"lc":1,"type":"constructor","id":["langchain","schema","messages","ToolMessage"],"kwargs":{"content":"cluster prod-1: 3/3 pods ready","type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"}},{"lc":1,"type":"constructor","id":["langchain","schema","messages","ToolMessage"],"kwargs":{"content":"cluster prod-1: 3/3 pods ready","type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"}}]]}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6b6da9b2732.outputs"
+Content-Type: application/json
+Content-Length: 1303
+
+{"generations":[[{"text":"answer 8","generation_info":{"finish_reason":"stop","logprobs":null},"type":"ChatGeneration","message":{"lc":1,"type":"constructor","id":["langchain","schema","messages","AIMessage"],"kwargs":{"content":"answer 8","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8","finish_reason":"stop","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3ad-7643-81d4-f6b6da9b2732-0","usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}},"tool_calls":[],"invalid_tool_calls":[]}}}]],"llm_output":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8"},"run":null,"type":"LLMResult"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6b6da9b2732.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.445802+00:00"},{"name":"end","time":"2026-09-20T10:46:46.447437+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6b6da9b2732.extra"
+Content-Type: application/json
+Content-Length: 1636
+
+{"invocation_params":{"model":"parallel","model_name":"parallel","stream":false,"temperature":0.0,"_type":"openai-chat","stop":null,"tools":[{"type":"function","function":{"name":"lookup_status","description":"Look up the health of a cluster.","parameters":{"properties":{"cluster":{"default":"prod-1","type":"string"},"question":{"default":"","type":"string"},"text":{"default":"","type":"string"}},"type":"object"}}}]},"options":{"stop":null},"batch_size":1,"metadata":{"thread_id":"thread-parallel","ls_integration":"langchain_chat_model","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","ls_provider":"openai","ls_model_name":"parallel","ls_model_type":"chat","ls_temperature":0.0,"lc_versions":{"langchain-core":"1.6.3","langchain-openai":"1.6.2"},"model":"parallel","model_name":"parallel","stream":false,"temperature":0.0,"_type":"openai-chat","stop":null,"usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}},"LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3ad-7643-81d4-f6b6da9b2732.serialized"
+Content-Type: application/json
+Content-Length: 268
+
+{"lc":1,"type":"constructor","id":["langchain","chat_models","openai","ChatOpenAI"],"kwargs":{"model_name":"parallel","temperature":0.0,"openai_api_key":{"lc":1,"type":"secret","id":["OPENAI_API_KEY"]},"openai_api_base":"http://127.0.0.1:8931/v1"},"name":"ChatOpenAI"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4"
+Content-Type: application/json
+Content-Length: 533
+
+{"id":"01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4","start_time":"2026-09-20T10:46:46.447594+00:00","parent_run_id":"01a0be6c-f3ad-7643-81d4-f67edac612a5","tags":["seq:step:3"],"dotted_order":"20260920T104646418820Z01a0be6c-f392-7bc1-abae-680c03f0fab0.20260920T104646445360Z01a0be6c-f3ad-7643-81d4-f67edac612a5.20260920T104646447594Z01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4","trace_id":"01a0be6c-f392-7bc1-abae-680c03f0fab0","session_name":"asz-harness","name":"should_continue","run_type":"chain","end_time":"2026-09-20T10:46:46.447660+00:00"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4.inputs"
+Content-Type: application/json
+Content-Length: 2341
+
+{"messages":[{"content":"Check both clusters.","additional_kwargs":{},"response_metadata":{},"type":"human","id":"19fd8f49-c441-4c25-81ad-b86f5eea3bfb"},{"content":"","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":107,"total_tokens":117,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-7","finish_reason":"tool_calls","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3a4-7821-8698-f2570f2ed415-0","tool_calls":[{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_7","type":"tool_call"},{"name":"lookup_status","args":{"cluster":"prod-1","question":"check prod-1","text":"some findings"},"id":"call_lookup_status_1007","type":"tool_call"}],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":107,"output_tokens":10,"total_tokens":117,"input_token_details":{"cache_read":5},"output_token_details":{}}},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"5833e961-d768-4ebc-a5b3-8cbeaf4b3361","tool_call_id":"call_lookup_status_7","status":"success"},{"content":"cluster prod-1: 3/3 pods ready","additional_kwargs":{},"response_metadata":{},"type":"tool","name":"lookup_status","id":"6ef80091-d1bb-4f46-8c0b-c7ce16432062","tool_call_id":"call_lookup_status_1007","status":"success"},{"content":"answer 8","additional_kwargs":{"refusal":null},"response_metadata":{"token_usage":{"completion_tokens":10,"prompt_tokens":108,"total_tokens":118,"completion_tokens_details":null,"prompt_tokens_details":{"audio_tokens":null,"cache_write_tokens":null,"cached_tokens":5,"image_tokens":null,"text_tokens":null}},"model_provider":"openai","model_name":"parallel","system_fingerprint":null,"id":"chatcmpl-8","finish_reason":"stop","logprobs":null},"type":"ai","id":"lc_run--01a0be6c-f3ad-7643-81d4-f6b6da9b2732-0","tool_calls":[],"invalid_tool_calls":[],"usage_metadata":{"input_tokens":108,"output_tokens":10,"total_tokens":118,"input_token_details":{"cache_read":5},"output_token_details":{}}}],"remaining_steps":10004}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4.outputs"
+Content-Type: application/json
+Content-Length: 20
+
+{"output":"__end__"}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4.events"
+Content-Type: application/json
+Content-Length: 117
+
+[{"name":"start","time":"2026-09-20T10:46:46.447594+00:00"},{"name":"end","time":"2026-09-20T10:46:46.447660+00:00"}]
+--3ef69f5bbf8844f4b6bd3e1d8e918ded
+Content-Disposition: form-data; name="post.01a0be6c-f3af-76b3-b5e4-0bb1e4ce7cd4.extra"
+Content-Type: application/json
+Content-Length: 692
+
+{"metadata":{"thread_id":"thread-parallel","ls_integration":"langgraph","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:ed77c5c2-dce9-dcde-edda-94994818e71c","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langchain-core","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3","library_version":"1.6.3"}}
+--3ef69f5bbf8844f4b6bd3e1d8e918ded--

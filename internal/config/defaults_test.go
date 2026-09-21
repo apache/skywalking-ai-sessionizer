@@ -67,3 +67,42 @@ func TestCollectorFieldsMergeWithNamedDefaults(t *testing.T) {
 		t.Fatalf("partial adapter lost defaults: %+v", a)
 	}
 }
+
+// TestTheOldAdapterNameStillLoads holds the promise a rename has to keep.
+//
+// An adapter's name lives in two places that outlast a release: a
+// configuration someone wrote, and the header of every file landed under it.
+// If either stopped being read, an upgrade would skip the adapter as unknown
+// and collect nothing, saying so only in a line on standard error.
+func TestTheOldAdapterNameStillLoads(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "asz.yaml")
+	if err := os.WriteFile(path, []byte(`
+storage:
+  root: ./data
+adapters:
+  - name: claude-code-changes
+    enabled: true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("a configuration written before the rename no longer loads: %v", err)
+	}
+	var found bool
+	for _, a := range cfg.Adapters {
+		if a.Name == AdapterClaudeCodeChanges {
+			found = true
+			if !a.Enabled {
+				t.Error("the adapter loaded but is not enabled")
+			}
+			if a.Collector.Mode == "" {
+				t.Error("the adapter loaded without its collector defaults")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the old name did not survive loading")
+	}
+}

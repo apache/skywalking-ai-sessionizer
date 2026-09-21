@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -35,6 +36,14 @@ import (
 // makes a file cut short mid-write fail as incomplete. A record's source
 // digest has a different purpose: it identifies the source record before
 // conversion, including any envelope fields the conversion leaves out.
+// ErrNotEncodable says a record cannot be written however often it is tried.
+//
+// It separates a record that will never encode from a disk that is full or
+// gone. The first has to be set aside, because retrying it stops everything
+// behind it for ever; the second has to be retried, because it will work
+// when the disk does.
+var ErrNotEncodable = errors.New("sessiondata: record cannot be encoded")
+
 type Writer struct {
 	bw *bufio.Writer
 	h  hash.Hash
@@ -180,7 +189,8 @@ func encodeRecord(r *Record) ([]byte, error) {
 	// A part is inside three record containers. JSON near the depth limit
 	// can be valid on its own but unreadable after insertion into a record.
 	if !json.Valid(out) {
-		return nil, fmt.Errorf("encoded record is not valid JSON")
+		return nil, fmt.Errorf("%w: a part is valid on its own but not inside a record",
+			ErrNotEncodable)
 	}
 	return out, nil
 }

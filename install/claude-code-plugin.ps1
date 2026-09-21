@@ -24,11 +24,11 @@
 # 1. Downloads the binary package of the version through the Apache mirrors,
 #    or from archive.apache.org for a version no longer on the download site,
 #    with its sha512 from the same Apache site, and stops unless they match.
-# 2. Checks that asz-claude-plugin.exe starts, and copies it into
+# 2. Checks that asz-changes.exe starts, and copies it into
 #    %USERPROFILE%\.local\bin, where the Claude Code installer puts
 #    claude.exe, adding that directory to the user's Path. The plugin's hooks
 #    run it by name from the Path.
-# 3. Installs the asz-changes plugin into Claude Code from the marketplace at
+# 3. Installs the file-changes plugin into Claude Code from the marketplace at
 #    the version's tag. A plugin at another tag is uninstalled with its data
 #    kept first, because removing the marketplace would delete the records
 #    asz has not collected yet.
@@ -47,7 +47,7 @@ if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { throw "${Me}: cla
 $Arch = switch ((Get-CimInstance Win32_Processor | Select-Object -First 1).Architecture) {
   9 { "amd64" } 12 { "arm64" } default { throw "${Me}: there is no package for this processor" } }
 $Pkg = "apache-skywalking-ai-sessionizer-$Version-bin-windows-$Arch.zip"
-$Exe = "asz-claude-plugin.exe"
+$Exe = "asz-changes.exe"
 $Bin = Join-Path $env:USERPROFILE ".local\bin"
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("asz-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $Tmp | Out-Null
@@ -91,7 +91,7 @@ try {
 } finally {
   Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
-Write-Host "${Me}: installed asz-claude-plugin into $Bin"
+Write-Host "${Me}: installed asz-changes into $Bin"
 
 $Sep = [IO.Path]::PathSeparator
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -104,7 +104,7 @@ if ($Found -ne (Join-Path $Bin $Exe)) {
   Write-Warning "${Me}: $Exe on this Path is $(if ($Found) { $Found } else { 'not found' }), not the one in $Bin. Put $Bin before it in your Path." }
 
 $Market = "skywalking-ai-sessionizer"
-$Id = "asz-changes@$Market"
+$Id = "file-changes@$Market"
 $Tag = "v$Version"
 # Windows PowerShell 5.1 can turn what a program writes to standard error
 # into an error, which "Stop" would make fatal. The exit code decides here.
@@ -127,15 +127,24 @@ foreach ($Entry in $Installed) {
 }
 
 # 0.3.0 ran the plugin with --plugin-dir, whose data directory is
-# asz-changes-inline. Its settings move to the installed plugin's directory
-# once, before the first session.
+# A plugin's data directory is named after the plugin, so a rename would
+# otherwise start it empty: the settings gone, and any change record asz had
+# not collected yet left where nothing will look. Both earlier names are
+# carried across once, before the first session, so a rename costs nothing.
+#
+#   asz-changes-inline   0.3.0, loaded with -PluginDir
+#   asz-changes-$Market  0.4.0, before this plugin was named file-changes
 $Config = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
-$Inline = Join-Path $Config "plugins\data\asz-changes-inline\settings.yaml"
-$Data = Join-Path $Config "plugins\data\asz-changes-$Market"
-if ((Test-Path -LiteralPath $Inline) -and -not (Test-Path -LiteralPath (Join-Path $Data "settings.yaml"))) {
-  New-Item -ItemType Directory -Force -Path $Data | Out-Null
-  Copy-Item -LiteralPath $Inline -Destination $Data
-  Write-Host "${Me}: copied the settings of the plugin loaded with --plugin-dir"
+$Data = Join-Path $Config "plugins\data\file-changes-$Market"
+if (-not (Test-Path -LiteralPath $Data)) {
+  foreach ($Was in @((Join-Path $Config "plugins\data\asz-changes-$Market"),
+                     (Join-Path $Config "plugins\data\asz-changes-inline"))) {
+    if (Test-Path -LiteralPath $Was) {
+      Copy-Item -LiteralPath $Was -Destination $Data -Recurse
+      Write-Host "${Me}: carried the plugin data over from $(Split-Path -Leaf $Was)"
+      break
+    }
+  }
 }
 
 $Ref = if ($Declared.Count -gt 0) { $Declared[0].ref } else { $null }

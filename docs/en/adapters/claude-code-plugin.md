@@ -57,7 +57,7 @@ last complete newline, and a line still being written waits for the next pass. A
 `cat >>` to one shared file from concurrent subagents was seen to corrupt lines above about 64 KB.
 The sample it was seen on is unavailable.
 
-asz's `claude-code-changes` adapter, on by default, finds these files beside Claude Code's own,
+asz's `changes` adapter, on by default, finds these files beside Claude Code's own,
 tails them, and lands each line as a record of kind `changes` under the stream the tool ran in.
 See [Configuration](../setup/configuration.md#the-changes-adapter).
 
@@ -186,7 +186,7 @@ Two rules, and neither waits for a collector:
   default, which matches Claude Code's own transcript cleanup. Whatever asz has landed is asz's,
   under its own retention.
 
-The rules run at the session's start and end, and before each scan. `asz-claude-plugin prune`
+The rules run at the session's start and end, and before each scan. `asz-changes prune`
 runs them now.
 
 ## What a scan is
@@ -222,15 +222,15 @@ It never stops the tool.
 `hooks/hooks.json` gives every hook the binary's name as its command and `hook` as its one argument:
 
 ```json
-{"type": "command", "command": "asz-claude-plugin", "args": ["hook"], "timeout": 60}
+{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 60}
 ```
 
 The Claude Code [hooks reference](https://code.claude.com/docs/en/hooks#exec-form-and-shell-form)
 says that when a hook has `args`, Claude Code resolves `command` as an executable on `PATH` and
 starts it directly, with `args` as its arguments and no shell, and that no shell splits the command
 into words on any platform. Claude Code 2.1.274 ran the hooks in this form on Linux, macOS and
-Windows, each on x86-64 and ARM 64. On Windows the name `asz-claude-plugin` started
-`asz-claude-plugin.exe`. [What was verified](#what-was-verified) says how.
+Windows, each on x86-64 and ARM 64. On Windows the name `asz-changes` started
+`asz-changes.exe`. [What was verified](#what-was-verified) says how.
 
 The command is a name and not a path inside the plugin, because the binary is installed with asz
 and the plugin holds none. Anthropic's language server plugins for Claude Code name their servers
@@ -240,7 +240,7 @@ so a plugin that held the binary would need a built copy for every platform comm
 an Apache source release carries no compiled file.
 
 Before that, the plugin gave one command line and no `args`:
-`"${CLAUDE_PLUGIN_ROOT}/bin/asz-claude-plugin" hook`. The hooks reference says Claude Code runs
+`"${CLAUDE_PLUGIN_ROOT}/bin/asz-changes" hook`. The hooks reference says Claude Code runs
 such a line in a shell, and that on Windows without Git Bash the shell is PowerShell. PowerShell's
 own documentation, in `about_Operators`, says a quoted path is shown as a string, not run, unless
 the call operator `&` comes first. The Claude Code 2.1.260 program, read on macOS, puts the line
@@ -258,7 +258,7 @@ unavailable.
 
 ## Run the plugin from a checkout
 
-`make build` writes `bin/asz` and `bin/asz-claude-plugin`. To run the checkout's plugin, put `bin`
+`make build` writes `bin/asz` and `bin/asz-changes`. To run the checkout's plugin, put `bin`
 first on `PATH` and load the plugin's directory for one session:
 
 ```sh
@@ -267,7 +267,7 @@ PATH="$PWD/bin:$PATH" claude --plugin-dir plugins/claude-code/plugin
 
 Its data directory is `asz-changes-inline`.
 
-`asz-claude-plugin status`, with `CLAUDE_PLUGIN_DATA` set, prints the settings in force and the
+`asz-changes status`, with `CLAUDE_PLUGIN_DATA` set, prints the settings in force and the
 exclusion rules they expand to.
 
 ## What was verified
@@ -312,11 +312,11 @@ cache held `.claude-plugin/plugin.json`, `hooks/hooks.json`, `LICENSE` and `NOTI
 directory named for the tag's commit. A headless session, with a local program answering as the
 Messages API does, ran one shell command that wrote a file:
 
-- With `asz-claude-plugin` on `PATH`, the hooks ran it by name. Its record in
-  `asz-changes-skywalking-ai-sessionizer/output/<session-id>/main.jsonl` named the file as created,
+- With `asz-changes` on `PATH`, the hooks ran it by name. Its record in
+  `file-changes-skywalking-ai-sessionizer/output/<session-id>/main.jsonl` named the file as created,
   and `asz collect` landed the record under the session's main stream.
-- With no `asz-claude-plugin` on `PATH`, the session's start hook reported
-  `Executable not found in $PATH: "asz-claude-plugin"`, and so did its end hook. The shell command
+- With no `asz-changes` on `PATH`, the session's start hook reported
+  `Executable not found in $PATH: "asz-changes"`, and so did its end hook. The shell command
   ran, and no record was written.
 
 For an upgrade, a second tag was made on a changed `hooks/hooks.json`. Adding the marketplace at the
@@ -330,7 +330,7 @@ install pages. It runs the commands as the pages write them, and changes only th
 addresses, to a server on the same machine that holds the package, the install scripts, the
 marketplace repository at three tags, and a stand-in for the model's API. It runs the asz install
 command in every shell there is for it, and the plugin's install command. A session must then be
-recorded by the plugin and collected by asz, and a session with no `asz-claude-plugin` on `PATH`
+recorded by the plugin and collected by asz, and a session with no `asz-changes` on `PATH`
 must still run its tool. The Upgrade commands by hand move the plugin to the second tag, and the
 plugin's install command moves it to the third. After each, the plugin's data must still be there
 and the next session must be recorded. The install command run once more must change nothing, and
@@ -341,8 +341,8 @@ passed on macOS on Apple silicon outside CI, and on Linux on ARM 64 in a Debian 
 in an Alpine 3.22.5 container, which runs Claude Code's build for musl.
 
 On Windows that CI ran the check on `windows-latest`, x86-64, and on `windows-11-arm`, ARM 64. Both
-install scripts ran in Windows PowerShell and in PowerShell 7. The hooks name `asz-claude-plugin`
-without `.exe`, and they started `asz-claude-plugin.exe`: the plugin recorded the file the shell
+install scripts ran in Windows PowerShell and in PowerShell 7. The hooks name `asz-changes`
+without `.exe`, and they started `asz-changes.exe`: the plugin recorded the file the shell
 command wrote, and with the binary off the `Path`, Claude Code reported `Executable not found in
 $PATH` and the command still ran. The runners have Git Bash, so Claude Code's shell tool there was
 `Bash`. A Windows machine without Git Bash, where the shell tool is `PowerShell`, has not been tried.

@@ -15,6 +15,11 @@ coverage.txt
 go.work
 go.work.sum
 
+# The LangChain demo application's environment. The fixtures under
+# tests/apps/langchain/testdata are committed; what builds them is not.
+tests/apps/langchain/.venv/
+__pycache__/
+
 # Editors / OS
 .idea/
 .vscode/

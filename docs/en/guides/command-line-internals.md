@@ -16,7 +16,7 @@ its number of directories. It shows that discovery groups files by session and n
 [Discovery is session-first](../adapters/claude-code.md#discovery-is-session-first) explains. The
 list is absent when no session spans more than one.
 
-With the `claude-code-changes` adapter enabled, a second table lists the sessions the plugin has
+With the `changes` adapter enabled, a second table lists the sessions the plugin has
 written change records for, with their streams and workspace.
 
 With the `claude-code-provider` adapter enabled, it names the directory Claude Code writes provider
@@ -234,7 +234,14 @@ counting from 1. The record is read from disk on every request and never cached,
 wanted only when someone opens it. The answer is 404 when the conversation, the sequence or the row
 does not exist.
 
-`/api/glossary` returns three keys. `dialect` says whose vocabulary the terms are in. `terms` is
+`/api/glossary` takes an optional `dialect`, and without one answers in the vocabulary the root's
+own landed files were read in — a root of LangChain conversations is not described in Claude Code's
+words. A root holding both answers with whichever its sessions name first, and lists the rest under
+`dialects`; the page asks once as it loads, so describing two runtimes at once would need it to ask
+per conversation instead.
+
+It returns four keys. `dialect` says whose vocabulary the terms are in. `dialects` says what else
+the root holds. `terms` is
 keyed by the model's name, and each entry carries the runtime's `native` name, `where` the runtime
 records it, and a `note`. `fields` describes the fields Session Data defines itself, such as `ord`,
 `parts` and `usage`, in one line each. A field that names something the model names, such as
@@ -363,7 +370,7 @@ travels, so in a root rebuilt from a push the check stops at the last landed rec
 last file leaves no gap there.
 
 Which streams have an append cursor depends on what landed them. `claude-code-local` gives one to a
-transcript and a workflow journal, and `claude-code-changes` to the plugin's change records.
+transcript and a workflow journal, and `changes` to the plugin's change records.
 `claude-code-local` reads a child agent's sidecar, a workflow manifest and a workflow script whole,
 with a snapshot cursor. So in a root it collected, a lost file of one of them is found only by the
 round chain, and a root with no rounds does not show it. A scenario `sd` build gives each of them

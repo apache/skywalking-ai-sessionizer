@@ -27,7 +27,7 @@
 //     and Claude Code's cache must hold the plugin's directory alone.
 //  3. A headless Claude Code session runs one shell command. The plugin must
 //     record the file it wrote, and asz collect must land the record.
-//  4. The same session without asz-claude-plugin on PATH must still run the
+//  4. The same session without asz-changes on PATH must still run the
 //     command, and leave no record.
 //  5. The Upgrade commands, by hand, move the plugin to a second tag, and the
 //     install script moves it to a third. Each time the plugin's data must
@@ -73,7 +73,7 @@ import (
 
 const (
 	marketplace = "skywalking-ai-sessionizer"
-	plugin      = "asz-changes"
+	plugin      = "file-changes"
 	// The file the stand-in model asks the shell command to write.
 	written = "claudecodecheck.txt"
 	// A settings value the plugin reads, equal to its default, so the file
@@ -111,7 +111,7 @@ type check struct {
 	claude       string
 	shells       []string // the shells the pages give for this system, that are here
 	aszBin       string   // where install/asz put asz
-	bin          string   // where install/claude-code-plugin put asz-claude-plugin
+	bin          string   // where install/claude-code-plugin put asz-changes
 	config       string   // Claude Code's configuration directory for this run
 	api          *stand
 }
@@ -362,8 +362,8 @@ func (c *check) installAsz() error {
 		if !strings.Contains(out, "through the Apache mirrors") {
 			return errors.New("install/asz did not take the version on the download site through the mirrors")
 		}
-		if _, err := os.Stat(filepath.Join(bin, "asz-claude-plugin"+exe())); err == nil {
-			return errors.New("install/asz installed asz-claude-plugin too, which is the plugin's own install")
+		if _, err := os.Stat(filepath.Join(bin, "asz-changes"+exe())); err == nil {
+			return errors.New("install/asz installed asz-changes too, which is the plugin's own install")
 		}
 		c.aszBin = bin
 	}
@@ -394,7 +394,7 @@ func (c *check) installPlugin() error {
 	if err != nil {
 		return fmt.Errorf("the plugin install command failed: %w", err)
 	}
-	if err := c.reports(filepath.Join(c.bin, "asz-claude-plugin"+exe()), c.version); err != nil {
+	if err := c.reports(filepath.Join(c.bin, "asz-changes"+exe()), c.version); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(c.bin, "asz"+exe())); err == nil {
@@ -419,10 +419,10 @@ func (c *check) installPlugin() error {
 	return nil
 }
 
-// recorded runs a session with asz-claude-plugin on PATH. The plugin must
+// recorded runs a session with asz-changes on PATH. The plugin must
 // record the file the shell command wrote.
 func (c *check) recorded() error {
-	step("A session with asz-claude-plugin on PATH")
+	step("A session with asz-changes on PATH")
 	id, err := c.session("with", []string{c.bin})
 	if err != nil {
 		return err
@@ -465,16 +465,16 @@ func (c *check) collect() error {
 	return nil
 }
 
-// missing runs a session without asz-claude-plugin on PATH. The shell
+// missing runs a session without asz-changes on PATH. The shell
 // command must still run, and no record may be written.
 func (c *check) missing() error {
-	step("A session without asz-claude-plugin on PATH")
+	step("A session without asz-changes on PATH")
 	id, err := c.session("without", nil)
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(c.data(), "output", id)); err == nil {
-		return fmt.Errorf("the plugin wrote output for session %s with no asz-claude-plugin on PATH", id)
+		return fmt.Errorf("the plugin wrote output for session %s with no asz-changes on PATH", id)
 	}
 	log, _ := os.ReadFile(filepath.Join(c.work, "session-without.log"))
 	if bytes.Contains(log, []byte("Executable not found")) {

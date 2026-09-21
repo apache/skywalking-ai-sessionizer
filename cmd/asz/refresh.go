@@ -30,6 +30,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
@@ -99,6 +100,11 @@ type refresher struct {
 	// never moves again. So they are carried until one pass gets the lock.
 	retry map[string]bool
 
+	// langsmith converts what the langsmith-ingest receiver accepted. It is
+	// not a collector of sources: there is nothing to poll, only an inbox to
+	// drain.
+	langsmith *langsmith.Collector
+
 	// remover removes the sessions a scenario build marked, once all of
 	// each is sent. It exists when claude-code-local is enabled, and it runs
 	// only while this pipeline holds the scenario lock. A root no build wrote
@@ -165,7 +171,15 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			r.match = claudecode.NewMatcher(ad.Include, ad.Exclude).Match
 			r.colSource = src
 			names, sources = append(names, ad.Name), append(sources, src)
-		case config.AdapterClaudeCodeChanges:
+		case config.AdapterLangSmithIngest:
+			// The receiver lands nothing itself: it keeps what arrived, and
+			// this converts it on the pipeline's own period.
+			r.langsmith = &langsmith.Collector{Zone: zone,
+				Ownership:     langsmith.Ownership{Keys: ad.ThreadKeys, Scope: ad.Scope},
+				MaxDeltaBytes: ad.Collector.MaxDeltaBytes}
+			names = append(names, ad.Name)
+			sources = append(sources, "received on "+ad.Listen)
+		case config.AdapterChanges, config.AdapterClaudeCodeChanges:
 			src, err := claudecodechanges.ResolveSourceRoot(ad.SourceRoot)
 			if err != nil {
 				return nil, err
@@ -185,9 +199,10 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			names, sources = append(names, ad.Name), append(sources, src)
 		}
 	}
-	if r.col == nil && r.changes == nil && r.provider == nil {
-		// No local adapter is enabled. A root filled somewhere else, by a
-		// receiver or copied from another machine, is served as it is.
+	if r.col == nil && r.changes == nil && r.provider == nil && r.langsmith == nil {
+		// Nothing local is enabled and nothing feeds the pipeline. A root
+		// filled somewhere else, by the metrics receiver or copied from
+		// another machine, is served as it is.
 		fmt.Fprintln(os.Stderr, "source   : no local adapter enabled; nothing is collected")
 		return nil, nil
 	}
@@ -432,6 +447,19 @@ func (r *refresher) pass() error {
 		busy += ps.Busy
 		waiting, unreadable = ps.Waiting, ps.Unreadable
 		for _, id := range ps.Changed {
+			changed[id] = true
+		}
+	}
+
+	if r.langsmith != nil {
+		landedRuns, err := r.langsmith.Collect()
+		if err != nil {
+			errs = append(errs, err)
+		}
+		landed += landedRuns.Files
+		records += landedRuns.Records
+		sessionsSeen += len(landedRuns.Sessions)
+		for _, id := range landedRuns.Sessions {
 			changed[id] = true
 		}
 	}

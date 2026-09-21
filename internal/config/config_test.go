@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // The asz.yaml at the repository root claims to be the built-in defaults
@@ -58,11 +60,11 @@ func TestRepoConfigSpellsOutEveryValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Adapters) != 4 {
-		t.Fatalf("adapters: got %d, want the local adapter, the receiver, the changes adapter and the provider adapter", len(got.Adapters))
+	if len(got.Adapters) != 5 {
+		t.Fatalf("adapters: got %d, want the local adapter, the two receivers, the changes adapter and the provider adapter", len(got.Adapters))
 	}
 	for _, a := range got.Adapters {
-		if a.Name == AdapterClaudeCodeOTLP {
+		if isReceiver(a.Name) {
 			// A receiver is a server and has no collector to spell out.
 			if a.Collector != (Collector{}) {
 				t.Fatalf("%s: a receiver carries collector settings: %+v", a.Name, a.Collector)
@@ -133,5 +135,30 @@ func TestPushSwitchesAreReadAsWritten(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("both switches off was accepted")
+	}
+}
+
+// TestAnOldAdapterNameStillGetsItsDefaults.
+//
+// An adapter that was renamed answers to both names. The defaults were found
+// by literal name, so a configuration written before the rename got none of
+// them - including the exclusion that keeps the tool's own sessions out of a
+// person's conversations. Nothing failed; the setting was simply gone.
+func TestAnOldAdapterNameStillGetsItsDefaults(t *testing.T) {
+	var current, old Adapter
+	if err := yaml.Unmarshal([]byte("name: changes\n"), &current); err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte("name: claude-code-changes\n"), &old); err != nil {
+		t.Fatal(err)
+	}
+	if len(current.Exclude) == 0 {
+		t.Fatal("the current name has no default exclusions, so this test proves nothing")
+	}
+	if len(old.Exclude) != len(current.Exclude) {
+		t.Fatalf("the old name got %v, the current name %v", old.Exclude, current.Exclude)
+	}
+	if old.Name != "claude-code-changes" {
+		t.Errorf("the name was rewritten to %q; a configuration says what it says", old.Name)
 	}
 }

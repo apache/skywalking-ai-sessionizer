@@ -76,7 +76,7 @@ func TestHooksRunTheBinaryWithoutAShell(t *testing.T) {
 		for _, g := range groups {
 			for _, h := range g.Hooks {
 				n++
-				if h["type"] != "command" || h["command"] != "asz-claude-plugin" || !reflect.DeepEqual(h["args"], []any{"hook"}) {
+				if h["type"] != "command" || h["command"] != "asz-changes" || !reflect.DeepEqual(h["args"], []any{"hook"}) {
 					t.Errorf("%s: %v is not the binary with the one argument hook", event, h)
 				}
 				// Claude Code ignores a shell when args is set, so naming one
@@ -116,11 +116,11 @@ func TestTheMarketplaceInstallsThePlugin(t *testing.T) {
 		t.Errorf("marketplace %q, owner %q: the documented install names skywalking-ai-sessionizer, and Claude Code requires an owner", market.Name, market.Owner.Name)
 	}
 	if len(market.Plugins) != 1 {
-		t.Fatalf("the marketplace lists %d plugins, want asz-changes alone", len(market.Plugins))
+		t.Fatalf("the marketplace lists %d plugins, want file-changes alone", len(market.Plugins))
 	}
 	entry := market.Plugins[0]
-	if entry["name"] != "asz-changes" || entry["source"] != "./plugins/claude-code/"+pluginDir {
-		t.Errorf("entry %v is not asz-changes from ./plugins/claude-code/%s", entry, pluginDir)
+	if entry["name"] != "file-changes" || entry["source"] != "./plugins/claude-code/"+pluginDir {
+		t.Errorf("entry %v is not file-changes from ./plugins/claude-code/%s", entry, pluginDir)
 	}
 	if _, ok := entry["version"]; ok {
 		t.Errorf("the marketplace entry sets a version")
@@ -128,8 +128,8 @@ func TestTheMarketplaceInstallsThePlugin(t *testing.T) {
 
 	var manifest map[string]any
 	readJSON(t, filepath.Join(pluginDir, ".claude-plugin", "plugin.json"), &manifest)
-	if manifest["name"] != "asz-changes" {
-		t.Errorf("plugin.json names %v, and the marketplace entry names asz-changes", manifest["name"])
+	if manifest["name"] != "file-changes" {
+		t.Errorf("plugin.json names %v, and the marketplace entry names file-changes", manifest["name"])
 	}
 	if _, ok := manifest["version"]; ok {
 		t.Errorf("plugin.json sets a version")

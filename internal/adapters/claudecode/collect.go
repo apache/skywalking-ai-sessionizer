@@ -183,13 +183,13 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 		return err
 	}
 
-	var ix *index.Index
-	if ixState.Schema == index.Schema {
-		if loaded, ok, lerr := index.Load(indexDir, s.ID); lerr == nil && ok {
-			ix = loaded
-		}
+	// Only an index that agrees with its saved state is extended; one that
+	// does not is built again. See index.LoadFor for the crash it guards.
+	ix, ok, err := index.LoadFor(indexDir, s.ID, ixState)
+	if err != nil {
+		return err
 	}
-	if ix == nil {
+	if !ok {
 		ix = index.New(s.ID)
 		ixState = storage.NewIndexState(s.ID)
 	}

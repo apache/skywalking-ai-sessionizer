@@ -176,7 +176,12 @@ func (b *builder) stage5Spawns() {
 			b.open("spawn_call", b.str(ed.Tool), "a child names a call that was never landed")
 			continue
 		}
-		b.markAgentCall(ed.Tool)
+		// A plain model call the agent made inside a tool is not a child
+		// agent, so the call that opened it stays a tool step. The stream
+		// and the edge are kept: the call still started that lineage.
+		if s, ok := b.byStream[ed.Stream]; !ok || s.Role != model.StreamAuxiliary {
+			b.markAgentCall(ed.Tool)
+		}
 		b.spawnEdges = append(b.spawnEdges, ed)
 		spawned[ed.Stream] = true
 		b.stats.SpawnsResolved++
@@ -187,7 +192,7 @@ func (b *builder) stage5Spawns() {
 	// and to no Talk, because guessing a parent would be worse than saying none
 	// was found.
 	for _, s := range b.streams {
-		if s.Role == model.StreamChild && !spawned[s.ID] {
+		if s.Role != model.StreamMain && !spawned[s.ID] {
 			b.stats.ChildrenOrphan++
 			b.open("spawn_of_child", s.Name, "no landed record names the call that started this stream")
 		}

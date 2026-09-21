@@ -1,0 +1,135 @@
+[
+  {
+    "values": [
+      "asz-harness",
+      "thread-plain"
+    ],
+    "id": "ls-asz-harness-thread-plain-40fecfcca2c6"
+  },
+  {
+    "values": [
+      "tsb-advisor",
+      "thread-three-turns"
+    ],
+    "id": "ls-tsb-advisor-thread-three-turns-c2ce00cc3414"
+  },
+  {
+    "values": [
+      "production",
+      "123"
+    ],
+    "id": "ls-production-123-0a137aca36ca"
+  },
+  {
+    "values": [
+      "application-one",
+      "123"
+    ],
+    "id": "ls-application-one-123-fa114041ee37"
+  },
+  {
+    "values": [
+      "application-two",
+      "123"
+    ],
+    "id": "ls-application-two-123-befa997b7e8d"
+  },
+  {
+    "values": [
+      "p",
+      "../outside"
+    ],
+    "id": "ls-p-outside-76652ffe6577"
+  },
+  {
+    "values": [
+      "p",
+      "team/customer"
+    ],
+    "id": "ls-p-team-customer-282765b65350"
+  },
+  {
+    "values": [
+      "p",
+      "_hidden"
+    ],
+    "id": "ls-p-hidden-4ad6ffdefa66"
+  },
+  {
+    "values": [
+      "p",
+      "会话-1"
+    ],
+    "id": "ls-p-1-05d33d9d2196"
+  },
+  {
+    "values": [
+      "p",
+      "con"
+    ],
+    "id": "ls-p-con-7c992adaf4a7"
+  },
+  {
+    "values": [
+      "p",
+      "with space"
+    ],
+    "id": "ls-p-with-space-f9049306da14"
+  },
+  {
+    "values": [
+      "p",
+      "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    ],
+    "id": "ls-p-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-f02b8a4e5562"
+  },
+  {
+    "values": [
+      "",
+      "only-a-thread"
+    ],
+    "id": "ls-only-a-thread-88283653153f"
+  },
+  {
+    "values": [
+      "MiXeD-CaSe",
+      "Thread-ID"
+    ],
+    "id": "ls-mixed-case-thread-id-afd1bc52dfa4"
+  },
+  {
+    "values": [
+      "a\u001fb",
+      "c"
+    ],
+    "id": "ls-a-b-c-a4d431f70ef1"
+  },
+  {
+    "values": [
+      "a",
+      "b\u001fc"
+    ],
+    "id": "ls-a-b-c-903011e2f7a3"
+  },
+  {
+    "values": [
+      "",
+      ""
+    ],
+    "id": "ls-390feabc786e"
+  },
+  {
+    "values": [
+      "a",
+      ""
+    ],
+    "id": "ls-a-c4855ea937d9"
+  },
+  {
+    "values": [
+      "",
+      "a"
+    ],
+    "id": "ls-a-d4acf8e21a4a"
+  }
+]

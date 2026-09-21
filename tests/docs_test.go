@@ -18,8 +18,10 @@
 package tests_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,4 +77,54 @@ func TestDocumentExampleIsCurrent(t *testing.T) {
 	if string(got) != string(want) {
 		t.Fatalf("%s is not what the fixture scenario produces now; run make asz-view-example and commit the result", path)
 	}
+}
+
+// TestTheMenuAndThePagesAgree holds the index to the pages, both ways.
+//
+// docs/menu.yml is what the website builds its navigation from, so an entry
+// with no page is a broken link for every reader, and a page with no entry is
+// one nobody can reach from the site at all. Neither shows up in a build here:
+// the pages are Markdown, nothing compiles them, and the failure only appears
+// once the documentation is published.
+func TestTheMenuAndThePagesAgree(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "docs", "menu.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One path per line, which is how the file is written and how the
+	// website reads it. A full YAML parse would add a dependency for the one
+	// field this needs.
+	listed := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		_, value, ok := strings.Cut(strings.TrimSpace(line), "path:")
+		if !ok {
+			continue
+		}
+		path := strings.TrimSpace(value)
+		if path == "" || path == "/readme" {
+			continue
+		}
+		page := filepath.Join("..", "docs", filepath.FromSlash(path)+".md")
+		if _, err := os.Stat(page); err != nil {
+			t.Errorf("the menu lists %s, and %s is not there", path, page)
+			continue
+		}
+		listed[page] = true
+	}
+	if len(listed) == 0 {
+		t.Fatal("the menu lists no page")
+	}
+	err = filepath.WalkDir(filepath.Join("..", "docs", "en"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return err
+		}
+		if !listed[path] {
+			t.Errorf("%s is a page nobody can reach: it is in no menu entry", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%d pages, each listed once and each present", len(listed))
 }

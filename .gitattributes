@@ -44,3 +44,8 @@ internal/view/conversation-view/host-shell/fonts/*.woff2 export-ignore
 # source package of the next version would carry a formula for the version
 # before it, so git archive leaves them out.
 Formula/** export-ignore
+
+# A captured request is the bytes the client sent. Multipart bodies are
+# delimited by CRLF, so normalising line endings would change what the fixture
+# holds and no receiver could be checked against it.
+tests/apps/langchain/testdata/**/body.bin -text -diff

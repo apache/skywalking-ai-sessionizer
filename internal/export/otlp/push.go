@@ -607,12 +607,20 @@ func (b *batch) flush() error {
 }
 
 // serviceOf is the service a session's records are attributed to: the
-// configured name, or the runtime named by the adapter on the session's
-// first landed header.
+// configured name, or the runtime named by the adapter that landed the
+// session's conversation.
+//
+// A session holds more than its conversation. The change recorder's files
+// land beside it, under an adapter of their own, and they often land first
+// because a change is captured while a tool runs and the conversation
+// follows. Taking whichever header came first attributed a LangChain session
+// to Claude Code. The transcript decides it, and the rest only when there is
+// no transcript to ask.
 func (p *Pusher) serviceOf(files []storage.LandedFile) string {
 	if p.ServiceName != "" {
 		return p.ServiceName
 	}
+	var fallback string
 	for _, lf := range files {
 		f, err := os.Open(lf.Path)
 		if err != nil {
@@ -625,15 +633,24 @@ func (p *Pusher) serviceOf(files []storage.LandedFile) string {
 		}
 		var hdr struct {
 			Adapter string `json:"adapter"`
+			Kind    string `json:"kind"`
 		}
 		if json.Unmarshal(line, &hdr) != nil || hdr.Adapter == "" {
 			continue
 		}
 		name, _, _ := strings.Cut(hdr.Adapter, "/")
 		if runtime, ok := p.Runtimes[name]; ok {
-			return runtime
+			name = runtime
 		}
-		return name
+		if hdr.Kind == string(sessiondata.KindTranscript) {
+			return name
+		}
+		if fallback == "" {
+			fallback = name
+		}
+	}
+	if fallback != "" {
+		return fallback
 	}
 	return "unknown"
 }

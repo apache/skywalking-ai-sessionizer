@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -73,8 +75,20 @@ type ReadOnly struct {
 func (r ReadOnly) On() bool { return r.Enabled == nil || *r.Enabled }
 
 // Tools names the tools observed with a scan.
+//
+// A runtime with a fixed tool set can be listed by name, which is what Claude
+// Code's entry does. A runtime whose tools the application defines cannot be:
+// nobody knows their names in advance. So an entry takes three forms, and the
+// exclusions take the same three.
 type Tools struct {
+	// Scope names the tools observed. An entry is an exact name, a regular
+	// expression when it begins "re:", or "*" alone for every tool.
 	Scope []string `yaml:"scope"`
+	// Exclude names tools never observed, in the same three forms, applied
+	// after Scope. It is what makes "*" usable: the read-only classifier
+	// only understands shell commands, so for any other runtime this is the
+	// only way to keep a scan off a tool that reads.
+	Exclude []string `yaml:"exclude"`
 }
 
 // Retention is how long things are kept.
@@ -126,6 +140,11 @@ func Load(dataDir string) (*Settings, error) {
 	if len(loaded.Tools.Scope) > 0 {
 		s.Tools.Scope = loaded.Tools.Scope
 	}
+	// Exclusions are taken whether or not any were given, because emptying
+	// the list is a real setting: it says observe everything the scope names.
+	// Reading them only when non-empty would make removing the last one do
+	// nothing.
+	s.Tools.Exclude = loaded.Tools.Exclude
 	if loaded.Retention.Idle > 0 {
 		s.Retention.Idle = loaded.Retention.Idle
 	}
@@ -143,8 +162,28 @@ func Load(dataDir string) (*Settings, error) {
 
 // IsScopeTool reports whether a tool is observed with a scan.
 func (s *Settings) IsScopeTool(name string) bool {
-	for _, t := range s.Tools.Scope {
-		if t == name {
+	if !matchesAny(s.Tools.Scope, name) {
+		return false
+	}
+	return !matchesAny(s.Tools.Exclude, name)
+}
+
+// matchesAny reads the three entry forms.
+//
+// A regular expression that does not compile matches nothing rather than
+// everything. A setting someone got wrong should observe too little and be
+// noticed, not observe everything and be expensive.
+func matchesAny(entries []string, name string) bool {
+	for _, entry := range entries {
+		switch {
+		case entry == "*":
+			return true
+		case strings.HasPrefix(entry, "re:"):
+			re, err := regexp.Compile(entry[len("re:"):])
+			if err == nil && re.MatchString(name) {
+				return true
+			}
+		case entry == name:
 			return true
 		}
 	}

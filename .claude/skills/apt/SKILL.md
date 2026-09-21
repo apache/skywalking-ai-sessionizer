@@ -10,7 +10,9 @@ user-invocable: true
 holds no package, only files that describe them:
 
 - `dists/stable/main/binary-amd64/Packages` and `binary-arm64/Packages`, each with `Packages.gz`.
-  They list every released version of `asz` and `asz-claude-code`. Each entry's `Filename` is
+  They list every released version of each package. The recorder's package is `asz-claude-code` up
+  to 0.4.0 and `asz-changes` from 0.5.0, so a repository that spans the rename lists both. Each
+  entry's `Filename` is
   `pool/<package>_<version>_<arch>.deb`.
 - `dists/stable/Release`, which names the hashes of the `Packages` files, and its signatures
   `InRelease` and `Release.gpg`, by a key in KEYS.
@@ -21,8 +23,8 @@ holds no package, only files that describe them:
 Users run:
 
 ```sh
-sudo apt install asz asz-claude-code
-sudo apt install asz=0.4.0 asz-claude-code=0.4.0
+sudo apt install asz asz-changes
+sudo apt install asz=0.4.0 asz-claude-code=0.4.0   # the recorder's package name before 0.5.0
 ```
 
 The user names one version or several. Each must be released and on the download site or the
@@ -61,8 +63,18 @@ KEYS. apt reads KEYS the same way the install page has a person read it, with `g
 ```sh
 curl --noproxy '*' -fsSL -o "$W/KEYS" https://downloads.apache.org/skywalking/KEYS
 gpg --dearmor < "$W/KEYS" > "$W/keys.gpg"
+# Which packages a version published depends on when it was released.
+# 0.5.0 renamed the recorder's package: asz-claude-code up to 0.4.x, and
+# asz-changes from 0.5.0. No version publishes both, so asking for both
+# fails the download on every version.
+packages_of() {
+  case "$1" in
+    0.1.*|0.2.*|0.3.*|0.4.*) echo "asz asz-claude-code" ;;
+    *) echo "asz asz-changes" ;;
+  esac
+}
 for v in <versions>; do
-  for p in asz asz-claude-code; do
+  for p in $(packages_of "$v"); do
     for a in amd64 arm64; do
       f=apache-skywalking-ai-sessionizer-$v-bin-$p-$a.deb
       for g in "$f" "$f.sha512" "$f.asc"; do
@@ -171,11 +183,13 @@ for image in debian:stable ubuntu:24.04; do
     install -m 644 /keys.gpg /usr/share/keyrings/apache-skywalking.gpg
     echo "deb [signed-by=/usr/share/keyrings/apache-skywalking.gpg] http://asz-apt-site/apt stable main" > /etc/apt/sources.list.d/apache-skywalking.list
     apt-get update
-    apt-get install -y asz asz-claude-code
+    apt-get install -y asz asz-changes
     asz version | grep -F "$NEWEST"
-    asz-claude-plugin version | grep -F "$NEWEST"
+    asz-changes version | grep -F "$NEWEST"
     for v in $OLDER; do
-      apt-get install -y --allow-downgrades "asz=$v" "asz-claude-code=$v"
+      recorder=asz-changes
+      case "$v" in 0.1.*|0.2.*|0.3.*|0.4.*) recorder=asz-claude-code ;; esac
+      apt-get install -y --allow-downgrades "asz=$v" "$recorder=$v"
       asz version | grep -F "$v"
     done'
 done

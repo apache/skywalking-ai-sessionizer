@@ -23,6 +23,14 @@ continuity is evaluated inside one and never across two. A child agent always cr
 distinct stream.
 *Not:* timestamp order, and not a sequence of prompts.
 
+**Stream role** — what a stream's lineage is to the session. **main** is the parent lineage. **child**
+is a child agent: a program the agent started, with a loop and a context of its own. **auxiliary** is
+a plain model call the agent made inside its own work, with a prompt of its own — the same agent,
+not a second one. It is a stream only so the continuity check does not run across it, and the call
+that opened it stays a tool step. **judge** is reserved for an evaluator scoring the agent.
+*Not:* auxiliary is not a subagent, and it is not a context reset. The caller's context continues
+unchanged around it.
+
 ## Structure
 
 **Segment** — an activity window that can be committed on its own. It sits above Session and cuts

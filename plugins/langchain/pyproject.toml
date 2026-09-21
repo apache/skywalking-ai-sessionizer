@@ -1,0 +1,46 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+[project]
+name = "apache-skywalking-asz-langchain"
+version = "0.5.0"
+description = "Records what a LangChain agent's tool calls changed on disk, for Apache SkyWalking AI Sessionizer"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Apache SkyWalking" }]
+keywords = ["skywalking", "observability", "langchain", "langgraph", "agent"]
+dependencies = ["langchain-core>=0.3"]
+
+[project.urls]
+Homepage = "https://skywalking.apache.org/"
+Repository = "https://github.com/apache/skywalking-ai-sessionizer"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["asz_langchain"]
+py-modules = ["asz_langchain_boot"]
+
+# The loader is written by "asz-langchain enable", not by the install. A wheel
+# cannot place a .pth in a site directory: measured, pip puts a declared data
+# file in the environment's root, where Python never reads it, and the loader
+# silently never runs.
+[project.scripts]
+asz-langchain = "asz_langchain.cli:main"

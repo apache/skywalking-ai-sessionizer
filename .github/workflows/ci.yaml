@@ -106,6 +106,11 @@ jobs:
       # from end to end, and this is their only run on Windows.
       - name: Unit tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./cmd/... ./pkg/... ./internal/... ./plugins/...
+      # The LangChain shim is the other half of one agreement, written in
+      # another language. Its tables are what the Go parity tests read, so
+      # without this a change on the Python side could not fail anything.
+      - name: LangChain shim tests
+        run: python3 -m unittest discover -s plugins/langchain/tests -v
       - name: Scenarios, chain and boundary tests
         run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./tests/...
       # Raw JSON must survive both implementations of encoding/json. The
@@ -241,7 +246,7 @@ jobs:
         run: |
           dist/build/linux-amd64/asz version
           if [ -d plugins/claude-code ]; then
-            dist/build/linux-amd64/asz-claude-plugin version
+            dist/build/linux-amd64/asz-changes version
           else
             echo "::notice::this tree has no Claude Code plugin, so no plugin binary was run"
           fi
@@ -333,7 +338,7 @@ jobs:
           for p in $debs; do files="$files ./dist/apache-skywalking-ai-sessionizer-$VERSION-bin-$p-${PLATFORM#linux-}.deb"; done
           sudo apt-get install -y $files
           asz version | grep -F "$VERSION"
-          asz-claude-plugin version | grep -F "$VERSION"
+          asz-changes version | grep -F "$VERSION"
           test "$(command -v asz)" = /usr/bin/asz
           for p in $debs; do
             ls "/usr/share/doc/$p/LICENSE" "/usr/share/doc/$p/NOTICE" "/usr/share/doc/$p/licenses"
@@ -342,7 +347,7 @@ jobs:
           differ=$(dpkg --verify $debs)
           if [ -n "$differ" ]; then echo "$differ"; exit 1; fi
           sudo apt-get remove -y $debs
-          if command -v asz || command -v asz-claude-plugin; then echo "apt-get remove left a binary"; exit 1; fi
+          if command -v asz || command -v asz-changes; then echo "apt-get remove left a binary"; exit 1; fi
 
   # Each binary package with Claude Code, on its own platform, the way the
   # install pages tell a person to use it. The Quick install block installs

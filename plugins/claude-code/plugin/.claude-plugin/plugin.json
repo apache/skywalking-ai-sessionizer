@@ -1,9 +1,15 @@
 {
-  "name": "asz-changes",
-  "description": "Records which files each tool call changed, for Apache SkyWalking AI Sessionizer. Runs asz-claude-plugin from PATH; asz collects its output.",
-  "author": {"name": "Apache SkyWalking"},
+  "name": "file-changes",
+  "description": "Records which files each tool call changed, for Apache SkyWalking AI Sessionizer. Runs asz-changes from PATH; asz collects its output.",
+  "author": {
+    "name": "Apache SkyWalking"
+  },
   "homepage": "https://github.com/apache/skywalking-ai-sessionizer",
   "repository": "https://github.com/apache/skywalking-ai-sessionizer",
   "license": "Apache-2.0",
-  "keywords": ["skywalking", "observability", "changes"]
+  "keywords": [
+    "skywalking",
+    "observability",
+    "changes"
+  ]
 }

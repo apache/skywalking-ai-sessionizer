@@ -57,6 +57,21 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/plugins/claude-code/internal/settings"
 )
 
+// dataDir is where this keeps its snapshots and its output.
+//
+// ASZ_CHANGES_DATA comes first because this program is not Claude Code's: it
+// records what a tool call changed for whatever runtime drives it, and a
+// runtime-neutral program reading a runtime's variable would be asking every
+// other one to pretend. CLAUDE_PLUGIN_DATA still works, because Claude Code
+// sets it for every hook and a plugin installed there should need no
+// configuration at all.
+func dataDir() string {
+	if dir := os.Getenv("ASZ_CHANGES_DATA"); dir != "" {
+		return dir
+	}
+	return os.Getenv("CLAUDE_PLUGIN_DATA")
+}
+
 // version is set at build time from the tag or the commit.
 var version = "dev"
 
@@ -71,14 +86,14 @@ Usage:
 With no command, it runs as hook when standard input is a pipe, a socket, a
 file, or anything else that is not a terminal or another character device.
 
-The plugin's data directory is CLAUDE_PLUGIN_DATA, which Claude Code sets for
-every hook. status and prune take it from the environment too.
+The data directory is ASZ_CHANGES_DATA, or CLAUDE_PLUGIN_DATA, which Claude
+Code sets for every hook. status and prune take it from the environment too.
 `
 
 func main() {
 	switch subcommand(os.Args[1:], os.Stdin) {
 	case "hook":
-		os.Exit(runHook(os.Stdin, os.Getenv("CLAUDE_PLUGIN_DATA"), os.Getenv("CLAUDE_PROJECT_DIR"), time.Now()))
+		os.Exit(runHook(os.Stdin, dataDir(), os.Getenv("CLAUDE_PROJECT_DIR"), time.Now()))
 	case "version":
 		fmt.Printf("asz-claude-plugin %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	case "status":
@@ -582,10 +597,11 @@ func (p *plugin) maintain() {
 
 // status prints what the plugin would run under.
 func status() error {
-	dataDir := os.Getenv("CLAUDE_PLUGIN_DATA")
-	if dataDir == "" {
-		return errors.New("CLAUDE_PLUGIN_DATA is not set; run under Claude Code, or set it to the plugin's data directory")
+	dir := dataDir()
+	if dir == "" {
+		return errors.New("no data directory: set ASZ_CHANGES_DATA, or run under Claude Code, which sets CLAUDE_PLUGIN_DATA")
 	}
+	dataDir := dir
 	st, err := settings.Load(dataDir)
 	if err != nil {
 		return err
@@ -616,9 +632,9 @@ func orDefault(s, d string) string {
 
 // pruneNow runs the retention rules from the command line.
 func pruneNow() error {
-	dataDir := os.Getenv("CLAUDE_PLUGIN_DATA")
+	dataDir := dataDir()
 	if dataDir == "" {
-		return errors.New("CLAUDE_PLUGIN_DATA is not set")
+		return errors.New("no data directory: set ASZ_CHANGES_DATA, or run under Claude Code, which sets CLAUDE_PLUGIN_DATA")
 	}
 	st, err := settings.Load(dataDir)
 	if err != nil {

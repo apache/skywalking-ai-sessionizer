@@ -79,12 +79,13 @@ var definitions = map[string]definition{
 			"durable conversation structure.",
 		},
 	},
-	"asz-claude-code": {
-		binary:  "asz-claude-plugin",
-		summary: "Claude Code plugin that records which files each tool call changed",
+	"asz-changes": {
+		binary:  "asz-changes",
+		summary: "Records which files each tool call changed",
 		description: []string{
-			"The binary the hooks of the asz-changes plugin run. The plugin itself is",
-			"installed into Claude Code with the claude plugin commands.",
+			"The program an agent runtime's integration runs around a tool call, to",
+			"record what it changed on disk. Claude Code runs it from the hooks of the",
+			"asz-changes plugin; a LangChain application runs it from the asz shim.",
 		},
 	},
 }

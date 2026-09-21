@@ -30,7 +30,11 @@ import (
 	"io"
 )
 
-// Events this plugin acts on.
+// Events this plugin acts on, in its own vocabulary.
+//
+// The names are Claude Code's, because that is the runtime this was written
+// for and changing them would break every installed manifest for nothing. What
+// matters is that they are no longer the ONLY names: see neutral below.
 const (
 	PreToolUse         = "PreToolUse"
 	PostToolUse        = "PostToolUse"
@@ -38,6 +42,30 @@ const (
 	SessionStart       = "SessionStart"
 	SessionEnd         = "SessionEnd"
 )
+
+// neutral maps a runtime-neutral event name onto the one this acts on.
+//
+// This program records what a tool call changed, which is not a Claude Code
+// idea. Another runtime's integration should not have to send "PreToolUse" to
+// say a tool began, so it can say so plainly instead. The two vocabularies
+// mean the same thing and take the same path.
+var neutral = map[string]string{
+	"tool.begin":    PreToolUse,
+	"tool.end":      PostToolUse,
+	"tool.failed":   PostToolUseFailure,
+	"session.begin": SessionStart,
+	"session.end":   SessionEnd,
+}
+
+// Neutral returns the neutral name for an event, for a caller writing one.
+func Neutral(event string) string {
+	for name, mapped := range neutral {
+		if mapped == event {
+			return name
+		}
+	}
+	return event
+}
 
 // Input is one hook invocation.
 type Input struct {
@@ -67,6 +95,9 @@ func Read(r io.Reader) (*Input, error) {
 	}
 	if in.Event == "" {
 		return nil, fmt.Errorf("hook: input names no event")
+	}
+	if mapped, ok := neutral[in.Event]; ok {
+		in.Event = mapped
 	}
 	return &in, nil
 }

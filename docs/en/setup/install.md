@@ -31,7 +31,6 @@ version to upgrade. On Windows, stop `asz` first.
 brew trust https://github.com/apache/skywalking-ai-sessionizer
 brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
 brew install apache/skywalking-ai-sessionizer/asz
-brew install apache/skywalking-ai-sessionizer/asz-claude-code
 ```
 
 Homebrew 7 loads a tap that is not one of its own only after `brew trust`. Trust it by the same URL
@@ -39,13 +38,15 @@ you tap: for this tap, the name `apache/skywalking-ai-sessionizer` does not matc
 repository is not named `homebrew-skywalking-ai-sessionizer`. Without it, `brew tap` stops with
 `Refusing to load formula ... from untrusted tap`.
 
-`asz-claude-code` installs `asz-claude-plugin`, the Claude Code plugin's binary. To install the
-plugin into Claude Code, run the two commands that `brew info asz-claude-code` prints. Upgrade with
-`brew upgrade asz asz-claude-code`.
+`asz` installs two programs: `asz` itself and `asz-changes`, which records what a tool call changed
+on disk. To wire a runtime to it, see [Claude Code Plugin](claude-code-plugin.md) or
+[LangChain Plugin](langchain-plugin.md). Upgrade with `brew upgrade asz`.
 
-For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>` and
-`apache/skywalking-ai-sessionizer/asz-claude-code@<version>`. Homebrew keeps them off your `PATH`;
-`brew info` shows where they are.
+Until 0.5.0 there were two formulae fetching the identical archive and installing one binary each.
+`asz-claude-code` is gone; `brew uninstall asz-claude-code` once `asz` is installed.
+
+For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>`. Homebrew keeps it
+off your `PATH`; `brew info` shows where it is.
 
 ## apt, on Debian and Ubuntu
 
@@ -53,13 +54,22 @@ For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>` a
 curl -fsSL https://downloads.apache.org/skywalking/KEYS | gpg --dearmor | sudo tee /usr/share/keyrings/apache-skywalking.gpg > /dev/null
 echo "deb [signed-by=/usr/share/keyrings/apache-skywalking.gpg] https://skywalking.apache.org/apt stable main" | sudo tee /etc/apt/sources.list.d/apache-skywalking.list
 sudo apt update
-sudo apt install asz asz-claude-code
+sudo apt install asz asz-changes
 ```
 
-`asz-claude-code` installs `asz-claude-plugin`, the Claude Code plugin's binary. Then install the
-plugin into Claude Code as [Claude Code Plugin](claude-code-plugin.md) says. Upgrade with
-`sudo apt update && sudo apt upgrade`. For an exact version, run
-`sudo apt install asz=<version> asz-claude-code=<version>`.
+`asz-changes` records what a tool call changed on disk; install it on a machine where an agent
+runs. `asz` is the collector and the page, and a machine that only receives needs it alone. To
+wire a runtime to the recorder, see [Claude Code Plugin](claude-code-plugin.md) or
+[LangChain Plugin](langchain-plugin.md).
+
+Upgrade with `sudo apt update && sudo apt upgrade`. For an exact version, run
+`sudo apt install asz=<version> asz-changes=<version>`.
+
+`asz-changes` was called `asz-claude-code` until 0.5.0, and the binary in it was called
+`asz-claude-plugin`. Neither name is published any more, so a machine that has the old package
+keeps it until `sudo apt remove asz-claude-code`, and the Claude Code plugin has to be reinstalled
+once so its hooks call the new name. `install/claude-code-plugin.sh` does that and carries the
+plugin's data across.
 
 ## Binary package
 
@@ -70,7 +80,7 @@ apache-skywalking-ai-sessionizer-<version>-bin-<os>-<arch>.tgz    os: darwin, li
 apache-skywalking-ai-sessionizer-<version>-bin-windows-<arch>.zip  arch: amd64, arm64
 ```
 
-Each holds `asz`, `asz-claude-plugin` (the Claude Code plugin's binary), `LICENSE`, `NOTICE` and
+Each holds `asz`, `asz-changes` (the change recorder), `LICENSE`, `NOTICE` and
 `licenses/`.
 
 For Debian and Ubuntu, the same page links two `.deb` packages per architecture, which
@@ -158,11 +168,11 @@ make build VERSION=$VERSION
 ./bin/asz version
 ```
 
-`make build` writes `bin/asz` and `bin/asz-claude-plugin`. Without make, on Windows for example:
+`make build` writes `bin/asz` and `bin/asz-changes`. Without make, on Windows for example:
 
 ```sh
 go build -ldflags "-X main.version=$VERSION" -o bin/asz.exe ./cmd/asz
-go build -ldflags "-X main.version=$VERSION" -o bin/asz-claude-plugin.exe ./plugins/claude-code
+go build -ldflags "-X main.version=$VERSION" -o bin/asz-changes.exe ./plugins/claude-code
 ```
 
 A build from source draws the page with system fonts. The binary packages carry the page's fonts.

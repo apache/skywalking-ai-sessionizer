@@ -1,6 +1,6 @@
 ---
 name: homebrew
-description: Add released versions of Apache SkyWalking AI Sessionizer to its Homebrew tap, Formula/ on main in apache/skywalking-ai-sessionizer. Writes asz@VERSION and asz-claude-code@VERSION from the voted packages, moves asz and asz-claude-code to the newest version, checks every formula with brew, and opens a pull request to main in this repository. Use after a version is published, or to add older released versions.
+description: Add released versions of Apache SkyWalking AI Sessionizer to its Homebrew tap, Formula/ on main in apache/skywalking-ai-sessionizer. Writes asz@VERSION from the voted packages, moves asz to the newest version, checks every formula with brew, and opens a pull request to main in this repository. Use after a version is published, or to add older released versions.
 user-invocable: true
 ---
 
@@ -8,11 +8,19 @@ user-invocable: true
 
 `Formula/` on main in this repository is the tap. It holds:
 
-- `asz@VERSION.rb` and `asz-claude-code@VERSION.rb` for every released version, keg-only, so an
-  exact version stays installable;
-- `asz.rb` and `asz-claude-code.rb` for the newest version.
+From 0.5.0 one formula installs both binaries. Before it there were two, fetching the identical
+archive and the identical checksum and installing one binary each, which only invited a machine to
+end up with `asz` of one version and the recorder of another. A version before 0.5.0 keeps the
+two-formula shape it was released with, and its formulae stay as they are; `asz-claude-code.rb`,
+the pointer to the newest, is deleted when 0.5.0 is added.
 
-`asz.rb` and `asz-claude-code.rb` beside this file are the templates. A formula installs the voted
+- `asz@VERSION.rb` for every released version from 0.5.0, and `asz@VERSION.rb` with
+  `asz-claude-code@VERSION.rb` for the versions before it, which stay as they were released,
+  keg-only, so an
+  exact version stays installable;
+- `asz.rb` for the newest version.
+
+`asz.rb` beside this file is the template. A formula installs the voted
 binary package for the machine, macOS or Linux on arm64 or amd64, from the version's GitHub release,
 with archive.apache.org as its mirror. That URL keeps working after the version leaves the download
 site. Users run:
@@ -20,7 +28,7 @@ site. Users run:
 ```sh
 brew trust https://github.com/apache/skywalking-ai-sessionizer
 brew tap apache/skywalking-ai-sessionizer https://github.com/apache/skywalking-ai-sessionizer
-brew install apache/skywalking-ai-sessionizer/asz apache/skywalking-ai-sessionizer/asz-claude-code
+brew install apache/skywalking-ai-sessionizer/asz
 brew install apache/skywalking-ai-sessionizer/asz@0.4.0
 ```
 
@@ -75,7 +83,9 @@ for v in <versions>; do
         curl --noproxy '*' -fsSL -o "$W/$v/$g" "https://archive.apache.org/dist/skywalking/ai-sessionizer/$v/$g"
     done
     (cd "$W/$v" && shasum -a 512 -c "$f.sha512")
-    tar -tvzf "$W/$v/$f" | awk '($NF == "asz" || $NF == "asz-claude-plugin") && $1 ~ /^-rwx/ {n++}
+    # 0.5.0 renamed the recorder: asz-claude-plugin up to 0.4.x, asz-changes
+    # from 0.5.0. An archive holds one of them beside asz, never both.
+    tar -tvzf "$W/$v/$f" | awk '($NF == "asz" || $NF == "asz-changes" || $NF == "asz-claude-plugin") && $1 ~ /^-rwx/ {n++}
       $NF == "LICENSE" || $NF == "NOTICE" {m++} $NF ~ /^licenses\/./ {l = 1}
       END {if (n != 2 || m != 2 || !l) {print "missing a file the formula installs"; exit 1}}'
   done
@@ -91,7 +101,7 @@ T=.claude/skills/homebrew
 for v in <versions>; do
   sum() { shasum -a 256 "$W/$v/apache-skywalking-ai-sessionizer-$v-bin-$1.tgz" | cut -d ' ' -f 1; }
   mkdir -p "$W/formula-$v"
-  for f in asz asz-claude-code; do
+  for f in asz; do
     sed -e "s/@VERSION@/$v/g" \
       -e "s/@DARWIN_ARM64_SHA256@/$(sum darwin-arm64)/" -e "s/@DARWIN_AMD64_SHA256@/$(sum darwin-amd64)/" \
       -e "s/@LINUX_ARM64_SHA256@/$(sum linux-arm64)/" -e "s/@LINUX_AMD64_SHA256@/$(sum linux-amd64)/" \
@@ -99,7 +109,7 @@ for v in <versions>; do
   done
   # Homebrew names a versioned formula's class after its file: asz@0.4.0 is
   # AszAT040. keg_only keeps it from clashing with the current formula.
-  for c in Asz:asz AszClaudeCode:asz-claude-code; do
+  for c in Asz:asz; do
     C=${c%%:*} V=${c%%:*}AT$(printf '%s' "$v" | tr -d .) perl -pe \
       's/^class \Q$ENV{C}\E < Formula$/class $ENV{V} < Formula/; s/^(  license "Apache-2\.0"\n)/$1\n  keg_only :versioned_formula\n/' \
       "$W/formula-$v/${c#*:}.rb" > "$W/formula-$v/${c#*:}@$v.rb"
@@ -112,7 +122,7 @@ newest=$(printf '%s\n' $current <versions> | sort -V | tail -1)
 echo "current: ${current:-none}, newest: $newest"
 ```
 
-`asz.rb` and `asz-claude-code.rb` move only forward: to `$newest`, when it is one of the given
+`asz.rb` moves only forward: to `$newest`, when it is one of the given
 versions. Adding an older version never moves them back.
 
 ## 5. Check them with Homebrew
@@ -122,7 +132,7 @@ It must not touch the user's own install. If any of these is installed, stop, te
 not uninstall it:
 
 ```sh
-for f in asz asz-claude-code $(for v in <versions>; do printf 'asz@%s asz-claude-code@%s ' "$v" "$v"; done); do
+for f in asz $(for v in <versions>; do printf 'asz@%s ' "$v"; done); do
   brew list --formula "$f" >/dev/null 2>&1 && echo "$f is installed"
 done
 ```
@@ -134,8 +144,8 @@ export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_ENV_H
 tap=aszcheck/formulae
 brew tap-new --no-git "$tap"
 dir=$(brew --repository "$tap")/Formula
-for v in <versions>; do cp "$W/formula-$v/asz@$v.rb" "$W/formula-$v/asz-claude-code@$v.rb" "$dir/"; done
-if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" "$W/formula-$newest/asz-claude-code.rb" "$dir/"; fi
+for v in <versions>; do cp "$W/formula-$v/asz@$v.rb" "$dir/"; done
+if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" "$dir/"; git rm -q --ignore-unmatch "$dir/asz-claude-code.rb"; fi
 env -u http_proxy -u https_proxy -u all_proxy brew style "$tap"
 for f in "$dir"/*.rb; do
   n=$tap/$(basename "$f" .rb)
@@ -145,15 +155,15 @@ for f in "$dir"/*.rb; do
 done
 for v in <versions>; do
   "$(brew --prefix "asz@$v")/bin/asz" version
-  "$(brew --prefix "asz-claude-code@$v")/bin/asz-claude-plugin" version
+  # The recorder is asz-changes from 0.5.0 and asz-claude-plugin before it.
+  "$(brew --prefix "asz@$v")/bin/asz-changes" version ||
+    "$(brew --prefix "asz@$v")/bin/asz-claude-plugin" version
 done
-brew info --formula "$tap/asz-claude-code@$newest" | grep 'claude plugin marketplace add'
 ```
 
 Every step must pass, and each binary must print its version. When `asz.rb` moved, the `asz` and
-`asz-claude-plugin` on `$(brew --prefix)/bin` must print `$newest`, and link into the `asz` and
-`asz-claude-code` kegs, not a versioned one. Then remove everything the check installed, whether it
-passed or not:
+`asz-changes` on `$(brew --prefix)/bin` must print `$newest`, and link into the `asz` keg, not a
+versioned one. Then remove everything the check installed, whether it passed or not:
 
 ```sh
 for f in "$dir"/*.rb; do brew uninstall --formula "$tap/$(basename "$f" .rb)"; done
@@ -164,8 +174,8 @@ brew untap "$tap"
 
 ```sh
 mkdir -p Formula
-for v in <versions>; do cp "$W/formula-$v/asz@$v.rb" "$W/formula-$v/asz-claude-code@$v.rb" Formula/; done
-if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" "$W/formula-$newest/asz-claude-code.rb" Formula/; fi
+for v in <versions>; do cp "$W/formula-$v/asz@$v.rb" Formula/; done
+if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" Formula/; git rm -q --ignore-unmatch Formula/asz-claude-code.rb; fi
 git status --short
 ```
 
@@ -182,9 +192,9 @@ gh pr create --repo apache/skywalking-ai-sessionizer --base main --title "Homebr
 
 The commit message and the pull request carry no AI attribution: no Co-Authored-By line and no
 "Generated with" line. Say in the pull request which versions were added, which version `asz` and
-`asz-claude-code` install now, and that the check passed.
+`asz` install now, and that the check passed.
 
 ## 8. After the merge
 
-Anyone who tapped runs `brew update`, then `brew upgrade asz asz-claude-code`. Tell the user the
+Anyone who tapped runs `brew update`, then `brew upgrade asz`. Tell the user the
 pull request link, and remove the worktree and `W` once it is merged.

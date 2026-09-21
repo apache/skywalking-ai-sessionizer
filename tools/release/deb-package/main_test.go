@@ -29,7 +29,7 @@ import (
 func staged(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for name, body := range map[string]string{"asz": "binary", "asz-claude-plugin": "plugin", "LICENSE": "license", "NOTICE": "notice", "licenses/license-a.txt": "a"} {
+	for name, body := range map[string]string{"asz": "binary", "asz-changes": "recorder", "LICENSE": "license", "NOTICE": "notice", "licenses/license-a.txt": "a"} {
 		path := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -48,7 +48,7 @@ func TestTheSameFilesGiveTheSameBytes(t *testing.T) {
 	out := t.TempDir()
 	var packages [][]byte
 	for _, name := range []string{"one.deb", "two.deb"} {
-		if err := run("asz-claude-code", "0.4.0", "arm64", from, 1757000000, filepath.Join(out, name)); err != nil {
+		if err := run("asz-changes", "0.5.0", "arm64", from, 1757000000, filepath.Join(out, name)); err != nil {
 			t.Fatal(err)
 		}
 		body, err := os.ReadFile(filepath.Join(out, name))

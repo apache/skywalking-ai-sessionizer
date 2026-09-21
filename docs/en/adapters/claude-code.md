@@ -732,7 +732,7 @@ kept 21,569, 43 and 166 of them byte for byte, respectively.
 
 **The plugin's observations.** The [asz Claude Code plugin](../setup/claude-code-plugin.md)
 records shell commands, and edits inside subagents, into its own data directory beside Claude
-Code's files. The `claude-code-changes` adapter, on by default, finds them the way this adapter
+Code's files. The `changes` adapter, on by default, finds them the way this adapter
 finds transcripts, resolves `plugins/data` under the same Claude Code directory, and lands each
 line as a record of kind `changes` under the stream the tool ran in, with the session's own lock
 and sequence. Session filters apply to the workspace the records name.

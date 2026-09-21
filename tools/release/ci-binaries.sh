@@ -158,8 +158,11 @@ def main():
     # DEB_PACKAGES in the tag's Makefile names the Debian packages, one for
     # each Linux platform. A tag from before them passes none.
     debs = deb_text.split()
-    require(len(debs) == len(set(debs)) and set(debs) <= {"asz", "asz-claude-code"},
-            "DEB_PACKAGES must name distinct packages among asz and asz-claude-code")
+    # asz-claude-code was the recorder's package until 0.5.0, so a tag from
+    # either side of the rename is valid and this list holds both names.
+    known = {"asz", "asz-changes", "asz-claude-code"}
+    require(len(debs) == len(set(debs)) and set(debs) <= known,
+            "DEB_PACKAGES must name distinct packages among " + ", ".join(sorted(known)))
     for name in debs:
         for platform in platforms:
             os_name, arch = platform.split("/")
