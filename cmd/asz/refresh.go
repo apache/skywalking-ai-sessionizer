@@ -39,6 +39,42 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 )
 
+// changesSource is one recorder directory the changes adapter reads: its
+// collector, the session filter of that adapter entry, and the directory.
+type changesSource struct {
+	col   *claudecodechanges.Collector
+	match func(claudecodechanges.Session) bool
+	src   string
+}
+
+// changesFor is the changes source that reads root, or the first source
+// when none does, so a scenario remover that expects the build's own
+// directory can say which one is read instead. Empty when there is none.
+func (r *refresher) changesFor(root string) changesSource {
+	for _, cs := range r.changes {
+		if sameDir(cs.src, root) {
+			return cs
+		}
+	}
+	if len(r.changes) > 0 {
+		return r.changes[0]
+	}
+	return changesSource{}
+}
+
+// sameDir reports whether two paths name one directory: the same after
+// cleaning, or after following symbolic links where the paths exist.
+func sameDir(a, b string) bool {
+	canon := func(p string) string {
+		p = filepath.Clean(p)
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			return resolved
+		}
+		return p
+	}
+	return canon(a) == canon(b)
+}
+
 // refresher is the pipeline: land what is new, parse what moved, and send
 // what is now on disk.
 //
@@ -59,8 +95,10 @@ type refresher struct {
 	deriver *metrics.Deriver
 	col     *claudecode.Collector
 	match   func(claudecode.Session) bool
-	changes *claudecodechanges.Collector
-	cmatch  func(claudecodechanges.Session) bool
+	// changes holds one recorder directory per changes adapter entry. A
+	// machine can run Claude Code's plugin and a LangChain shim at once,
+	// each writing its own directory, and one collector reads them all.
+	changes []changesSource
 	// provider lands the bodies Claude Code wrote for its model provider,
 	// and providerAd holds its filter settings.
 	provider   *claudecodeprovider.Collector
@@ -68,7 +106,6 @@ type refresher struct {
 	// The directories the collectors read. They are checked on every pass,
 	// not once, so a source that appears later is picked up.
 	colSource      string
-	changesSource  string
 	providerSource string
 	interval       time.Duration
 	maxRound       int64
@@ -185,9 +222,17 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			if err != nil {
 				return nil, err
 			}
-			r.changes = claudecodechanges.New(src, zone, ad.Collector.MaxDeltaBytes)
-			r.cmatch = changesMatch(ad)
-			r.changesSource = src
+			// The configuration compared the spellings; this compares the
+			// directories, which is where the default gets its name, and
+			// through any symbolic link, since /tmp and /private/tmp are
+			// one directory on macOS.
+			for _, cs := range r.changes {
+				if sameDir(cs.src, src) {
+					return nil, fmt.Errorf("config: two %s adapters read %s; name each directory once", config.AdapterChanges, src)
+				}
+			}
+			r.changes = append(r.changes, changesSource{
+				col: claudecodechanges.New(src, zone, ad.Collector.MaxDeltaBytes), match: changesMatch(ad), src: src})
 			names, sources = append(names, ad.Name), append(sources, src)
 		case config.AdapterClaudeCodeProvider:
 			src, err := claudecodeprovider.ResolveSourceRoot(ad.SourceRoot)
@@ -200,7 +245,7 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			names, sources = append(names, ad.Name), append(sources, src)
 		}
 	}
-	if r.col == nil && r.changes == nil && r.provider == nil && r.langsmith == nil {
+	if r.col == nil && len(r.changes) == 0 && r.provider == nil && r.langsmith == nil {
 		// Nothing local is enabled and nothing feeds the pipeline. A root
 		// filled somewhere else, by the metrics receiver or copied from
 		// another machine, is served as it is.
@@ -214,9 +259,12 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 	// A build writes a session under claude-code-local's source, so only a
 	// pipeline that collects from there can remove one.
 	if r.col != nil {
+		// A build writes its plugin output under the local source, so the
+		// remover is given the changes source that reads there.
+		cs := r.changesFor(filepath.Join(r.colSource, "plugins", "data"))
 		r.remover = &remove.Remover{
 			Zone: zone, Source: r.colSource, Local: r.col, LocalMatch: r.match,
-			Changes: r.changes, ChangesRoot: r.changesSource, ChangesMatch: r.cmatch,
+			Changes: cs.col, ChangesRoot: cs.src, ChangesMatch: cs.match,
 			Provider: r.provider, ProviderRoot: r.providerSource,
 			Derives: r.deriver != nil,
 		}
@@ -395,15 +443,17 @@ func (r *refresher) pass() error {
 			changed[id] = true
 		}
 	}
-	changesHere := false
-	if r.changes != nil {
-		var cherr error
-		if changesHere, cherr = present(r.changesSource, true); cherr != nil {
+	// Each recorder directory is collected on its own: one that is absent,
+	// or fails, leaves the others collected.
+	for _, cs := range r.changes {
+		changesHere, cherr := present(cs.src, true)
+		if cherr != nil {
 			errs = append(errs, cherr)
 		}
-	}
-	if changesHere {
-		ch, err := r.changes.CollectAll(r.cmatch)
+		if !changesHere {
+			continue
+		}
+		ch, err := cs.col.CollectAll(cs.match)
 		if err != nil {
 			errs = append(errs, err)
 			ch = &claudecodechanges.Stats{}

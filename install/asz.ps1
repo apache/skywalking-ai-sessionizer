@@ -40,6 +40,7 @@ $Arch = switch ((Get-CimInstance Win32_Processor | Select-Object -First 1).Archi
   9 { "amd64" } 12 { "arm64" } default { throw "${Me}: there is no package for this processor" } }
 $Pkg = "apache-skywalking-ai-sessionizer-$Version-bin-windows-$Arch.zip"
 $Exe = "asz.exe"
+$Exes = @("asz.exe", "asz-changes.exe")
 $Bin = Join-Path $env:USERPROFILE ".local\bin"
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("asz-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $Tmp | Out-Null
@@ -70,20 +71,31 @@ try {
     throw "${Me}: the sha512 of $Pkg does not match $Pkg.sha512, so nothing was installed" }
   $Unpacked = Join-Path $Tmp "pkg"
   Expand-Archive -LiteralPath $Zip -DestinationPath $Unpacked
-  & (Join-Path $Unpacked $Exe) version
-  if ($LASTEXITCODE -ne 0) { throw "${Me}: $Exe does not run" }
+  # From 0.5.0 the archive holds asz and asz-changes, the change recorder,
+  # and both are installed, as Homebrew and apt install both. An older
+  # version's archive holds the recorder under its old name, and this
+  # installs asz alone from it.
+  $Exes = @($Exes | Where-Object { Test-Path -LiteralPath (Join-Path $Unpacked $_) })
+  foreach ($One in $Exes) {
+    & (Join-Path $Unpacked $One) version
+    if ($LASTEXITCODE -ne 0) { throw "${Me}: $One does not run" }
+  }
   New-Item -ItemType Directory -Force -Path $Bin | Out-Null
   # Windows does not replace the file of a running program. Finding that
-  # out before the copy leaves the installed one whole.
-  $Old = Join-Path $Bin $Exe
-  if (Test-Path -LiteralPath $Old) {
-    try { [IO.File]::Open($Old, "Open", "ReadWrite", "None").Dispose() }
-    catch { throw "${Me}: $Old is in use. Stop asz, then run this again." } }
-  Copy-Item -LiteralPath (Join-Path $Unpacked $Exe) -Destination $Bin -Force
+  # out before the copy leaves the installed ones whole.
+  foreach ($One in $Exes) {
+    $Old = Join-Path $Bin $One
+    if (Test-Path -LiteralPath $Old) {
+      try { [IO.File]::Open($Old, "Open", "ReadWrite", "None").Dispose() }
+      catch { throw "${Me}: $Old is in use. Stop asz and Claude Code, then run this again." } }
+  }
+  foreach ($One in $Exes) {
+    Copy-Item -LiteralPath (Join-Path $Unpacked $One) -Destination $Bin -Force
+  }
 } finally {
   Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
-Write-Host "${Me}: installed asz into $Bin"
+Write-Host "${Me}: installed $($Exes -join ' and ') into $Bin"
 
 $Sep = [IO.Path]::PathSeparator
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")

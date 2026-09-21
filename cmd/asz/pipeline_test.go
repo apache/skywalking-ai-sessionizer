@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
@@ -915,5 +917,99 @@ func TestProviderBodiesReachesTheReceiverCollector(t *testing.T) {
 		if ref.langsmith.ProviderBodies != on {
 			t.Errorf("provider_bodies: %v reached the collector as %v", on, ref.langsmith.ProviderBodies)
 		}
+	}
+}
+
+// changeRecord is one record a recorder wrote for a session, as a line.
+func changeRecord(session, tool string) string {
+	r := &changes.Record{
+		Schema: changes.Schema, ID: "p1/c1", CapturedBy: changes.CapturedByASZPlugin, Session: session, Stream: "main",
+		Tool: "toolu_1", ToolName: tool, Time: "2026-09-08T02:00:04Z", Basis: changes.BasisToolWindow,
+		Root: &changes.Root{Path: "/w"}, ChangedFiles: changes.Int(1),
+		Changes: []changes.FileChange{{Path: "a.go", Operation: changes.OpModify,
+			Before: changes.Endpoint{Present: true, Bytes: changes.Int64(2), SHA256: "x"},
+			After:  changes.Endpoint{Present: true, Bytes: changes.Int64(2), SHA256: "y"},
+			Diff:   changes.DiffAvailable, Additions: changes.Int(1), Deletions: changes.Int(1),
+			Hunks: []changes.Hunk{{OldStart: 1, OldLines: 1, NewStart: 1, NewLines: 1, Lines: []string{"-a", "+b"}}}}},
+	}
+	b, err := r.Marshal()
+	if err != nil {
+		panic(err)
+	}
+	return string(b) + "\n"
+}
+
+// TestTwoRecorderDirectoriesAreBothCollected.
+//
+// A machine can run Claude Code's plugin and a LangChain shim at once, each
+// writing its own directory: the plugin under Claude Code's plugin data,
+// the shim where ASZ_CHANGES_DATA points. The changes adapter is named once
+// per directory, and one pipeline collects both. Before, a second entry
+// silently replaced the first, and only one directory was read.
+func TestTwoRecorderDirectoriesAreBothCollected(t *testing.T) {
+	root := t.TempDir()
+	zone := storage.NewZone(root)
+	const claude = "11111111-2222-4333-8444-555555555555"
+	const langchain = "ls-agent-thread-1-abcdef012345"
+	pluginData := filepath.Join(root, "claude", "plugins", "data")
+	shimData := filepath.Join(root, "shim")
+	for _, w := range []struct{ path, session, tool string }{
+		{filepath.Join(pluginData, "file-changes-skywalking-ai-sessionizer", "output", claude, "main.jsonl"), claude, "Bash"},
+		{filepath.Join(shimData, "output", langchain, "main.jsonl"), langchain, "write_report"},
+	} {
+		if err := os.MkdirAll(filepath.Dir(w.path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(w.path, []byte(changeRecord(w.session, w.tool)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	once := config.Collector{Mode: config.ModeOnce, Interval: time.Minute, MaxDeltaBytes: 1 << 20}
+	ads := []config.Adapter{
+		{Name: config.AdapterChanges, Enabled: true, SourceRoot: pluginData, Collector: once},
+		{Name: config.AdapterChanges, Enabled: true, SourceRoot: shimData, Collector: once},
+	}
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ref.close)
+	if got := len(ref.changes); got != 2 {
+		t.Fatalf("%d recorder directories are read, want both", got)
+	}
+	_ = ref.pass()
+	for _, session := range []string{claude, langchain} {
+		files, err := storage.LandedFiles(zone, session)
+		if err != nil || len(files) == 0 {
+			t.Errorf("%s: nothing landed (%v); its recorder directory was not read", session, err)
+		}
+	}
+}
+
+// Two names for one recorder directory are one directory - a symbolic
+// link to it, or the default beside its explicit path - and the default is
+// one only the collector can name, so the directories are compared where
+// they are resolved, through the link.
+func TestTwoSpellingsOfOneRecorderDirectoryAreRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a symbolic link needs a privilege on Windows")
+	}
+	root := t.TempDir()
+	zone := storage.NewZone(root)
+	data := filepath.Join(root, "shim")
+	if err := os.MkdirAll(data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "shim-link")
+	if err := os.Symlink(data, alias); err != nil {
+		t.Fatal(err)
+	}
+	once := config.Collector{Mode: config.ModeOnce, Interval: time.Minute, MaxDeltaBytes: 1 << 20}
+	ads := []config.Adapter{
+		{Name: config.AdapterChanges, Enabled: true, SourceRoot: data, Collector: once},
+		{Name: config.AdapterChanges, Enabled: true, SourceRoot: alias, Collector: once},
+	}
+	if _, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true); err == nil || !strings.Contains(err.Error(), "both read") && !strings.Contains(err.Error(), "read "+data) {
+		t.Fatalf("two spellings of one directory were accepted: %v", err)
 	}
 }

@@ -119,11 +119,17 @@ function Read-Claude {
   if ($LASTEXITCODE -ne 0) { throw "${Me}: claude $args failed" }
   if ($Text.Trim()) { return @($Text | ConvertFrom-Json) } else { return @() }
 }
-$Installed = @(Read-Claude plugin list --json | ForEach-Object { $_ } | Where-Object { $_.id -eq $Id })
+$Plugins = @(Read-Claude plugin list --json | ForEach-Object { $_ })
+$Installed = @($Plugins | Where-Object { $_.id -eq $Id })
+# The plugin was named asz-changes until 0.5.0. One installed under that
+# name is moved the same way: its data carried across, then uninstalled
+# with the data kept, before its marketplace is removed.
+$WasId = "asz-changes@$Market"
+$WasInstalled = @($Plugins | Where-Object { $_.id -eq $WasId })
 $Declared = @(Read-Claude plugin marketplace list --json | ForEach-Object { $_ } | Where-Object { $_.name -eq $Market })
-foreach ($Entry in $Installed) {
+foreach ($Entry in ($Installed + $WasInstalled)) {
   if ($Entry.scope -ne "user") {
-    throw "${Me}: asz-changes is installed at the $($Entry.scope) scope. Uninstall it there with --keep-data first. Moving the marketplace removes it from every scope, and deletes its data." }
+    throw "${Me}: the plugin is installed at the $($Entry.scope) scope. Uninstall it there with --keep-data first. Moving the marketplace removes it from every scope, and deletes its data." }
 }
 
 # 0.3.0 ran the plugin with --plugin-dir, whose data directory is
@@ -134,13 +140,25 @@ foreach ($Entry in $Installed) {
 #
 #   asz-changes-inline   0.3.0, loaded with -PluginDir
 #   asz-changes-$Market  0.4.0, before this plugin was named file-changes
-$Config = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE ".claude" }
+#
+# The directory is found the way asz finds it: CLAUDE_CONFIG_DIR, else
+# XDG_CONFIG_HOME\claude, else the profile's .claude. The copy goes to a
+# directory beside the final one and is renamed into place, so a copy that
+# stops half way leaves nothing that looks finished, and running this
+# again copies again rather than moving on to remove the marketplace,
+# which deletes the old data.
+$Config = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR }
+  elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME "claude" }
+  else { Join-Path $env:USERPROFILE ".claude" }
 $Data = Join-Path $Config "plugins\data\file-changes-$Market"
 if (-not (Test-Path -LiteralPath $Data)) {
   foreach ($Was in @((Join-Path $Config "plugins\data\asz-changes-$Market"),
                      (Join-Path $Config "plugins\data\asz-changes-inline"))) {
     if (Test-Path -LiteralPath $Was) {
-      Copy-Item -LiteralPath $Was -Destination $Data -Recurse
+      $Partial = "$Data.partial"
+      if (Test-Path -LiteralPath $Partial) { Remove-Item -LiteralPath $Partial -Recurse -Force }
+      Copy-Item -LiteralPath $Was -Destination $Partial -Recurse
+      Move-Item -LiteralPath $Partial -Destination $Data
       Write-Host "${Me}: carried the plugin data over from $(Split-Path -Leaf $Was)"
       break
     }
@@ -154,6 +172,7 @@ if ($Declared.Count -gt 0 -and $Ref -eq $Tag -and $Installed.Count -gt 0) {
 }
 if ($Declared.Count -gt 0 -and $Ref -ne $Tag) {
   if ($Installed.Count -gt 0) { Invoke-Claude plugin uninstall $Id --keep-data }
+  if ($WasInstalled.Count -gt 0) { Invoke-Claude plugin uninstall $WasId --keep-data }
   Invoke-Claude plugin marketplace remove $Market
   $Declared = @()
 }

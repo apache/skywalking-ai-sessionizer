@@ -73,6 +73,15 @@ type Cursor struct {
 	Schema int
 	Kind   CursorKind
 	Source string // path relative to the adapter's source root
+	// Origin is the source root the file is under, for an adapter that reads
+	// more than one: two roots can hold the same relative path, and one
+	// cursor for both stops collection of both. It is relative to the
+	// storage root when the source root lies inside it, so a root copied
+	// whole keeps its cursors, and absolute otherwise. Empty on a cursor
+	// written before 0.5.0, which belongs to the root whose file it was read
+	// from: the file with its device and inode, and the bytes before its
+	// offset.
+	Origin string
 
 	// Append fields.
 	Dev        uint64
@@ -128,6 +137,8 @@ func LoadCursor(path string, kind CursorKind, source string) (*Cursor, error) {
 			c.Kind = CursorKind(val)
 		case "source":
 			c.Source = val
+		case "origin":
+			c.Origin = val
 		case "dev":
 			c.Dev, _ = strconv.ParseUint(val, 10, 64)
 		case "ino":
@@ -168,6 +179,9 @@ func (c *Cursor) Save(path string, now time.Time) error {
 		fmt.Fprintf(bw, "schema        %d\n", c.Schema)
 		fmt.Fprintf(bw, "kind          %s\n", c.Kind)
 		fmt.Fprintf(bw, "source        %s\n", c.Source)
+		if c.Origin != "" {
+			fmt.Fprintf(bw, "origin        %s\n", c.Origin)
+		}
 		if c.Kind == CursorAppend {
 			fmt.Fprintf(bw, "dev           %d\n", c.Dev)
 			fmt.Fprintf(bw, "ino           %d\n", c.Ino)

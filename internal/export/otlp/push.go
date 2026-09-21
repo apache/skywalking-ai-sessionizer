@@ -74,6 +74,10 @@ type Pusher struct {
 	// configured. Empty means the runtime that produced each session, read
 	// off its landed header's adapter and named through Runtimes.
 	ServiceName string
+	// SessionRuntime names the runtime of a session from its id alone, for
+	// a session none of whose transcripts has landed yet. It answers only
+	// for a name asz derived itself, and empty otherwise.
+	SessionRuntime func(session string) string
 	// Runtimes names the runtime behind each adapter: claude-code-local is
 	// Claude Code, mock is Mock Agent. An adapter with no entry is named by
 	// its own name.
@@ -293,7 +297,7 @@ func (p *Pusher) Pass() (*Stats, error) {
 		}
 		// A session's records are attributed to the runtime that produced
 		// them, which its landed headers name.
-		b.services[s.id] = p.serviceOf(s.files)
+		b.services[s.id] = p.serviceOf(s.id, s.files)
 		for _, lf := range s.files {
 			if b.stop != nil {
 				break
@@ -616,7 +620,7 @@ func (b *batch) flush() error {
 // follows. Taking whichever header came first attributed a LangChain session
 // to Claude Code. The transcript decides it, and the rest only when there is
 // no transcript to ask.
-func (p *Pusher) serviceOf(files []storage.LandedFile) string {
+func (p *Pusher) serviceOf(session string, files []storage.LandedFile) string {
 	if p.ServiceName != "" {
 		return p.ServiceName
 	}
@@ -647,6 +651,15 @@ func (p *Pusher) serviceOf(files []storage.LandedFile) string {
 		}
 		if fallback == "" {
 			fallback = name
+		}
+	}
+	// No transcript has landed yet. The recorder's files often come first,
+	// and their adapter is shared by every runtime, so it says nothing
+	// about which one this is. The session's name does, when asz derived
+	// the name itself, and the command wiring says how to read it.
+	if p.SessionRuntime != nil {
+		if runtime := p.SessionRuntime(session); runtime != "" {
+			return runtime
 		}
 	}
 	if fallback != "" {
@@ -858,7 +871,7 @@ func (b *batch) addRound(rel, path, conv string) error {
 	if _, known := b.services[session]; !known {
 		files, err := storage.LandedFiles(b.p.Zone, session)
 		if err == nil {
-			b.services[session] = b.p.serviceOf(files)
+			b.services[session] = b.p.serviceOf(session, files)
 		}
 	}
 	return b.add(session, record(stamp, now, data, attrs), rel, digest)

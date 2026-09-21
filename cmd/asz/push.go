@@ -139,6 +139,14 @@ func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error
 		Runtimes: map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName,
 			claudecodechanges.NameWas: claudecodechanges.RuntimeName,
 			langsmith.Name:            langsmith.RuntimeName, claudecodeprovider.Name: claudecodeprovider.RuntimeName, mock.Name: mock.RuntimeName},
+		// A session whose transcript has not landed yet is named by asz
+		// itself when it came through the receiver, and that name says so.
+		SessionRuntime: func(session string) string {
+			if langsmith.IsSessionID(session) {
+				return langsmith.RuntimeName
+			}
+			return ""
+		},
 		InstanceID: o.InstanceID,
 		Layer:      o.Layer,
 		BatchBytes: o.BatchBytes,

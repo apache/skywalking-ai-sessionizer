@@ -21,9 +21,9 @@ $Version = "<version>"
 & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing "https://raw.githubusercontent.com/apache/skywalking-ai-sessionizer/v$Version/install/asz.ps1"))) $Version
 ```
 
-The script checks the package's sha512 and puts `asz` in `~/.local/bin`, or
+The script checks the package's sha512 and puts `asz` and `asz-changes` in `~/.local/bin`, or
 `%USERPROFILE%\.local\bin` on Windows, which it adds to your `Path`. Run it again with another
-version to upgrade. On Windows, stop `asz` first.
+version to upgrade. On Windows, stop `asz` and Claude Code first.
 
 ## Homebrew, on macOS and Linux
 
@@ -43,7 +43,9 @@ on disk. To wire a runtime to it, see [Claude Code Plugin](claude-code-plugin.md
 [LangChain Plugin](langchain-plugin.md). Upgrade with `brew upgrade asz`.
 
 Until 0.5.0 there were two formulae fetching the identical archive and installing one binary each.
-`asz-claude-code` is gone; `brew uninstall asz-claude-code` once `asz` is installed.
+`asz-claude-code` is gone. Coming from 0.4.0, follow [Upgrading from 0.4.0](#upgrading-from-040):
+`brew uninstall asz-claude-code` is its last step, after the Claude Code plugin has been
+reinstalled, because until then the plugin's hooks still call the binary that formula holds.
 
 For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>`. Homebrew keeps it
 off your `PATH`; `brew info` shows where it is.
@@ -83,12 +85,13 @@ apache-skywalking-ai-sessionizer-<version>-bin-windows-<arch>.zip  arch: amd64, 
 Each holds `asz`, `asz-changes` (the change recorder), `LICENSE`, `NOTICE` and
 `licenses/`.
 
-For Debian and Ubuntu, the same page links two `.deb` packages per architecture, which
-`sudo apt install ./<file>.deb` installs:
+For Debian and Ubuntu, the release directory holds two `.deb` packages per architecture, one for
+each program, which `sudo apt install ./<file>.deb` installs. They are what the apt repository
+above serves; the downloads page lists the archives only.
 
 ```text
-apache-skywalking-ai-sessionizer-<version>-bin-asz-<arch>.deb              arch: amd64, arm64
-apache-skywalking-ai-sessionizer-<version>-bin-asz-claude-code-<arch>.deb  arch: amd64, arm64
+apache-skywalking-ai-sessionizer-<version>-bin-asz-<arch>.deb          arch: amd64, arm64
+apache-skywalking-ai-sessionizer-<version>-bin-asz-changes-<arch>.deb  arch: amd64, arm64
 ```
 
 On macOS or Linux:
@@ -186,3 +189,20 @@ go install "github.com/apache/skywalking-ai-sessionizer/cmd/asz@v$VERSION"
 ```
 
 `asz version` then prints `dev`, and the Claude Code plugin's binary is not installed.
+
+## Upgrading from 0.4.0
+
+0.5.0 renamed the change recorder, its package and its plugin; [the changelog](../changes/changes.md#renamed)
+lists every name. The upgrade keeps every record, in this order:
+
+1. Stop Claude Code and the collector (`asz collect` or `asz server`).
+2. Install 0.5.0 by the way you installed 0.4.0. Each way installs both programs now: the install
+   script, `brew upgrade asz`, or `sudo apt install asz asz-changes`.
+3. Start the collector again. It reads the plugin's old directory and its new one.
+4. Run the [Claude Code plugin installer](claude-code-plugin.md) for 0.5.0. It carries the plugin's
+   data across, uninstalls the plugin under its old name with the data kept, and installs it under
+   the new one, whose hooks call `asz-changes`.
+5. Start Claude Code.
+6. Only then remove what 0.4.0 installed: `brew uninstall asz-claude-code` or
+   `sudo apt remove asz-claude-code`. Until step 4 the old plugin's hooks still call
+   `asz-claude-plugin`, which those packages hold.

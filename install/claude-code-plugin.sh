@@ -114,17 +114,25 @@ tag=v$version
 # its key within the object that names this plugin or this marketplace.
 plugins=$(claude plugin list --json) || fail "claude plugin list failed"
 markets=$(claude plugin marketplace list --json) || fail "claude plugin marketplace list failed"
-scopes=$(printf '%s\n' "$plugins" | awk -v id="$id" '
-  /"id":/ { this = index($0, "\"" id "\"") > 0 }
-  this && /"scope":/ { sub(/.*"scope": *"/, ""); sub(/".*/, ""); print }')
+scopes_of() {
+  printf '%s\n' "$plugins" | awk -v id="$1" '
+    /"id":/ { this = index($0, "\"" id "\"") > 0 }
+    this && /"scope":/ { sub(/.*"scope": *"/, ""); sub(/".*/, ""); print }'
+}
+scopes=$(scopes_of "$id")
+# The plugin was named asz-changes until 0.5.0. One installed under that
+# name is moved the same way: its data carried across, then uninstalled
+# with the data kept, before its marketplace is removed.
+was_id=asz-changes@$market
+was_scopes=$(scopes_of "$was_id")
 declared=$(printf '%s\n' "$markets" | awk -v name="$market" '
   /"name":/ { this = index($0, "\"" name "\"") > 0; if (this) print "yes" }')
 ref=$(printf '%s\n' "$markets" | awk -v name="$market" '
   /"name":/ { this = index($0, "\"" name "\"") > 0 }
   this && /"ref":/ { sub(/.*"ref": *"/, ""); sub(/".*/, ""); print }')
 
-for scope in $scopes; do
-  [ "$scope" = user ] || fail "file-changes is installed at the $scope scope. Uninstall it there with --keep-data first. Moving the marketplace removes it from every scope, and deletes its data."
+for scope in $scopes $was_scopes; do
+  [ "$scope" = user ] || fail "the plugin is installed at the $scope scope. Uninstall it there with --keep-data first. Moving the marketplace removes it from every scope, and deletes its data."
 done
 
 # A plugin's data directory is named after the plugin, so a rename would
@@ -134,14 +142,26 @@ done
 #
 #   asz-changes-inline   0.3.0, loaded with --plugin-dir
 #   asz-changes-$market  0.4.0, before this plugin was named file-changes
-data=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/data
+#
+# The directory is found the way asz finds it: CLAUDE_CONFIG_DIR, else
+# XDG_CONFIG_HOME/claude, else ~/.claude. The copy goes to a directory
+# beside the final one and is renamed into place, so a copy that stops
+# half way leaves nothing that looks finished, and running this again
+# copies again rather than moving on to remove the marketplace, which
+# deletes the old data.
+config=${CLAUDE_CONFIG_DIR:-${XDG_CONFIG_HOME:+$XDG_CONFIG_HOME/claude}}
+data=${config:-$HOME/.claude}/plugins/data
 here="$data/file-changes-$market"
 if [ ! -e "$here" ]; then
   for was in "$data/asz-changes-$market" "$data/asz-changes-inline"; do
     [ -d "$was" ] || continue
-    mkdir -p "$here"
-    (cd "$was" && tar cf - .) | (cd "$here" && tar xf -) ||
-      fail "could not copy $was to $here; nothing was changed"
+    rm -rf "$here.partial"
+    mkdir -p "$here.partial"
+    # cp, not a tar pipe: a pipe's status is the reader's, so a member the
+    # writer could not read left a copy that looked complete.
+    cp -Rp "$was/." "$here.partial/" ||
+      fail "could not copy $was; nothing was changed. Run this again."
+    mv "$here.partial" "$here" || fail "could not move the copy into place; nothing was changed. Run this again."
     say "carried the plugin data over from $(basename "$was")"
     break
   done
@@ -154,6 +174,9 @@ fi
 if [ "$declared" = yes ] && [ "$ref" != "$tag" ]; then
   if [ -n "$scopes" ]; then
     claude plugin uninstall "$id" --keep-data || fail "claude plugin uninstall failed, so the marketplace was left as it is"
+  fi
+  if [ -n "$was_scopes" ]; then
+    claude plugin uninstall "$was_id" --keep-data || fail "claude plugin uninstall of $was_id failed, so the marketplace was left as it is"
   fi
   claude plugin marketplace remove "$market" || fail "claude plugin marketplace remove failed. The plugin's data is kept. Run this again."
   declared=

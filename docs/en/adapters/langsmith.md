@@ -136,14 +136,15 @@ trace carries `ls_method`, and no run of a graph trace does. A field that is a m
 nothing else is still a repeat and is dropped; a field carrying anything beside it is kept whole,
 because what is beside it is the function's own and is recorded nowhere else.
 
-`ls_method` is inherited, so it is never read as proof on its own. Decorating a function that
-wraps a whole graph marks that graph's ordinary tools as traced too, and a call is made up for a
-tool only when the tool names none, nothing resolved one for it, and its trace holds no model
-call that could have asked.
+`ls_method` is inherited, so it is never read as proof on its own: decorating a function that
+wraps a whole graph marks that graph's ordinary tools as traced too.
 
-Such a function also calls its tools itself, so no model call names them. The run is the call, and
-its arguments are landed from the tool run: without that the tool answered nothing and made no
-step at all.
+Such a function also calls its tools itself, so no model call names them, and a tool that names
+no call is landed answering none. No call is made up for it. Making one up was tried three ways,
+and each invented a second call for one real execution in some arrival order, because on this
+wire a request never proves that no model call asked: the model call may simply not have arrived
+yet. The tool's arguments are still landed from its run, so the step and its result are there;
+what is missing is the model call that asked for it, when none did.
 
 ### What each call was sent
 

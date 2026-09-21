@@ -362,8 +362,10 @@ func (c *check) installAsz() error {
 		if !strings.Contains(out, "through the Apache mirrors") {
 			return errors.New("install/asz did not take the version on the download site through the mirrors")
 		}
-		if _, err := os.Stat(filepath.Join(bin, "asz-changes"+exe())); err == nil {
-			return errors.New("install/asz installed asz-changes too, which is the plugin's own install")
+		// From 0.5.0 the script installs both programs, as Homebrew and apt
+		// do; the plugin installer then finds the recorder already there.
+		if err := c.reports(filepath.Join(bin, "asz-changes"+exe()), c.version); err != nil {
+			return fmt.Errorf("install/asz did not install asz-changes beside asz: %w", err)
 		}
 		c.aszBin = bin
 	}

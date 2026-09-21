@@ -90,10 +90,23 @@ curl -fsSL -o "$tmp/$pkg" "$from" || fail "cannot download $pkg"
 want=$(cut -d ' ' -f 1 "$tmp/$pkg.sha512")
 if command -v sha512sum >/dev/null 2>&1; then got=$(sha512sum "$tmp/$pkg"); else got=$(shasum -a 512 "$tmp/$pkg"); fi
 [ "${#want}" -eq 128 ] && [ "${got%% *}" = "$want" ] || fail "the sha512 of $pkg does not match $pkg.sha512, so nothing was installed"
+# From 0.5.0 the archive holds asz and asz-changes, the change recorder,
+# and both are installed, as Homebrew and apt install both: a recorder of
+# one version beside asz of another is what one package is meant to
+# prevent. An older version's archive holds the recorder under its old
+# name, and this installs asz alone from it.
 tar -xzf "$tmp/$pkg" -C "$tmp" asz
 "$tmp/asz" version
-mv -f "$tmp/asz" "$bin/asz"
-say "installed asz into $bin"
+if tar -tzf "$tmp/$pkg" | grep -qx asz-changes; then
+  tar -xzf "$tmp/$pkg" -C "$tmp" asz-changes
+  "$tmp/asz-changes" version
+  mv -f "$tmp/asz" "$bin/asz"
+  mv -f "$tmp/asz-changes" "$bin/asz-changes"
+  say "installed asz and asz-changes into $bin"
+else
+  mv -f "$tmp/asz" "$bin/asz"
+  say "installed asz into $bin; $version has no asz-changes"
+fi
 if [ "$(command -v asz || true)" != "$bin/asz" ]; then
   say "Put $bin first on your PATH, in your shell profile, so asz there is the one that runs." >&2
 fi

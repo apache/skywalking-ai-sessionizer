@@ -75,9 +75,11 @@ test:
 ## test-langchain-shim: the Python half of the agreement with the receiver
 .PHONY: test-langchain-shim
 test-langchain-shim:
-	@command -v python3 >/dev/null 2>&1 \
-		&& python3 -m unittest discover -s plugins/langchain/tests \
-		|| echo "python3 is not installed; the LangChain shim tests were skipped"
+	@if command -v python3 >/dev/null 2>&1; then \
+		python3 -m unittest discover -s plugins/langchain/tests; \
+	else \
+		echo "python3 is not installed; the LangChain shim tests were skipped"; \
+	fi
 
 ## test-e2e: the scenarios, the chain tests and the boundary rules, verbose
 .PHONY: test-e2e

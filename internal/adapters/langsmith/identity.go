@@ -120,6 +120,13 @@ func StorageID(owner Owner) string {
 	return "ls-" + slug + "-" + hex.EncodeToString(sum[:6])
 }
 
+// IsSessionID reports whether a session id is one StorageID derived, and so
+// one this adapter landed. The prefix is asz's own, so a reader with no
+// landed transcript to ask can still say which runtime a session came from.
+func IsSessionID(id string) bool {
+	return strings.HasPrefix(id, "ls-")
+}
+
 // UnassignedID is where a trace with no supplied identity lands.
 //
 // It is named for the trace because there is nothing else to name it for, and

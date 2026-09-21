@@ -33,6 +33,23 @@ A list of the sources asz collects from.
 `changes` was called `claude-code-changes` until 0.5.0, because only Claude Code wrote those
 records. A configuration that still names it is read as the same adapter.
 
+### More than one agent
+
+- **Several Claude Code instances of one user, on one machine.** Supported with nothing to
+  configure. They all write under one directory, `~/.claude`, and one `claude-code-local` entry
+  discovers every session there; sessions are told apart by their own ids, and each is collected
+  and parsed behind a lock of its own.
+- **Several LangChain or LangGraph applications, or instances of one.** Supported by one
+  `langsmith-ingest` receiver. A conversation is owned by its project and its thread, so two
+  deployments never share one unless they share both.
+- **Several machines.** One asz on each, with its own storage root, exporting to one SkyWalking
+  OAP. `instance_id` says who is pushing, `user@host` by default, so instances stay apart there.
+- **Several recorder directories on one machine.** One `changes` entry per directory, as
+  [below](#the-changes-adapter).
+- **Several Claude Code directories on one machine** - two users, or instances started with
+  different `CLAUDE_CONFIG_DIR` values - need one asz process per directory today, each with its
+  own `source_root` and storage root. One process reads one Claude Code directory.
+
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `name` | | One of the adapters above. |
@@ -113,9 +130,26 @@ export:
 
 ## The changes adapter
 
-`changes` collects the records of the [Claude Code plugin](claude-code-plugin.md). It
-finds them under `plugins/data` in Claude Code's directory. It does nothing when the plugin is not
-installed.
+`changes` collects the records `asz-changes` writes: what each tool call changed on disk, for
+the [Claude Code plugin](claude-code-plugin.md) or the [LangChain plugin](langchain-plugin.md).
+With no `source_root` it reads Claude Code's plugin directory, `plugins/data` under
+`CLAUDE_CONFIG_DIR`, else `XDG_CONFIG_HOME/claude`, else `~/.claude`, and does nothing when the
+plugin is not installed. A LangChain recorder writes where `ASZ_CHANGES_DATA` points, so that is
+its `source_root`.
+
+One entry reads one directory. A machine that runs both names the adapter twice:
+
+```yaml
+adapters:
+  - name: changes
+    enabled: true
+  - name: changes
+    enabled: true
+    source_root: /var/lib/asz/changes
+```
+
+Two entries that read one directory are refused, and `claude-code-changes`, the adapter's name
+until 0.5.0, counts as the same adapter.
 
 ## The provider adapter
 

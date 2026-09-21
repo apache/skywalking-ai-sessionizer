@@ -19,7 +19,6 @@ package claudecodechanges
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 )
@@ -30,23 +29,34 @@ import (
 // adapters tail their files with claudecode.TailAppend. Nothing is written,
 // and the caller holds the session's lock.
 func (c *Collector) Covered(s Session) (bool, string, error) {
-	cursorOf := func(src Source) string {
-		return filepath.Join(c.Zone.StreamDir(src.Session, src.Stream), prefix+".cursor")
+	// The cursor of a source is the one collection reads it behind: the
+	// plain one for the first source of a stream, its own for any other, so
+	// two plugin directories that each hold a file for one stream are
+	// judged each against its own cursor, as they were landed. Reading the
+	// plain cursor to tell them apart writes nothing.
+	cursorOf := func(src Source) (string, error) {
+		return cursorFor(c.Zone.StreamDir(src.Session, src.Stream), c.origin(), src)
 	}
-	// Checked for every file before any is read. Two plugin directories can
-	// each hold a file for one stream. Both map to one cursor, and a pass
-	// would interleave them behind it, so neither can be said to be landed to
-	// its end, even while another file is still waiting to land.
+	// Checked for every file before any is read: two sources behind one
+	// cursor would have been interleaved by a pass, and neither could be
+	// said to be landed to its end.
 	claimed := make(map[string]string, len(s.Sources))
 	for _, src := range s.Sources {
-		cursorPath := cursorOf(src)
+		cursorPath, err := cursorOf(src)
+		if err != nil {
+			return false, "", err
+		}
 		if prev, dup := claimed[cursorPath]; dup && prev != src.Rel {
 			return false, "", fmt.Errorf("claudecodechanges: %s and %s both map to %s, so neither can be said to be landed", prev, src.Rel, cursorPath)
 		}
 		claimed[cursorPath] = src.Rel
 	}
 	for _, src := range s.Sources {
-		ok, reason, err := claudecode.CoveredAppend(src.Path, src.Rel, cursorOf(src), c.MaxDelta)
+		cursorPath, err := cursorOf(src)
+		if err != nil {
+			return false, "", err
+		}
+		ok, reason, err := claudecode.CoveredAppend(src.Path, src.Rel, cursorPath, c.MaxDelta)
 		if err != nil || !ok {
 			return ok, reason, err
 		}

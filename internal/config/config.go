@@ -461,15 +461,35 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: storage.root must not be empty")
 	}
 	seen := map[string]bool{}
+	// A machine can run more than one recorder - Claude Code's plugin and
+	// a LangChain shim, each writing its own directory - so the changes
+	// adapter may be named more than once, one entry per directory. Every
+	// other adapter is one source, and an old name for an adapter is that
+	// adapter: two entries that read one directory would land it twice.
+	changesRoots := map[string]string{}
 	localMetrics, receiverMetrics := false, false
 	for i, a := range c.Adapters {
 		if a.Name == "" {
 			return fmt.Errorf("config: adapters[%d] has no name", i)
 		}
-		if seen[a.Name] {
-			return fmt.Errorf("config: duplicate adapter %q", a.Name)
+		if isChanges(a.Name) {
+			// Spellings of one directory are one directory; the resolved
+			// paths are compared again where they are resolved, since the
+			// default is a directory only the collector can name.
+			key, root := "", "Claude Code's plugin directory"
+			if a.SourceRoot != "" {
+				key, root = filepath.Clean(a.SourceRoot), a.SourceRoot
+			}
+			if prev, dup := changesRoots[key]; dup {
+				return fmt.Errorf("config: adapters %q and %q both read %s; name each directory once", prev, a.Name, root)
+			}
+			changesRoots[key] = a.Name
+		} else {
+			if seen[a.Name] {
+				return fmt.Errorf("config: duplicate adapter %q", a.Name)
+			}
+			seen[a.Name] = true
 		}
-		seen[a.Name] = true
 		if a.Name == AdapterClaudeCodeOTLP && a.Enabled {
 			if a.Listen == "" {
 				return fmt.Errorf("config: adapter %q needs listen, the address the runtime's exporter is pointed at, such as 127.0.0.1:4317", a.Name)

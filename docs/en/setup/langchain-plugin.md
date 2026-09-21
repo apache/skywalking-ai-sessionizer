@@ -26,7 +26,8 @@ pip install apache-skywalking-asz-langchain
 asz-langchain enable
 ```
 
-and `asz-changes` on the machine, from the release archive, Homebrew or apt.
+or, from the source package of a release, `pip install ./plugins/langchain`. And `asz-changes` on
+the machine, which the [install script, Homebrew and apt](install.md) all put beside `asz`.
 
 The application imports nothing and changes nothing. `enable` writes a loader
 into the environment's site directory, so it runs at interpreter start and
