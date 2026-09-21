@@ -4,6 +4,17 @@
 
 ## LangChain and LangGraph
 
+- What each model call was sent, and what came back, lands beside the conversation as a provider
+  body, cut against what the session already holds by `pkg/providerbody` — the same mechanism as
+  Claude Code's bodies. It is what the continuity check between calls runs on, and it shows a
+  nested agent its own prompt. Measured on the captured corpus, a twenty-turn conversation lands
+  at 13% of what it was on the wire, bodies included, and a conversation of a few short calls at
+  about a third. `provider_bodies: false` on the `langsmith-ingest` adapter turns it off. A
+  request on this wire names its call, the run's own id, and the assembler now joins a request by
+  the call it names, when exactly one names it; a request that names none, as Claude Code's do,
+  joins as before. A nested stream's records name the tool they ran inside as their prompt, not
+  the trace.
+
 - asz assembles conversations from an agent built on LangChain or LangGraph without changing the
   application. The `langsmith-ingest` adapter is a receiver the tracing client is pointed at, and
   since that client is a dependency of `langchain-core`, every LangChain application already

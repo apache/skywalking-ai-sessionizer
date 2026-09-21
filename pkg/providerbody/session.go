@@ -330,7 +330,10 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 	rec := &sessiondata.Record{Ord: 1, Sha: sum[:12], Bytes: len(body), ID: b.ID, Model: k.Model}
 	switch b.Role {
 	case RoleRequest:
-		rec.Run = k.Run
+		// A request names the call it was sent to when its adapter knows
+		// it. One that does not is joined by its run and the request
+		// before it.
+		rec.Run, rec.Call = k.Run, k.Call
 	case RoleResponse:
 		rec.Call = k.Call
 	}

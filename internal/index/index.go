@@ -238,8 +238,10 @@ type Body struct {
 	// provider has answered, so the id does not exist yet.
 	Request uint32
 	// Previous is the request id of the call before this one, which a REQUEST
-	// carries. It is the only link a request has to the conversation it
-	// continues, and it names a response's Request.
+	// carries. It is the link a request that names no call has to the
+	// conversation it continues, and it names a response's Request. A request
+	// whose runtime knew its call carries that on its entry's Call, as a
+	// response does, and joins by it.
 	Previous uint32
 }
 

@@ -202,6 +202,19 @@ func (s *shape) auxiliary(id string) bool {
 	return ok && known.PlainCall && !known.Program
 }
 
+// promptOf says which prompt a run belongs to: the tool it ran inside when
+// it is nested, and its trace otherwise. Every stream of one trace would
+// otherwise share the trace as its prompt, and a nested agent's records
+// would name the caller's prompt as theirs.
+func (s *shape) promptOf(run Run) string {
+	for _, id := range ancestors(run.Dotted, run.ID) {
+		if _, ok := s.Tools[id]; ok {
+			return id
+		}
+	}
+	return run.TraceID
+}
+
 // opens reports whether this run is a tool that started a stream.
 func (s *shape) opens(run Run) bool {
 	return run.Type == "tool" && s.Opened[run.ID]

@@ -37,14 +37,15 @@ import (
 // files a session holds - to read one line of each. Resolved once, at parse time,
 // it travels in the round.
 //
-// A response joins by its message id, which is the call's own. A request names no
-// call, only the request before it and its prompt, so a request joins to the call
-// of its stream whose previous call's response carries that request id, and whose
-// prompt is the one it names, when exactly one request and exactly one call carry
-// those two ids. A compaction request names no prompt, a retried request carries
-// the same two ids twice, and the first calls of two streams under one prompt
-// carry the same two ids; none of them is joined. Nothing is joined by position or
-// by time.
+// A response joins by its message id, which is the call's own, and so does a
+// request whose runtime named its call, when exactly one request names it. A
+// request that names no call - one Claude Code writes names only the request
+// before it and its prompt - joins to the call of its stream whose previous call's
+// response carries that request id, and whose prompt is the one it names, when
+// exactly one request and exactly one call carry those two ids. A compaction
+// request names no prompt, a retried request carries the same two ids twice, and
+// the first calls of two streams under one prompt carry the same two ids; none of
+// them is joined. Nothing is joined by position or by time.
 //
 // The join is made again from the evidence each round covers, and a round carries
 // the whole call node, so a body landing later attaches in a later round, and a
@@ -61,22 +62,26 @@ func (b *builder) joinProviderBodies() {
 		return
 	}
 
-	// Responses, by message id.
-	byMsg := map[uint32][]int{}
+	// Bodies that name their call, by message id: every response, and a
+	// request whose runtime knew its call when it was landed.
+	byMsg := map[index.BodyRole]map[uint32][]int{
+		index.BodyRoleRequest: {}, index.BodyRoleResponse: {},
+	}
 	for i, y := range bodies {
-		if y.role == index.BodyRoleResponse && y.msg != 0 {
-			byMsg[y.msg] = append(byMsg[y.msg], i)
+		if y.msg != 0 && byMsg[y.role] != nil {
+			byMsg[y.role][y.msg] = append(byMsg[y.role][y.msg], i)
 		}
 	}
 	// requestOf is the request id a call's response carries, which is what the
 	// call after it names as the request before its own.
 	requestOf := map[string]uint32{}
 	responseOf := map[string]int{}
+	requestFor := map[string]int{}
 	for _, k := range calls {
 		if k.msg == 0 {
 			continue
 		}
-		switch hits := byMsg[k.msg]; len(hits) {
+		switch hits := byMsg[index.BodyRoleResponse][k.msg]; len(hits) {
 		case 0:
 		case 1:
 			requestOf[k.node], responseOf[k.node] = bodies[hits[0]].request, hits[0]
@@ -86,20 +91,31 @@ func (b *builder) joinProviderBodies() {
 				bodies[i].ambiguous = true
 			}
 		}
+		switch hits := byMsg[index.BodyRoleRequest][k.msg]; len(hits) {
+		case 0:
+		case 1:
+			requestFor[k.node] = hits[0]
+			bodies[hits[0]].joined = true
+		default:
+			for _, i := range hits {
+				bodies[i].ambiguous = true
+			}
+		}
 	}
 
-	// Requests, by the request before them and their prompt.
+	// Requests that name no call, by the request before them and their prompt.
 	type key struct{ previous, prompt uint32 }
 	byKey := map[key][]int{}
 	for i, y := range bodies {
-		if y.role == index.BodyRoleRequest && y.prompt != 0 {
+		if y.role == index.BodyRoleRequest && y.msg == 0 && y.prompt != 0 {
 			byKey[key{y.previous, y.prompt}] = append(byKey[key{y.previous, y.prompt}], i)
 		}
 	}
-	// The key each call's request would carry. A call whose previous call has no
-	// response carrying its request id has none, and neither has a call in a
-	// stream whose landed lines have a gap: a call may be missing between two
-	// that look consecutive.
+	// The key each call's request would carry. A call whose request named it
+	// takes none. A call whose previous call has no response carrying its
+	// request id has none, and neither has a call in a stream whose landed
+	// lines have a gap: a call may be missing between two that look
+	// consecutive.
 	gapped := map[uint32]bool{}
 	for _, k := range calls {
 		if _, done := gapped[k.stream]; !done {
@@ -109,7 +125,7 @@ func (b *builder) joinProviderBodies() {
 	callKey := map[string]key{}
 	callsByKey := map[key]int{}
 	for i, k := range calls {
-		if gapped[k.stream] || k.prompt == 0 {
+		if _, named := requestFor[k.node]; named || gapped[k.stream] || k.prompt == 0 {
 			continue
 		}
 		var previous uint32
@@ -122,7 +138,6 @@ func (b *builder) joinProviderBodies() {
 		callKey[k.node] = key{previous, k.prompt}
 		callsByKey[key{previous, k.prompt}]++
 	}
-	requestFor := map[string]int{}
 	for _, k := range calls {
 		ck, ok := callKey[k.node]
 		if !ok {

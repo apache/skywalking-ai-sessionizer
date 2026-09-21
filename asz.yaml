@@ -146,6 +146,15 @@ adapters:
       - project
       - thread
 
+    # What each model call was sent, and what came back, landed beside the
+    # conversation. It is the evidence the continuity check between calls
+    # runs on, and it shows a nested agent's own prompt. Cut against what the
+    # session already holds: measured, a long conversation lands under half
+    # of what it was on the wire, and a conversation of a few short calls
+    # lands more than it was, because the note that says how to rebuild a
+    # body costs more than a small body saves.
+    provider_bodies: true
+
     collector:
       # What the receiver accepts waits in an inbox until a pass converts it,
       # so this is how often that happens.

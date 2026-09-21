@@ -175,8 +175,9 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			// The receiver lands nothing itself: it keeps what arrived, and
 			// this converts it on the pipeline's own period.
 			r.langsmith = &langsmith.Collector{Zone: zone,
-				Ownership:     langsmith.Ownership{Keys: ad.ThreadKeys, Scope: ad.Scope},
-				MaxDeltaBytes: ad.Collector.MaxDeltaBytes}
+				Ownership:      langsmith.Ownership{Keys: ad.ThreadKeys, Scope: ad.Scope},
+				MaxDeltaBytes:  ad.Collector.MaxDeltaBytes,
+				ProviderBodies: ad.ProviderBodies}
 			names = append(names, ad.Name)
 			sources = append(sources, "received on "+ad.Listen)
 		case config.AdapterChanges, config.AdapterClaudeCodeChanges:

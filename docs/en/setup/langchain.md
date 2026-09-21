@@ -115,10 +115,15 @@ The prompt that opens a turn, a tool command and a tool result are landed whole,
 as they were sent. Nothing is sampled and nothing is redacted, which is the same
 treatment a Claude Code transcript gets.
 
-What is not landed is the history that repeats. Every model call carries the
-whole conversation again in its inputs, and a call's record keeps what the model
-said rather than what it was told, so a landed conversation is 7 to 8% of what
-arrived. See [the adapter page](../adapters/langsmith.md) for what that costs.
+What each model call was sent, and what came back, is landed beside the
+conversation as a provider body, cut against what the session already holds so
+a request shares its front with the one before. That is what the continuity
+check between calls runs on, and it is what shows a nested agent its own prompt.
+Measured, a long conversation lands at about an eighth of what it was on the
+wire, bodies included; a conversation of a few short calls lands at about a
+third, because a small body's rebuild note costs more than the body saves. To
+land the conversation alone, set `provider_bodies: false` on the adapter. See
+[the adapter page](../adapters/langsmith.md) for the numbers.
 
 ## What it cannot do
 

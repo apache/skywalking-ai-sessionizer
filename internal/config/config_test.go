@@ -162,3 +162,53 @@ func TestAnOldAdapterNameStillGetsItsDefaults(t *testing.T) {
 		t.Errorf("the name was rewritten to %q; a configuration says what it says", old.Name)
 	}
 }
+
+// TestProviderBodiesIsASettingOfTheReceiverAlone.
+//
+// The langsmith-ingest receiver lands what each call was sent unless told
+// not to, and no other adapter takes the setting: Claude Code's bodies come
+// through their own adapter. A collector test that sets the flag on the
+// collector directly cannot show that the setting reaches it, so this holds
+// the configuration side.
+func TestProviderBodiesIsASettingOfTheReceiverAlone(t *testing.T) {
+	for _, a := range Default().Adapters {
+		if a.Name == AdapterLangSmithIngest && !a.ProviderBodies {
+			t.Error("the receiver does not land bodies by default")
+		}
+		if a.Name != AdapterLangSmithIngest && a.ProviderBodies {
+			t.Errorf("%s takes provider_bodies by default", a.Name)
+		}
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "asz.yaml")
+	if err := os.WriteFile(path, []byte("storage:\n  root: "+dir+"\nadapters:\n  - name: langsmith-ingest\n    enabled: true\n    listen: 127.0.0.1:0\n    provider_bodies: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range cfg.Adapters {
+		if a.Name == AdapterLangSmithIngest && a.ProviderBodies {
+			t.Error("provider_bodies: false was read as true")
+		}
+	}
+	if err := os.WriteFile(path, []byte("storage:\n  root: "+dir+"\nadapters:\n  - name: langsmith-ingest\n    enabled: true\n    listen: 127.0.0.1:0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range cfg.Adapters {
+		if a.Name == AdapterLangSmithIngest && !a.ProviderBodies {
+			t.Error("a receiver entry that says nothing about provider_bodies lost the default")
+		}
+	}
+	if err := os.WriteFile(path, []byte("storage:\n  root: "+dir+"\nadapters:\n  - name: claude-code-local\n    provider_bodies: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Error("another adapter was allowed provider_bodies")
+	}
+}

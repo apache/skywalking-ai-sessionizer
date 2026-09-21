@@ -42,7 +42,7 @@ func TestWhatTheDocumentationClaims(t *testing.T) {
 	for _, kase := range cases {
 		arrived := requestBytes(t, kase)
 		zone, sessions := land(t, kase)
-		var landed int64
+		var landed, bodies int64
 		for _, session := range sessions {
 			files, err := storage.LandedFiles(zone, session)
 			if err != nil {
@@ -53,16 +53,29 @@ func TestWhatTheDocumentationClaims(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// A provider body sits at the session, in no stream and no run.
+				if f.Stream == "" && f.RunID == "" {
+					bodies += info.Size()
+					continue
+				}
 				landed += info.Size()
 			}
 		}
 		totalArrived += arrived
-		totalLanded += landed
-		t.Logf("%-18s arrived %9d  landed %8d  %5.1f%%",
-			kase, arrived, landed, 100*float64(landed)/float64(arrived))
+		totalLanded += landed + bodies
+		t.Logf("%-18s arrived %9d  conversation %8d (%5.1f%%)  bodies %8d (%5.1f%%)  together %5.1f%%",
+			kase, arrived, landed, 100*float64(landed)/float64(arrived),
+			bodies, 100*float64(bodies)/float64(arrived), 100*float64(landed+bodies)/float64(arrived))
 	}
 	t.Logf("%-18s arrived %9d  landed %8d  %5.1f%%",
 		"ALL", totalArrived, totalLanded, 100*float64(totalLanded)/float64(totalArrived))
+	// The numbers above are what the adapter page states. A measurement that
+	// only prints would pass through a change that doubled what lands, so
+	// the whole corpus is held to a bound well above what it measures today
+	// (17.8%) and well below what landing bodies whole would give.
+	if share := 100 * float64(totalLanded) / float64(totalArrived); share > 25 {
+		t.Errorf("the corpus lands at %.1f%% of the wire; the page says 17.8%%, and above 25%% the trade the page describes is no longer the one being made", share)
+	}
 }
 
 // requestBytes is what one case put on the wire.
