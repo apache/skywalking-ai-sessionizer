@@ -893,3 +893,27 @@ func TestNoListingSeesRemoved(t *testing.T) {
 		t.Fatalf("the page lists %v: %v", ids, err)
 	}
 }
+
+// TestProviderBodiesReachesTheReceiverCollector. The configuration reads
+// provider_bodies and the collector acts on its own field; neither side's
+// tests can show that the one reaches the other. This holds the wiring
+// between them, both ways, since a switch that is always on is no switch.
+func TestProviderBodiesReachesTheReceiverCollector(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		root := t.TempDir()
+		zone := storage.NewZone(root)
+		ads := []config.Adapter{{Name: config.AdapterLangSmithIngest, Enabled: true,
+			Listen: "127.0.0.1:0", ProviderBodies: on}}
+		ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(ref.close)
+		if ref.langsmith == nil {
+			t.Fatal("no collector was built for the receiver")
+		}
+		if ref.langsmith.ProviderBodies != on {
+			t.Errorf("provider_bodies: %v reached the collector as %v", on, ref.langsmith.ProviderBodies)
+		}
+	}
+}

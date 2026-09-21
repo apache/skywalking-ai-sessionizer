@@ -144,11 +144,12 @@ lower, which hold everything it refers to. See
 [Session Data, Provider bodies](session-data.md#provider-bodies).
 
 The join is made when the round is parsed, and it is made again from the evidence each round covers.
-A response joins by the message id it carries, which is the call's own. A request names no call,
-only the request before it and its prompt, so it joins to the call of its stream whose previous
-call's response carries that request id and whose prompt is the one it names, when exactly one
-request and exactly one call carry the pair. Nothing is joined by position or by time, and a call
-whose join is not exact carries nothing. A body that lands after the round covering its call joins
+A response joins by the message id it carries, which is the call's own, and so does a request
+whose adapter knew its call, when exactly one request names that call. A request that names no
+call - one Claude Code writes names only the request before it and its prompt - joins to the call
+of its stream whose previous call's response carries that request id and whose prompt is the one
+it names, when exactly one request and exactly one call carry the pair. Nothing is joined by
+position or by time, and a call whose join is not exact carries nothing. A body that lands after the round covering its call joins
 in a later round, as a new revision of the call; evidence that makes a join ambiguous withdraws it
 the same way.
 

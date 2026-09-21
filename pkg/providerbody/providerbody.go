@@ -129,7 +129,9 @@ type Keys struct {
 	Session string
 	// Run is the run, one prompt cycle, a request was sent in.
 	Run string
-	// Call is the provider call a response answers.
+	// Call is the provider call a response answers, and the call a request
+	// was sent to when its adapter knows it. A runtime that names a request
+	// before the provider has answered cannot know it.
 	Call string
 	// Request is the provider's id for the request a response answers.
 	Request string

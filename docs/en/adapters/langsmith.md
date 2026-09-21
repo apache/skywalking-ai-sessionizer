@@ -145,22 +145,47 @@ Such a function also calls its tools itself, so no model call names them. The ru
 its arguments are landed from the tool run: without that the tool answered nothing and made no
 step at all.
 
-### The repeated history is not landed
+### What each call was sent
 
 Every model call carries the whole conversation again in its `inputs`. Measured over twenty turns:
 the first call's inputs were 210 bytes and the twenty-first's were 18,918, a factor of ninety, and
 the thread was 1.63 MB on the wire.
 
-Almost none of that lands. A model call's record keeps what the model said, not what it was told,
-so a landed conversation is **7 to 8% of what arrived** — 126 KB of the 1.63 MB above, and 97 KB of
-the 1.34 MB the large-content capture sent. Across the nine captures assembled end to end, 3.75 MB
-on the wire landed as 380 KB.
+A call's record keeps what the model said, so the conversation itself is **7 to 8% of what
+arrived** — 126 KB of the 1.63 MB above. What the model was told is landed beside it, as a
+provider body, the way Claude Code's bodies are: cut against what the session already holds by
+`pkg/providerbody`, so a request shares its front with the request before it. A request is landed
+from the first arrival of a run that carries inputs, a response from the arrival that carries the
+run's end, and a repeat is a repeat. Measured, with every call's inputs and outputs:
 
-That is a deliberate trade and it has a cost worth naming. The model's `llm.call` is one provider
-attempt, input manifest and response together, and the manifest is the evidence continuity between
-turns would be checked against. asz does not hold it for a LangChain conversation today. Landing it
-whole would multiply a long conversation by twelve; landing it cut against what the session already
-holds is what `pkg/providerbody` exists for, and is where this goes next.
+| Capture | On the wire | Conversation | Bodies | Together |
+| --- | --- | --- | --- | --- |
+| long-conversation, 20 turns | 1.63 MB | 7.7% | 5.3% | 13.0% |
+| large-content | 1.34 MB | 7.2% | 7.9% | 15.2% |
+| subagent | 179 KB | 22.7% | 13.4% | 36.0% |
+| three-turns | 145 KB | 19.7% | 13.5% | 33.3% |
+| plain, one call | 20 KB | 31.5% | 16.1% | 47.6% |
+| all nine captures | 3.75 MB | 10.1% | 7.7% | 17.8% |
+
+Two things to read off that. Cutting pays on a long conversation, where each request is mostly
+the one before: twenty turns of requests and responses, 217 KB on the wire, land as 87 KB. And it
+costs on a short one, where the note that says how to rebuild a body is larger than what a small
+body saves: three turns' bodies land at more than their size. Both are the price of the
+continuity check having something to run on. `provider_bodies: false` on the adapter turns it off.
+
+Both bodies of a call name the call, and `internal/assemble/provider.go` joins them by it. On this
+wire a request knows its call — it is the run's own id — where a request Claude Code writes names
+only the request before it and its prompt. So nothing about the order of a stream's calls is kept
+or derived by the receiver. It was, and the assembler disagreed with it whenever a call's fragments
+landed in an order the receiver had not seen: a session landed before the receiver kept anything, a
+call whose first fragment landed in `main` before its ancestry arrived, a request held for a later
+pass and then replayed. The run id is evidence; an order is an inference, and the assembler's is
+the only one. A nested stream's records still name the tool they ran inside as their prompt, not
+the trace, so every stream of one trace does not share the trace as its prompt.
+
+On this wire a body is the framework's view of what it sent — the run's `inputs.messages`, in
+LangChain's serialized message form — and not the bytes the provider received. The manifest says
+which adapter it came from, and a reader must not take it for the wire.
 
 ### A conversation is named by what was asked
 
@@ -214,8 +239,9 @@ supplied, and nothing merges it with anything else.
 - **Which tools write.** A LangChain application names its own tools, and nothing on the wire says
   whether one changes the workspace or only reads it. The change recorder is told which to watch,
   by whoever runs it, because there is no convention to infer it from.
-- **Cost, and a provider's own request.** A run's `inputs.messages` is the framework's view of what
-  it sent, not the bytes the provider received.
+- **The provider's own request.** A run's `inputs.messages` is the framework's view of what it
+  sent, not the bytes the provider received, and that is what lands as the call's request body.
+  What the provider was actually sent, and what it cost, are not on this wire.
 - **Which question is new.** An application that keeps its own history sends the whole
   conversation as a turn's input. What opened the turn is read as the run of messages at the end,
   after the last thing anyone else said. An application that reorders its history, or repeats a

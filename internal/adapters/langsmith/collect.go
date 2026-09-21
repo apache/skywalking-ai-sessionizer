@@ -55,7 +55,11 @@ type Collector struct {
 	// because a file is cut by narrowing what goes in it and never by
 	// splitting a record.
 	MaxDeltaBytes int64
-	Now           func() time.Time
+	// ProviderBodies lands what each model call was sent and what came
+	// back, beside the conversation, cut against what the session already
+	// holds. See bodies.go for what it costs and what it is worth.
+	ProviderBodies bool
+	Now            func() time.Time
 }
 
 // DefaultMaxDeltaBytes is the budget a collector uses when none is set.
@@ -70,6 +74,13 @@ type Landed struct {
 	// Unassigned counts the runs that supplied no identity, which land under
 	// their own trace rather than being guessed into a conversation.
 	Unassigned int
+	// Bodies counts the provider bodies landed: what each call was sent and
+	// what came back, beside the conversation. BodyConflicts counts the
+	// bodies not landed because the same run's body had already landed
+	// with other bytes: the first is kept, and this says how often a later
+	// delivery disagreed with it.
+	Bodies        int
+	BodyConflicts int
 	// Unreadable counts the requests moved aside because nothing could be
 	// read out of them.
 	Unreadable int
@@ -209,6 +220,8 @@ func (c *Collector) Collect() (Landed, error) {
 			out.Files += landed.Files
 			out.Records += landed.Records
 			out.Unassigned += landed.Unassigned
+			out.Bodies += landed.Bodies
+			out.BodyConflicts += landed.BodyConflicts
 			for _, s := range landed.Sessions {
 				touched[s] = true
 			}
@@ -247,14 +260,21 @@ type placed struct {
 	// call is the call a tool run answered, taken from the record rather
 	// than worked out twice.
 	call string
+	// inputs and outputs are the arrival's own fields, as they came, for
+	// the bodies a model call lands beside the conversation; model is what
+	// the runtime said the call ran on.
+	inputs, outputs json.RawMessage
+	model           string
 }
 
 // grouped is one session's arrivals out of one request.
 type grouped struct {
-	session string
-	items   []placed
-	files   int
-	records int
+	session   string
+	items     []placed
+	files     int
+	records   int
+	bodies    int
+	conflicts int
 }
 
 // convert reads one request into landed files, refusing to place a run whose
@@ -366,6 +386,10 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 			order = append(order, session)
 		}
 		item := placed{run: envelope, records: records}
+		if d, err := decodeOperation(op); err == nil {
+			item.inputs, item.outputs = d.inputs, d.outputs
+			item.model, _ = d.metadata["ls_model_name"].(string)
+		}
 		if envelope.Type == "tool" {
 			for _, r := range records {
 				if r.Tool != "" {
@@ -396,6 +420,8 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		}
 		out.Files += g.files
 		out.Records += g.records
+		out.Bodies += g.bodies
+		out.BodyConflicts += g.conflicts
 		out.Sessions = append(out.Sessions, session)
 	}
 	return out, nil
@@ -507,6 +533,20 @@ func (c *Collector) place(g *grouped, open *pending) *placement {
 			sh.NamedBy = "question"
 		}
 	}
+	// A nested stream's records carry its own prompt - the tool it ran
+	// inside - rather than the trace's, so every stream of one trace does
+	// not share one prompt.
+	for i := range g.items {
+		item := &g.items[i]
+		if sh.streamOf(item.run) != MainStream {
+			prompt := sh.promptOf(item.run)
+			for j := range item.records {
+				if item.records[j].Run != "" {
+					item.records[j].Run = prompt
+				}
+			}
+		}
+	}
 	for _, item := range g.items {
 		here[item.run.ID] = true
 		if sh.opens(item.run) {
@@ -581,10 +621,19 @@ func (c *Collector) land(g *grouped, stamp string, request Waiting, open *pendin
 			return err
 		}
 	}
-	if err := sh.save(shapePath); err != nil {
-		return err
+	if c.ProviderBodies {
+		landed, err := c.landBodies(g.session, state, bodiesOf(g.items), stamp, request)
+		if err != nil {
+			return err
+		}
+		g.files += landed.files
+		g.bodies += landed.records
+		g.conflicts += landed.conflicts
 	}
 	if err := c.indexLanded(g.session, state, c.Now()); err != nil {
+		return err
+	}
+	if err := sh.save(shapePath); err != nil {
 		return err
 	}
 	return state.Save(statePath, c.Now())

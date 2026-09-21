@@ -20,6 +20,7 @@ package tests_test
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	view_ "github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
@@ -223,7 +225,7 @@ func land(t *testing.T, kase string) (*storage.Zone, []string) {
 		}
 	}
 	collected := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
-	collector := &langsmith.Collector{Zone: zone,
+	collector := &langsmith.Collector{Zone: zone, ProviderBodies: true,
 		Now: func() time.Time { collected = collected.Add(time.Second); return collected }}
 	landed, err := collector.Collect()
 	if err != nil {
@@ -575,7 +577,7 @@ func receiveInto(t *testing.T) (*storage.Zone, func(body string), func() langsmi
 		}
 	}
 	collected := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
-	collector := &langsmith.Collector{Zone: zone,
+	collector := &langsmith.Collector{Zone: zone, ProviderBodies: true,
 		Now: func() time.Time { collected = collected.Add(time.Second); return collected }}
 	collect := func() langsmith.Landed {
 		t.Helper()
@@ -583,9 +585,47 @@ func receiveInto(t *testing.T) (*storage.Zone, func(body string), func() langsmi
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A request held for a run that never arrives converts nothing, and
+		// a test that does not notice passes on nothing. The tests that
+		// want a request to wait build their own collector.
+		if landed.Waiting != 0 {
+			t.Fatalf("%d request(s) are waiting for a run that has not arrived; the fixture names one it never sends", landed.Waiting)
+		}
+		if landed.Unreadable != 0 {
+			t.Fatalf("%d request(s) were set aside as unreadable; the fixture is malformed", landed.Unreadable)
+		}
 		return landed
 	}
 	return zone, post, collect
+}
+
+// receiveIntoCollector is receiveInto for a test that expects a request to
+// wait, and drives the collector itself.
+func receiveIntoCollector(t *testing.T) (*storage.Zone, func(body string), *langsmith.Collector) {
+	t.Helper()
+	zone := storage.NewZone(t.TempDir())
+	at := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	receiver := &langsmith.Receiver{Zone: zone, Listen: "127.0.0.1:0",
+		Now: func() time.Time { at = at.Add(time.Millisecond); return at }}
+	if err := receiver.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(receiver.Stop)
+	post := func(body string) {
+		t.Helper()
+		resp, err := http.Post("http://"+receiver.Addr()+"/runs/batch",
+			"application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("the receiver answered %d", resp.StatusCode)
+		}
+	}
+	collected := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	return zone, post, &langsmith.Collector{Zone: zone, ProviderBodies: true,
+		Now: func() time.Time { collected = collected.Add(time.Second); return collected }}
 }
 
 // TestAProgramArrivingLaterMakesAPlainCallAChild.
@@ -979,4 +1019,839 @@ func crashed(t *testing.T, zone *storage.Zone, session string) {
 	if err := before.Save(zone.IndexStatePath(session), time.Now()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestEveryModelCallCarriesWhatItWasSent.
+//
+// A call's record keeps what the model said. What it was told is landed
+// beside it as a provider body and joined to the call, which both the
+// request and the response name. Every call in every stream has to carry
+// both - including the first call of a nested agent, in a stream of its own.
+//
+// Counting roles is not enough: two calls' requests swapped, or a call gone
+// missing, still count. So the number of calls is the capture's, and each
+// call's request and response are rebuilt from the landed records and
+// compared byte for byte with what that run carried on the wire.
+func TestEveryModelCallCarriesWhatItWasSent(t *testing.T) {
+	for _, tc := range []struct {
+		kase  string
+		calls int
+	}{{"subagent", 6}, {"long-conversation", 20}, {"three-turns", 4}, {"large-content", 2}} {
+		t.Run(tc.kase, func(t *testing.T) {
+			wire := wireBodies(t, tc.kase)
+			zone, sessions := land(t, tc.kase)
+			session := sessions[0]
+			if _, err := parse.Session(zone, parse.Options{
+				Conversation: session, Session: session, Reindex: index.Rebuild}); err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			view := fold(t, zone, session)
+			held := heldBodies(t, zone, session)
+
+			calls := 0
+			for _, n := range view.Nodes {
+				if n.Kind != model.KindLLMCall {
+					continue
+				}
+				calls++
+				runID := strings.TrimPrefix(n.ID, "call/")
+				bodies, err := sessionflow.ProviderBodiesOf(n.Attrs)
+				if err != nil {
+					t.Fatalf("%s: %v", n.ID, err)
+				}
+				got := map[string]sessionflow.Ref{}
+				for _, b := range bodies {
+					got[b.Role] = b.Ref
+				}
+				if len(got) != 2 || len(bodies) != 2 {
+					t.Errorf("%s in %s carries %d bodies, want one request and one response", n.ID, n.Stream, len(bodies))
+					continue
+				}
+				for role, want := range map[string][]byte{
+					sessionflow.RoleRequest:  wire[runID].inputs,
+					sessionflow.RoleResponse: wire[runID].outputs,
+				} {
+					ref, ok := got[role]
+					if !ok {
+						t.Errorf("%s carries no %s", n.ID, role)
+						continue
+					}
+					id := recordIDAt(t, zone, session, ref)
+					if m, ok := held.Manifest(id); !ok || m.Call != runID {
+						t.Errorf("%s: the manifest of %s names call %q", n.ID, id, m.Call)
+					}
+					if wantID := runID + ":" + role; id != wantID {
+						t.Errorf("%s's %s is record %q, want %q: joined to another call's body", n.ID, role, id, wantID)
+						continue
+					}
+					body, err := held.Body(id)
+					if err != nil {
+						t.Errorf("%s: rebuilding %s: %v", n.ID, id, err)
+						continue
+					}
+					if !bytes.Equal(body, want) {
+						t.Errorf("%s's %s rebuilds to %d bytes that are not the %d the wire carried", n.ID, role, len(body), len(want))
+					}
+				}
+			}
+			if calls != tc.calls {
+				t.Errorf("%d model calls, want the capture's %d", calls, tc.calls)
+			}
+		})
+	}
+}
+
+// wireBody is what one model call carried on the wire.
+type wireBody struct{ inputs, outputs []byte }
+
+// wireBodies reads, from a capture's own requests, each model run's inputs
+// and outputs as they were sent: the inputs from its first arrival carrying
+// them, the outputs from the arrival carrying its end.
+func wireBodies(t *testing.T, kase string) map[string]wireBody {
+	t.Helper()
+	out := map[string]wireBody{}
+	dir := filepath.Join(corpus, kase)
+	requests, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("no corpus for %s: %v", kase, err)
+	}
+	for _, r := range requests {
+		raw, err := os.ReadFile(filepath.Join(dir, r.Name(), "meta.json"))
+		if err != nil {
+			continue
+		}
+		var meta struct {
+			Headers map[string]string `json:"headers"`
+		}
+		if err := json.Unmarshal(raw, &meta); err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(dir, r.Name(), "body.bin"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := langsmith.ParseMultipart(bytes.NewReader(body), meta.Headers["Content-Type"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, op := range parsed.Operations {
+			var run struct {
+				ID   string `json:"id"`
+				Type string `json:"run_type"`
+				End  string `json:"end_time"`
+			}
+			if err := json.Unmarshal(op.Envelope, &run); err != nil {
+				t.Fatal(err)
+			}
+			if run.Type != "llm" && run.Type != "chat_model" {
+				continue
+			}
+			w := out[run.ID]
+			if in, ok := op.Fields["inputs"]; ok && w.inputs == nil {
+				w.inputs = append([]byte(nil), in...)
+			}
+			if o, ok := op.Fields["outputs"]; ok && run.End != "" {
+				w.outputs = append([]byte(nil), o...)
+			}
+			out[run.ID] = w
+		}
+	}
+	return out
+}
+
+// heldBodies rebuilds what a session holds, from its landed body records,
+// the way a reader would.
+func heldBodies(t *testing.T, zone *storage.Zone, session string) *providerbody.Session {
+	t.Helper()
+	held := providerbody.NewSession()
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Stream != "" || f.RunID != "" {
+			continue
+		}
+		fh, err := os.Open(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader, err := sessiondata.NewReader(fh)
+		if err != nil {
+			fh.Close()
+			t.Fatal(err)
+		}
+		for {
+			rec, err := reader.Next()
+			if err != nil {
+				break
+			}
+			if err := held.Add(rec); err != nil {
+				t.Fatalf("%s: %v", f.Path, err)
+			}
+		}
+		fh.Close()
+	}
+	return held
+}
+
+// recordIDAt reads the id of the landed record at a position.
+func recordIDAt(t *testing.T, zone *storage.Zone, session string, ref sessionflow.Ref) string {
+	t.Helper()
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Seq != ref.Seq {
+			continue
+		}
+		fh, err := os.Open(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fh.Close()
+		reader, err := sessiondata.NewReader(fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for row := uint64(1); ; row++ {
+			rec, err := reader.Next()
+			if err != nil {
+				break
+			}
+			if row == ref.Row {
+				return rec.ID
+			}
+		}
+	}
+	t.Fatalf("no record at seq %d row %d", ref.Seq, ref.Row)
+	return ""
+}
+
+// TestARequestJoinsItsOwnCallWhenItsInputsArriveLate.
+//
+// A call's completion can arrive before its inputs, and the next call's
+// start can arrive between the two. A request used to be keyed by the call
+// before it, taken from a cursor that moved only when a body landed, which
+// was nothing here - and the second call's request then joined the first
+// call. A request names its call, whenever its inputs arrive.
+func TestARequestJoinsItsOwnCallWhenItsInputsArriveLate(t *testing.T) {
+	zone, post, collect := receiveInto(t)
+	const trace = "e1e1e1e1-e1e1-71e1-81e1-e1e1e1e1e1e0"
+	const a = "e1e1e1e1-e1e1-71e1-81e1-e1e1e1e1e1e1"
+	const b = "e1e1e1e1-e1e1-71e1-81e1-e1e1e1e1e1e2"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-late-inputs"}}`
+	root := "20260920T100000000000Z" + trace
+	call := func(id, at string) string {
+		return `"id":"` + id + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
+			`"dotted_order":"` + root + `.20260920T10000` + at + `000000Z` + id + `",` +
+			`"run_type":"llm","name":"ChatOpenAI",` + owner
+	}
+	inputsA := `{"messages":[[{"role":"user","content":"first"}]]}`
+	inputsB := `{"messages":[[{"role":"user","content":"first"},{"role":"assistant","content":"A"},{"role":"user","content":"second"}]]}`
+	outputs := func(text string) string {
+		return `{"generations":[[{"message":{"kwargs":{"content":"` + text + `"}}}]]}`
+	}
+	// The root, then A's completion with no inputs.
+	post(`{"post":[{"id":"` + trace + `","trace_id":"` + trace + `","dotted_order":"` + root + `",` +
+		`"run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,` +
+		`"inputs":{"messages":[{"role":"user","content":"first"}]}}],` +
+		`"patch":[{` + call(a, "1") + `,"end_time":"2026-09-20T10:00:02Z","outputs":` + outputs("A") + `}]}`)
+	collect()
+	// B's start, with inputs.
+	post(`{"post":[{` + call(b, "3") + `,"start_time":"2026-09-20T10:00:03Z","end_time":"2026-09-20T10:00:04Z",` +
+		`"inputs":` + inputsB + `,"outputs":` + outputs("B") + `}]}`)
+	collect()
+	// A's start, late, with its inputs.
+	post(`{"post":[{` + call(a, "1") + `,"start_time":"2026-09-20T10:00:01Z","inputs":` + inputsA + `}]}`)
+	landed := collect()
+	session := landed.Sessions[0]
+
+	m := manifestsOf(t, zone, session)
+	if got := m[a+":request"].Call; got != a {
+		t.Errorf("A's request, landed last, names %q as its call", got)
+	}
+	bodiesAreOwn(t, zone, session, 2)
+}
+
+func countKind(view *sessionflow.View, kind string) int {
+	n := 0
+	for _, node := range view.Nodes {
+		if node.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
+// manifestsOf reads every landed body's manifest, by record id.
+func manifestsOf(t *testing.T, zone *storage.Zone, session string) map[string]*providerbody.Manifest {
+	t.Helper()
+	out := map[string]*providerbody.Manifest{}
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Stream != "" || f.RunID != "" {
+			continue
+		}
+		fh, err := os.Open(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reader, err := sessiondata.NewReader(fh); err == nil {
+			for {
+				rec, err := reader.Next()
+				if err != nil {
+					break
+				}
+				if m, err := providerbody.ManifestOf(rec); err == nil {
+					out[rec.ID] = m
+				}
+			}
+		}
+		fh.Close()
+	}
+	return out
+}
+
+// TestAReplayAfterALostShapeLandsNothingTwice.
+//
+// Bodies land before the shape is saved. A crash between the two replays the
+// request: its bodies are repeats, and every request still joins its own
+// call. The shape holds nothing a body joins by - a request names its call -
+// so a lost shape cannot move a join, as it did when the shape kept the
+// stream's order.
+func TestAReplayAfterALostShapeLandsNothingTwice(t *testing.T) {
+	zone, post, collect := receiveInto(t)
+	const trace = "f1f1f1f1-f1f1-71f1-81f1-f1f1f1f1f1f0"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-replay"}}`
+	root := "20260920T100000000000Z" + trace
+	call := func(id, at, content string) string {
+		return `{"post":[{"id":"` + id + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
+			`"dotted_order":"` + root + `.20260920T10000` + at + `000000Z` + id + `",` +
+			`"run_type":"llm","name":"ChatOpenAI","start_time":"2026-09-20T10:00:0` + at + `Z",` +
+			`"end_time":"2026-09-20T10:00:0` + at + `Z",` + owner + `,` +
+			`"inputs":{"messages":[[{"role":"user","content":"` + content + `"}]]},` +
+			`"outputs":{"generations":[[{"message":{"kwargs":{"content":"ok"}}}]]}}]}`
+	}
+	post(`{"post":[{"id":"` + trace + `","trace_id":"` + trace + `","dotted_order":"` + root + `",` +
+		`"run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,` +
+		`"inputs":{"messages":[{"role":"user","content":"go"}]}}]}`)
+	const a, b, c = "f1f1f1f1-f1f1-71f1-81f1-f1f1f1f1f1f1", "f1f1f1f1-f1f1-71f1-81f1-f1f1f1f1f1f2", "f1f1f1f1-f1f1-71f1-81f1-f1f1f1f1f1f3"
+	post(call(a, "1", "a"))
+	session := collect().Sessions[0]
+	shapePath := filepath.Join(zone.SessionDir(session), "langsmith.shape.json")
+	before, err := os.ReadFile(shapePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := call(b, "2", "b")
+	post(second)
+	collect()
+	// The crash: B's bodies landed, the shape did not. The client retries.
+	if err := os.WriteFile(shapePath, before, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	post(second)
+	collect()
+	post(call(c, "3", "c"))
+	collect()
+	m := manifestsOf(t, zone, session)
+	if len(m) != 6 {
+		t.Errorf("%d bodies landed for three calls, want 6: a replay is a repeat", len(m))
+	}
+	if got := bodyRecordsLanded(t, zone, session); got != 6 {
+		t.Errorf("%d body records landed for three calls, want 6: a replay lands no second record", got)
+	}
+	for _, id := range []string{a, b, c} {
+		if got := m[id+":request"].Call; got != id {
+			t.Errorf("%s's request names %q as its call", id, got)
+		}
+	}
+	bodiesAreOwn(t, zone, session, 3)
+}
+
+// TestTwoRequestsNamingOneCallJoinNeither.
+//
+// A request joins by the call it names when exactly one request names it,
+// which is the rule every join follows. This receiver lands one request per
+// call, so the second one here is landed by hand, as another collector might
+// land it. The call then carries its response and no request, rather than
+// one of the two.
+func TestTwoRequestsNamingOneCallJoinNeither(t *testing.T) {
+	zone, post, collect := receiveInto(t)
+	const trace = "d2d2d2d2-d2d2-72d2-82d2-d2d2d2d2d2d0"
+	const a = "d2d2d2d2-d2d2-72d2-82d2-d2d2d2d2d2d1"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-two-requests"}}`
+	root := "20260920T100000000000Z" + trace
+	post(`{"post":[{"id":"` + trace + `","trace_id":"` + trace + `","dotted_order":"` + root + `",` +
+		`"run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,` +
+		`"inputs":{"messages":[{"role":"user","content":"go"}]}},` +
+		`{"id":"` + a + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
+		`"dotted_order":"` + root + `.20260920T100001000000Z` + a + `","run_type":"llm","name":"ChatOpenAI",` +
+		`"start_time":"2026-09-20T10:00:01Z","end_time":"2026-09-20T10:00:02Z",` + owner + `,` +
+		`"inputs":{"messages":[[{"role":"user","content":"go"}]]},` +
+		`"outputs":{"generations":[[{"message":{"kwargs":{"content":"A"}}}]]}}]}`)
+	session := collect().Sessions[0]
+	bodiesAreOwn(t, zone, session, 1)
+
+	// A second request naming A, in a provider body file of its own, under
+	// the session's lock and sequence as any collector would land it.
+	dir := zone.SessionDir(session)
+	lock, err := storage.LockSession(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := storage.LoadSessionState(zone.SessionStatePath(session), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.RecoverNextSeq(dir); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := providerbody.NewSession().Encode(providerbody.Body{
+		ID: a + ":request-again", Role: providerbody.RoleRequest, Src: "by-hand",
+		Keys:  providerbody.Keys{Session: session, Call: a},
+		Bytes: []byte(`{"messages":[[{"role":"user","content":"go, again"}]]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := state.Take()
+	header := &sessiondata.Header{
+		Seq: seq, At: time.Now().UTC().Format(time.RFC3339Nano),
+		Kind: sessiondata.KindProviderBody, Adapter: langsmith.Name + "/" + langsmith.Version,
+		Dialect: langsmith.Dialect, Src: ".", Session: session,
+	}
+	path := filepath.Join(zone.ProviderDir(session), storage.LandedName(string(sessiondata.KindProviderBody), "20260920T100003.000000000Z", seq))
+	err = storage.WriteExclusive(path, storage.PermLanded, func(w io.Writer) error {
+		writer, err := sessiondata.NewWriter(w, header)
+		if err != nil {
+			return err
+		}
+		if err := writer.Write(rec); err != nil {
+			return err
+		}
+		return writer.Close()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save(zone.SessionStatePath(session), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	// A collector indexes what it lands. This landed nothing through one, so
+	// the index is dropped and parsing rebuilds it from the landed files,
+	// which is what makes the index disposable.
+	if err := os.RemoveAll(zone.IndexDir(session)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(zone.IndexStatePath(session)); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+
+	if _, err := parse.Session(zone, parse.Options{Conversation: session, Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(manifestsOf(t, zone, session)); got != 3 {
+		t.Fatalf("%d bodies landed, want the call's two and the one by hand", got)
+	}
+	view := fold(t, zone, session)
+	if got := countKind(view, model.KindLLMCall); got != 1 {
+		t.Fatalf("%d calls in the fold, want the one", got)
+	}
+	for _, n := range view.Nodes {
+		if n.Kind != model.KindLLMCall {
+			continue
+		}
+		bodies, _ := sessionflow.ProviderBodiesOf(n.Attrs)
+		if len(bodies) != 1 || bodies[0].Role != sessionflow.RoleResponse {
+			t.Fatalf("%s carries %v, want its response alone: two requests name it", n.ID, bodies)
+		}
+		if id := recordIDAt(t, zone, session, bodies[0].Ref); id != a+":response" {
+			t.Errorf("%s carries %q as its response", n.ID, id)
+		}
+	}
+}
+
+// TestAChangedRedeliveryIsCountedNotLanded: a finished run delivered again
+// with other outputs does not replace what landed, and is not hidden either.
+func TestAChangedRedeliveryIsCountedNotLanded(t *testing.T) {
+	zone, post, collect := receiveInto(t)
+	// The run is its own root: a dotted order naming a run that never
+	// arrives is waited for, and a test that waits converts nothing.
+	const id = "a2a2a2a2-a2a2-71a2-81a2-a2a2a2a2a2a1"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-conflict"}}`
+	root := "20260920T100000000000Z" + id
+	run := func(outputs string) string {
+		return `{"post":[{"id":"` + id + `","trace_id":"` + id + `","dotted_order":"` + root + `",` +
+			`"run_type":"llm","name":"ChatOpenAI","start_time":"2026-09-20T10:00:00Z",` +
+			`"end_time":"2026-09-20T10:00:01Z",` + owner + `,` +
+			`"inputs":{"messages":[[{"role":"user","content":"hi"}]]},` +
+			`"outputs":{"generations":[[{"message":{"kwargs":{"content":"` + outputs + `"}}}]]}}]}`
+	}
+	post(run("first"))
+	first := collect()
+	post(run("changed"))
+	second := collect()
+	if first.BodyConflicts != 0 || second.BodyConflicts != 1 {
+		t.Errorf("conflicts %d then %d, want 0 then 1", first.BodyConflicts, second.BodyConflicts)
+	}
+	// Counted, and not landed: one response, and it is the first one.
+	responses := 0
+	for id, m := range manifestsOf(t, zone, first.Sessions[0]) {
+		if m.Role != providerbody.RoleResponse {
+			continue
+		}
+		responses++
+		if m.SHA256 != providerbody.Digest([]byte(`{"generations":[[{"message":{"kwargs":{"content":"first"}}}]]}`)) {
+			t.Errorf("%s is not the first response landed", id)
+		}
+	}
+	if responses != 1 {
+		t.Errorf("%d responses landed, want the first and only the first", responses)
+	}
+	if got := bodyRecordsLanded(t, zone, first.Sessions[0]); got != 2 {
+		t.Errorf("%d body records landed, want the first request and the first response only", got)
+	}
+}
+
+// TestAModelCallSentTwiceLandsItsBodiesOnceAndFinished.
+//
+// A model call can be posted open, with a streaming stub in its outputs,
+// and patched closed with the real answer. Its request is landed from the
+// first arrival carrying inputs, its response only from the arrival carrying
+// its end, and the repeat of the request is a repeat: two bodies, and the
+// response is the finished answer and not the stub.
+//
+// The slow-tool capture does not show this - there it is the tool that
+// arrives twice, and its model calls arrive once, finished - so a test on
+// it passed with the rule broken. This one sends the arrivals itself.
+func TestAModelCallSentTwiceLandsItsBodiesOnceAndFinished(t *testing.T) {
+	zone, post, collect := receiveInto(t)
+	const trace = "d1d1d1d1-d1d1-71d1-81d1-d1d1d1d1d1d0"
+	const call = "d1d1d1d1-d1d1-71d1-81d1-d1d1d1d1d1d1"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-twice"}}`
+	root := "20260920T100000000000Z" + trace
+	inputs := `{"messages":[[{"role":"user","content":"count to three"}]]}`
+	stub := `{"generations":[[{"message":{"kwargs":{"content":"on"}}}]]}`
+	answer := `{"generations":[[{"message":{"kwargs":{"content":"one, two, three"}}}]]}`
+
+	post(`{"post":[{"id":"` + trace + `","trace_id":"` + trace + `","dotted_order":"` + root + `",` +
+		`"run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,` +
+		`"inputs":{"messages":[{"role":"user","content":"count to three"}]}},` +
+		`{"id":"` + call + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
+		`"dotted_order":"` + root + `.20260920T100001000000Z` + call + `",` +
+		`"run_type":"llm","name":"ChatOpenAI","start_time":"2026-09-20T10:00:01Z",` + owner + `,` +
+		`"inputs":` + inputs + `,"outputs":` + stub + `}]}`)
+	collect()
+	post(`{"patch":[{"id":"` + call + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
+		`"dotted_order":"` + root + `.20260920T100001000000Z` + call + `",` +
+		`"run_type":"llm","name":"ChatOpenAI","end_time":"2026-09-20T10:00:04Z",` + owner + `,` +
+		`"inputs":` + inputs + `,"outputs":` + answer + `},` +
+		`{"id":"` + trace + `","end_time":"2026-09-20T10:00:05Z"}]}`)
+	landed := collect()
+	session := landed.Sessions[0]
+
+	var roles []string
+	responseIs := ""
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if f.Stream != "" || f.RunID != "" {
+			continue
+		}
+		fh, err := os.Open(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reader, err := sessiondata.NewReader(fh); err == nil {
+			for {
+				rec, err := reader.Next()
+				if err != nil {
+					break
+				}
+				m, err := providerbody.ManifestOf(rec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				roles = append(roles, m.Role)
+				if m.Role == providerbody.RoleResponse {
+					responseIs = m.SHA256
+				}
+			}
+		}
+		fh.Close()
+	}
+	sort.Strings(roles)
+	if strings.Join(roles, ",") != "request,response" {
+		t.Fatalf("bodies landed: %v, want exactly one request and one response", roles)
+	}
+	if responseIs != providerbody.Digest([]byte(answer)) {
+		if responseIs == providerbody.Digest([]byte(stub)) {
+			t.Fatal("the response landed is the streaming stub, not the finished answer")
+		}
+		t.Fatalf("the response landed is neither the stub nor the answer")
+	}
+}
+
+// TestProviderBodiesCanBeTurnedOff: with the setting off nothing is landed
+// beside the conversation, and the session says it holds no bodies.
+func TestProviderBodiesCanBeTurnedOff(t *testing.T) {
+	zone, post, _ := receiveInto(t)
+	post(`{"post":[{"id":"c1c1c1c1-c1c1-71c1-81c1-c1c1c1c1c1c1","trace_id":"c1c1c1c1-c1c1-71c1-81c1-c1c1c1c1c1c1",` +
+		`"dotted_order":"20260920T100000000000Zc1c1c1c1-c1c1-71c1-81c1-c1c1c1c1c1c1","run_type":"llm","name":"ChatOpenAI",` +
+		`"start_time":"2026-09-20T10:00:00Z","end_time":"2026-09-20T10:00:01Z","session_name":"asz",` +
+		`"extra":{"metadata":{"thread_id":"t-off"}},"inputs":{"messages":[[{"role":"user","content":"hi"}]]},` +
+		`"outputs":{"generations":[[{"message":{"kwargs":{"content":"hello"}}}]]}}]}`)
+	off := &langsmith.Collector{Zone: zone, ProviderBodies: false}
+	landed, err := off.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed.Bodies != 0 {
+		t.Errorf("%d bodies landed with the setting off", landed.Bodies)
+	}
+	if _, err := os.Stat(zone.ProviderDir(landed.Sessions[0])); !os.IsNotExist(err) {
+		t.Error("a provider body directory exists with the setting off")
+	}
+}
+
+// TestARequestJoinsItsOwnCallInEverySchedule.
+//
+// A request names its call, the run's own id, and the collector keeps and
+// derives nothing about the order of a stream's calls. It did, twice - a
+// copy kept in its own state, then an order read from the session's index -
+// and the assembler disagreed with it in each schedule below, so a request
+// joined another call. In every schedule every request has to name its own
+// call and join it, whatever landed first:
+//
+//   - a session landed before the collector kept anything;
+//   - a call whose first fragment landed in main before its ancestry
+//     arrived, so the assembler places it by that fragment;
+//   - a request held for a later pass and then replayed, landing after a
+//     call that arrived while it waited;
+//   - a call delivered again after another has followed it.
+func TestARequestJoinsItsOwnCallInEverySchedule(t *testing.T) {
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-order"}}`
+	trace := func(n string) string {
+		return "b" + n + "b" + n + "b" + n + "b" + n + "-b" + n + "b" + n + "-7" + n + "b" + n + "-8" + n + "b" + n + "-b" + n + "b" + n + "b" + n + "b" + n + "b" + n + "b0"
+	}
+	call := func(tr, id, parent, dotted, at string, inputs, outputs string) string {
+		body := `{"id":"` + id + `","trace_id":"` + tr + `","parent_run_id":"` + parent + `",` +
+			`"dotted_order":"` + dotted + `","run_type":"llm","name":"ChatOpenAI",` + owner
+		if inputs != "" {
+			body += `,"start_time":"2026-09-20T10:00:0` + at + `Z","inputs":` + inputs
+		}
+		if outputs != "" {
+			body += `,"end_time":"2026-09-20T10:00:0` + at + `.9Z","outputs":` + outputs
+		}
+		return body + `}`
+	}
+	in := func(text string) string { return `{"messages":[[{"role":"user","content":"` + text + `"}]]}` }
+	out := func(text string) string {
+		return `{"generations":[[{"message":{"kwargs":{"content":"` + text + `"}}}]]}`
+	}
+	t.Run("a session landed before the collector kept any order", func(t *testing.T) {
+		zone, post, collect := receiveInto(t)
+		tr := trace("1")
+		root := "20260920T100000000000Z" + tr
+		a, b := tr[:len(tr)-1]+"1", tr[:len(tr)-1]+"2"
+		post(`{"post":[{"id":"` + tr + `","trace_id":"` + tr + `","dotted_order":"` + root + `","run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,"inputs":{"messages":[{"role":"user","content":"go"}]}},` +
+			call(tr, a, tr, root+".20260920T100001000000Z"+a, "1", in("a"), out("A")) + `]}`)
+		session := collect().Sessions[0]
+		// An older session: whatever the collector might have kept is gone.
+		if err := os.Remove(filepath.Join(zone.SessionDir(session), "langsmith.shape.json")); err != nil {
+			t.Fatal(err)
+		}
+		post(`{"post":[` + call(tr, b, tr, root+".20260920T100002000000Z"+b, "2", in("b"), out("B")) + `]}`)
+		collect()
+		if got := manifestsOf(t, zone, session)[b+":request"].Call; got != b {
+			t.Errorf("B's request names %q as its call", got)
+		}
+		bodiesAreOwn(t, zone, session, 2)
+	})
+
+	t.Run("a call whose first fragment landed before its ancestry", func(t *testing.T) {
+		zone, post, collector := receiveIntoCollector(t)
+		tr := trace("2")
+		root := "20260920T100000000000Z" + tr
+		tool := tr[:len(tr)-1] + "5"
+		a, b := tr[:len(tr)-1]+"1", tr[:len(tr)-1]+"2"
+		toolDotted := root + ".20260920T100001000000Z" + tool
+		// A's completion, inside a tool nobody has sent. It waits as long as
+		// it may, then lands in main.
+		post(`{"patch":[` + call(tr, a, tool, toolDotted+".20260920T100002000000Z"+a, "2", "", out("A")) + `]}`)
+		var landed langsmith.Landed
+		for i := 0; i < 6 && landed.Placed == 0; i++ {
+			var err error
+			if landed, err = collector.Collect(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if landed.Placed != 1 {
+			t.Fatalf("A was not landed after waiting as long as it may: %+v", landed)
+		}
+		session := landed.Sessions[0]
+		files, err := storage.LandedFiles(zone, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inMain := 0
+		for _, f := range files {
+			if f.Stream == langsmith.MainStream {
+				inMain++
+			} else if f.Stream != "" {
+				t.Errorf("A landed in stream %q before its ancestry, want main", f.Stream)
+			}
+		}
+		if inMain == 0 {
+			t.Fatal("A's completion landed in no stream")
+		}
+		// Now the ancestry, A's own inputs, and B inside the same tool.
+		post(`{"post":[{"id":"` + tr + `","trace_id":"` + tr + `","dotted_order":"` + root + `","run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z","end_time":"2026-09-20T10:00:09Z",` + owner + `,"inputs":{"messages":[{"role":"user","content":"go"}]}},` +
+			`{"id":"` + tool + `","trace_id":"` + tr + `","parent_run_id":"` + tr + `","dotted_order":"` + toolDotted + `","run_type":"tool","name":"delegate","start_time":"2026-09-20T10:00:01Z","end_time":"2026-09-20T10:00:08Z",` + owner + `,"outputs":{"output":{"type":"tool","tool_call_id":"call_d","content":"done"}}}]}`)
+		if _, err := collector.Collect(); err != nil {
+			t.Fatal(err)
+		}
+		post(`{"post":[` + call(tr, a, tool, toolDotted+".20260920T100002000000Z"+a, "2", in("a"), "") + `,` +
+			call(tr, b, tool, toolDotted+".20260920T100003000000Z"+b, "3", in("b"), out("B")) + `]}`)
+		if _, err := collector.Collect(); err != nil {
+			t.Fatal(err)
+		}
+		bodiesAreOwn(t, zone, session, 2)
+	})
+
+	t.Run("a request replayed after a call that arrived while it waited", func(t *testing.T) {
+		zone, post, collector := receiveIntoCollector(t)
+		tr := trace("3")
+		root := "20260920T100000000000Z" + tr
+		a, b := tr[:len(tr)-1]+"1", tr[:len(tr)-1]+"2"
+		// A waits for the root. The root arrives with B's completion; A
+		// then lands after B, which is the order the assembler sees.
+		post(`{"post":[` + call(tr, a, tr, root+".20260920T100001000000Z"+a, "1", in("a"), out("A")) + `]}`)
+		if landed, err := collector.Collect(); err != nil || landed.Waiting != 1 {
+			t.Fatalf("A should be waiting for the root: %+v %v", landed, err)
+		}
+		post(`{"post":[{"id":"` + tr + `","trace_id":"` + tr + `","dotted_order":"` + root + `","run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,"inputs":{"messages":[{"role":"user","content":"go"}]}}],` +
+			`"patch":[` + call(tr, b, tr, root+".20260920T100002000000Z"+b, "2", "", out("B")) + `]}`)
+		landed, err := collector.Collect()
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := landed.Sessions[0]
+		post(`{"post":[` + call(tr, b, tr, root+".20260920T100002000000Z"+b, "2", in("b"), "") + `]}`)
+		if _, err := collector.Collect(); err != nil {
+			t.Fatal(err)
+		}
+		m := manifestsOf(t, zone, session)
+		for _, id := range []string{a, b} {
+			if got := m[id+":request"].Call; got != id {
+				t.Errorf("%s's request names %q as its call", id, got)
+			}
+		}
+		bodiesAreOwn(t, zone, session, 2)
+	})
+
+	t.Run("a call delivered again after another has followed it", func(t *testing.T) {
+		zone, post, collect := receiveInto(t)
+		tr := trace("4")
+		root := "20260920T100000000000Z" + tr
+		a, b, c := tr[:len(tr)-1]+"1", tr[:len(tr)-1]+"2", tr[:len(tr)-1]+"3"
+		one := func(id, at, text string) string {
+			return `{"post":[` + call(tr, id, tr, root+".20260920T10000"+at+"000000Z"+id, at, in(text), out(strings.ToUpper(text))) + `]}`
+		}
+		post(`{"post":[{"id":"` + tr + `","trace_id":"` + tr + `","dotted_order":"` + root + `","run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` + owner + `,"inputs":{"messages":[{"role":"user","content":"go"}]}}]}`)
+		post(one(a, "1", "a"))
+		session := collect().Sessions[0]
+		post(one(b, "2", "b"))
+		collect()
+		post(one(a, "1", "a")) // A again, as a client retries
+		collect()
+		post(one(c, "3", "c"))
+		collect()
+		m := manifestsOf(t, zone, session)
+		if got := m[c+":request"].Call; got != c {
+			t.Errorf("C's request names %q as its call", got)
+		}
+		if len(m) != 6 {
+			t.Errorf("%d bodies landed for three calls, want 6", len(m))
+		}
+		if got := bodyRecordsLanded(t, zone, session); got != 6 {
+			t.Errorf("%d body records landed for three calls, want 6: a redelivery lands no second record", got)
+		}
+		bodiesAreOwn(t, zone, session, 3)
+	})
+}
+
+// bodiesAreOwn parses the session and checks that every call in the fold
+// carries its own request and its own response, and no other call's.
+func bodiesAreOwn(t *testing.T, zone *storage.Zone, session string, calls int) {
+	t.Helper()
+	if _, err := parse.Session(zone, parse.Options{Conversation: session, Session: session}); err != nil {
+		t.Fatal(err)
+	}
+	view := fold(t, zone, session)
+	if got := countKind(view, model.KindLLMCall); got != calls {
+		t.Errorf("%d calls in the fold, want %d", got, calls)
+	}
+	for _, n := range view.Nodes {
+		if n.Kind != model.KindLLMCall {
+			continue
+		}
+		bodies, _ := sessionflow.ProviderBodiesOf(n.Attrs)
+		// One of each role, and each the call's own record: two references
+		// to its own response would otherwise pass as a request and a
+		// response.
+		byRole := map[string]int{}
+		for _, y := range bodies {
+			byRole[y.Role]++
+			want := strings.TrimPrefix(n.ID, "call/") + ":" + y.Role
+			if id := recordIDAt(t, zone, session, y.Ref); id != want {
+				t.Errorf("%s carries %q, which is another call's", n.ID, id)
+			}
+		}
+		if len(bodies) != 2 || byRole[sessionflow.RoleRequest] != 1 || byRole[sessionflow.RoleResponse] != 1 {
+			t.Errorf("%s carries %v, want its request and its response, one each", n.ID, bodies)
+		}
+	}
+}
+
+// bodyRecordsLanded counts the provider body records a session holds, as
+// landed: a record landed twice counts twice here and once in manifestsOf,
+// which keys by id.
+func bodyRecordsLanded(t *testing.T, zone *storage.Zone, session string) int {
+	t.Helper()
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, f := range files {
+		if f.Stream != "" || f.RunID != "" {
+			continue
+		}
+		fh, err := os.Open(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reader, err := sessiondata.NewReader(fh); err == nil {
+			for {
+				if _, err := reader.Next(); err != nil {
+					break
+				}
+				n++
+			}
+		}
+		fh.Close()
+	}
+	return n
 }

@@ -183,6 +183,15 @@ type Adapter struct {
 	// project that shares a thread key, which is a choice to make rather
 	// than one to discover.
 	Scope []string `yaml:"scope"`
+	// ProviderBodies lands what each model call was sent and what came
+	// back, beside the conversation, for the langsmith-ingest receiver. It
+	// is what the continuity check between calls runs on, and what shows a
+	// nested agent's own prompt. Cut against what the session already
+	// holds; measured, a long conversation lands under half of what it was
+	// on the wire, and a conversation of a few short calls lands more than
+	// it was. The Claude Code provider adapter is its own adapter and does
+	// not take this.
+	ProviderBodies bool `yaml:"provider_bodies"`
 	// MetricsLookback bounds the first derivation over a root that has
 	// history: a minute older than this is not derived. A duration such as
 	// 24h or 7d; empty means 24h; 0 or none means everything.
@@ -297,11 +306,12 @@ func Default() *Config {
 			// The LangSmith tracing client, received. Off until pointed
 			// at: the file names the address an application would be
 			// given, and the defaults are what that client documents.
-			Name:       AdapterLangSmithIngest,
-			Enabled:    false,
-			Listen:     "127.0.0.1:1985",
-			ThreadKeys: []string{"thread_id", "session_id", "conversation_id"},
-			Scope:      []string{"project", "thread"},
+			Name:           AdapterLangSmithIngest,
+			Enabled:        false,
+			Listen:         "127.0.0.1:1985",
+			ThreadKeys:     []string{"thread_id", "session_id", "conversation_id"},
+			Scope:          []string{"project", "thread"},
+			ProviderBodies: true,
 			Collector: Collector{Mode: ModeWatch, Interval: DefaultInterval,
 				MaxDeltaBytes: 2 << 20},
 		}, {
@@ -469,13 +479,16 @@ func (c *Config) Validate() error {
 		if a.Name == AdapterClaudeCodeLocal && a.Enabled && a.Metrics {
 			localMetrics = true
 		}
+		if a.Name != AdapterLangSmithIngest && a.ProviderBodies {
+			return fmt.Errorf("config: adapter %q does not take provider_bodies; only %q does, and %q lands Claude Code's bodies on its own", a.Name, AdapterLangSmithIngest, AdapterClaudeCodeProvider)
+		}
 		if a.Name == AdapterLangSmithIngest {
 			if a.Enabled && a.Listen == "" {
 				return fmt.Errorf("config: adapter %q needs listen, the address LANGSMITH_ENDPOINT is pointed at, such as 127.0.0.1:1985", a.Name)
 			}
 			if a.Metrics || a.MetricsLookback != "" || a.SourceRoot != "" ||
 				len(a.Include) > 0 || len(a.Exclude) > 0 {
-				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, token, thread_keys, scope and collector, not source_root, include, exclude, metrics or metrics_lookback", a.Name)
+				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, token, thread_keys, scope, provider_bodies and collector, not source_root, include, exclude, metrics or metrics_lookback", a.Name)
 			}
 			// It takes a period and a byte budget, unlike the metrics
 			// receiver: what it accepts waits in an inbox until a pass

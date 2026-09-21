@@ -194,14 +194,15 @@ shows the same bodies on the same calls without opening one. See
 before that carries no bodies on its calls; parsing its chain again from the landed files brings
 them in.
 
-A response joins to the call whose message id it carries. A request names no call, only its prompt
-and the request id of the call before it in its chain, so it joins to the call of a stream whose
-previous call's response carries that request id and whose prompt is the one the request names. The
-first call of a stream matches a request that names no previous request. A request joins only when
-exactly one request and exactly one call carry those two ids. A synthetic call, which the runtime wrote
-without calling the provider, takes part in no join. No request joins in a stream whose landed
-transcript lines have a gap, since a call may be missing between two that look consecutive; its
-responses still join. A body that joins to no call, such as
+A response joins to the call whose message id it carries, and so does a request that names its
+call, when exactly one request names it. A request that names no call, only its prompt and the
+request id of the call before it in its chain, joins to the call of a stream whose previous call's
+response carries that request id and whose prompt is the one the request names. The first call of
+a stream matches a request that names no previous request. Such a request joins only when exactly
+one request and exactly one call carry those two ids. A synthetic call, which the runtime wrote
+without calling the provider, takes part in no join. No request of that kind joins in a stream
+whose landed transcript lines have a gap, since a call may be missing between two that look
+consecutive; responses, and requests that name their call, still join. A body that joins to no call, such as
 the request that names the session, a compaction request, or a retried request, is listed on no
 step; its file is still under `files`. Nothing is joined by position or by time.
 
