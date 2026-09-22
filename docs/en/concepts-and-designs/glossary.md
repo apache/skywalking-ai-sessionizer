@@ -94,7 +94,7 @@ typed relation carrying its own correlation quality. Cross-stream flow is never 
 | `starts` | an agent call → the child stream it created |
 | `reports` | a notification → the child that finished |
 | `ends_with` | a child stream → the step carrying its final output |
-| `result_of` | a record → the tool use whose result it carried |
+| `result_of` | a record → the tool use whose result it carried; and a stream's final step → the call that started it, when that call received it as its result |
 | `follows` | an epoch → the epoch it continues after a reset |
 | `summarizes` | a summary → the reset that produced it |
 | `in_segment` | a Talk → the window that will commit it |

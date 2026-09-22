@@ -168,6 +168,10 @@ type builder struct {
 	container map[[2]uint32]string
 
 	toolByID map[uint32]*toolUse
+	// reported holds the child streams a runtime notification reports. Such a
+	// child was started in the background, so the result its call received is
+	// the acknowledgement of the launch and not what the child returned.
+	reported map[uint32]bool
 	epochAt  map[[2]uint32]string
 	talkByID map[string]*talk
 
