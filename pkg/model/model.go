@@ -110,6 +110,14 @@ const (
 	// one the parent was waiting for.
 	RelEndsWith = "ends_with"
 	// RelResultOf: a record -> the tool use whose result it carried.
+	//
+	// A stream a call started ends in one too: a child's output step, or an
+	// auxiliary stream's last model call, -> the call it went back to as that
+	// call's result. It is the way back that starts is the way in to, so a
+	// sub-agent that did its task and returned is not drawn as a dead end. It
+	// is written only when the call's result was received and is its own, not
+	// the acknowledgement of a background launch; a child that never came back
+	// has none.
 	RelResultOf = "result_of"
 	// RelFollows: an epoch -> the epoch it continues after a context reset.
 	RelFollows = "follows"

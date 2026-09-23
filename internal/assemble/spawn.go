@@ -280,8 +280,15 @@ func (b *builder) emitDelegationSteps() {
 		if last != nil && result != nil {
 			refs = append(refs, ref(result))
 		}
+		// What the call that started the child received is what the child
+		// returned to it. Where no journal records the returned value, that
+		// result is the record of it; where one does, it is a second one.
+		back, ed, returns := b.returnedTo(s)
+		if returns {
+			refs = append(refs, blockRef(back.Result, back.ResOrd))
+		}
 		a := map[string]any{}
-		if result != nil {
+		if result != nil || returns {
 			a["returned_value"] = model.ObservedReplayable
 		} else {
 			a["returned_value"] = model.Unavailable
@@ -295,6 +302,35 @@ func (b *builder) emitDelegationSteps() {
 		b.stats.Steps++
 		b.relate(model.RelEndsWith, s.NodeID, id, model.ExactUnique,
 			"the last response in the child stream, and what it returned", refs...)
+		if returns {
+			b.relate(model.RelResultOf, id, back.NodeID, ed.Quality,
+				"the result the call that started this stream received",
+				blockRef(back.Result, back.ResOrd))
+		}
+	}
+
+	// An auxiliary stream is a tool's own plain model call, not an agent, so it
+	// has no output step. Its last call's reply is still what went back to the
+	// tool that made it, and the stream would otherwise be the same dead end.
+	for _, s := range b.streams {
+		if s.Role != model.StreamAuxiliary {
+			continue
+		}
+		last := b.lastAssistant(s)
+		if last == nil || last.Call == 0 {
+			continue
+		}
+		callID := sessionflow.NodeID("call", b.str(last.Call))
+		if _, exists := b.nodes[callID]; !exists {
+			continue
+		}
+		back, ed, returns := b.returnedTo(s)
+		if !returns {
+			continue
+		}
+		b.relate(model.RelResultOf, callID, back.NodeID, ed.Quality,
+			"the result the tool that started this stream received",
+			ref(last), blockRef(back.Result, back.ResOrd))
 	}
 }
 
@@ -313,6 +349,7 @@ func (b *builder) reportOn(e *index.Entry, notifyID string) {
 		if child, ok := b.byStream[e.Child]; ok {
 			b.relate(model.RelReports, notifyID, child.NodeID, model.ExactUnique,
 				"task id on the notification", ref(e))
+			b.markReported(child)
 			return
 		}
 		b.stats.NotifyUnmatched++
@@ -330,8 +367,52 @@ func (b *builder) reportOn(e *index.Entry, notifyID string) {
 		if child, ok := b.byStream[ed.Stream]; ok {
 			b.relate(model.RelReports, notifyID, child.NodeID, model.StrongInference,
 				"the call the notification completes", ref(e))
+			b.markReported(child)
 		}
 	}
+}
+
+func (b *builder) markReported(s *streamInfo) {
+	if b.reported == nil {
+		b.reported = map[uint32]bool{}
+	}
+	b.reported[s.ID] = true
+}
+
+// returnedTo is the call a stream's work went back to, as that call's result.
+//
+// A sub-agent does a task for its caller and hands the result back; a stream
+// with a way in and no way out reads as a dead end. The way back is exact only
+// in one shape: one call started the stream directly, that call's result was
+// joined and is its own, and the result is not the acknowledgement of a launch.
+// A child started in the background reports through a runtime notification
+// instead, and a batch of children is launched by a result that names the batch,
+// not answered by one - neither is taken for a return.
+func (b *builder) returnedTo(s *streamInfo) (*toolUse, spawnEdge, bool) {
+	var found *spawnEdge
+	for i := range b.spawnEdges {
+		ed := &b.spawnEdges[i]
+		if ed.Stream != s.ID {
+			continue
+		}
+		if found != nil {
+			// Two calls claim one stream: which one received its result is
+			// not something to choose.
+			return nil, spawnEdge{}, false
+		}
+		found = ed
+	}
+	if found == nil || found.Batch != 0 || b.reported[s.ID] {
+		return nil, spawnEdge{}, false
+	}
+	t, ok := b.toolByID[found.Tool]
+	if !ok || t.Result == nil || t.Ambiguous || t.Result.Flags.Has(index.FlagLaunchAck) {
+		return nil, spawnEdge{}, false
+	}
+	if _, exists := b.nodes[t.NodeID]; !exists {
+		return nil, spawnEdge{}, false
+	}
+	return t, *found, true
 }
 
 // lastAssistant returns a stream's final model response.

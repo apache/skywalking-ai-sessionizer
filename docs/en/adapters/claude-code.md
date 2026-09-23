@@ -487,7 +487,9 @@ child's last non-synthetic response, and at the run journal's result record when
 the child returned, and it is not in the child's transcript: 2,353 of 2,436 journal results appear
 nowhere else, on a snapshot of the development corpus whose size was not recorded. asz does not drop
 the parent's copy. A synchronous return, `status:"completed"`, still appears as the result of the
-parent's `agent.call`.
+parent's `agent.call`, and the child's `agent.output` has a `result_of` relation to that call: it is
+the way back, with the parent's result as its evidence. A background launch, `async_launched`, has
+none, because its result is only the acknowledgement; its way back is the notification, `reports`.
 
 Completion arrives as a `<task-notification>`, and its two ids are not equally good. asz reads
 them only from a record whose message content is a plain string. The notification step comes from

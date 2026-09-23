@@ -334,6 +334,95 @@ func TestANestedAgentGetsItsOwnStream(t *testing.T) {
 	}
 }
 
+// TestAStreamReturnsToTheCallThatStartedIt.
+//
+// A sub-agent does a task for its caller and hands the result back. The model
+// recorded the way in - a call starts a stream - and nothing for the way back,
+// so every sub-agent read as a dead end. On this wire the way back is exact:
+// the child stream is the work under one tool run, and that run's result is
+// what the caller received. So the stream's final step is the result of the
+// call that started it: a child's output step, and the auxiliary stream's one
+// model call, whose reply the tool returned.
+//
+// The capture has both: a second graph run inside a tool, and a tool that
+// makes one model call. Each has to lead back to its own call, with the
+// result the call received as the evidence, and the child's output has to
+// say its returned value is observed rather than unavailable.
+func TestAStreamReturnsToTheCallThatStartedIt(t *testing.T) {
+	zone, sessions := land(t, "subagent")
+	session := sessions[0]
+	if _, err := parse.Session(zone, parse.Options{
+		Conversation: session, Session: session, Reindex: index.Rebuild}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	view := fold(t, zone, session)
+	nodes := view.Nodes
+	startedBy := map[string]string{} // stream node id -> the call that started it
+	for _, r := range view.Relations {
+		if r.Type == model.RelStarts {
+			startedBy[r.To] = r.From
+		}
+	}
+	returns := map[string]*sessionflow.Relation{} // the call -> the step that came back to it
+	for _, r := range view.Relations {
+		if r.Type == model.RelResultOf {
+			returns[r.To] = r
+		}
+	}
+	if len(startedBy) != 2 {
+		t.Fatalf("%d streams started by a call, want the child and the auxiliary: %v", len(startedBy), startedBy)
+	}
+	for stream, call := range startedBy {
+		r, ok := returns[call]
+		if !ok {
+			t.Errorf("%s was started by %s and nothing came back to it: a dead end", stream, call)
+			continue
+		}
+		from := nodes[r.From]
+		if from == nil {
+			t.Errorf("the way back from %s names %s, which is no node", stream, r.From)
+			continue
+		}
+		if "stream/"+from.Stream != stream {
+			t.Errorf("%s came back from %s, a step of stream %q, not of the stream it started", call, r.From, from.Stream)
+		}
+		if r.Quality != model.ExactUnique {
+			t.Errorf("the way back to %s is %s, want exact_unique", call, r.Quality)
+		}
+		// The evidence is the result the call received: the call's own
+		// second reference, which is how a tool step records its result.
+		callNode := nodes[call]
+		if callNode == nil || len(callNode.Refs) < 2 {
+			t.Errorf("%s has no joined result", call)
+			continue
+		}
+		received := callNode.Refs[1]
+		found := false
+		for _, e := range r.Evidence {
+			found = found || (e.Seq == received.Seq && e.Row == received.Row)
+		}
+		if !found {
+			t.Errorf("the way back to %s does not rest on the result %s received (%+v): %+v", call, call, received, r.Evidence)
+		}
+		switch from.Kind {
+		case model.KindAgentOutput:
+			var a struct {
+				Returned string `json:"returned_value"`
+			}
+			if err := json.Unmarshal(from.Attrs, &a); err != nil {
+				t.Fatal(err)
+			}
+			if a.Returned != model.ObservedReplayable {
+				t.Errorf("%s says its returned value is %q, want observed: the call received it", r.From, a.Returned)
+			}
+		case model.KindLLMCall:
+			// The auxiliary stream: its one model call is what went back.
+		default:
+			t.Errorf("%s came back from a %s, want the child's output or the auxiliary call", call, from.Kind)
+		}
+	}
+}
+
 // TestAConversationHasAName.
 //
 // A list of conversations with no names in it is a list of identifiers.

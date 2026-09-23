@@ -80,6 +80,14 @@ any kind directly under it ran a program, and the stream is a `child` started by
 Measured on the subagent capture, whose three tools are one nested graph, one single model call and
 one leaf: one main stream, one child stream, one auxiliary stream, one agent call, and two tool steps.
 
+A nested agent does a task for its caller and hands the result back, and the conversation records
+that too. The tool run's result is what the caller received, and it is exact: the child stream is
+the work under that one tool run. So the child's `agent.output` has a `result_of` relation to the
+`agent.call` that started it, with the call's result as its evidence, and its `returned_value` is
+observed. An auxiliary stream's model call leads back to its tool step the same way. Nothing here
+arrives as a notification, as it does when Claude Code runs a child in the background, because a
+LangChain tool returns only when the work under it has finished.
+
 The session remembers which of its runs were tools, so a run arriving in a later request still
 finds the tool it ran inside. That memory is derived and disposable — deleting it changes nothing
 already landed, because a record's stream is the directory it is in.

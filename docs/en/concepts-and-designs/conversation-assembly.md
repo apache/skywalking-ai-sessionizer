@@ -193,14 +193,25 @@ stays under the provider call whose response asked for it. The `agent.launch_ack
 record, and it sits in the run.
 
 Everything else is a **typed relation** carrying its own correlation quality: `starts`, `reports`,
-`ends_with`, `follows`, `summarizes`, `in_segment`. Cross-stream flow is never containment, which is
-what stops a rendered conversation repeating every subagent's work inside its parent.
+`ends_with`, `result_of`, `follows`, `summarizes`, `in_segment`. Cross-stream flow is never
+containment, which is what stops a rendered conversation repeating every subagent's work inside its
+parent.
 
-A tool's request and result are not joined by a relation. The tool node references the request
-record and, once the join finds it, the result record. Those references are the join. Its quality
-is the node's `result_join` attribute. An edge would say the same thing again, and its far end would
-be a record with no node of its own. So assembly never writes the `result_of` relation that the
-[Glossary](glossary.md#relations) lists.
+A tool's request and its own result are not joined by a relation. The tool node references the
+request record and, once the join finds it, the result record. Those references are the join. Its
+quality is the node's `result_join` attribute. An edge would say the same thing again, and its far
+end would be a record with no node of its own.
+
+The way back from a stream a call started is a relation, because it crosses streams and both of its
+ends are nodes. A sub-agent does a task and hands its result back; with a way in and no way out,
+every child reads as a dead end. So a stream's final step - a child's `agent.output`, or an
+auxiliary stream's last `llm.call` - has a `result_of` relation to the call that started it. It is
+written only when the shape makes it exact: one call started the stream directly, that call's
+result was joined and is its own, and the result is not the acknowledgement of a background launch.
+A child launched in the background comes back through a runtime notification instead, which is
+`reports`, and a batch of children is launched by a result that names the batch rather than answered
+by one. A child that never came back has no `result_of`. The relation's evidence is the result the
+call received, and the child's `agent.output` then says its `returned_value` is observed.
 
 A Segment is a relation rather than a parent. It is a time window and a session outlives many of
 them, so a session cannot sit under a segment in a tree where every node has one parent.
