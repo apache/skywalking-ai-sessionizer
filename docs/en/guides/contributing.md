@@ -27,6 +27,10 @@ command, by `make scenarios`. See [Scenarios](scenario.md). `tests/chain/` holds
 cannot express, and `tests/boundary/` the import rules between the collector side and the server
 side.
 
+Benchmarks are `Benchmark` functions in `_test.go` files. `make test` and CI compile them but never
+run them. Each benchmark's comment gives the command that runs it, its reference numbers, and the
+machine they were measured on.
+
 ## Before opening a pull request
 
 - `make check` passes. CI runs the same targets and one required check fans them in.
