@@ -33,7 +33,16 @@ github:
     merge: false
     rebase: false
   dependabot_updates: true
-  # No branch protection and no required review. The project is new and has one
-  # committer, so there is nobody to review a pull request. Null is the form the
-  # ASF documentation gives for removing every protection rule.
-  protected_branches: ~
+  # A pull request merges only when the Required check passes on a branch that
+  # is up to date with main. Required is the one CI job that every other job
+  # fans in to. No review is required: the project has one committer, so there
+  # is nobody to review a pull request.
+  protected_branches:
+    main:
+      required_status_checks:
+        strict: true
+        contexts:
+          - Required
+  # Shows the Update branch button on a pull request that is behind main.
+  pull_requests:
+    allow_update_branch: true
