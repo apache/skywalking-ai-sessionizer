@@ -33,7 +33,9 @@ machine they were measured on.
 
 ## Before opening a pull request
 
-- `make check` passes. CI runs the same targets and one required check fans them in.
+- `make check` passes. CI runs the same targets and one required check, `Required`, fans them in.
+  A pull request merges only when that check passes on a branch that is up to date with `main`.
+  Use the Update branch button when it is behind. No review is required.
 - Record each change users can see in `docs/en/changes/changes.md`, the changelog of the version
   in development, under the heading of its area.
 - Every source file carries the Apache license header. `make license-fix` inserts missing ones.
