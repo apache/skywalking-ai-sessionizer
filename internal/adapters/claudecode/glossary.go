@@ -73,7 +73,7 @@ var glossary = model.NewGlossary(Dialect,
 
 	// ---- steps ----
 	model.Term{Unified: model.KindMessageExternal, Native: "origin.kind == \"human\"", Where: "a user record",
-		Note: "also a queued_command attachment whose commandMode is \"prompt\""},
+		Note: "also a user record with promptSource \"sdk\", no origin and no isMeta - a headless run's prompt - and a queued_command attachment whose commandMode is \"prompt\""},
 	model.Term{Unified: model.KindMessageAssistant, Native: "text block", Where: "an assistant record"},
 	model.Term{Unified: model.KindMessageSynthetic, Native: "message.model == \"<synthetic>\"", Where: "an assistant record",
 		Note: "the client wrote it; no model produced it"},
@@ -134,7 +134,7 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.ContentUnavailable, Note: "the runtime never wrote it, or the source was pruned"},
 
 	model.Term{Unified: model.TriggerExternal, Native: "origin.kind == \"human\"", Where: "record",
-		Note: "also a run whose records state no origin at all - a locally typed command"},
+		Note: "also a user record with promptSource \"sdk\", no origin and no isMeta - a headless run's prompt - and a run whose records state no origin at all - a locally typed command"},
 	model.Term{Unified: model.TriggerNotification, Native: "origin.kind == \"task-notification\"", Where: "record"},
 	model.Term{Unified: model.TriggerUnknown, Note: "no record of the run states a trigger"},
 )

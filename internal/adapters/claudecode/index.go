@@ -66,6 +66,9 @@ type indexRecord struct {
 	ParentAgentID string `json:"parentAgentId"`
 
 	Origin origin `json:"origin"`
+	// PromptSource says how a prompt reached the runtime. A headless run's
+	// prompt has no origin, and this is what says a caller sent it.
+	PromptSource string `json:"promptSource"`
 
 	Message struct {
 		ID         string          `json:"id"`
@@ -172,6 +175,9 @@ func triggerOf(d *indexRecord) index.Trigger {
 	if kind == "" {
 		kind = d.Attachment.Origin.Kind
 	}
+	if kind == "" && sdkPrompt(d) {
+		return index.TriggerExternal
+	}
 	switch kind {
 	case "":
 		return index.TriggerNone
@@ -181,6 +187,20 @@ func triggerOf(d *indexRecord) index.Trigger {
 		return index.TriggerNotification
 	}
 	return index.TriggerOther
+}
+
+// sdkPrompt reports the prompt a caller sent a headless run: claude -p, or an
+// Agent SDK application.
+//
+// Such a prompt has no origin. The runtime writes promptSource "sdk" on it
+// instead. Measured on the local corpus, 36 non-meta user records carry it
+// with no origin, 35 of them a caller's prompt and one a person's message on
+// a resumed session, and no tool result carries it. One more carries it and
+// is meta, a notice the harness wrote, which is why meta is excluded. A
+// prompt that does say where it came from is read by its origin, so a
+// notification sent through the SDK stays a notification.
+func sdkPrompt(d *indexRecord) bool {
+	return d.Type == "user" && d.Origin.Kind == "" && d.PromptSource == "sdk" && !d.IsMeta
 }
 
 // flagsOf reduces the record's shape to the bits a lookup needs.
@@ -262,7 +282,7 @@ func flagsOf(d *indexRecord, tur *toolResult, hasTUR bool, src Source) index.Fla
 			f |= index.FlagInjection
 		}
 	}
-	if d.Type == "user" && d.Origin.Kind == "human" && !d.IsMeta {
+	if d.Type == "user" && (d.Origin.Kind == "human" || sdkPrompt(d)) && !d.IsMeta {
 		f |= index.FlagExternalInput
 	}
 	if d.IsMeta {
