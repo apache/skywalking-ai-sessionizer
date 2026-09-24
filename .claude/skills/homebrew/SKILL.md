@@ -11,8 +11,7 @@ user-invocable: true
 From 0.5.0 one formula installs both binaries. Before it there were two, fetching the identical
 archive and the identical checksum and installing one binary each, which only invited a machine to
 end up with `asz` of one version and the recorder of another. A version before 0.5.0 keeps the
-two-formula shape it was released with, and its formulae stay as they are; `asz-claude-code.rb`,
-the pointer to the newest, is deleted when 0.5.0 is added.
+two-formula shape it was released with, and its formulae stay as they are.
 
 - `asz@VERSION.rb` for every released version from 0.5.0, and `asz@VERSION.rb` with
   `asz-claude-code@VERSION.rb` for the versions before it, which stay as they were released,
@@ -37,9 +36,10 @@ its URL, because the repository is not named `homebrew-skywalking-ai-sessionizer
 needs no trust: it names each formula in full, which Homebrew takes as trusting that one.
 
 The user names one version or several. Each must be released: voted, on the download site or the
-archive, and its GitHub release promoted. 0.4.0 is the first version these templates fit; before
-it, the plugin's binary was not beside `asz` in the package. This runs on macOS with Homebrew. It
-changes nothing but a pull request to main in this repository.
+archive, and its GitHub release promoted. 0.5.0 is the first version the template fits, because
+it installs `asz-changes`, which a package before 0.5.0 does not hold. A version before 0.5.0 is in
+`Formula/` already, with the formulae it was released with; never write it again. This runs on
+macOS with Homebrew. It changes nothing but a pull request to main in this repository.
 
 A local proxy can break HTTPS to Apache hosts, so the commands below go around it.
 
@@ -83,9 +83,7 @@ for v in <versions>; do
         curl --noproxy '*' -fsSL -o "$W/$v/$g" "https://archive.apache.org/dist/skywalking/ai-sessionizer/$v/$g"
     done
     (cd "$W/$v" && shasum -a 512 -c "$f.sha512")
-    # 0.5.0 renamed the recorder: asz-claude-plugin up to 0.4.x, asz-changes
-    # from 0.5.0. An archive holds one of them beside asz, never both.
-    tar -tvzf "$W/$v/$f" | awk '($NF == "asz" || $NF == "asz-changes" || $NF == "asz-claude-plugin") && $1 ~ /^-rwx/ {n++}
+    tar -tvzf "$W/$v/$f" | awk '($NF == "asz" || $NF == "asz-changes") && $1 ~ /^-rwx/ {n++}
       $NF == "LICENSE" || $NF == "NOTICE" {m++} $NF ~ /^licenses\/./ {l = 1}
       END {if (n != 2 || m != 2 || !l) {print "missing a file the formula installs"; exit 1}}'
   done
@@ -145,7 +143,7 @@ tap=aszcheck/formulae
 brew tap-new --no-git "$tap"
 dir=$(brew --repository "$tap")/Formula
 for v in <versions>; do cp "$W/formula-$v/asz@$v.rb" "$dir/"; done
-if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" "$dir/"; git rm -q --ignore-unmatch "$dir/asz-claude-code.rb"; fi
+if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" "$dir/"; fi
 env -u http_proxy -u https_proxy -u all_proxy brew style "$tap"
 for f in "$dir"/*.rb; do
   n=$tap/$(basename "$f" .rb)
@@ -155,9 +153,7 @@ for f in "$dir"/*.rb; do
 done
 for v in <versions>; do
   "$(brew --prefix "asz@$v")/bin/asz" version
-  # The recorder is asz-changes from 0.5.0 and asz-claude-plugin before it.
-  "$(brew --prefix "asz@$v")/bin/asz-changes" version ||
-    "$(brew --prefix "asz@$v")/bin/asz-claude-plugin" version
+  "$(brew --prefix "asz@$v")/bin/asz-changes" version
 done
 ```
 
@@ -175,7 +171,7 @@ brew untap "$tap"
 ```sh
 mkdir -p Formula
 for v in <versions>; do cp "$W/formula-$v/asz@$v.rb" Formula/; done
-if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" Formula/; git rm -q --ignore-unmatch Formula/asz-claude-code.rb; fi
+if [ "$newest" != "$current" ]; then cp "$W/formula-$newest/asz.rb" Formula/; fi
 git status --short
 ```
 
@@ -191,8 +187,8 @@ gh pr create --repo apache/skywalking-ai-sessionizer --base main --title "Homebr
 ```
 
 The commit message and the pull request carry no AI attribution: no Co-Authored-By line and no
-"Generated with" line. Say in the pull request which versions were added, which version `asz` and
-`asz` install now, and that the check passed.
+"Generated with" line. Say in the pull request which versions were added, which version the `asz`
+formula installs now, and that the check passed.
 
 ## 8. After the merge
 
