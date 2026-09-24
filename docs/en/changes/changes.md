@@ -2,6 +2,13 @@
 
 > In development, not yet released. `tools/release/release.sh prepare 0.6.0` removes this note.
 
+## Development
+
+- The first benchmark: `BenchmarkLangChainRequests` measures cutting every request body of one
+  LangChain conversation, for context windows from 8K to 1M tokens, trimmed, summarised or neither.
+  `make test` and CI only compile it. Its comment gives the command that runs it, the reference
+  numbers, and the machine they come from.
+
 ## Conversation model
 
 - A stream a call started now leads back to it. A sub-agent does a task and hands the result back,
