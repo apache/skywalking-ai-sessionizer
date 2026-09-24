@@ -23,6 +23,14 @@
   before it. The renderer is Horizon's, now pinned at `297f020`, which also draws a light theme's
   scrollbars and other native controls light.
 
+## Claude Code
+
+- A headless run's question is on the page. `claude -p` and an Agent SDK application write their
+  prompt with `promptSource: "sdk"` and no `origin`, and only `origin.kind: "human"` was read as a
+  person's input, so the page showed each answer without the question it answered. Such a prompt
+  is now external input that opens its talk. A session collected before this keeps the gap, because
+  landed records are never rewritten.
+
 ## Development
 
 - The first benchmark: `BenchmarkLangChainRequests` measures cutting every request body of one

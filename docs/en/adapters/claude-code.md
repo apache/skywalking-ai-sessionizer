@@ -249,8 +249,8 @@ so `logicalParentUuid` is the only link back, and a parent walk across a reset s
 
 ### Talks and runs
 
-Claude Code records neither a Talk nor a Run. Both are built from two of its fields, `promptId` and
-`origin`, by an exact rule.
+Claude Code records neither a Talk nor a Run. Both are built from its fields `promptId` and
+`origin`, and `promptSource` for a headless run's prompt, by an exact rule.
 
 - **A run is one prompt cycle**: one per distinct `promptId` within a stream. A `promptId` is not
   unique across streams, because a child stream is written under a cycle id that also appears in its
@@ -265,6 +265,13 @@ Claude Code records neither a Talk nor a Run. Both are built from two of its fie
   `task-notification` is a notification. The value is an open set: a third kind exists, so any
   other value maps to `unknown`, and a switch on exactly two values would meet something it does
   not expect.
+- **A headless run's prompt has no `origin`.** `claude -p` and an Agent SDK application write
+  `promptSource: "sdk"` on the prompt instead, and a `user` record with it, no `origin` and no
+  `isMeta` is external. On this machine on 2026-09-24, 36 non-meta `user` records carried
+  `promptSource: "sdk"` and no `origin`: 35 were a caller's prompt and one a person's message on a
+  resumed session. One more was meta, a notice the harness wrote. No tool result carried it. A
+  prompt that states an `origin` is read by it, so a notification sent through the SDK stays a
+  notification.
 - **On the main stream, a Talk starts when a cycle has an external trigger, or when no record of
   the cycle states any trigger.** A local slash command writes no `origin`, and it is a person
   acting, so a rule that required an explicit marker would attach it to whatever came before. A
@@ -285,7 +292,7 @@ pass.
 
 | Model kind | Claude Code source | Quality |
 | --- | --- | --- |
-| `message.external` | `user` record with `origin.kind:"human"` and without `isMeta`; a `queued_command` attachment with `commandMode:"prompt"` | `exact_unique` |
+| `message.external` | `user` record with `origin.kind:"human"` and without `isMeta`; a `user` record with `promptSource:"sdk"`, no `origin` and without `isMeta`; a `queued_command` attachment with `commandMode:"prompt"` | `exact_unique` |
 | `message.assistant` | assistant `text` block | `exact_unique` |
 | `message.synthetic` | `message.model == "<synthetic>"` | `exact_unique` |
 | `context.injection` | every other `attachment` record; a `user` record with `isMeta:true` | `exact_unique` |

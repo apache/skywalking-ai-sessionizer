@@ -207,10 +207,17 @@ func ccTime(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000
 const ccModel = "claude-opus-5"
 
 // rec adds the envelope every Claude Code record carries.
+func (w *ccWriter) entrypoint() string {
+	if w.p.Entrypoint != "" {
+		return w.p.Entrypoint
+	}
+	return "cli"
+}
+
 func (w *ccWriter) rec(m map[string]any, stream string) string {
 	for k, v := range map[string]any{
 		"sessionId": w.p.Session, "version": "2.1.245", "userType": "external",
-		"entrypoint": "cli", "cwd": "/Users/dev/" + strings.TrimPrefix(w.p.Project, "-Users-dev-"), "gitBranch": "main",
+		"entrypoint": w.entrypoint(), "cwd": "/Users/dev/" + strings.TrimPrefix(w.p.Project, "-Users-dev-"), "gitBranch": "main",
 	} {
 		if _, ok := m[k]; !ok {
 			m[k] = v
@@ -255,11 +262,18 @@ func (w *ccWriter) event(e *Event) error {
 			"type": "user", "uuid": e.ID, "parentUuid": parentOf(e.Parent), "promptId": e.Run,
 			"timestamp": ccTime(e.At),
 		}
-		if s == "main" {
+		switch {
+		case s == "main" && w.p.Entrypoint == "sdk-cli":
+			// The caller's prompt, as a headless run writes it: no origin,
+			// and promptSource says it came through the SDK.
+			m["promptSource"] = "sdk"
+			m["permissionMode"] = "bypassPermissions"
+			m["message"] = map[string]any{"role": "user", "content": e.Text}
+		case s == "main":
 			m["origin"] = map[string]any{"kind": "human"}
 			m["permissionMode"] = "auto"
 			m["message"] = map[string]any{"role": "user", "content": []map[string]any{{"type": "text", "text": e.Text}}}
-		} else {
+		default:
 			m["message"] = map[string]any{"role": "user", "content": e.Text}
 		}
 		w.add(s, w.rec(m, s))
@@ -333,11 +347,17 @@ func (w *ccWriter) event(e *Event) error {
 		}
 		w.add(s, w.rec(m, s))
 	case EvNotice:
-		w.add(s, w.rec(map[string]any{
+		m := map[string]any{
 			"type": "user", "uuid": e.ID, "parentUuid": parentOf(e.Parent), "promptId": e.Run,
 			"origin": map[string]any{"kind": "task-notification"}, "timestamp": ccTime(e.At),
 			"message": map[string]any{"role": "user", "content": e.Text},
-		}, s))
+		}
+		if w.p.Entrypoint == "sdk-cli" {
+			// A headless run marks its notifications as sent through the SDK
+			// too, and they keep their origin.
+			m["promptSource"] = "sdk"
+		}
+		w.add(s, w.rec(m, s))
 	case EvSynthetic:
 		w.add(s, w.rec(map[string]any{
 			"type": "assistant", "uuid": e.ID, "parentUuid": parentOf(e.Parent), "requestId": e.Req, "timestamp": ccTime(e.At),

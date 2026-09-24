@@ -1,0 +1,33 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# A headless run, claude -p or an Agent SDK application, over two prompts. Its
+# prompts carry no origin: the runtime writes promptSource "sdk" instead, on
+# every one measured. Each prompt is still the input that opens its talk, and
+# the question has to be on the page beside its answer. The run also marks a
+# background agent's notification as sent through the SDK, and that one keeps
+# its origin: it reports the agent, and is not a question.
+title: headless run
+entrypoint: sdk-cli
+steps:
+  - input: read the README and say what the project is
+  - call: {text: Reading it, tool: {name: Read, input: {file_path: README.md}, result: "# asz"}}
+  - call: {text: It is asz.}
+  - input: and what does it collect
+  - call:
+      agent: {name: scout, prompt: list what it collects, steps: [{call: {text: transcripts}}], notify: true}
+  - call: {text: Conversation logs.}

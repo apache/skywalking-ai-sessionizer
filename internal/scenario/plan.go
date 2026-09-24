@@ -215,12 +215,13 @@ type JournalLine struct {
 
 // Plan is a scenario resolved into timed records with stable ids.
 type Plan struct {
-	Session string
-	Project string
-	Title   string
-	Events  []Event
-	Streams []Stream
-	Runs    []Run
+	Session    string
+	Project    string
+	Title      string
+	Entrypoint string
+	Events     []Event
+	Streams    []Stream
+	Runs       []Run
 	// SystemPrompt and Tools are what the main stream's calls send, as the
 	// scenario wrote them. Empty leaves the stand-in. See ProviderBodies.
 	//
@@ -294,7 +295,7 @@ func (sc *Scenario) Plan(opts Options) (*Plan, error) {
 	if scale == 0 {
 		scale = 1
 	}
-	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, at: at, interval: interval, scale: scale,
+	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Entrypoint: sc.Entrypoint, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, at: at, interval: interval, scale: scale,
 		SystemPrompt: sc.SystemPrompt, Tools: sc.Tools}
 	if p.Project == "" {
 		p.Project = "-Users-dev-scenario"

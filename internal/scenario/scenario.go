@@ -51,6 +51,12 @@ type Scenario struct {
 	// Title is the name the runtime gave the session, written as the
 	// runtime writes it. Empty means the session has no title.
 	Title string `yaml:"title"`
+	// Entrypoint is how the runtime was started, as it records it. Empty is
+	// the interactive command line. "sdk-cli" is a headless run, claude -p or
+	// an Agent SDK application: every input of the main stream is then the
+	// caller's prompt, which carries promptSource "sdk" and no origin, and is
+	// sent as a plain string.
+	Entrypoint string `yaml:"entrypoint"`
 	// Interval is the session's clock: the gap between consecutive steps in
 	// every stream, unless a step says after. Zero means one second.
 	Interval time.Duration `yaml:"interval"`
