@@ -30,9 +30,6 @@ A list of the sources asz collects from.
 | `claude-code-otlp` | no | what Claude Code's own OpenTelemetry exporter sends; see [below](#the-receiver-adapter) |
 | `langsmith-ingest` | no | what the LangSmith tracing client sends, from a LangChain or LangGraph application; see [LangChain and LangGraph](langchain.md) |
 
-`changes` was called `claude-code-changes` until 0.5.0, because only Claude Code wrote those
-records. A configuration that still names it is read as the same adapter.
-
 ### More than one agent
 
 - **Several Claude Code instances of one user, on one machine.** Supported with nothing to
@@ -148,8 +145,7 @@ adapters:
     source_root: /var/lib/asz/changes
 ```
 
-Two entries that read one directory are refused, and `claude-code-changes`, the adapter's name
-until 0.5.0, counts as the same adapter.
+Two entries that read one directory are refused.
 
 ## The provider adapter
 

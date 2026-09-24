@@ -58,3 +58,15 @@
 - The `apt` skill installs every older version in the index through the redirects, not only the
   versions added. Adding a version moves the one that was newest to the archive, so its redirect
   changes too.
+
+## Documentation
+
+- The setup pages no longer carry upgrade guides from one version to another. The steps for
+  upgrading from 0.4.0, and the notes about the names 0.5.0 replaced, are gone. The changelog of
+  0.5.0 still lists every rename. Each way to install still says how to move to a newer version,
+  and the Claude Code plugin keeps its upgrade steps, whose order keeps the plugin's data.
+- [LangChain and LangGraph](../setup/langchain.md) said a LangChain conversation has no context
+  reset. A summary that `SummarizationMiddleware` marked now resets it.
+- The LangChain plugin's README, which is its page on PyPI, says the plugin needs `asz-changes` and
+  a `tools.scope` naming the application's tools. It links the documentation of the released
+  version.
