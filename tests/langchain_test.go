@@ -184,6 +184,19 @@ func TestUnfinishedWorkIsAConversationToo(t *testing.T) {
 func land(t *testing.T, kase string) (*storage.Zone, []string) {
 	t.Helper()
 	zone := storage.NewZone(t.TempDir())
+	return zone, landInto(t, zone, kase)
+}
+
+// landInto sends a capture into a zone that may already hold it.
+func landInto(t *testing.T, zone *storage.Zone, kase string) []string {
+	t.Helper()
+	return landIntoBudget(t, zone, kase, 0)
+}
+
+// landIntoBudget is landInto with the largest landed file set, zero for the
+// collector's own.
+func landIntoBudget(t *testing.T, zone *storage.Zone, kase string, budget int64) []string {
+	t.Helper()
 	at := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
 	receiver := &langsmith.Receiver{Zone: zone, Listen: "127.0.0.1:0",
 		Now: func() time.Time { at = at.Add(time.Millisecond); return at }}
@@ -225,13 +238,13 @@ func land(t *testing.T, kase string) (*storage.Zone, []string) {
 		}
 	}
 	collected := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
-	collector := &langsmith.Collector{Zone: zone, ProviderBodies: true,
+	collector := &langsmith.Collector{Zone: zone, ProviderBodies: true, MaxDeltaBytes: budget,
 		Now: func() time.Time { collected = collected.Add(time.Second); return collected }}
 	landed, err := collector.Collect()
 	if err != nil {
 		t.Fatalf("collect: %v", err)
 	}
-	return zone, landed.Sessions
+	return landed.Sessions
 }
 
 // fold reads the conversation back out of its rounds.

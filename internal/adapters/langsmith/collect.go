@@ -475,6 +475,9 @@ type placement struct {
 	shapePath string
 	streams   []string
 	byStream  map[string][]sessiondata.Record
+	// placed holds each item's records as placed, in item order, for what is
+	// read from them after placement, such as the prompt a body names.
+	placed [][]sessiondata.Record
 }
 
 // place decides where every record of one session goes: no directory, no
@@ -533,34 +536,56 @@ func (c *Collector) place(g *grouped, open *pending) *placement {
 			sh.NamedBy = "question"
 		}
 	}
-	// A nested stream's records carry its own prompt - the tool it ran
-	// inside - rather than the trace's, so every stream of one trace does
-	// not share one prompt.
-	for i := range g.items {
-		item := &g.items[i]
-		if sh.streamOf(item.run) != MainStream {
-			prompt := sh.promptOf(item.run)
-			for j := range item.records {
-				if item.records[j].Run != "" {
-					item.records[j].Run = prompt
-				}
+	// Placement works on copies and leaves the request's records as they
+	// arrived. It runs once to check that a request can land and again to
+	// land it, and changing the records made the second run build on the
+	// first: a link landed with its auxiliary flag twice.
+	placed := make([][]sessiondata.Record, len(g.items))
+	for i, item := range g.items {
+		stream := sh.streamOf(item.run)
+		prompt := ""
+		if stream != MainStream {
+			// A nested stream's records carry its own prompt - the tool it
+			// ran inside - rather than the trace's, so every stream of one
+			// trace does not share one prompt.
+			prompt = sh.promptOf(item.run)
+		}
+		for _, r := range item.records {
+			r.Flags = append([]string(nil), r.Flags...)
+			if prompt != "" && r.Run != "" {
+				r.Run = prompt
 			}
+			if isReset(r) {
+				// A reset belongs to the stream whose model call was sent the
+				// summary, so its ids name that stream. It lands once per
+				// stream while the shape remembers it.
+				r.ID = stream + "/" + r.ID
+				if r.Parent != "" {
+					r.Parent = stream + "/" + r.Parent
+				}
+				if sh.Resets[r.ID] {
+					continue
+				}
+				sh.Resets[r.ID] = true
+			}
+			placed[i] = append(placed[i], r)
 		}
 	}
-	for _, item := range g.items {
+	for i, item := range g.items {
 		here[item.run.ID] = true
+		records := placed[i]
 		if sh.opens(item.run) {
 			child := StreamName(item.run.ID, item.run.Name)
 			plain := sh.auxiliary(item.run.ID)
-			for i := range item.records {
-				item.records[i].Child = child
+			for j := range records {
+				records[j].Child = child
 				if plain {
-					item.records[i].Flags = append(item.records[i].Flags, "auxiliary")
+					records[j].Flags = append(records[j].Flags, "auxiliary")
 				}
 			}
 			sh.joined(item.run.ID, plain)
 		}
-		add(sh.streamOf(item.run), item.records...)
+		add(sh.streamOf(item.run), records...)
 	}
 	// A tool whose own records landed before anything ran inside it says
 	// nothing about the stream that turned out to start there: only the
@@ -575,7 +600,7 @@ func (c *Collector) place(g *grouped, open *pending) *placement {
 		add(link.stream, link.record())
 	}
 	sort.Strings(streams)
-	return &placement{shape: sh, shapePath: shapePath, streams: streams, byStream: byStream}
+	return &placement{shape: sh, shapePath: shapePath, streams: streams, byStream: byStream, placed: placed}
 }
 
 // check says whether every record of one session can be written at all.
@@ -622,7 +647,7 @@ func (c *Collector) land(g *grouped, stamp string, request Waiting, open *pendin
 		}
 	}
 	if c.ProviderBodies {
-		landed, err := c.landBodies(g.session, state, bodiesOf(g.items), stamp, request)
+		landed, err := c.landBodies(g.session, state, bodiesOf(g.items, p.placed), stamp, request)
 		if err != nil {
 			return err
 		}

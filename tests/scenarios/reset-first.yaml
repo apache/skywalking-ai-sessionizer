@@ -15,21 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# The demo application the fixtures are captured from. The versions are exact
-# on purpose: a fixture records what one client sent, so a version that moves
-# is a recapture and a deliberate change, not a surprise in a later run.
-
-[project]
-name = "asz-langchain-harness"
-version = "0.0.0"
-requires-python = ">=3.11"
-dependencies = [
-    "langchain==1.4.2",
-    "langgraph==1.2.11",
-    "langchain-core==1.6.3",
-    "langchain-openai==1.6.2",
-    "langsmith==0.13.0",
-]
-
-[tool.uv]
-package = false
+# A stream whose first record is a reset. A LangChain agent whose first model
+# call was sent a summary starts this way. There is no epoch before the reset,
+# so the stream has one epoch, opened by that reset, and nothing follows it.
+steps:
+  - reset: {summary: summary of the work before this stream}
+  - input: after the reset
+  - call: {text: Working after.}

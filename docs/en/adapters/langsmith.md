@@ -234,8 +234,21 @@ supplied, and nothing merges it with anything else.
 - **Which call a failed tool answered.** A tool that raises has empty outputs and names the call
   nowhere. asz reads it from the model call that asked for the tool, and only when exactly one call
   of that name in that trace is unanswered. Otherwise the result lands joined to nothing.
-- **A context reset.** LangChain has no compaction, so a conversation is one epoch however long it
-  runs.
+- **A context reset, unless the framework marks it.** `SummarizationMiddleware` marks the summary
+  message it writes with `additional_kwargs.lc_source` set to `summarization`. A model call sent that
+  message starts a new epoch in its stream, with the message as its summary, the same way a Claude
+  Code compaction does. The summariser's own call read the old history, so it stays in the old
+  epoch. `trim_messages`, langmem's `SummarizationNode` and `RemoveMessage` write no mark. A
+  conversation that uses them is one epoch however long it runs, because a changed message list
+  alone cannot say whether the history was trimmed, summarised, edited or started again. Three
+  limits follow from the evidence:
+  - The middleware summarises inside a turn, so the talk it happens in stays in the epoch where the
+    turn began, as it does for a Claude Code compaction in the middle of a turn.
+  - The reset lands with the arrival that carries the request. In the captured corpus every model
+    call's first arrival carried its request, 71 of 71. A request that arrives after its call has
+    begun puts that one call in the old epoch.
+  - A marked message with no `id` makes no reset. The middleware gives every message one. Without
+    it, one summary could not be told from another with the same words.
 - **A delegation, by name.** Nothing on the wire says a nested run is an agent, and nothing names
   what it was asked to do. The boundary is read from the run tree instead: work that ran inside a
   tool is that tool's. Whether that work was a program or a single model call is read from what

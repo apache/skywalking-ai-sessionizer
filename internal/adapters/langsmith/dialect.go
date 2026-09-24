@@ -216,6 +216,7 @@ func ConvertRun(op Operation, run Run, method string, firstOfTrace bool, hints H
 	}
 	switch d.run.Type {
 	case "llm", "chat_model":
+		out = append(out, resets(base, d)...)
 		out = append(out, modelCall(base, d))
 	case "tool":
 		// A tool that names no call is landed answering none.

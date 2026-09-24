@@ -38,6 +38,8 @@ Each row says where the thing is recorded in a run.
 | `agent.output` | `outputs.output.content` | the delegating tool run |  |
 | `call` | `id` | a run of type llm | shared by every arrival about that run |
 | `conversation` | `extra.metadata.thread_id` | a run | with session_id and conversation_id as the other spellings; supplied, never inferred |
+| `epoch.boundary` | `additional_kwargs.lc_source: summarization` | a message in the inputs of a run of type llm | the first request sent a marked summary; trim_messages and langmem write no mark and make none |
+| `epoch.summary` | `kwargs.content` | the marked message in the inputs of a run of type llm |  |
 | `error.api` | `error` | a run | a string with the exception and its traceback |
 | `id` | `id` | a run | the record is the arrival, so a run that is posted and later patched has two |
 | `input_of` | `inputs` | a run |  |
@@ -69,14 +71,12 @@ not there.
 | `child` | — | derived here | no equivalent: a nested agent is a run beneath a tool, named as nothing else |
 | `conflict` | — | derived here | derived |
 | `context.injection` | — | derived here | no equivalent |
-| `continues` | — | derived here | no equivalent: the client has no context reset to resume from |
+| `continues` | — | derived here | no equivalent: a marked summary names no last message before it |
 | `control.command` | — | derived here | no equivalent |
 | `control.interrupt` | — | derived here | no equivalent |
 | `control.permission` | — | derived here | no equivalent: nothing here asks before running a tool |
 | `ends_with` | — | derived here | derived from a nested agent's last response |
-| `epoch` | — | derived here | no equivalent: the client has no context reset |
-| `epoch.boundary` | — | derived here | no equivalent: the client has no context reset |
-| `epoch.summary` | — | derived here | no equivalent |
+| `epoch` | — | derived here | the span between two summaries SummarizationMiddleware marked |
 | `exact_ambiguous` | — | derived here | derived |
 | `exact_unique` | — | derived here | one call id, named by the tool run that answered it |
 | `external` | — | derived here | the root run of a trace carries the message that opened it |
@@ -95,7 +95,7 @@ not there.
 | `starts` | — | derived here | derived from a delegating tool and the runs beneath it |
 | `stream` | — | derived here | no equivalent: a nested agent is a run like any other |
 | `strong_inference` | — | derived here | derived: a failed tool joined to the one unanswered call of its name |
-| `summarizes` | — | derived here | no equivalent |
+| `summarizes` | — | derived here | derived: the summary and its boundary come from one marked message |
 | `talk` | — | derived here | one readable interaction; one trace is one turn |
 | `thinking` | — | derived here | no equivalent yet: a provider's reasoning arrives inside the message content |
 | `trigger` | — | derived here | no equivalent: derived from a trace's root run |
