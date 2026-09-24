@@ -54,7 +54,7 @@ records. A configuration that still names it is read as the same adapter.
 | --- | --- | --- |
 | `name` | | One of the adapters above. |
 | `enabled` | see above | A disabled adapter is skipped. |
-| `source_root` | empty | Where to read from. Empty means where Claude Code keeps its files: `CLAUDE_CONFIG_DIR`, else `XDG_CONFIG_HOME/claude`, else `~/.claude`. Set it to collect from a copy. |
+| `source_root` | empty | Where to read from. Empty means where Claude Code keeps its files: `CLAUDE_CONFIG_DIR`, else `XDG_CONFIG_HOME/claude`, else `~/.claude`. Set it to collect from a copy. A value that is set is used as it is, so for `claude-code-local` it names the `projects` directory inside, such as `/home/me/.claude/projects`. |
 | `include` | empty | [Session filters](#session-filters) a session must match. Empty means every session. |
 | `exclude` | `/private/tmp/**` | [Session filters](#session-filters) that leave a session out. `exclude: []` clears the default. |
 | `metrics` | `false` | Derive Claude Code's token metrics from the collected data. See [Metrics](export-otlp.md#metrics). |
