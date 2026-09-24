@@ -422,13 +422,33 @@ func TestAResetRecoversWhenOnlyItsBoundaryLanded(t *testing.T) {
 			removed++
 		}
 	}
-	if err := os.Remove(filepath.Join(zone.SessionDir(session), "langsmith.shape.json")); err != nil {
-		t.Fatal(err)
+	// The index is built from what landed, so after the crash it holds none
+	// of the lost files. Keeping the first landing's index would let the
+	// test pass on entries that point at files no longer there.
+	for _, path := range []string{
+		filepath.Join(zone.SessionDir(session), "langsmith.shape.json"),
+		zone.IndexDir(session), zone.IndexStatePath(session),
+	} {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Logf("crashed after file %d, %d files lost", crashAt, removed)
 
 	landIntoBudget(t, zone, "summarized", 1)
-	resetsAre(t, parsed(t, zone, session), 2)
+	view := parsed(t, zone, session)
+	resetsAre(t, view, 2)
+	// Each summary is a record that exists again, with the summariser's words.
+	for _, n := range view.Nodes {
+		if n.Kind != model.KindEpochSummary {
+			continue
+		}
+		text := recordAt(t, zone, session, *n.Ref).text()
+		if !strings.HasPrefix(text, "Here is a summary of the conversation to date:") ||
+			!strings.Contains(text, ": the clusters checked so far were healthy") {
+			t.Errorf("the summary at %v reads %q", *n.Ref, text)
+		}
+	}
 }
 
 func eachRecordIn(t *testing.T, path string, fn func(rec sessiondata.Record)) {
