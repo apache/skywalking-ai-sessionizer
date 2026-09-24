@@ -68,9 +68,7 @@ changes itself, and asz reads them from the transcript.
 ## Upgrade
 
 Run the install script again with the new version. It keeps the plugin's settings and the records
-asz has not collected yet. Coming from 0.4.0 or earlier, it finds the plugin under its old name,
-`asz-changes`, carries its data across, and uninstalls it with the data kept. See
-[Upgrading from 0.4.0](install.md#upgrading-from-040) for the order to do it in.
+asz has not collected yet.
 
 By hand, first move `asz-changes` to the new version: `brew upgrade asz`,
 `sudo apt update && sudo apt upgrade`, or the binary from the new version's

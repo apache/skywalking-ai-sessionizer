@@ -138,8 +138,12 @@ land the conversation alone, set `provider_bodies: false` on the adapter. See
   raises, its output is empty and the call id is nowhere in its run. asz reads
   it from the model call that asked for the tool, and when that arrived in a
   different batch, the result lands joined to nothing rather than to a guess.
-- **There is no context reset.** LangChain has no compaction, so a conversation
-  is one epoch however long it runs.
+- **Only a summary the framework marked resets the context.**
+  `SummarizationMiddleware` marks the summary it writes, and the model call sent
+  that summary starts a new epoch, as a Claude Code compaction does.
+  `trim_messages`, langmem and `RemoveMessage` leave no mark, so a conversation
+  that uses them is one epoch however long it runs. See
+  [the adapter page](../adapters/langsmith.md#what-the-wire-cannot-supply).
 
 ## Seeing it work without an application
 

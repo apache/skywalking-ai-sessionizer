@@ -8,8 +8,8 @@ runtime owns, and builds the conversation structure as a chain of immutable, ver
 
 - [Concepts and Designs](en/concepts-and-designs/overview.md). Start here to understand what
   the project is, the conversation model it assembles, and the evidence rules every page follows.
-- [Setup](en/setup/quick-start.md). Build the binary, collect this machine's history, assemble it
-  and read it. Configuration, the command line and the container image.
+- [Setup](en/setup/quick-start.md). Install asz, collect this machine's history, assemble it and
+  read it. Configuration, the command line and the container image.
 - [Data Formats](en/formats/storage-root.md). What is on disk: the storage root, Session Data
   (`.sd`) and Session Flow (`.sf`). These are public. A third-party adapter produces the first and
   a consumer reads the second.

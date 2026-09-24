@@ -42,11 +42,6 @@ repository is not named `homebrew-skywalking-ai-sessionizer`. Without it, `brew 
 on disk. To wire a runtime to it, see [Claude Code Plugin](claude-code-plugin.md) or
 [LangChain Plugin](langchain-plugin.md). Upgrade with `brew upgrade asz`.
 
-Until 0.5.0 there were two formulae fetching the identical archive and installing one binary each.
-`asz-claude-code` is gone. Coming from 0.4.0, follow [Upgrading from 0.4.0](#upgrading-from-040):
-`brew uninstall asz-claude-code` is its last step, after the Claude Code plugin has been
-reinstalled, because until then the plugin's hooks still call the binary that formula holds.
-
 For an exact version, install `apache/skywalking-ai-sessionizer/asz@<version>`. Homebrew keeps it
 off your `PATH`; `brew info` shows where it is.
 
@@ -66,12 +61,6 @@ wire a runtime to the recorder, see [Claude Code Plugin](claude-code-plugin.md) 
 
 Upgrade with `sudo apt update && sudo apt upgrade`. For an exact version, run
 `sudo apt install asz=<version> asz-changes=<version>`.
-
-`asz-changes` was called `asz-claude-code` until 0.5.0, and the binary in it was called
-`asz-claude-plugin`. Neither name is published any more, so a machine that has the old package
-keeps it until `sudo apt remove asz-claude-code`, and the Claude Code plugin has to be reinstalled
-once so its hooks call the new name. `install/claude-code-plugin.sh` does that and carries the
-plugin's data across.
 
 ## Binary package
 
@@ -189,20 +178,3 @@ go install "github.com/apache/skywalking-ai-sessionizer/cmd/asz@v$VERSION"
 ```
 
 `asz version` then prints `dev`, and the Claude Code plugin's binary is not installed.
-
-## Upgrading from 0.4.0
-
-0.5.0 renamed the change recorder, its package and its plugin; [the changelog](../changes/changes.md#renamed)
-lists every name. The upgrade keeps every record, in this order:
-
-1. Stop Claude Code and the collector (`asz collect` or `asz server`).
-2. Install 0.5.0 by the way you installed 0.4.0. Each way installs both programs now: the install
-   script, `brew upgrade asz`, or `sudo apt install asz asz-changes`.
-3. Start the collector again. It reads the plugin's old directory and its new one.
-4. Run the [Claude Code plugin installer](claude-code-plugin.md) for 0.5.0. It carries the plugin's
-   data across, uninstalls the plugin under its old name with the data kept, and installs it under
-   the new one, whose hooks call `asz-changes`.
-5. Start Claude Code.
-6. Only then remove what 0.4.0 installed: `brew uninstall asz-claude-code` or
-   `sudo apt remove asz-claude-code`. Until step 4 the old plugin's hooks still call
-   `asz-claude-plugin`, which those packages hold.

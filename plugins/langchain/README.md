@@ -18,9 +18,13 @@ export ASZ_WATCH=/path/to/the/workspace
 export ASZ_CHANGES_DATA=/var/lib/asz/changes
 ```
 
-**[Full setup, what it costs and what it cannot see](https://skywalking.apache.org/docs/skywalking-ai-sessionizer/next/en/setup/langchain-plugin/)**
+It needs `asz-changes` on `PATH`, which the install script, Homebrew and apt put
+beside `asz`. Nothing is recorded until `tools.scope` in
+`$ASZ_CHANGES_DATA/settings.yaml` names your application's tools.
+
+**[Full setup, what it costs and what it cannot see](https://skywalking.apache.org/docs/skywalking-ai-sessionizer/latest/en/setup/langchain-plugin/)**
 
 To collect the conversation itself, which needs no plugin at all, see
-[LangChain and LangGraph](https://skywalking.apache.org/docs/skywalking-ai-sessionizer/next/en/setup/langchain/).
+[LangChain and LangGraph](https://skywalking.apache.org/docs/skywalking-ai-sessionizer/latest/en/setup/langchain/).
 
 Apache-2.0. Part of [Apache SkyWalking](https://skywalking.apache.org/).
