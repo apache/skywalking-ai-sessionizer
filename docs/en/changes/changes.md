@@ -15,6 +15,13 @@
 - A link to a plain model call inside a tool landed with its `auxiliary` flag twice. A request is
   placed once to check it can land and again to land it, and the second placement built on the
   first. Placement now leaves the request as it arrived.
+- The page shows what a LangChain model call was sent. The Prompt tab read a LangChain request as
+  Claude Code's shape and drew it as one empty message. It now shows each message in LangChain's
+  own words, `system`, `human`, `ai` and `tool`, with the tool calls an `ai` message made and each
+  tool result under the call it answers. A response shows the answer, the model and the token
+  counts. What it added stays unavailable for a LangChain call, because no request names the one
+  before it. The renderer is Horizon's, now pinned at `297f020`, which also draws a light theme's
+  scrollbars and other native controls light.
 
 ## Development
 
