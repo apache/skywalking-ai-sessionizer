@@ -76,6 +76,9 @@
 
 ## Documentation
 
+- `source_root` of `claude-code-local` was described as the directory Claude Code keeps its files
+  in, `~/.claude`. It is the `projects` directory inside it, which is what the collector reads and
+  what the container image page sets. Set to `~/.claude`, the collector found no sessions.
 - The setup pages no longer carry upgrade guides from one version to another. The steps for
   upgrading from 0.4.0, and the notes about the names 0.5.0 replaced, are gone. The changelog of
   0.5.0 still lists every rename. Each way to install still says how to move to a newer version,
