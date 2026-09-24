@@ -48,12 +48,12 @@ together, because they sit in the same package, `internal/adapters/claudecode`.
 | `epoch.boundary` | `system/compact_boundary` | a system record |  |
 | `epoch.summary` | `isCompactSummary` | a user record |  |
 | `error.api` | `system/api_error` | a system record |  |
-| `external` | `origin.kind == "human"` | record | also a run whose records state no origin at all - a locally typed command |
+| `external` | `origin.kind == "human"` | record | also a user record with promptSource "sdk", no origin and no isMeta - a headless run's prompt - and a run whose records state no origin at all - a locally typed command |
 | `follows` | `logicalParentUuid` | a compact_boundary record |  |
 | `id` | `uuid` | record |  |
 | `llm.call` | `message.id` | assistant records sharing one | one call is several records; 2.09 on average |
 | `message.assistant` | `text block` | an assistant record |  |
-| `message.external` | `origin.kind == "human"` | a user record | also a queued_command attachment whose commandMode is "prompt" |
+| `message.external` | `origin.kind == "human"` | a user record | also a user record with promptSource "sdk", no origin and no isMeta - a headless run's prompt - and a queued_command attachment whose commandMode is "prompt" |
 | `message.synthetic` | `message.model == "<synthetic>"` | an assistant record | the client wrote it; no model produced it |
 | `model` | `message.model` | an assistant record | `<synthetic>` on a record the client fabricated |
 | `notification` | `origin.kind == "task-notification"` | record |  |
