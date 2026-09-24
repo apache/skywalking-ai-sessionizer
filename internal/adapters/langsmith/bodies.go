@@ -81,15 +81,19 @@ type body struct {
 }
 
 // bodiesOf reads the bodies one request's arrivals carry, in arrival order.
-func bodiesOf(items []placed) []body {
+//
+// A body names the prompt its call was placed under, so it is read from the
+// records as placed: a nested stream's call carries the tool it ran inside,
+// not the trace the request arrived with.
+func bodiesOf(items []placed, records [][]sessiondata.Record) []body {
 	var out []body
-	for _, item := range items {
+	for i, item := range items {
 		if item.run.Type != "llm" && item.run.Type != "chat_model" {
 			continue
 		}
 		var prompt string
-		if len(item.records) > 0 {
-			prompt = item.records[0].Run
+		if i < len(records) && len(records[i]) > 0 {
+			prompt = records[i][0].Run
 		}
 		if in := item.inputs; len(in) > 0 && string(in) != "null" {
 			out = append(out, body{run: item.run, role: providerbody.RoleRequest, model: item.model, bytes: in, prompt: prompt})

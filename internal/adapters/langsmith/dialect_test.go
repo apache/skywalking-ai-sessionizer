@@ -50,7 +50,7 @@ func TestEveryArrivalConverts(t *testing.T) {
 	for _, kase := range []string{"plain", "three-turns", "tool-error", "parallel-tools",
 		"loop", "two-threads", "slow-tool", "large-content", "subagent",
 		"subagent-own-thread", "no-thread-key", "shared-thread-key",
-		"unsafe-thread-key", "abandoned-run", "traceable-only"} {
+		"unsafe-thread-key", "abandoned-run", "traceable-only", "summarized"} {
 		records := convertCase(t, kase)
 		if len(records) == 0 {
 			t.Fatalf("%s: converted to nothing", kase)

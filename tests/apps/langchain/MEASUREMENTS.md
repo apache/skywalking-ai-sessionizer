@@ -40,6 +40,7 @@ was still running.
 | slow-tool | 2 | 18 | 15 | 3 | 3 | 68419 | `thread-slow` |
 | subagent | 1 | 39 | 39 | 0 | 0 | 179285 | `thread-subagent` |
 | subagent-own-thread | 1 | 30 | 30 | 0 | 0 | 125135 | `thread-subagent-parent` |
+| summarized | 1 | 35 | 35 | 0 | 0 | 173969 | `thread-summarized` |
 | three-turns | 1 | 29 | 29 | 0 | 0 | 145441 | `thread-three-turns` |
 | tool-error | 1 | 9 | 9 | 0 | 0 | 42676 | `thread-tool-error` |
 | traceable-only | 1 | 2 | 2 | 0 | 0 | 3692 | `thread-traceable` |
@@ -52,9 +53,9 @@ Counted across every case, by the kind of run that carried them.
 
 | run type | runs | bytes | share |
 | --- | --- | --- | --- |
-| chain | 354 | 3135207 | 79.9% |
-| llm | 63 | 665858 | 17.0% |
-| tool | 23 | 121321 | 3.1% |
+| chain | 377 | 3217032 | 79.2% |
+| llm | 72 | 719445 | 17.7% |
+| tool | 26 | 126525 | 3.1% |
 
 A graph's own `chain` runs carry the whole message list again in their inputs
 and outputs, which is why they hold most of the bytes while saying nothing the
@@ -75,6 +76,7 @@ conversation does not already have.
 | slow-tool | A slow tool: runs are posted open and completed later by a patch. |
 | subagent | An agent as a tool: its model calls have their own context. |
 | subagent-own-thread | A sub-agent invoked with its own thread key: a separate conversation. |
+| summarized | SummarizationMiddleware: the history is replaced by a summary, twice. |
 | three-turns | Three turns on one thread: one conversation, three traces. |
 | tool-error | A tool that raises: the failure has to survive as a failed result. |
 | traceable-only | No LangChain graph at all: the client's own decorator. |

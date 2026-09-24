@@ -100,7 +100,7 @@ langchain-capture:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed; see tests/apps/langchain/README.md"; exit 1; }
 	@cd tests/apps/langchain && \
 		{ [ -d .venv ] || uv venv --python 3.12 .venv >/dev/null; } && \
-		VIRTUAL_ENV=.venv uv pip install -q langgraph==1.2.11 langchain-core==1.6.3 \
+		VIRTUAL_ENV=.venv uv pip install -q langchain==1.4.2 langgraph==1.2.11 langchain-core==1.6.3 \
 			langchain-openai==1.6.2 langsmith==0.13.0 && \
 		./.venv/bin/python run.py && ./.venv/bin/python measure.py
 

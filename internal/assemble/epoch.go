@@ -114,6 +114,13 @@ func (b *builder) stage6Epochs() {
 		}
 
 		for _, cut := range cuts {
+			// A stream whose first record is a reset has no epoch before it. A
+			// LangChain agent whose first model call was sent a summary starts
+			// this way. Emitting the empty epoch gave it the reset's own id, so
+			// one epoch replaced the other and followed itself.
+			if cut == start {
+				continue
+			}
 			// The boundary record opens the epoch that follows it, so the epoch
 			// before it ends at the boundary.
 			emit(firstBoundary(start, cuts), cut)

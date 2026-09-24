@@ -55,6 +55,8 @@ def _tool_call(name, index, arguments=None):
 
 def _reply(behaviour, tools, tool_messages, index):
     """What the model says next, given the case and what it has been told."""
+    if behaviour == "summary":
+        return None, "summary %d: the clusters checked so far were healthy" % index
     if behaviour == "plain" or not tools:
         return None, "answer %d" % index
     if behaviour == "parallel" and tool_messages == 0:

@@ -104,10 +104,16 @@ type shape struct {
 	// A tool the graph ran and nothing else is an ordinary step and is not
 	// here.
 	Opened map[string]bool `json:"opened"`
+	// Resets holds the ids of the reset records already landed. A summary is
+	// sent again with every later request, and without this each request
+	// would land it again. Losing it lands one more copy, which the index
+	// drops as a repeat.
+	Resets map[string]bool `json:"resets,omitempty"`
 }
 
 func loadShape(path string) *shape {
-	s := &shape{Version: shapeVersion, Tools: map[string]toolRun{}, Opened: map[string]bool{}}
+	s := &shape{Version: shapeVersion, Tools: map[string]toolRun{}, Opened: map[string]bool{},
+		Resets: map[string]bool{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return s
@@ -121,6 +127,9 @@ func loadShape(path string) *shape {
 	}
 	if loaded.Opened == nil {
 		loaded.Opened = map[string]bool{}
+	}
+	if loaded.Resets == nil {
+		loaded.Resets = map[string]bool{}
 	}
 	return &loaded
 }

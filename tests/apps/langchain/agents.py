@@ -202,6 +202,25 @@ def case_long_conversation():
         ask(agent, "Turn %d: what is the status?" % (i + 1), "thread-long")
 
 
+def case_summarized():
+    """SummarizationMiddleware: the history is replaced by a summary, twice.
+
+    The middleware marks what it does. Its summary message carries
+    additional_kwargs lc_source=summarization, and its own model call carries
+    the same key in its metadata. The mark is what asz takes a context reset
+    from, so this case is the evidence for it.
+    """
+    from langchain.agents import create_agent
+    from langchain.agents.middleware import SummarizationMiddleware
+
+    agent = create_agent(model("tool"), [lookup_status], checkpointer=InMemorySaver(),
+                         middleware=[SummarizationMiddleware(model=model("summary"),
+                                                             trigger=("messages", 6),
+                                                             keep=("messages", 2))])
+    for cluster in ("prod-1", "prod-2", "prod-3", "prod-4"):
+        ask(agent, "Check %s." % cluster, "thread-summarized")
+
+
 def case_abandoned_run():
     """A process that dies mid-turn: the open runs are all that ever arrive.
 
@@ -247,6 +266,7 @@ CASES = {
     "shared-thread-key": case_shared_thread_key,
     "unsafe-thread-key": case_unsafe_thread_key,
     "long-conversation": case_long_conversation,
+    "summarized": case_summarized,
     "abandoned-run": case_abandoned_run,
     "traceable-only": case_traceable_only,
 }

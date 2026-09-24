@@ -15,21 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# The demo application the fixtures are captured from. The versions are exact
-# on purpose: a fixture records what one client sent, so a version that moves
-# is a recapture and a deliberate change, not a surprise in a later run.
-
-[project]
-name = "asz-langchain-harness"
-version = "0.0.0"
-requires-python = ">=3.11"
-dependencies = [
-    "langchain==1.4.2",
-    "langgraph==1.2.11",
-    "langchain-core==1.6.3",
-    "langchain-openai==1.6.2",
-    "langsmith==0.13.0",
-]
-
-[tool.uv]
-package = false
+checkpoints:
+  final:
+    kinds: {epoch.boundary: 1, epoch.summary: 1, epoch: 1}
+    relations: {follows: 0, summarizes: 1}
