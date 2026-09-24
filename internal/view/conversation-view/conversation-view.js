@@ -1745,9 +1745,23 @@ function readBody(bytes, role) {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "other", raw: value };
   const body = value;
-  if (role === "request" && Array.isArray(body["messages"])) return readRequest(body);
-  if (role === "response" && Array.isArray(body["content"])) return readResponse(body);
+  if (role === "request") {
+    if (isObjectList(body["messages"])) return readRequest(body);
+    const prompt = langChainPrompt(body["messages"]);
+    if (prompt) return readLangChainRequest(body, prompt);
+  }
+  if (role === "response") {
+    if (Array.isArray(body["content"])) return readResponse(body);
+    const generation = langChainGeneration(body["generations"]);
+    if (generation) return readLangChainResponse(body, generation);
+  }
   return { kind: "other", raw: value };
+}
+function isObjectList(value) {
+  return Array.isArray(value) && value.every(isObject);
+}
+function isObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 function readRequest(body) {
   const rest = /* @__PURE__ */ Object.create(null);
@@ -1829,6 +1843,90 @@ function readBlock(value) {
     return { kind, json: content ?? value, ...about };
   }
   return { kind, json: value };
+}
+function langChainPrompt(messages) {
+  if (!Array.isArray(messages) || messages.length !== 1) return null;
+  const prompt = messages[0];
+  return isObjectList(prompt) ? prompt : null;
+}
+function langChainGeneration(generations) {
+  if (!Array.isArray(generations) || generations.length !== 1) return null;
+  const prompt = generations[0];
+  if (!Array.isArray(prompt) || prompt.length !== 1) return null;
+  const only = prompt[0];
+  return isObject(only) ? only : null;
+}
+function readLangChainRequest(body, prompt) {
+  const rest = /* @__PURE__ */ Object.create(null);
+  for (const [k, v] of Object.entries(body)) if (k !== "messages") rest[k] = v;
+  return { kind: "request", system: [], tools: [], messages: prompt.map(readLangChainMessage), rest, raw: body };
+}
+function readLangChainResponse(body, generation) {
+  const message2 = generation["message"];
+  const fields = isObject(message2) ? langChainFields(message2) : null;
+  const rest = /* @__PURE__ */ Object.create(null);
+  for (const [k, v] of Object.entries(fields ?? {})) {
+    if (!["content", "tool_calls", "invalid_tool_calls", "usage_metadata", "id", "type"].includes(k)) rest[k] = v;
+  }
+  if (generation["generation_info"] != null) rest["generation_info"] = generation["generation_info"];
+  if (body["llm_output"] != null) rest["llm_output"] = body["llm_output"];
+  const metadata = fields == null ? void 0 : fields["response_metadata"];
+  const output = body["llm_output"];
+  const model = (isObject(metadata) ? metadata["model_name"] : void 0) ?? (isObject(output) ? output["model_name"] : void 0);
+  const usage = fields == null ? void 0 : fields["usage_metadata"];
+  const text = generation["text"];
+  return {
+    kind: "response",
+    model: typeof model === "string" ? model : void 0,
+    id: typeof (fields == null ? void 0 : fields["id"]) === "string" ? fields["id"] : void 0,
+    blocks: fields ? langChainBlocks(fields, message2) : typeof text === "string" ? [{ kind: "text", text }] : [],
+    usage: isObject(usage) ? usage : void 0,
+    rest,
+    raw: body
+  };
+}
+function readLangChainMessage(value) {
+  const fields = langChainFields(value);
+  const type = typeof fields["type"] === "string" ? fields["type"] : "";
+  const role = typeof fields["role"] === "string" ? fields["role"] : "";
+  return { role: type && type !== "chat" ? type : role, blocks: langChainBlocks(fields, value), raw: value };
+}
+function langChainContentBlock(value) {
+  return isObject(value) && value["type"] === "tool_call" ? langChainToolCall(value) : readBlock(value);
+}
+function langChainToolCall(c) {
+  const id = typeof c["id"] === "string" ? c["id"] : void 0;
+  return { kind: "tool_use", name: typeof c["name"] === "string" ? c["name"] : "", ...id ? { id } : {}, json: c["args"] };
+}
+function langChainFields(m) {
+  const kwargs = m["kwargs"];
+  return m["lc"] === 1 && m["type"] === "constructor" && isObject(kwargs) ? kwargs : m;
+}
+function langChainBlocks(fields, raw) {
+  const content = fields["content"];
+  if (fields["type"] === "tool" || fields["role"] === "tool") {
+    const about = {
+      ...typeof fields["tool_call_id"] === "string" ? { id: fields["tool_call_id"] } : {},
+      ...fields["status"] === "error" ? { failed: true } : {}
+    };
+    return [typeof content === "string" ? { kind: "tool_result", text: content, json: raw, ...about } : { kind: "tool_result", json: content ?? raw, ...about }];
+  }
+  const blocks = typeof content === "string" ? content ? [{ kind: "text", text: content, reminder: content.includes(REMINDER) }] : [] : Array.isArray(content) ? content.map(langChainContentBlock) : [];
+  const at = /* @__PURE__ */ new Map();
+  blocks.forEach((b, i) => {
+    if (b.kind === "tool_use" && b.id) at.set(b.id, i);
+  });
+  for (const call of Array.isArray(fields["tool_calls"]) ? fields["tool_calls"] : []) {
+    const use = langChainToolCall(isObject(call) ? call : {});
+    const i = use.id ? at.get(use.id) : void 0;
+    if (i === void 0) blocks.push(use);
+    else blocks[i] = { ...use, name: use.name || (blocks[i].name ?? "") };
+  }
+  for (const call of Array.isArray(fields["invalid_tool_calls"]) ? fields["invalid_tool_calls"] : []) {
+    blocks.push({ kind: "invalid_tool_call", json: call });
+  }
+  if (blocks.length) return blocks;
+  return typeof content === "string" ? [{ kind: "text", text: "" }] : [{ kind: "unknown", json: raw }];
 }
 function deltaOf(previous, current) {
   let shared = 0;
@@ -2308,7 +2406,7 @@ function drawRequest(ctx, e, read2, sides, store) {
     read2.messages.map((m, i) => message(ctx, m, i + 1, read2.messages.length, `${e.id}|req|msg|${i}`)).join(""),
     true
   );
-  const settings2 = section(ctx, e, "settings", s.promptSettings, Object.keys(read2.rest).join(", "), json(ctx, read2.rest, `${e.id}|req|set`));
+  const settings2 = Object.keys(read2.rest).length ? section(ctx, e, "settings", s.promptSettings, Object.keys(read2.rest).join(", "), json(ctx, read2.rest, `${e.id}|req|set`)) : "";
   const whole = section(ctx, e, "request-raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|req|raw`));
   return `${modes}${system}${tools}${messages}${settings2}${whole}`;
 }

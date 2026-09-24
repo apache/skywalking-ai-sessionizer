@@ -298,7 +298,10 @@
   background: var(--sw-bg-3); border-radius: 3px;
   padding: 1px 5px; border: 1px solid var(--sw-line-2);
 }
-.sw-top-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+/* `min-width: 0` so the row can give way on a narrow window: without it the
+   widest chip's text sets a floor the topbar cannot go below, and the whole
+   bar overflows the viewport instead of the label ellipsizing. */
+.sw-top-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
 
 /* main */
 .sw-main {
@@ -461,6 +464,17 @@ textarea:disabled {
  * (UI font). Code that consumes these still uses var() reads; the
  * theme store sets `<html data-theme>` and CSS does the rest.
  */
+
+/* Native form controls — date inputs and their calendar popups, spinners,
+ * scrollbars, the default focus ring — read `color-scheme`, not our tokens.
+ * `tokens.css` states `dark` on `:root` for the dark palette it defines, and
+ * nothing turned it back: on a LIGHT theme the browser went on drawing the
+ * calendar icon white on a white field, and opened a dark popup over a light
+ * page. Keyed on the appearance rather than on one theme id, so a light theme
+ * added later is covered by having declared what it is. */
+[data-appearance="light"] {
+  color-scheme: light;
+}
 
 /* ── horizon (default — declared explicitly for parity with the others) ── */
 [data-theme="horizon"] {
