@@ -34,9 +34,11 @@ adapters:
   - name: claude-code-local
     enabled: true
 
-    # Where Claude Code keeps its files. Leave empty to resolve it the way
-    # Claude Code does: CLAUDE_CONFIG_DIR, then XDG_CONFIG_HOME, then
-    # ~/.claude. Set it only to collect from a copy or a mounted corpus.
+    # The directory Claude Code keeps its projects in, one directory per
+    # project. Leave empty to resolve it the way Claude Code does: projects
+    # under CLAUDE_CONFIG_DIR, then under XDG_CONFIG_HOME/claude, then under
+    # ~/.claude. Set it only to collect from a copy or a mounted corpus, and
+    # name that copy's projects directory, not the directory above it.
     source_root: ""
 
     # Session filters. A session is judged by the working directory its main
