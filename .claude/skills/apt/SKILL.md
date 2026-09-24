@@ -166,17 +166,19 @@ refuse the whole repository: stop and tell the user.
 ## 6. Install through the redirects
 
 Apache httpd serves the directory with its `.htaccess`, as the website does. apt in Debian and in
-Ubuntu then installs the newest version and each older version added, following the redirects to
-the real Apache sites.
+Ubuntu then installs the newest version and every older version in the index, following the
+redirects to the real Apache sites. Not only the versions added: adding a newer version moves the
+one that was newest from the mirrors to the archive, so its redirect changed too.
 
 ```sh
 docker run --rm httpd:2.4 cat /usr/local/apache2/conf/httpd.conf > "$W/httpd.conf"
 perl -0pi -e 's/^#(LoadModule rewrite_module )/$1/m; s/(<Directory "\/usr\/local\/apache2\/htdocs">.*?)AllowOverride None/$1AllowOverride All/s' "$W/httpd.conf"
+older=$(sed -n 's/^Version: //p' "$APT"/dists/stable/main/binary-*/Packages | sort -uV | grep -vxF "$newest" | tr '\n' ' ')
 docker network create asz-apt
 docker run -d --name asz-apt-site --network asz-apt -v "$APT:/usr/local/apache2/htdocs/apt:ro" \
   -v "$W/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro" httpd:2.4
 for image in debian:stable ubuntu:24.04; do
-  docker run --rm --network asz-apt -v "$W/keys.gpg:/keys.gpg:ro" -e NEWEST="$newest" -e OLDER="<the added versions other than the newest>" "$image" bash -euc '
+  docker run --rm --network asz-apt -v "$W/keys.gpg:/keys.gpg:ro" -e NEWEST="$newest" -e OLDER="$older" "$image" bash -euc '
     # The redirects lead to https, and these images carry no certificates.
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq && apt-get install -y -qq ca-certificates > /dev/null

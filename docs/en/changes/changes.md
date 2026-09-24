@@ -39,3 +39,17 @@
   the notification, `reports`, and a child that never came back has no `result_of`. LangChain's
   nested agents and Claude Code's synchronous returns gain it; nothing is re-landed, and the next
   round of an existing conversation adds it.
+
+## Release
+
+- The `pypi` skill says what a release manager sets up before an upload: two-factor
+  authentication, a token scoped to the whole account for the upload that creates a project and a
+  token scoped to the project after it, and that token in `SW_PYPI_TOKEN` in the environment
+  Claude Code starts with. It downloads from downloads.apache.org first, because
+  archive.apache.org still had no 0.5.0 fifteen minutes after the move. It verifies with `gpgv`,
+  which leaves the user's keyring alone, and checks that PyPI holds the files it built.
+- The `homebrew` skill no longer runs `git rm` inside the temporary tap, where git stops the check
+  whenever `asz.rb` moves. Its template fits 0.5.0 and later only.
+- The `apt` skill installs every older version in the index through the redirects, not only the
+  versions added. Adding a version moves the one that was newest to the archive, so its redirect
+  changes too.
