@@ -1,6 +1,6 @@
 ---
 name: pypi
-description: Publish a released version of the Apache SkyWalking AI Sessionizer LangChain plugin, apache-skywalking-asz-langchain, to PyPI. Says what a release manager sets up before the first upload, downloads the voted source package, verifies it, builds the sdist and the wheel from plugins/langchain inside it, checks and installs them, and uploads them with twine. Use after a version is published.
+description: Publish a released version of the Apache SkyWalking AI Sessionizer LangChain plugin, apache-skywalking-asz-langchain, to PyPI. Says what a release manager sets up before the first upload, downloads the voted source package, verifies it, builds the source distribution and the wheel from plugins/langchain inside it, checks and installs them, and uploads them with twine. Use after a version is published.
 user-invocable: true
 ---
 
@@ -28,10 +28,10 @@ an owner to add them.
    upload that creates a project needs a token scoped to the whole account, as 0.5.0 did. Every
    later upload uses a token scoped to `apache-skywalking-asz-langchain`. After the first upload,
    replace the account token with a project token, and delete the account token.
-3. **The token in `SW_PYPI_TOKEN`,** exported from the shell profile, such as `~/.zprofile`. Then
-   start Claude Code. A session reads the profile once, when it starts, and never sees a variable
-   added later. Its permission check also refuses to read a token out of a file, so the token has
-   to be in the environment the session started with.
+3. **The token in `SW_PYPI_TOKEN`,** exported from the shell profile, such as `~/.zprofile`,
+   before Claude Code starts. When the 0.5.0 token was added to the profile during a session, the
+   session did not see it until Claude Code was started again. Reading it out of the profile from
+   inside the session was refused by the permission check of auto mode.
 
 Check it without printing it. Stop and tell the user when it is not set:
 
@@ -44,8 +44,8 @@ Never print the token, and never write it into a file.
 ## 1. Download the voted source package and verify it
 
 The newest version is on downloads.apache.org minutes after the move. archive.apache.org holds every
-version, but gets a new one hours later: for 0.5.0 it still answered 404 fifteen minutes after the
-move, and 200 when checked again four hours later. So try the download site first.
+version, but gets a new one later: for 0.5.0 it still answered 404 fifteen minutes after the move,
+and 200 when checked again four hours later. So try the download site first.
 
 ```sh
 v=VERSION
@@ -115,8 +115,9 @@ that nobody sees. To correct a version once it is uploaded, release the next ver
 ## 5. Check it landed
 
 PyPI must hold the two files that were built, byte for byte, and they must install. Run this in
-the directory of the upload: a build run again from the same source gives other bytes, because the
-wheel and the sdist record the time they were built.
+the directory of the upload: a build run again from the same source gives other bytes. Measured on
+0.5.0, a rebuilt wheel held the same files with the same bytes as the uploaded one, and differed
+only in the time recorded for the files the build writes.
 
 ```sh
 curl -fsSL "https://pypi.org/pypi/apache-skywalking-asz-langchain/$v/json" |

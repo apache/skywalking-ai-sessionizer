@@ -46,7 +46,7 @@ convenience made from its voted files.
 | Target | What users get | Written by | When |
 | --- | --- | --- | --- |
 | The release directory, served by downloads.apache.org and its mirrors | the voted packages, each with its `.asc` and `.sha512` | [3. Publish](#3-publish) | right after the vote |
-| archive.apache.org | every released version, also after it leaves the release directory | Apache's infrastructure, from the release directory | by itself, hours after the move |
+| archive.apache.org | every released version, also after it leaves the release directory | Apache's infrastructure, from the release directory | by itself, later than the release directory |
 | The GitHub release `v$VERSION` | the same files | CI creates it on the tag push, [2. Candidate](#2-candidate) attaches to it, [3. Publish](#3-publish) promotes it | at the vote, then at Publish |
 | The container image, `ghcr.io/apache/skywalking-ai-sessionizer:$VERSION` | `docker pull` | CI's `docker` job, on the released event | when Publish promotes the GitHub release |
 | The downloads page and the documentation, `data/projects.yml` in apache/skywalking-website | links to the source package and the binary archives, and the docs of the tag | [The website](#the-website), a pull request | at least one hour after the move |
@@ -853,7 +853,7 @@ documentation and the changelog of the tag:
 ```markdown
 #### Where to get it
 
-- The Apache release of $VERSION is the source package. The binary packages for macOS, Linux and Windows, and the Debian packages, are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The Apache release of $VERSION is the source package. The binary packages for macOS, Linux and Windows, and the Debian packages, are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links the source package and the binary archives, each with its signature and checksum.
 - The files attached to this GitHub release are the same signed packages, each with its `.asc` signature and `.sha512` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/install.md#verify-a-package) describes.
 - To build from the source package, see [Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/install.md#build-from-the-source-package).
 - Documentation: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/README.md
@@ -1037,8 +1037,8 @@ token scoped to the whole account.
 
 After Publish, run the `pypi` skill with Claude Code and name the version. It downloads the voted
 source package from downloads.apache.org, or from archive.apache.org for an older version, and
-checks it against its `.sha512` and its `.asc` against KEYS. It builds the sdist and the wheel from
-`plugins/langchain` inside it with `python -m build`, checks both with `twine check`, installs the
+checks it against its `.sha512` and its `.asc` against KEYS. It builds the source distribution and
+the wheel from `plugins/langchain` inside it with `python -m build`, checks both with `twine check`, installs the
 wheel into a fresh environment and runs `asz-langchain status`, and uploads both with
 `twine upload`. Then it checks that PyPI holds the same two files and that they install. The wheel
 carries `LICENSE` and `NOTICE`, which `pyproject.toml` names.
@@ -1256,12 +1256,16 @@ tools/release/release.sh publish $VERSION --remove-old
 these:
 
 1. The website pull request that points the links of the older versions at
-   `https://archive.apache.org/dist/skywalking/ai-sessionizer/` has merged. Until then, the
-   downloads page links the files that would be removed.
-2. The Scoop bucket names the new version. Its manifest downloads the version it names from the
-   download site, and that URL stops working when the version is removed.
-3. The website pull request that adds the new version to [the apt repository](#apt) has merged. Until then, apt downloads the older version through the mirrors, from the files that
-   would be removed.
+   `https://archive.apache.org/dist/skywalking/ai-sessionizer/` has merged, and the downloads page
+   shows it. Until then, the downloads page links the files that would be removed.
+2. The website pull request that adds the new version to [the apt repository](#apt) has merged,
+   and `https://skywalking.apache.org/apt` lists it. Until then, apt downloads the older version
+   through the mirrors, from the files that would be removed.
+3. archive.apache.org holds every file of each version to remove. The website and apt send users
+   there once the version is gone.
+4. If a Scoop bucket carries the project, it names the new version. Its manifest downloads the
+   version it names from the download site, and that URL stops working when the version is
+   removed.
 
 The move is not repeated, and the steps after it run again. For each version older than
 `$VERSION`, it runs:

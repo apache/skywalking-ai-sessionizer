@@ -42,12 +42,17 @@
 
 ## Release
 
-- The `pypi` skill says what a release manager sets up before an upload: two-factor
-  authentication, a token scoped to the whole account for the upload that creates a project and a
-  token scoped to the project after it, and that token in `SW_PYPI_TOKEN` in the environment
-  Claude Code starts with. It downloads from downloads.apache.org first, because
-  archive.apache.org still had no 0.5.0 fifteen minutes after the move. It verifies with `gpgv`,
-  which leaves the user's keyring alone, and checks that PyPI holds the files it built.
+- The `pypi` skill says what a release manager sets up before an upload. PyPI requires two-factor
+  authentication. The upload that creates a project needs a token scoped to the whole account.
+  Every later upload uses a token scoped to the project. The token is read from `SW_PYPI_TOKEN`,
+  exported before Claude Code starts.
+- The `pypi` skill downloads from downloads.apache.org first, because archive.apache.org still had
+  no 0.5.0 fifteen minutes after the move. It verifies with `gpgv`, which leaves the user's keyring
+  alone. After the upload, it checks that PyPI holds the files it built.
+- The text `publish` writes for the GitHub release says the downloads page links the source package
+  and the binary archives. It said each package, and the page does not list the Debian packages.
+- The release guide lets `--remove-old` go ahead without a Scoop bucket when the project has none,
+  and asks that archive.apache.org holds each version before it is removed.
 - The `homebrew` skill no longer runs `git rm` inside the temporary tap, where git stops the check
   whenever `asz.rb` moves. Its template fits 0.5.0 and later only.
 - The `apt` skill installs every older version in the index through the redirects, not only the

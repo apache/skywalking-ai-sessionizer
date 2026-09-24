@@ -1070,11 +1070,11 @@ if [ "$cmd" = publish ]; then
   # The downloads page links the older versions in the release directory
   # until the website pull request points them at the archive, the apt
   # repository on the website sends apt to the mirrors for the previous
-  # version until it lists this one, and the Scoop bucket names the previous
-  # version until it moves on. Removing them in the run that moves would
-  # break all three, so removal is a later run.
+  # version until it lists this one, and a Scoop bucket, where there is one,
+  # names the previous version until it moves on. Removing them in the run
+  # that moves would break them, so removal is a later run.
   if [ "$remove_old" = true ] && [ "$moved" = false ]; then
-    fail "--remove-old runs only after the move, in a later run. Run publish without it now. Once the website pull requests that point the older versions at archive.apache.org and add $version to the apt repository have merged, and the Scoop bucket names $version, run: tools/release/release.sh publish $version --remove-old"
+    fail "--remove-old runs only after the move, in a later run. Run publish without it now. Once the website pull requests that point the older versions at archive.apache.org and add $version to the apt repository have merged, archive.apache.org holds the older versions, and any Scoop bucket names $version, run: tools/release/release.sh publish $version --remove-old"
   fi
   for p in $packages; do
     for f in "$p" "$p.asc" "$p.sha512"; do has_line "$files" "$f" || fail "$from has no $f"; done
@@ -1190,7 +1190,7 @@ if [ "$cmd" = publish ]; then
 
 #### Where to get it
 
-- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows$(if [ -n "$debs" ]; then printf ', and the Debian packages,'; fi) are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links each package with its signature and checksum.
+- The Apache release of $version is the source package. The binary packages for macOS, Linux and Windows$(if [ -n "$debs" ]; then printf ', and the Debian packages,'; fi) are conveniences built from it. The [SkyWalking downloads page](https://skywalking.apache.org/downloads/) links the source package and the binary archives, each with its signature and checksum.
 - The files attached to this GitHub release are the same signed packages, each with its \`.asc\` signature and \`.sha512\` checksum. Verify them against https://downloads.apache.org/skywalking/KEYS, as [Install]($github/blob/$tag/docs/en/setup/install.md#verify-a-package) describes.
 - To build from the source package, see [Install]($github/blob/$tag/docs/en/setup/install.md#build-from-the-source-package).
 - Documentation: $github/blob/$tag/docs/README.md
@@ -1356,8 +1356,8 @@ YAML
   say "     to $version, as docs/en/guides/how-to-release.md says."
   if [ -n "$old" ] && [ "$remove_old" = false ]; then
     say "  $((n + 1)). Later, once the website pull requests that point$old at archive.apache.org"
-    say "     and add $version to the apt repository have merged, and the Scoop bucket names"
-    say "     $version:"
+    say "     and add $version to the apt repository have merged, archive.apache.org holds"
+    say "     the older versions, and any Scoop bucket names $version:"
     say "     tools/release/release.sh publish $version --remove-old"
   fi
   exit 0
