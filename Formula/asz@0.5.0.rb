@@ -17,10 +17,12 @@
 
 # Written by the homebrew skill in apache/skywalking-ai-sessionizer from the
 # voted binary packages of 0.5.0.
-class Asz < Formula
+class AszAT050 < Formula
   desc "Conversation-level observability for long-lived AI agents"
   homepage "https://github.com/apache/skywalking-ai-sessionizer"
   license "Apache-2.0"
+
+  keg_only :versioned_formula
 
   # Each package comes from the GitHub release of v0.5.0, which carries
   # the voted files. Its URL keeps working after a newer version replaces
