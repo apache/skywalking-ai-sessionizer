@@ -370,7 +370,9 @@ queueing and model latency as tool time. Three tools do report a duration the ru
 them today, so those three are `unavailable` too. A configured timeout is not a measurement.
 [asz.view](../formats/asz-view.md#a-node-in-talks) reports the time from the request record to the
 result record where the join is exact. That is the interval between two records, not execution
-time. OTLP's `claude_code.tool.execution` span supplies the rest, which is Phase 2.
+time. Claude Code's own OpenTelemetry export may carry a tool's execution time, but asz keeps only
+its metrics and drops its logs and traces, and what they carry for a tool call has not been
+measured.
 
 **Absence of `is_error` does not mean success.** It is present on 85.5% of result blocks. asz sets
 `failed` only when the block carries it.
