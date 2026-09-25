@@ -1179,6 +1179,7 @@ const ENGLISH = {
   promptWholeBody: "The body",
   promptChanges: "What it added",
   promptNoPrevious: "The request before this one is not among the loaded bodies, so there is nothing to compare with.",
+  promptNoPreviousNamed: "This request names no request before it, so there is nothing to compare with.",
   promptSystem: "System prompt",
   promptTools: "Tools ({count})",
   promptMessages: "Messages ({count})",
@@ -2385,6 +2386,7 @@ function drawRequest(ctx, e, read2, sides, store) {
       <button type="button" class="acv-chip${state.promptWhole ? "" : " on"}" data-prompt-whole="0" aria-pressed="${!state.promptWhole}">${esc(s.promptChanges)}</button>
     </div>`;
   if (!state.promptWhole) {
+    if (previous === UNNAMED) return `${modes}<div class="acv-empty">${esc(s.promptNoPreviousNamed)}</div>`;
     if (!previous) return `${modes}<div class="acv-empty">${esc(s.promptNoPrevious)}</div>`;
     return `${modes}${drawDelta(ctx, e, deltaOf(previous, read2), read2, previous.messages.length)}`;
   }
@@ -2410,10 +2412,12 @@ function drawRequest(ctx, e, read2, sides, store) {
   const whole = section(ctx, e, "request-raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|req|raw`));
   return `${modes}${system}${tools}${messages}${settings2}${whole}`;
 }
+const UNNAMED = "unnamed";
 function previousRequest(ctx, e, sides, store) {
   var _a, _b, _c;
   if (!sides.request) return null;
   const mine = store.manifestAt(sides.request.seq, sides.request.row);
+  if (mine && !mine.previous_request) return UNNAMED;
   if (!(mine == null ? void 0 : mine.previous_request)) return null;
   const response = store.responseOfRequestId(mine.previous_request);
   if (!(response == null ? void 0 : response.manifest.call)) return null;

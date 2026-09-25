@@ -20,8 +20,9 @@
   own words, `system`, `human`, `ai` and `tool`, with the tool calls an `ai` message made and each
   tool result under the call it answers. A response shows the answer, the model and the token
   counts. What it added stays unavailable for a LangChain call, because no request names the one
-  before it. The renderer is Horizon's, now pinned at `297f020`, which also draws a light theme's
-  scrollbars and other native controls light.
+  before it, and it now says so. It used to say the request before was not among the loaded bodies,
+  here and for the first call of any chain, where nothing is missing. The renderer is Horizon's, now
+  pinned at `88e0110`, which also draws a light theme's scrollbars and other native controls light.
 
 ## Claude Code
 
