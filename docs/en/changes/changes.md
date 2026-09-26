@@ -131,8 +131,9 @@
 ## Documentation
 
 - The Claude Code adapter page said a `claude_code.tool.execution` span from Claude Code's
-  OpenTelemetry export supplies a tool's execution time. asz drops that export's traces, and no
+  OpenTelemetry export supplies a tool's execution time. asz keeps nothing of that export, and no
   such span was measured, so the page now says the export may carry it and that this is unmeasured.
+  For a call to an MCP server, the plugin's execution record carries the measured time.
 - `source_root` of `claude-code-local` was described as the directory Claude Code keeps its files
   in, `~/.claude`. It is the `projects` directory inside it, which is what the collector reads and
   what the container image page sets. Set to `~/.claude`, the collector found no sessions.
