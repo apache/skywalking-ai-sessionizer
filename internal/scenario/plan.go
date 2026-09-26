@@ -83,10 +83,11 @@ const (
 
 // ToolUse is the request a tool_use fragment carries.
 type ToolUse struct {
-	ID      string
-	Name    string
-	Input   map[string]any
-	Changes []Change
+	ID        string
+	Name      string
+	Input     map[string]any
+	Changes   []Change
+	Execution *Execution
 }
 
 // Ack is what a launch acknowledgement names.
@@ -147,6 +148,10 @@ type Event struct {
 	// it changed, for the writers to record each the way its producer does.
 	ToolName string
 	Changes  []Change
+	// Execution and ToolInput are what the plugin's hook saw of the call,
+	// and the input the call was made with.
+	Execution *Execution
+	ToolInput map[string]any
 
 	// A notice.
 	NoticeTool  string
@@ -493,7 +498,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		if err := checkChanges(c.Tool, id); err != nil {
 			return err
 		}
-		tool = &ToolUse{ID: tid, Name: c.Tool.Name, Input: c.Tool.Input, Changes: c.Tool.Changes}
+		tool = &ToolUse{ID: tid, Name: c.Tool.Name, Input: c.Tool.Input, Changes: c.Tool.Changes, Execution: c.Tool.Execution}
 	case c.Agent != nil:
 		tool = &ToolUse{ID: id + "-tool", Name: "Agent", Input: map[string]any{"description": c.Agent.Name, "prompt": c.Agent.Prompt}}
 	case c.Skill != nil:
@@ -531,7 +536,7 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		rat := b.tick(l, r.After)
 		e := Event{Kind: EvResult, Stream: l.stream, Batch: l.batch, At: rat, ID: id + "-result", Parent: l.last, Run: run,
 			Of: tool.ID, Text: r.Text, Failed: r.Failed, StringEnrichment: r.String, Lost: lost || r.Lost,
-			ToolName: tool.Name, Changes: tool.Changes}
+			ToolName: tool.Name, Changes: tool.Changes, Execution: tool.Execution, ToolInput: tool.Input}
 		b.emit(e)
 		l.last = e.ID
 	case c.Agent != nil:

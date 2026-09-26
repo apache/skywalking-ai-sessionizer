@@ -18,6 +18,7 @@
 package view
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -57,5 +58,16 @@ func TestTalkOrderIsATotalOrder(t *testing.T) {
 		if got := strings.Join(ids, " "); got != want {
 			t.Fatalf("read %d: %s, want %s", i, got, want)
 		}
+	}
+}
+
+// TestRecordTimesSortByInstant. The plugin writes Go's RFC3339Nano, which
+// drops trailing zeros, so the text of three times in order is not in order.
+func TestRecordTimesSortByInstant(t *testing.T) {
+	in := []string{"2026-09-26T10:00:00.11Z", "not a time", "2026-09-26T10:00:00.5Z", "2026-09-26T10:00:00.1Z", "2026-09-26T10:00:00Z"}
+	sort.SliceStable(in, func(i, j int) bool { return compareTimes(in[i], in[j]) < 0 })
+	want := "2026-09-26T10:00:00Z 2026-09-26T10:00:00.1Z 2026-09-26T10:00:00.11Z 2026-09-26T10:00:00.5Z not a time"
+	if got := strings.Join(in, " "); got != want {
+		t.Fatalf("%s, want %s", got, want)
 	}
 }

@@ -43,10 +43,10 @@ func TestNamedAdaptersKeepDefaultsAndExplicitOverrides(t *testing.T) {
 			if len(c.Adapters) != 1 || !reflect.DeepEqual(c.Adapters[0], def) {
 				t.Fatalf("named defaults: got %+v, want %+v", c.Adapters, def)
 			}
-			override := "adapters:\n  - name: " + def.Name + "\n    enabled: false\n    exclude: []\n    metrics: false\n"
+			override := "adapters:\n  - name: " + def.Name + "\n    enabled: false\n    exclude: []\n"
 			c = write(override)
 			a := c.Adapters[0]
-			if a.Enabled || a.Metrics || len(a.Exclude) != 0 {
+			if a.Enabled || len(a.Exclude) != 0 {
 				t.Fatalf("explicit false/empty values were lost: %+v", a)
 			}
 		})

@@ -39,6 +39,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 )
 
 // Options settle a check run.
@@ -245,7 +246,7 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		{"records_well_formed", ex.Properties.RecordsWellFormed, func() ([]string, error) { return expect.RecordsWellFormed(out, session) }},
 		{"repack_keeps_structure", ex.Properties.RepackKeepsStructure, func() ([]string, error) { return repackKeepsStructure(out, session, ex.Parse.MaxRoundBytes) }},
 		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) {
-			return pushFollowsTheWire(out, session, f, ex.Push, expectedTokens(built.Plan), expect.On(ex.Properties.MetricsMatchThePlan))
+			return pushFollowsTheWire(out, session, f, ex.Push, expectedTokens(built.Plan), expectedMCP(built.Plan), expect.On(ex.Properties.MetricsMatchThePlan))
 		}},
 		{"removed_after_sent", ex.Properties.RemovedAfterSent, func() ([]string, error) {
 			return removedAfterSent(sc, f, out, session, built.Plan.Project, ex.Parse.MaxRoundBytes, opts)
@@ -256,6 +257,12 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 				return nil, nil
 			}
 			return changesLeaveTheFold(sc, f, out, session, opts, ex.Parse.MaxRoundBytes)
+		}},
+		{"executions_leave_the_fold", ex.Properties.ExecutionsLeaveTheFold, func() ([]string, error) {
+			if !scenario.HasExecutions(sc.Steps) {
+				return nil, nil
+			}
+			return leavesTheFold("executions_leave_the_fold", "the execution records", sc.WithoutExecutions(), f, out, session, opts, ex.Parse.MaxRoundBytes)
 		}},
 		{"provider_bodies_leave_the_fold", ex.Properties.ProviderBodiesLeaveTheFold, func() ([]string, error) {
 			if !sc.ProviderBodies {
@@ -504,7 +511,7 @@ func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f sc
 		return nil, err
 	}
 	var lines []string
-	for _, d := range expect.Compare(with, without) {
+	for _, d := range append(expect.Compare(with, without), expect.CompareRecords(with, without)...) {
 		lines = append(lines, property+": the fold differs with and without "+what+": "+d)
 	}
 	same, err := expect.SameIdentity(out, session, plain, built.Session)
@@ -696,6 +703,40 @@ func names(p *scenario.Plan) map[string]string {
 	out := map[string]string{"main": "main"}
 	for _, s := range p.Streams {
 		out[s.Label] = s.ID
+	}
+	return out
+}
+
+// expectedMCP is what the plan says the MCP family counts: each call the
+// plugin's hook saw once, and the time it measured, by server, tool, how the
+// call ended and the stream that made it. A replayed result is the same call.
+func expectedMCP(p *scenario.Plan) map[string]int64 {
+	out := map[string]int64{}
+	for i := range p.Events {
+		e := &p.Events[i]
+		if e.Kind != scenario.EvResult || e.Execution == nil || e.Replayed {
+			continue
+		}
+		source := metrics.SourceSubagent
+		if e.Stream == "main" {
+			source = metrics.SourceMain
+		}
+		tool := e.ToolName
+		if _, split, ok := claudecode.MCPName(e.ToolName); ok {
+			tool = split
+		}
+		outcome := e.Execution.Outcome
+		if outcome == "" {
+			outcome = execution.OutcomeReturned
+			if e.Failed != nil && *e.Failed {
+				outcome = execution.OutcomeFailed
+			}
+		}
+		key := e.Execution.Server + "/" + e.Execution.Source + "/" + tool + "/" + outcome + "/" + source
+		out[metrics.MCPCalls+"/"+key]++
+		if e.Execution.Duration > 0 {
+			out[metrics.MCPDuration+"/"+key] += e.Execution.Duration.Milliseconds()
+		}
 	}
 	return out
 }

@@ -2,8 +2,7 @@
 
 asz can send what it collects to an OpenTelemetry receiver, such as the SkyWalking OAP or an
 OpenTelemetry Collector: every collected file and every conversation round as a log record, and
-Claude Code's token usage as metrics. [OTLP Records](../formats/otlp.md) describes what a receiver
-gets.
+the metrics derived from them. [OTLP Records](../formats/otlp.md) describes what a receiver gets.
 
 ## Send
 
@@ -24,13 +23,20 @@ everything not sent yet, and exits. Each file is sent once.
 
 ## Metrics
 
-To send Claude Code's token usage, `claude_code.token.usage`, choose one source:
+asz derives these metrics from what it collects, and sends them with the files:
 
-- Derive it from the transcripts: set `metrics: true` on the `claude-code-local` adapter.
-- Or receive what Claude Code's own exporter sends, with the
-  [receiver adapter](configuration.md#the-receiver-adapter).
+- `agent.token.usage`: the tokens of each Claude Code model call.
+- `agent.mcp.calls` and `agent.mcp.duration`: each call to an MCP server and the time it took.
+  They need the [Claude Code plugin](claude-code-plugin.md).
 
-Not both, since both would count the same tokens.
+They are on by default. The first run reaches back three days. To change that, or to turn the
+metrics off:
+
+```yaml
+metrics:
+  enabled: true
+  lookback: 72h   # 0 or none sends all the history
+```
 
 ## Limit the rate
 

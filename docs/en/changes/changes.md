@@ -20,8 +20,9 @@
   own words, `system`, `human`, `ai` and `tool`, with the tool calls an `ai` message made and each
   tool result under the call it answers. A response shows the answer, the model and the token
   counts. What it added stays unavailable for a LangChain call, because no request names the one
-  before it. The renderer is Horizon's, now pinned at `297f020`, which also draws a light theme's
-  scrollbars and other native controls light.
+  before it, and it now says so. It used to say the request before was not among the loaded bodies,
+  here and for the first call of any chain, where nothing is missing. The renderer is Horizon's, now
+  pinned at `88e0110`, which also draws a light theme's scrollbars and other native controls light.
 
 ## Claude Code
 
@@ -31,8 +32,50 @@
   is now external input that opens its talk. A session collected before this keeps the gap, because
   landed records are never rewritten.
 
+## MCP calls
+
+- A call to an MCP server names its server and its tool. Claude Code calls an MCP tool
+  `mcp__<server>__<tool>`. A landed call part now carries `server` and `server_tool` when the name
+  splits exactly, with one `__` after `mcp__`, and the step's `attrs` carry `mcp_server` and
+  `mcp_tool`. A name with a second `__` is left whole, since the separator cannot be told apart
+  from a name that holds it. A session collected before this has neither, because landed records
+  are never rewritten.
+- The Claude Code plugin records each call to an MCP server. Its hooks after every `mcp__` call
+  write an `execution/1` record: the server and where its configuration came from, how the call
+  ended, the time Claude Code measured around it, and the size and SHA-256 of the arguments and of
+  the answer, never their text. The `changes` adapter lands them as a new kind, `execution`.
+  Assembly does not read them. `asz.view` lists them as `tool_executions`, and a step names its
+  records in `executions`, joined by the tool-use id. `mcp.enabled: false` in the plugin's
+  settings turns them off. The shapes were measured on Claude Code 2.1.282, and the real hook
+  payloads are the plugin's test data.
+
+## Metrics
+
+- Metrics are one section of the configuration, for the whole root. `metrics.enabled`, on by
+  default, derives every metric from every landed file, whichever adapter landed it.
+  `metrics.lookback`, 72 hours by default, bounds the first derivation over a root that already
+  has history. The adapter keys `metrics` and `metrics_lookback` are gone, and a file that still
+  writes them has them ignored. Metrics used to be off by default, with a look-back of 24 hours.
+- `claude_code.token.usage` is now `agent.token.usage`, with the same description, unit, kind and
+  labels. The family is asz's and is meant for any agent, and a runtime's vocabulary stops at its
+  adapter. A receiver's rules must read the new name.
+- Two new metrics count the calls to MCP servers, from the plugin's execution records:
+  `agent.mcp.calls` and `agent.mcp.duration`, by server, tool, the source of the server's
+  configuration, outcome and query source. A server and a tool together name the target a call
+  reached, which a receiver can treat as an endpoint of the agent.
+- The `claude-code-otlp` receiver no longer keeps what Claude Code's exporter sends. It accepts
+  metrics, logs and traces, over gRPC or over HTTP in any encoding, and keeps none of them. Its
+  `metrics` key is gone. Every metric asz sends is derived from the landed files, so one root has one
+  source for each count. The exporter's labels a transcript does not carry, such as the user and
+  the organisation, and its other metrics, such as cost, are no longer sent. The spool holds only
+  derived requests, and `spool.state` is no longer written.
+
 ## Development
 
+- The `all-kinds` scenario holds a call to an MCP server, so the push to a real OpenTelemetry
+  Collector carries an `execution` file and the MCP metrics, and the check compares them with the
+  root. The same run sends a real exporter's metrics to the `claude-code-otlp` receiver, and fails
+  if any of them reaches the spool or the Collector.
 - The first benchmark: `BenchmarkLangChainRequests` measures cutting every request body of one
   LangChain conversation, for context windows from 8K to 1M tokens, trimmed, summarised or neither.
   `make test` and CI only compile it. Its comment gives the command that runs it, the reference

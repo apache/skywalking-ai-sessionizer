@@ -33,7 +33,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry, Block or Body
 // changes; a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 14
+const Schema = 15
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -53,6 +53,9 @@ const (
 	// KindProviderBody is a body the runtime exchanged with its model
 	// provider; evidence, never a step, and in no derived lookup.
 	KindProviderBody
+	// KindExecution is what an observer saw a tool call do; evidence, never
+	// a step.
+	KindExecution
 )
 
 // Trigger says what caused a prompt cycle.
@@ -284,4 +287,8 @@ type Block struct {
 	// summed over its files; zero for every other kind.
 	Adds uint32
 	Dels uint32
+	// Server and ServerTool are the MCP server and tool a tool_use block's
+	// name addresses, interned, where the adapter could split the name.
+	Server     uint32
+	ServerTool uint32
 }

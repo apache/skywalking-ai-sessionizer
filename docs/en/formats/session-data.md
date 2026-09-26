@@ -79,6 +79,7 @@ is a directory with one file per body, and each record names its own file.
 | `workflow_manifest` | a workflow run's manifest | one record with `batch` and `label`, and a `data` part | the run's name |
 | `workflow_script` | the program a workflow ran | one record whose part is `unknown`: the source is a program, not data | nothing; kept because it is part of the session |
 | `changes` | the files the asz Claude Code plugin saw a tool call change, one line per call | one record per observed call, with `id`, `tool` and `time` lifted from it and the line whole as one `data` part, a `changes/1` record; no `from` and no flags, so assembly emits no node for it | nothing in a round; the view joins each to its step by `tool`. A transcript's `Edit` and `Write` results carry the same record as a second `data` part, from the runtime's own patch. See the [Claude Code plugin](../setup/claude-code-plugin.md). |
+| `execution` | what the asz Claude Code plugin's hook saw of each call to an MCP server, one line per call, in a file of its own beside the stream's change file | one record per observation, with `id`, `tool` and `time` lifted from it and the line whole as one `data` part, an `execution/1` record; no `from` and no flags, so assembly emits no node for it | nothing in a round; the view joins each to its step by `tool`, and one step can have several. See [Execution records](#execution-records) |
 | `provider_body` | what a model call was sent and what came back: the bodies Claude Code wrote for its provider, one file per body, or a LangChain run's `inputs` and `outputs` | one record per body, with `id` unique in the session (for Claude Code, the body's file name without `.json`; for LangChain, the run id followed by `:request` or `:response`), `run` on a request, `call` on a response, `model`, and the parts described in [Provider bodies](#provider-bodies); no `from` and no flags, so assembly emits no node for it. The header's `src` is `.` and it names no stream | nothing in a round; the view joins each to its call. See [Claude Code Provider Bodies](../setup/claude-code-provider-bodies.md) and [LangChain](../setup/langchain.md) |
 
 A source that is one document, not a stream of lines, lands as one record with `ord` 1 and `off` 0.
@@ -233,11 +234,18 @@ reads every landed file this way.
 | --- | --- | --- |
 | `text` | readable text | `text` |
 | `reasoning` | the model's own reasoning | `text` when the runtime kept it |
-| `call` | a request to run something | `id`, `name`, `data` |
+| `call` | a request to run something | `id`, `name`, `data`, and `server` and `server_tool` for a call to an MCP server |
 | `result` | what a call returned | `of`, `failed`, and `text`, `data` or both |
 | `media` | an image or a document | `media`, `data` |
 | `data` | structure that is not prose: a record the runtime keeps for itself, a manifest | `data` |
 | `unknown` | content the dialect could not describe | the bytes in `data` as one JSON string, the bytes themselves or their base64 when `encoding` is `base64`, and the reason in `text` |
+
+`server` and `server_tool` say which MCP server a call is addressed to and which of its tools. An
+adapter sets them only where its runtime's name for the call splits exactly. Claude Code names such a
+call `mcp__<server>__<tool>`, and the split is made only when exactly one `__` follows `mcp__`: a
+name that holds a second `__` could split two ways, so it is left whole. The server is Claude Code's
+form of the configured name, so "claude.ai Claude Docs" is `claude_ai_Claude_Docs`. The name the
+server was configured with is in the call's execution record, when there is one.
 
 Every part carries `state` and `bytes`. `state` is one of `available`, `truncated`, `redacted`,
 `omitted` or `unavailable`, and `bytes` is the size of the original even when the part holds less.
@@ -332,6 +340,38 @@ The set of kinds is small because the thing described is small. Measured across 
 Claude Code files, six content-block shapes exist and four cover 99.99% of content blocks. The
 Claude Code [Session Data mapping](../adapters/claude-code.md#session-data-mapping) gives the
 counts.
+
+## Execution records
+
+An `execution/1` record says what one observer around a tool call saw it do. The transcript says what
+the model asked for and what came back. It does not say which server ran the call, how long the call
+took, or what the server was sent. The one observer today is the asz Claude Code plugin, whose hook
+runs after every call to an MCP server. Measured on Claude Code 2.1.282:
+
+- The hook after a call names the server and where its configuration came from, the time the
+  runtime measured around the call, and the input as the server received it. A hook before the call
+  that rewrote the input changed what the server received and what this hook sees, while the
+  transcript kept the model's own input.
+- An error the server returned, a lost connection and a timeout all reach the failure hook, not the
+  success hook.
+- A call the runtime refused never reaches a hook, so it has no record.
+- A server's declaration that a tool only reads, or can destroy, reaches neither the model, nor the
+  hooks, nor the transcript.
+
+| Field | Holds |
+| --- | --- |
+| `schema` | `execution/1` |
+| `id` | the observation's own identity: the tool-use id and where it was observed. One call can have several records, each with its own id. The same event handed over twice is one record |
+| `observed_by`, `boundary` | who observed the call, `asz-plugin`, and where it stood, `client_hook`: the runtime's hook after the call |
+| `session`, `stream` | the session, and `main` or the agent id the call ran under |
+| `tool`, `tool_name` | the call's tool-use id, the only join to its step, and the name the runtime called it by |
+| `cwd` | the working directory the runtime reported, which the collector's session filters are judged by |
+| `protocol` | `mcp` |
+| `server` | `name`, the server's configured name, and `source`, where its configuration came from in the runtime's own word: for Claude Code `user`, `project`, `local`, or `dynamic` for a server given on the command line |
+| `time` | when the observation ended |
+| `duration_ms` | the time the runtime measured around the call, which includes any waiting before it started. It is not the server's own time. Absent when the observer did not say |
+| `outcome` | `returned`, `failed` or `interrupted` |
+| `arguments`, `result` | only the `bytes` and the `sha256` of the value as compact JSON with sorted keys, and `state` `size_only`. Two observations of one value have one digest, so a digest that differs from the model's input shows the input was changed on the way. `result` is only on a call that returned |
 
 ## Dropped
 

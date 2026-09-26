@@ -16,15 +16,19 @@
 # under the License.
 
 checkpoints:
-  launched:
-    rounds: 1
-    kinds: {stream: 4, agent.call: 2, agent.launch_ack: 2, agent.output: 3, runtime.notification: 1}
-    relations: {starts: 3, ends_with: 3, reports: 1}
   final:
-    rounds: 2
-    delta: true
-    kinds: {epoch.boundary: 1, epoch.summary: 1, talk: 5}
-    unresolved: {open: 0}
-    view: {state: verified, rounds: 2, files: 12}  # main twice, helper, its meta, two children, journal, manifest, script, the execution record; and two rounds
+    # Five tools and one agent: the records add no node.
+    kinds: {tool: 5, agent.call: 1}
+    nodes:
+      tool/s2-tool: {kind: tool, attrs: {mcp_server: status, mcp_tool: lookup}}
+      tool/s3-tool: {kind: tool, attrs: {mcp_server: status, mcp_tool: lookup}}
+      # A second "__" makes two splits possible, so none is made.
+      tool/s5-tool: {kind: tool, attrs: {name: mcp__odd__name__twice, mcp_server: null, mcp_tool: null}}
+      tool/auditor-s1-tool: {kind: tool, stream: auditor, attrs: {mcp_server: docs, mcp_tool: read}}
+    view:
+      state: verified
+      executions: 4
+      executions_joined: 4
+      outcomes: {returned: 3, failed: 1}
 push:
-  kinds: [transcript, agent_meta, journal, workflow_manifest, workflow_script, execution, round]
+  kinds: [transcript, agent_meta, execution, round]

@@ -56,7 +56,7 @@ adapter reports it as `unavailable` rather than approximating it.
 
 | Runtime | Status | Collection |
 | --- | --- | --- |
-| [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists. The [plugin](docs/en/setup/claude-code-plugin.md) adds which files each shell command changed. The [receiver](docs/en/setup/configuration.md#the-receiver-adapter), `claude-code-otlp`, is off by default. When Claude Code's own OpenTelemetry exporter is pointed at it, it lands the exporter's metrics requests. It drops the exporter's logs and traces. |
+| [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists. The [plugin](docs/en/setup/claude-code-plugin.md) adds which files each shell command changed. The [receiver](docs/en/setup/configuration.md#the-receiver-adapter), `claude-code-otlp`, is off by default. It accepts what Claude Code's own OpenTelemetry exporter sends and keeps none of it, so a Claude Code set to export keeps working. |
 | Codex | planned | — |
 | [LangChain / LangGraph](docs/en/adapters/langsmith.md) | collection implemented | a receiver, `langsmith-ingest`, the tracing client every LangChain application carries is pointed at with four environment variables; nothing changes in the application. It lands the conversation and what each model call was sent. The [plugin](docs/en/setup/langchain-plugin.md) adds which files each tool call changed. |
 

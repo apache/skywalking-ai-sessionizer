@@ -100,11 +100,12 @@ YAML
     sleep 2
   done
 
-  # The second source of the same metric: the runtime's own exporter. A
-  # second root runs the receiver adapter alone, a real external exporter
-  # sends it the token metric over gRPC and over HTTP, and the spool is
-  # pushed to the same Collector. The check then wants points from both
-  # sources, told apart by the sender attribute the exporter is given.
+  # The runtime's own exporter, pointed at asz's receiver. A second root runs
+  # the receiver adapter alone, and a real external exporter sends it a
+  # token metric over gRPC and over HTTP. The receiver accepts both and keeps
+  # nothing: every metric asz sends is derived from the landed files, so the
+  # second root's spool stays empty and its push sends nothing. The check
+  # then fails on any point marked with the exporter's sender attribute.
   received="$WORK/$protocol-received"
   mkdir -p "$received"
   cat > "$received/asz.yaml" <<YAML
@@ -116,7 +117,6 @@ adapters:
   - name: claude-code-otlp
     enabled: true
     listen: ":$RECEIVE_PORT"
-    metrics: true
 export:
   otlp:
     protocol: $protocol
@@ -142,7 +142,10 @@ YAML
   kill "$receiver_pid" >/dev/null 2>&1 || true
   wait "$receiver_pid" 2>/dev/null || true
   head -3 "$received/collect.log"
-  ls "$received/_metrics" | grep -c '\.pb$' | sed 's/^/spooled requests from the exporter: /'
+  if ls "$received/_metrics" 2>/dev/null | grep -q '\.pb$'; then
+    echo "the receiver put the exporter's metrics in the spool; it must accept and drop them"
+    exit 1
+  fi
   ./bin/asz push -once -config "$received/asz.yaml"
   # The file exporter flushes on its own schedule; give it a moment.
   for i in $(seq 1 20); do

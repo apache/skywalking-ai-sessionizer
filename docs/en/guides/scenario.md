@@ -150,7 +150,7 @@ A duration counts from the session's last record, never from when it landed, so 
 data always gives the same answer. A feed stamps each session so its last record falls when it was
 written, so a feed's session stays about that long after it was written. A one-shot build with an
 old `--at` is already past its duration, and goes as soon as it is sent. `d` counts whole days, as
-`metrics_lookback` does. One run applies one policy to every session it writes.
+`metrics.lookback` does. One run applies one policy to every session it writes.
 
 The policy belongs to the scenario, never to the product. The configuration has no removal
 setting, and a session no build marked, which is every real Claude Code session, is never removed.

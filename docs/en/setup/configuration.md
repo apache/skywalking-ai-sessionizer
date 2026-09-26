@@ -25,9 +25,9 @@ A list of the sources asz collects from.
 | Adapter | On by default | Collects |
 | --- | --- | --- |
 | `claude-code-local` | yes | Claude Code's transcripts on this machine |
-| `changes` | yes | what a tool call changed on disk, from the [Claude Code](claude-code-plugin.md) or [LangChain](langchain-plugin.md) plugin; see [below](#the-changes-adapter) |
+| `changes` | yes | what a tool call changed on disk, from the [Claude Code](claude-code-plugin.md) or [LangChain](langchain-plugin.md) plugin, and each call to an MCP server the Claude Code plugin saw; see [below](#the-changes-adapter) |
 | `claude-code-provider` | yes | the request and response bodies Claude Code writes when asked; see [below](#the-provider-adapter) |
-| `claude-code-otlp` | no | what Claude Code's own OpenTelemetry exporter sends; see [below](#the-receiver-adapter) |
+| `claude-code-otlp` | no | nothing: it accepts what Claude Code's own OpenTelemetry exporter sends, and keeps none of it; see [below](#the-receiver-adapter) |
 | `langsmith-ingest` | no | what the LangSmith tracing client sends, from a LangChain or LangGraph application; see [LangChain and LangGraph](langchain.md) |
 
 ### More than one agent
@@ -54,8 +54,6 @@ A list of the sources asz collects from.
 | `source_root` | empty | The directory Claude Code keeps its projects in, one directory per project. Empty means `projects` under `CLAUDE_CONFIG_DIR`, else under `XDG_CONFIG_HOME/claude`, else under `~/.claude`. To collect from a copy, name the copy's `projects` directory, not the directory above it. |
 | `include` | empty | [Session filters](#session-filters) a session must match. Empty means every session. |
 | `exclude` | `/private/tmp/**` | [Session filters](#session-filters) that leave a session out. `exclude: []` clears the default. |
-| `metrics` | `false` | Derive Claude Code's token metrics from the collected data. See [Metrics](export-otlp.md#metrics). |
-| `metrics_lookback` | `24h` | How far back the first derivation reaches, such as `24h` or `7d`. `0` or `none` derives everything. |
 | `listen` | none | `claude-code-otlp` only: the address to receive on, such as `127.0.0.1:4317`, gRPC and HTTP on one port. |
 
 ### Session filters
@@ -91,6 +89,16 @@ data later.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `max_round_bytes` | `2097152` | The largest round file the parser writes, 2 MiB. |
+
+## metrics
+
+The metrics asz derives from the collected data, whichever adapter collected it. See
+[Metrics](export-otlp.md#metrics).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Derive the metrics. |
+| `lookback` | `72h` | How far back the first derivation reaches, such as `72h` or `3d`. `0` or `none` derives everything. Later ones derive everything new. |
 
 ## export
 
@@ -128,7 +136,8 @@ export:
 ## The changes adapter
 
 `changes` collects the records `asz-changes` writes: what each tool call changed on disk, for
-the [Claude Code plugin](claude-code-plugin.md) or the [LangChain plugin](langchain-plugin.md).
+the [Claude Code plugin](claude-code-plugin.md) or the [LangChain plugin](langchain-plugin.md),
+and each call to an MCP server the Claude Code plugin saw.
 With no `source_root` it reads Claude Code's plugin directory, `plugins/data` under
 `CLAUDE_CONFIG_DIR`, else `XDG_CONFIG_HOME/claude`, else `~/.claude`, and does nothing when the
 plugin is not installed. A LangChain recorder writes where `ASZ_CHANGES_DATA` points, so that is
@@ -160,15 +169,8 @@ adapters:
   - name: claude-code-otlp
     enabled: true
     listen: 127.0.0.1:4317
-    metrics: true
 ```
 
-`claude-code-otlp` receives Claude Code's own metrics. Start Claude Code with:
-
-```sh
-CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=otlp OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317 claude
-```
-
-It runs while `asz collect` or `asz server` runs, but not with `-once`. It keeps the metrics for
-[export](#export), and drops logs and traces. Turn `metrics` on here or on `claude-code-local`, not
-on both, since both would count the same tokens.
+`claude-code-otlp` is for a Claude Code already set to send its own telemetry. It accepts metrics,
+logs and traces over gRPC or HTTP, and keeps none of them. The metrics asz sends come from the
+collected data. It runs while `asz collect` or `asz server` runs, but not with `-once`.

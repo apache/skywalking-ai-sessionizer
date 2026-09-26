@@ -684,8 +684,12 @@ attachment travels whole as one `data` part, so all its fields are kept. System 
 journal lines and manifests are of this kind.
 
 **An MCP tool use is an ordinary `call`.** Its server is only a prefix on the name,
-`mcp__<server>__<tool>`. This was observed on 39 of 26,940 tool uses (0.1%), too few to state as a
-rule.
+`mcp__<server>__<tool>`. The adapter lands the server and the tool as the part's `server` and
+`server_tool` only when exactly one `__` follows `mcp__`. A server or tool whose own name holds
+`__` cannot be told apart from the separator, so such a name is left whole. MCP tool uses were 39
+of 26,940 tool uses (0.1%) in the corpus. Which server ran a call, how it ended and how long it
+took are not in the transcript. The plugin's [execution records](claude-code-plugin.md#calls-to-mcp-servers)
+carry them.
 
 Five record fields come from places the glossary does not list:
 
@@ -855,11 +859,11 @@ the binary are unreachable in shipped builds.
 
 Its content defaults are restrictive, as [Collection](#collection) describes.
 
-### The same metrics from the transcripts
+### Metrics from the transcripts
 
-With `metrics: true`, this adapter derives a reconstructed subset of the runtime's own metric
-family from what it landed, under the exporter's metric name, so a receiver holds one name
-whichever produced the points. Phase one is `claude_code.token.usage`: the usage of a call is its
+asz derives `agent.token.usage` from what this adapter landed. It counts what the runtime's own
+exporter calls `claude_code.token.usage`, with the same description, unit, kind and token types,
+under asz's own name, because a runtime's vocabulary stops at its adapter. The usage of a call is its
 last fragment's in line order, as the assembler reads it, and only a finished call counts;
 `query_source` is `main` for the session's own transcript and `subagent` for a child's; `model`
 is `message.model`; `session.id` is the session. The exporter's account, organisation, terminal,
@@ -871,20 +875,17 @@ the derivation is tested against.
 
 What the transcripts do not carry is not derived: cost, per-request latency, tool execution time,
 active time, lines of code, commits, pull requests, the session start type, and the tokens of the
-runtime's auxiliary calls, which never reach a transcript. Those come from the exporter alone.
-The first derivation over a root with history reaches back `metrics_lookback`, 24 hours unless
-set. See [Metrics](../setup/export-otlp.md#metrics).
+runtime's auxiliary calls, which never reach a transcript. asz does not send them. The first
+derivation over a root with history reaches back `metrics.lookback`, 72 hours unless set. See
+[Metrics](../setup/export-otlp.md#metrics).
 
 ### The runtime's exporter, received
 
-`claude-code-otlp` is the other adapter for this runtime: an OpenTelemetry receiver its
-exporter is pointed at, over gRPC or HTTP with protobuf on one port. Phase one lands the metrics
-requests it receives in the spool, bytes as received, and `asz push` sends them under asz's
-identity; logs and traces are accepted and dropped. It lands no transcript and reads none, so it
-adds no structure; the two adapters meet only in the spool, and `metrics` is on for one of them.
-The runtime's events, with the latency and cost a transcript never carries, are the second phase,
-and the question there is whether they land as Session Data joined to `llm.call` by the request
-id or travel untouched.
+`claude-code-otlp` is an OpenTelemetry receiver the runtime's exporter can be pointed at, over
+gRPC or HTTP on one port. It accepts metrics, logs and traces, and keeps none of them. A runtime
+already set to export keeps working, and nothing it sends is counted beside what asz derives. It
+lands no transcript and reads none, so it adds no structure. The runtime's events carry the
+latency and cost a transcript never has. Landing them is not implemented.
 
 The receiver speaks OTLP because Claude Code has exactly one outward protocol. Its exporter setting
 accepts `console`, `otlp` or `prometheus` for metrics, and `console` or `otlp` for logs and traces.

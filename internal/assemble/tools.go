@@ -35,12 +35,15 @@ import (
 type toolUse struct {
 	ToolID uint32
 	Name   string
-	Use    *index.Entry
-	UseOrd uint16
-	Result *index.Entry
-	ResOrd uint16
-	Stream *streamInfo
-	NodeID string
+	// Server and ServerTool are the MCP server and tool the call's name
+	// addresses, where the adapter could split the name exactly.
+	Server, ServerTool string
+	Use                *index.Entry
+	UseOrd             uint16
+	Result             *index.Entry
+	ResOrd             uint16
+	Stream             *streamInfo
+	NodeID             string
 
 	// Ambiguous means several results carry this id. An exact identifier match
 	// does not guarantee a unique match, and where it is not unique the
@@ -82,6 +85,7 @@ func (b *builder) stage4Tools() {
 				case index.BlockToolUse:
 					if t.Use == nil {
 						t.Use, t.UseOrd, t.Name = e, blk.Ord, b.str(blk.Name)
+						t.Server, t.ServerTool = b.str(blk.Server), b.str(blk.ServerTool)
 					}
 				case index.BlockToolResult:
 					if t.Result != nil {
@@ -145,6 +149,13 @@ func (b *builder) emitTool(t *toolUse, parent string) {
 		"name": t.Name,
 		// The request lives in the tool_use block; the reference below locates it.
 		"timing": model.Unavailable,
+	}
+	// A call to an MCP server names the server and the tool, as the adapter
+	// read them from the call's name. They are the runtime's names, which
+	// can differ from the configured ones; which server ran the call is an
+	// observer's to say, in an execution record.
+	if t.Server != "" {
+		a["mcp_server"], a["mcp_tool"] = t.Server, t.ServerTool
 	}
 	refs := []sessionflow.Ref{blockRef(t.Use, t.UseOrd)}
 	quality := model.Unresolved

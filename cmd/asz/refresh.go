@@ -171,7 +171,7 @@ type refresher struct {
 // plugin may be installed after the pipeline starts, and a source that
 // appears later has to be picked up without a restart; every pass looks
 // again.
-func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, maxRound int64, once bool) (*refresher, error) {
+func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, mc config.Metrics, maxRound int64, once bool) (*refresher, error) {
 	r := &refresher{srv: srv, zone: zone, maxRound: maxRound, full: true, retry: map[string]bool{}}
 
 	// One pipeline serves every adapter, so it needs one mode and one
@@ -199,11 +199,6 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 			if err != nil {
 				return nil, err
 			}
-			deriver, err := newDeriver(zone, ad, mode == config.ModeOnce)
-			if err != nil {
-				return nil, err
-			}
-			r.deriver = deriver
 			r.col = claudecode.New(src, zone, ad.Collector.MaxDeltaBytes)
 			r.match = claudecode.NewMatcher(ad.Include, ad.Exclude).Match
 			r.colSource = src
@@ -251,6 +246,15 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, ma
 		// another machine, is served as it is.
 		fmt.Fprintln(os.Stderr, "source   : no local adapter enabled; nothing is collected")
 		return nil, nil
+	}
+	// Metrics are the root's, not an adapter's: one derivation reads every
+	// landed file, whichever adapter landed it.
+	if mc.On() {
+		deriver, err := newDeriver(zone, mc, mode == config.ModeOnce)
+		if err != nil {
+			return nil, err
+		}
+		r.deriver = deriver
 	}
 	r.base = view.Status{Mode: mode, Adapter: strings.Join(names, "+"), Source: strings.Join(sources, ", ")}
 	if mode == config.ModeWatch {
@@ -420,6 +424,10 @@ func (r *refresher) pass() error {
 	changed := map[string]bool{}
 
 	var cs *claudecode.Stats
+	// collected says a collector reached its source this pass. The first
+	// derivation over a root is bounded by the look-back and runs once, so
+	// it waits for a source to be there.
+	collected := false
 	colHere := false
 	if r.col != nil {
 		var cerr error
@@ -428,6 +436,7 @@ func (r *refresher) pass() error {
 		}
 	}
 	if colHere {
+		collected = true
 		var err error
 		cs, err = r.col.CollectAll(r.match)
 		if err != nil {
@@ -453,6 +462,7 @@ func (r *refresher) pass() error {
 		if !changesHere {
 			continue
 		}
+		collected = true
 		ch, err := cs.col.CollectAll(cs.match)
 		if err != nil {
 			errs = append(errs, err)
@@ -480,6 +490,7 @@ func (r *refresher) pass() error {
 		}
 	}
 	if providerHere {
+		collected = true
 		projects := r.colSource
 		if projects == "" {
 			projects, _ = claudecode.ResolveSourceRoot("")
@@ -503,6 +514,7 @@ func (r *refresher) pass() error {
 	}
 
 	if r.langsmith != nil {
+		collected = true
 		landedRuns, err := r.langsmith.Collect()
 		if err != nil {
 			errs = append(errs, err)
@@ -533,7 +545,7 @@ func (r *refresher) pass() error {
 			sessions = all
 		}
 	}
-	if r.deriver != nil && cs != nil {
+	if r.deriver != nil && collected {
 		// The first pass derives history once. A later pass derives what
 		// either adapter moved, what waited on a lock, and what either the
 		// deriver or removal left for another pass.

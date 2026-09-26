@@ -85,6 +85,21 @@ type Input struct {
 	// the exit code and the standard error text for a shell command.
 	ToolResponse json.RawMessage `json:"tool_response"`
 	Error        string          `json:"error"`
+
+	// MCPServer is set on every event of a call to an MCP server: the
+	// server's name and where its configuration came from. DurationMS is on
+	// the events after a call, the runtime's own measure around it, and
+	// IsInterrupt on a failure a person caused. All three measured on Claude
+	// Code 2.1.282.
+	MCPServer   *MCPServer `json:"mcp_server"`
+	DurationMS  *int64     `json:"duration_ms"`
+	IsInterrupt *bool      `json:"is_interrupt"`
+}
+
+// MCPServer is the MCP server a call went to, as the runtime names it.
+type MCPServer struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
 }
 
 // Read decodes one invocation.

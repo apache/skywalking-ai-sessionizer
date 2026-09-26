@@ -84,6 +84,7 @@ producer of them.
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence` |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
 | `workspace_changes` | one per workspace change record the session's files carry, joined to its step. See below. |
+| `tool_executions` | one per tool execution record the session's files carry, joined to its step. See below. |
 
 Verification is content, not an error. A gap in the chain or a failed digest is written into
 `summary.state` and `summary.problems`, each round says whether it verified, and the rest of the
@@ -113,7 +114,8 @@ usable round at all is an error, because there is nothing to show.
 | `text`, `state`, `bytes` | the part the node stands on: its readable text, clipped to the longest prefix of whole characters within 2,000 bytes, whether the content is `available`, and its full size. For a `data` part the text is the data as compact JSON. Earlier writers put `\u003c`, `\u003e` and `\u0026` there for `<`, `>` and `&`, so their step text can differ (see [What data holds](session-data.md#what-data-holds)). A reader wanting the whole record reads it by address. |
 | `usage`, `flags`, `dropped` | what else the referenced record says, copied once: on an `llm.call`, the token counts `in`, `out`, `cache_read`, `cache_write` from the one record `usage_at` names, never a sum over fragments; the record's `flags`; and its `dropped` list, so a viewer can say what was left out and why |
 | a talk adds | `label` and `reply`, clipped the same way and described below, then `runs`, `steps`, `tools`, `from`, `to`, `child`, `segment` |
-| a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly |
+| a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly; `changes` and `executions`, the records joined to it |
+| a call to an MCP server has in `attrs` | `mcp_server` and `mcp_tool`, the server and the tool the runtime's name for the call addresses, where the name splits exactly (see [Parts](session-data.md#parts)). They are the runtime's names; which server ran the call, by its configured name, is in the call's execution record |
 | a `turn.duration` step adds | `duration_ms`, `duration_measured_by` |
 | `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced |
 | `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, ordered by relation id and then direction, so a viewer draws cross-stream flow without searching `relations` and the same fold gives the same list |
@@ -162,6 +164,22 @@ and a viewer showing one prefers it. A change
 several windows could have made appears in each of their records, marked `shared` and naming the
 others, and is counted once. A record with `basis: skipped_read_only` carries no changes and
 means the call was not observed, never that it changed nothing.
+
+## Tool executions
+
+`tool_executions` lists what an observer around a tool call saw it do, one entry per execution
+record, in time order. An entry carries where the record was read from and the step it joins to,
+then the record's own fields as [`execution/1`](session-data.md#execution-records) lists them:
+
+| Key | Value |
+| --- | --- |
+| `step` | the id of the tool step whose tool-use id the record names. Empty when no step of the document carries the id; the record is kept, not dropped |
+| `ref` | the landed record the entry was built from, in the shape every node's `ref` has. `seq` names an `execution` file under `files` |
+| `schema`, `id`, `observed_by`, `boundary`, `session`, `stream`, `tool`, `tool_name`, `cwd`, `protocol` | the record's identity: `id` is the observation's own, so one call can have several entries |
+| `server`, `time`, `duration_ms`, `outcome`, `arguments`, `result` | which server ran the call and where its configuration came from, when the observation ended, the time the runtime measured around the call, how it ended, and the size and digest of what was sent and what came back |
+
+A tool step lists the ids of its records under `executions`, in the order `tool_executions` lists
+them. The records are not counted in `summary`, and they add no node.
 
 ## Provider bodies
 

@@ -32,6 +32,8 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // Source is one file the plugin writes: the records of one stream of one
@@ -41,6 +43,9 @@ type Source struct {
 	Rel     string // relative to the adapter's source root; kept in the landed header
 	Session string
 	Stream  string // main or an agent id
+	// Kind is what the file holds, and what it lands as: change records,
+	// or execution records, which the plugin writes to a file of their own.
+	Kind sessiondata.Kind
 }
 
 // Session is one Claude Code session with every change file the plugin
@@ -158,7 +163,7 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 				continue
 			}
 			for _, f := range files {
-				stream, ok := strings.CutSuffix(f.Name(), ".jsonl")
+				stream, kind, ok := streamOf(f.Name())
 				if f.IsDir() || !ok || (stream != "main" && !claudecode.IsAgentID(stream)) {
 					continue
 				}
@@ -169,7 +174,7 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 				}
 				abs := filepath.Join(out, id, f.Name())
 				s.Sources = append(s.Sources, Source{
-					Path: abs, Rel: path.Join(name, "output", id, f.Name()), Session: id, Stream: stream,
+					Path: abs, Rel: path.Join(name, "output", id, f.Name()), Session: id, Stream: stream, Kind: kind,
 				})
 				if s.Root == "" {
 					s.Root = firstRoot(abs)
@@ -185,8 +190,20 @@ func DiscoverWithWarnings(root string) (sessions []Session, warnings []error, er
 	return sessions, warnings, nil
 }
 
+// streamOf reads a file's stream and kind from its name: <stream>.jsonl for
+// change records, <stream>.execution.jsonl for execution records.
+func streamOf(name string) (string, sessiondata.Kind, bool) {
+	if stream, ok := strings.CutSuffix(name, ".execution.jsonl"); ok {
+		return stream, sessiondata.KindExecution, true
+	}
+	stream, ok := strings.CutSuffix(name, ".jsonl")
+	return stream, sessiondata.KindChanges, ok
+}
+
 // firstRoot reads the workspace path the first complete record names, or
-// nothing when the file has no complete record yet.
+// nothing when the file has no complete record yet. A change record names
+// the root it observed; an execution record, the working directory the
+// runtime reported.
 func firstRoot(path string) string {
 	f, err := os.Open(path)
 	if err != nil {
@@ -200,6 +217,9 @@ func firstRoot(path string) string {
 	line = bytes.TrimRight(line, "\r\n")
 	if r, ok := changes.Decode(line); ok && r.Root != nil {
 		return r.Root.Path
+	}
+	if r, ok := execution.Decode(line); ok {
+		return r.Cwd
 	}
 	return ""
 }

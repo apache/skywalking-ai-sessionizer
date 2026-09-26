@@ -18,6 +18,8 @@ session.
         transcript-<collected-at>-<seq>.sd
         changes.cursor                   the plugin's change records for the stream, when
         changes-<collected-at>-<seq>.sd  the asz Claude Code plugin is installed
+        execution.cursor                 the plugin's execution records for the stream: which
+        execution-<collected-at>-<seq>.sd  MCP server each call went to, and how it ended
       <agent-id>/                        one directory per child agent
         transcript.cursor
         transcript-<collected-at>-<seq>.sd
@@ -43,11 +45,8 @@ session.
   _provider/                             when claude-code-provider runs
     seen.state                           which body files landed, in which session, and which wait
     .lock                                one provider collector per root
-  _metrics/                              the metrics spool, when an adapter produces metrics
-    spool.state                          the next number for a received request
-    metrics.state                        what the local derivation has counted
-    .lock
-    metrics-<received-at>-<seq>-otlp.pb  one request the receiver adapter was sent
+  _metrics/                              the metrics spool, when metrics are on
+    metrics.state                        what the derivation has counted
     metrics-<session-id>-<seq>-local.pb  the points derived from the session's landed file <seq>
   push.state                             what has been sent: each file's digest, the receivers,
                                          and the files a receiver rejected records of
@@ -63,7 +62,7 @@ session.
 Child streams are flat siblings of `main`, keyed by agent id. Provider bodies sit under the
 session, not under a stream, because a body names no stream; the view joins each to its call. The storage path deliberately does
 not mirror the source tree: a path must not encode a relationship the pipeline is supposed to
-derive. [Export over OpenTelemetry](../setup/export-otlp.md) says how the metrics spool fills and
+derive. [OTLP Records](otlp.md) says how the metrics spool fills and
 what `push.state` records. `_scenario/` and `_removed/` exist only in a root a scenario build
 wrote. [Retention](#retention) says what they are for.
 

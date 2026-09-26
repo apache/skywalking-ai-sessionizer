@@ -331,12 +331,13 @@ func (b *builder) entryAt(r sessionflow.Ref) *index.Entry {
 
 // transcriptKind reports whether a record came from a stream's transcript, whose
 // lines are numbered as one run. A sidecar, a journal, a manifest, a script, a
-// change record and a provider body are each their own file, with their own line
-// numbers, so counting them together would find gaps that are not there.
+// change record, an execution record and a provider body are each their own
+// file, with their own line numbers, so counting them together would find gaps
+// that are not there.
 func transcriptKind(k index.Kind) bool {
 	switch k {
 	case index.KindMeta, index.KindJournal, index.KindManifest, index.KindScript,
-		index.KindChanges, index.KindProviderBody:
+		index.KindChanges, index.KindProviderBody, index.KindExecution:
 		return false
 	}
 	return true

@@ -69,9 +69,6 @@ func (s *Stats) Complete() bool {
 // maxDrainRounds bounds how many windows one source may land in a pass.
 const maxDrainRounds = 64
 
-// prefix is the landed file name prefix, which is also the kind.
-const prefix = "changes"
-
 // New returns a Collector with sensible defaults.
 func New(sourceRoot string, zone *storage.Zone, maxDelta int64) *Collector {
 	if maxDelta <= 0 {
@@ -222,6 +219,9 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 // rather than reading its file against another's position, which is the
 // conflict that stopped both for good.
 func cursorFor(dir, root string, src Source) (string, error) {
+	// A landed file's name prefix is its kind, and so is its cursor's, so
+	// a stream's change file and execution file keep separate places.
+	prefix := string(src.Kind)
 	plain := filepath.Join(dir, prefix+".cursor")
 	held, err := storage.LoadCursor(plain, storage.CursorAppend, src.Rel)
 	if err != nil {
@@ -329,10 +329,10 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 	}
 
 	seq := state.Take()
-	name := storage.LandedName(prefix, storage.Stamp(now), seq)
+	name := storage.LandedName(string(src.Kind), storage.Stamp(now), seq)
 	hdr := &sessiondata.Header{
 		H: 1, Seq: seq, At: now.UTC().Format(time.RFC3339Nano),
-		Kind: sessiondata.KindChanges, Adapter: Name + "/" + Version, Dialect: Dialect,
+		Kind: src.Kind, Adapter: Name + "/" + Version, Dialect: Dialect,
 		Src: src.Rel, Session: src.Session, Stream: src.Stream,
 	}
 	var written int64
@@ -342,7 +342,7 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 			return err
 		}
 		for row, ln := range chunk.Lines {
-			rec := Convert(ln.Ord, ln.Off, ln.Bytes)
+			rec := ConvertKind(src.Kind, ln.Ord, ln.Off, ln.Bytes)
 			if err := rw.Write(rec); err != nil {
 				return err
 			}
