@@ -23,6 +23,12 @@
   before it, and it now says so. It used to say the request before was not among the loaded bodies,
   here and for the first call of any chain, where nothing is missing. The renderer is Horizon's, now
   pinned at `88e0110`, which also draws a light theme's scrollbars and other native controls light.
+- A landed LangChain file is named for the collected time in its header. The collector read the
+  clock once per pass for the name and once per file for the header, so a server that stores files by
+  session and sequence and names them from the header, as the OAP does, named them apart from asz. On
+  a real root, all 50 LangChain files were named apart from their header, by up to 99 milliseconds,
+  and none of the 7,185 Claude Code files was. Files landed before this keep their names, because
+  landed files are never rewritten.
 
 ## Claude Code
 
@@ -97,6 +103,11 @@
   the notification, `reports`, and a child that never came back has no `result_of`. LangChain's
   nested agents and Claude Code's synchronous returns gain it; nothing is re-landed, and the next
   round of an existing conversation adds it.
+
+- A stream's `opened_by` lists its origins in relation id order. A call the assembler could not tie
+  to one stream is an origin of each stream it could have started, and the origins were listed in the
+  order a Go map gave them, so the document changed from one read to the next. On a real
+  conversation whose stream had three, five reads gave three orders.
 
 ## Release
 

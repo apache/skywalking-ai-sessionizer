@@ -161,7 +161,7 @@ type landedBodies struct {
 // landBodies writes one session's bodies out of one request, in files of the
 // session's own sequence, under the session lock the caller holds.
 func (c *Collector) landBodies(session string, state *storage.SessionState,
-	bodies []body, stamp string, request Waiting) (landedBodies, error) {
+	bodies []body, now time.Time, request Waiting) (landedBodies, error) {
 	var out landedBodies
 	if len(bodies) == 0 {
 		return out, nil
@@ -179,7 +179,7 @@ func (c *Collector) landBodies(session string, state *storage.SessionState,
 		}
 		seq := state.Take()
 		header := &sessiondata.Header{
-			Seq: seq, At: c.Now().UTC().Format(time.RFC3339Nano),
+			Seq: seq, At: now.Format(time.RFC3339Nano),
 			Kind: sessiondata.KindProviderBody, Adapter: Name + "/" + Version,
 			Dialect: Dialect, Src: ".", Session: session,
 		}
@@ -187,7 +187,7 @@ func (c *Collector) landBodies(session string, state *storage.SessionState,
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		path := filepath.Join(dir, storage.LandedName(string(sessiondata.KindProviderBody), stamp, seq))
+		path := filepath.Join(dir, storage.LandedName(string(sessiondata.KindProviderBody), storage.Stamp(now), seq))
 		err := storage.WriteExclusive(path, storage.PermLanded, func(w io.Writer) error {
 			writer, err := sessiondata.NewWriter(w, header)
 			if err != nil {

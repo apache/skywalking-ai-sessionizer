@@ -18,10 +18,12 @@
 package view
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
@@ -69,5 +71,52 @@ func TestRecordTimesSortByInstant(t *testing.T) {
 	want := "2026-09-26T10:00:00Z 2026-09-26T10:00:00.1Z 2026-09-26T10:00:00.11Z 2026-09-26T10:00:00.5Z not a time"
 	if got := strings.Join(in, " "); got != want {
 		t.Fatalf("%s, want %s", got, want)
+	}
+}
+
+// TestAStreamsOriginsKeepOneOrder. A call the assembler could not tie to one
+// stream leaves several candidates, and each is listed as an origin of the
+// stream. The fold holds its relations in a map, so listing them in the order
+// the map gave them changed the document from one read to the next: on a real
+// conversation whose stream had three, five reads gave three orders. They are
+// listed by relation id, as the relations list is.
+func TestAStreamsOriginsKeepOneOrder(t *testing.T) {
+	node := func(id, kind, stream, attrs string, seq uint64) *sessionflow.Node {
+		n := &sessionflow.Node{Entity: sessionflow.Entity{ID: id}, Kind: kind, Stream: stream,
+			Ref: &sessionflow.Ref{Seq: seq, Row: 1}}
+		if attrs != "" {
+			n.Attrs = json.RawMessage(attrs)
+		}
+		return n
+	}
+	nodes := map[string]*sessionflow.Node{}
+	for _, n := range []*sessionflow.Node{
+		node("stream/main", model.KindStream, "main", `{"role":"main"}`, 1),
+		node("stream/c1", model.KindStream, "c1", `{"role":"child"}`, 2),
+		node("tool/a", model.KindTool, "main", "", 1),
+		node("tool/b", model.KindTool, "main", "", 1),
+		node("tool/c", model.KindTool, "main", "", 1),
+	} {
+		nodes[n.ID] = n
+	}
+	rels := map[string]*sessionflow.Relation{}
+	for _, r := range []struct{ id, from string }{{"rel/3", "tool/a"}, {"rel/1", "tool/c"}, {"rel/2", "tool/b"}} {
+		rels[r.id] = &sessionflow.Relation{Entity: sessionflow.Entity{ID: r.id}, Type: model.RelStarts, From: r.from, To: "stream/c1"}
+	}
+	c := &Conversation{View: &sessionflow.View{Nodes: nodes, Relations: rels}, Session: "s", zone: storage.NewZone(t.TempDir())}
+	want := "tool/c tool/b tool/a"
+	for i := 0; i < 50; i++ {
+		var got []string
+		for _, st := range streamRows(c, nil) {
+			if st.ID != "stream/c1" {
+				continue
+			}
+			for _, o := range st.OpenedBy {
+				got = append(got, o.Step)
+			}
+		}
+		if strings.Join(got, " ") != want {
+			t.Fatalf("read %d: the origins are %v, want %s, by relation id", i, got, want)
+		}
 	}
 }
