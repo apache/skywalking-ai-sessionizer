@@ -91,6 +91,10 @@ type Conversation struct {
 
 	// at maps a landed position to when the runtime says it happened.
 	at map[[2]uint64]int64
+	// lanes maps a landed sequence to the lane its file belongs to: a stream,
+	// a workflow run, or the session itself. A position orders records only
+	// inside one lane.
+	lanes map[uint64]string
 	// from and to index relations by the node they touch, so an inspector does
 	// not scan every edge for every step.
 	from map[string][]*sessionflow.Relation
@@ -163,15 +167,16 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	}
 	c := &Conversation{
 		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems, head: v.Round,
-		at:   map[[2]uint64]int64{},
-		from: map[string][]*sessionflow.Relation{},
-		to:   map[string][]*sessionflow.Relation{},
+		at:    map[[2]uint64]int64{},
+		lanes: map[uint64]string{},
+		from:  map[string][]*sessionflow.Relation{},
+		to:    map[string][]*sessionflow.Relation{},
 	}
 	// The time of every landed position, from the records themselves. A node
 	// carries {seq, row}; this is what turns that into a moment. The page reads
 	// Session Data and Session Flow and nothing else: the index is assembly's
 	// accelerator, and a root that arrives without one still shows its times.
-	if err := timesOf(s.zone, v.Session, c.at); err != nil {
+	if err := timesOf(s.zone, v.Session, c.at, c.lanes); err != nil {
 		return nil, err
 	}
 	for _, r := range v.Relations {
@@ -284,14 +289,6 @@ func (c *Conversation) Streams() []*sessionflow.Node {
 	return out
 }
 
-// Edges returns every relation touching a node, both directions, by id.
-func (c *Conversation) Edges(id string) []*sessionflow.Relation {
-	out := append([]*sessionflow.Relation(nil), c.from[id]...)
-	out = append(out, c.to[id]...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
 // List returns every conversation in the zone that has rounds.
 // Root is the storage root the page reads.
 func (s *Server) Root() string { return s.zone.Root() }
@@ -337,18 +334,24 @@ func durationMillis(ns int64) int64 {
 }
 
 // timesOf fills at with the time of every record in the session's landed
-// files, keyed by landed position.
+// files, keyed by landed position, and lanes with the lane of every file.
 //
 // Only the time is taken from each line, without decoding the record: a
 // conversation has tens of thousands of records and the page needs one field
 // of each. A file that fails to read contributes no times rather than failing
 // the page; its records still render, without a moment.
-func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64) error {
+func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[uint64]string) error {
 	files, err := storage.LandedFiles(z, session)
 	if err != nil {
 		return err
 	}
 	for _, lf := range files {
+		switch {
+		case lf.Stream != "":
+			lanes[lf.Seq] = "stream/" + lf.Stream
+		case lf.RunID != "":
+			lanes[lf.Seq] = "run/" + lf.RunID
+		}
 		f, err := os.Open(lf.Path)
 		if err != nil {
 			continue

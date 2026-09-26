@@ -149,12 +149,16 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	for _, n := range loose {
 		v.Loose = append(v.Loose, c.step(n, 0, recs))
 	}
+	// In the order they happened, each at the earliest record that supports it.
+	rels := make([]*sessionflow.Relation, 0, len(c.View.Relations))
 	for _, r := range c.View.Relations {
+		rels = append(rels, r)
+	}
+	for _, r := range inOrder(rels, c.relationPoint, relationTie) {
 		v.Relations = append(v.Relations, sessionview.Relation{
 			ID: r.ID, Type: r.Type, From: r.From, To: r.To, Quality: r.Quality, Via: r.Via, Evidence: r.Evidence,
 		})
 	}
-	sort.Slice(v.Relations, func(i, j int) bool { return v.Relations[i].ID < v.Relations[j].ID })
 	for _, u := range c.View.Unresolved {
 		v.Unresolved = append(v.Unresolved, sessionview.Unresolved{ID: u.ID, Kind: u.Kind, Ref: u.RefID, Reason: u.Reason, State: u.State})
 	}
@@ -384,23 +388,22 @@ func countByte(b []byte, x byte) int {
 // compareTimes orders two record times by the instant they name. RFC 3339
 // text does not sort as text when its fractions differ in length, and Go's
 // RFC3339Nano, which the plugin writes, drops trailing zeros: as text, .11
-// sorts before .1, and .5 before the whole second. A time that does not
-// parse sorts after every one that does, by its text, so the order stays
-// total.
+// sorts before .1, and .5 before the whole second. Two spellings of one
+// instant are the same time, and a time that does not parse sorts after
+// every one that does; the caller decides between equal times by where each
+// record was read, never by the text.
 func compareTimes(a, b string) int {
 	ta, ea := time.Parse(time.RFC3339Nano, a)
 	tb, eb := time.Parse(time.RFC3339Nano, b)
 	switch {
 	case ea == nil && eb == nil:
-		if c := ta.Compare(tb); c != 0 {
-			return c
-		}
+		return ta.Compare(tb)
 	case ea == nil:
 		return -1
 	case eb == nil:
 		return 1
 	}
-	return strings.Compare(a, b)
+	return 0
 }
 
 // millisOf renders a record time a round header carries as unix

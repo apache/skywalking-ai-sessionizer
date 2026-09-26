@@ -104,10 +104,14 @@
   nested agents and Claude Code's synchronous returns gain it; nothing is re-landed, and the next
   round of an existing conversation adds it.
 
-- A stream's `opened_by` lists its origins in relation id order. A call the assembler could not tie
-  to one stream is an origin of each stream it could have started, and the origins were listed in the
-  order a Go map gave them, so the document changed from one read to the next. On a real
-  conversation whose stream had three, five reads gave three orders.
+- The document lists what happened in the order it happened, never by id: a stream's `opened_by`,
+  a step's `edges` and the `relations` list by the position of their records inside one stream or
+  run, and by time across streams; workspace changes and tool executions of one time by where each
+  was read. A workflow launch listed the streams it started by the hash in their ids; on real data,
+  130 of 150 steps that started several streams led with a different stream than their run's first.
+  A stream's origins had been listed in the order a Go map gave them, so the document changed from
+  one read to the next: on a real conversation whose stream had three, five reads gave three
+  orders.
 
 ## Release
 
