@@ -15,15 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package metrics derives the runtime's own token metric from landed
-// Session Data, so a receiver holds one metric name whichever produced the
-// points: the runtime's exporter or asz. It is a reconstructed subset of
-// the exporter's family, not a copy of it. The name, the unit, the delta
-// temporality and the token types are the exporter's; the labels are the
-// ones a transcript can supply, the session, the model and the query source;
-// the exporter's account, organisation, speed, effort and attribution labels
-// are not, and neither are its auxiliary calls, which never reach a
-// transcript. What the transcripts lack is never estimated.
+// Package metrics derives asz's metrics from landed Session Data: the tokens
+// of each model call, and the calls to MCP servers the plugin recorded.
+// Every metric asz sends comes from here; nothing the runtime's own exporter
+// sends is kept.
+//
+// The token metric counts what Claude Code's exporter counts, under asz's
+// name. The unit, the delta temporality and the token types are the
+// exporter's. The labels are the ones a transcript can supply: the session,
+// the model and the query source. The exporter's account, organisation,
+// speed, effort and attribution labels are not, and neither are its
+// auxiliary calls, which never reach a transcript. What the transcripts lack
+// is never estimated.
 //
 // Usage follows the assembler's rule: the last fragment of a call in line
 // order, never a sum, and only a call that finished. A main transcript
@@ -55,9 +58,7 @@ import (
 
 // The token metric. asz names it for an agent, not for one runtime, so every
 // runtime's tokens are one family. Claude Code's own exporter calls the same
-// count by a name of its own, and the claude-code-otlp adapter gives it this
-// name when it lands it, so a receiver holds one name whichever produced the
-// points.
+// count claude_code.token.usage, a name that stops at the runtime.
 const (
 	// TokenUsage counts tokens, by type and model, per session and per query
 	// source.
@@ -66,13 +67,11 @@ const (
 	tokenDesc  = "Number of tokens used"
 	// RuntimeService is the service name the runtime's exporter puts on its
 	// resource. A derived request carries the same, and asz push normalises
-	// both to asz's identity on the way out.
+	// it to asz's identity on the way out.
 	RuntimeService = "claude-code"
 
 	// ScopeName identifies what derived the points. It is asz's own, since
-	// the derivation is not the runtime's instrumentation; a receiver that
-	// keys on the scope sees two streams of one metric, as the export page
-	// says.
+	// the derivation is not the runtime's instrumentation.
 	ScopeName = "github.com/apache/skywalking-ai-sessionizer/metrics"
 
 	// SourceLocal names the spool files this package writes.
@@ -476,9 +475,9 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 		if !since.IsZero() && minute.Add(time.Minute).Before(since) {
 			continue
 		}
-		// A point for every type, zero included: the exporter writes all
-		// four for each call, and a receiver reading one family should not
-		// see a type appear and vanish by source.
+		// A point for every type, zero included, as the exporter writes all
+		// four for each call, so a type does not appear and vanish from one
+		// call to the next.
 		for typ, n := range map[string]int{
 			TypeInput: c.usage.Input, TypeOutput: c.usage.Output,
 			TypeCacheRead: c.usage.CacheRead, TypeCacheCreation: c.usage.CacheWrite,

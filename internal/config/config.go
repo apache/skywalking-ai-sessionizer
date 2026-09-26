@@ -184,7 +184,7 @@ type Adapter struct {
 
 	// Listen, on claude-code-otlp, is the address the receiver listens on
 	// for the runtime's exporter, such as 127.0.0.1:4317, over gRPC and
-	// HTTP with protobuf on the one port.
+	// HTTP on the one port. It keeps nothing it receives.
 	Listen string `yaml:"listen"`
 	// Token, on langsmith-ingest, is required in the x-api-key header.
 	// Empty accepts any key, which is what a local collector wants: the

@@ -1217,8 +1217,8 @@ func ownedBy(ids map[string]bool) func(rel string) bool {
 	}
 }
 
-// spoolOwners lists the spool files by the session that owns them. A
-// request the receiver adapter put there names no session and is left out.
+// spoolOwners lists the spool files by the session that owns them. A file
+// whose name names no session is left out.
 func spoolOwners(root string) (map[string][]string, error) {
 	items, err := os.ReadDir(filepath.Join(root, storage.SpoolDir))
 	if err != nil {
