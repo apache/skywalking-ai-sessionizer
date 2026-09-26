@@ -487,10 +487,18 @@ func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
 	}
 	parent := map[string]string{}
 	from := map[string][]origin{}
+	// In relation id order, as the relations list is. The fold holds them in a
+	// map, and a stream with more than one candidate listed its origins in a
+	// different order on each read: measured on a real conversation whose
+	// stream had three, five reads gave three orders.
+	var starts []*sessionflow.Relation
 	for _, r := range c.View.Relations {
-		if r.Type != model.RelStarts {
-			continue
+		if r.Type == model.RelStarts {
+			starts = append(starts, r)
 		}
+	}
+	sort.Slice(starts, func(i, j int) bool { return starts[i].ID < starts[j].ID })
+	for _, r := range starts {
 		if n := c.View.Nodes[r.From]; n != nil && n.Stream != "" {
 			parent[r.To] = n.Stream
 			from[r.To] = append(from[r.To], origin{r.From, n.Stream, r.Quality, c.talkOf(r.From)})
