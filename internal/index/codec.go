@@ -34,7 +34,7 @@ var magic = [4]byte{'A', 'S', 'I', 'X'}
 const (
 	// seq row stream batch kind trigger flags ts  record parent call run continues tool child started_by label  ord first count
 	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*9 + 8 + 4 + 4 // 80
-	blockWidth = 4 + 2 + 1 + 4 + 4 + 4 + 4                       // 23
+	blockWidth = 4 + 2 + 1 + 4 + 4 + 4 + 4 + 4 + 4               // 31
 	// entry role request previous
 	bodyWidth = 4 + 1 + 4 + 4 // 13
 )
@@ -289,6 +289,8 @@ func encodeBlock(b []byte, k *Block) {
 	le.PutUint32(b[11:], k.Name)
 	le.PutUint32(b[15:], k.Adds)
 	le.PutUint32(b[19:], k.Dels)
+	le.PutUint32(b[23:], k.Server)
+	le.PutUint32(b[27:], k.ServerTool)
 }
 
 func decodeBlock(b []byte, k *Block) {
@@ -299,6 +301,8 @@ func decodeBlock(b []byte, k *Block) {
 	k.Name = le.Uint32(b[11:])
 	k.Adds = le.Uint32(b[15:])
 	k.Dels = le.Uint32(b[19:])
+	k.Server = le.Uint32(b[23:])
+	k.ServerTool = le.Uint32(b[27:])
 }
 
 // LoadFor loads a session's index only if it agrees with its saved state.

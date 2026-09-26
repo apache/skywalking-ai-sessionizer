@@ -146,7 +146,7 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	zone := storage.NewZone(zoneRoot)
 	srv := view.NewWithGlossaries(zone, glossaries())
 
-	ref, err := newRefresher(srv, zone, ads, cfg.Parse.MaxRoundBytes, once)
+	ref, err := newRefresher(srv, zone, ads, cfg.Metrics, cfg.Parse.MaxRoundBytes, once)
 	if err != nil {
 		return err
 	}
@@ -213,8 +213,8 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 		fmt.Printf("source   : %s (once)\n", ref.base.Source)
 	}
 	if ref.deriver != nil {
-		fmt.Printf("metrics  : %s, derived from the landed files, look-back %s on the first pass\n",
-			metrics.TokenUsage, lookbackWord(ref.deriver.Lookback))
+		fmt.Printf("metrics  : %s, %s and %s, derived from the landed files, look-back %s on the first pass\n",
+			metrics.TokenUsage, metrics.MCPCalls, metrics.MCPDuration, lookbackWord(ref.deriver.Lookback))
 	}
 	if ref.pusher == nil {
 		fmt.Println("export   : none; set export.otlp.endpoint to send what is landed")

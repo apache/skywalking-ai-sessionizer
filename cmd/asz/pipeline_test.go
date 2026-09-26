@@ -28,6 +28,7 @@ import (
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
@@ -76,7 +77,7 @@ func TestOnePassLandsParsesAndSends(t *testing.T) {
 		{Name: config.AdapterClaudeCodeChanges, Enabled: true, SourceRoot: filepath.Join(source, "plugins", "data"),
 			Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}},
 	}
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestAPassWithNoReceiverStillLandsAndParses(t *testing.T) {
 	source := filepath.Join(root, "_source")
 	ads := []config.Adapter{{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: source,
 		Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}}}
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +263,7 @@ func testRefresher(t *testing.T, zone *storage.Zone, root string) *refresher {
 	source := filepath.Join(root, "_source")
 	ads := []config.Adapter{{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: source,
 		Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}}}
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,16 +286,15 @@ func testRefresher(t *testing.T, zone *storage.Zone, root string) *refresher {
 func TestTheModeIsSettledBeforeAnythingIsBuilt(t *testing.T) {
 	root := t.TempDir()
 	zone := storage.NewZone(root)
-	// The metrics-enabled adapter says once and comes first; the second
-	// says watch. The pipeline watches, and so must the derivation.
+	// The first adapter says once; the second says watch. The pipeline
+	// watches, and so must the derivation.
 	ads := []config.Adapter{
 		{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: filepath.Join(root, "_source"),
-			Metrics: true, MetricsLookback: "none",
 			Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Minute, MaxDeltaBytes: 1 << 20}},
 		{Name: config.AdapterClaudeCodeChanges, Enabled: true, SourceRoot: filepath.Join(root, "_source", "plugins", "data"),
 			Collector: config.Collector{Mode: config.ModeWatch, Interval: 2 * time.Second, MaxDeltaBytes: 1 << 20}},
 	}
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, false)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, allMetrics, 2<<20, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,13 +307,57 @@ func TestTheModeIsSettledBeforeAnythingIsBuilt(t *testing.T) {
 		t.Fatalf("the pipeline period is %s, want the shortest asked for, 2s", ref.interval)
 	}
 	if ref.deriver == nil {
-		t.Fatal("no metrics derivation for an adapter that asked for one")
+		t.Fatal("no metrics derivation with metrics on")
 	}
 	// A single pass sets Grace to -1, never wait, because there is no later
 	// pass to derive what it left. A watching pipeline leaves it at the
 	// default, so a call split across two passes is waited for.
 	if ref.deriver.Grace < 0 {
 		t.Fatalf("the derivation was built as a single pass (grace %s); a watching pipeline waits for a split call", ref.deriver.Grace)
+	}
+}
+
+// TestMetricsAreDerivedWhicheverAdapterCollected. Metrics are the root's,
+// not an adapter's. A pipeline that collects only the plugin's records, with
+// no transcript adapter, still derives the calls to MCP servers from them.
+func TestMetricsAreDerivedWhicheverAdapterCollected(t *testing.T) {
+	root, _ := scenarioRoot(t, "mcp-calls.yaml")
+	ref := pipelineOver(t, root, bothAdapters(root, "")[1:])
+	if ref.col != nil {
+		t.Fatal("the pipeline reads transcripts; the test needs the plugin's records alone")
+	}
+	if err := ref.pass(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := storage.NewSpool(storage.NewZone(root)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0.0
+	for _, f := range files {
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req collmetricspb.ExportMetricsServiceRequest
+		if err := proto.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+		for _, rm := range req.GetResourceMetrics() {
+			for _, sm := range rm.GetScopeMetrics() {
+				for _, m := range sm.GetMetrics() {
+					for _, dp := range m.GetSum().GetDataPoints() {
+						if m.GetName() == metrics.MCPCalls {
+							calls += dp.GetAsDouble()
+						}
+					}
+				}
+			}
+		}
+	}
+	// Four calls have a record; the first one's is written twice.
+	if calls != 4 {
+		t.Fatalf("%v calls to MCP servers derived from %d spool files, want 4", calls, len(files))
 	}
 }
 
@@ -326,7 +370,7 @@ func TestASourceThatAppearsLaterIsCollected(t *testing.T) {
 	changes := filepath.Join(root, "_source", "plugins", "data")
 	ads := []config.Adapter{{Name: config.AdapterClaudeCodeChanges, Enabled: true, SourceRoot: changes,
 		Collector: config.Collector{Mode: config.ModeWatch, Interval: time.Second, MaxDeltaBytes: 1 << 20}}}
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, false)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,16 +547,24 @@ func scenarioRoot(t *testing.T, name string) (string, *scenario.Built) {
 	return root, b
 }
 
+// allMetrics derives every metric with no look-back, as a build's
+// configuration does; noMetrics derives none.
+var (
+	allMetrics = config.Metrics{Lookback: "none"}
+	noMetrics  = config.Metrics{Enabled: new(bool)}
+)
+
 // bothAdapters is what a build's configuration enables: both local
-// adapters, the plugin's reading under the build's source unless another
-// directory is given, and metrics derived with no look-back.
+// adapters, and the plugin's reading under the build's source unless another
+// directory is given. pipelineOver derives metrics over them with no
+// look-back.
 func bothAdapters(root, changes string) []config.Adapter {
 	source := filepath.Join(root, "_source")
 	if changes == "" {
 		changes = filepath.Join(source, "plugins", "data")
 	}
 	return []config.Adapter{
-		{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: source, Metrics: true, MetricsLookback: "none",
+		{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: source,
 			Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}},
 		{Name: config.AdapterClaudeCodeChanges, Enabled: true, SourceRoot: changes,
 			Collector: config.Collector{Mode: config.ModeOnce, Interval: time.Second, MaxDeltaBytes: 1 << 20}},
@@ -523,7 +575,7 @@ func bothAdapters(root, changes string) []config.Adapter {
 func pipelineOver(t *testing.T, root string, ads []config.Adapter) *refresher {
 	t.Helper()
 	zone := storage.NewZone(root)
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, allMetrics, 2<<20, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -906,7 +958,7 @@ func TestProviderBodiesReachesTheReceiverCollector(t *testing.T) {
 		zone := storage.NewZone(root)
 		ads := []config.Adapter{{Name: config.AdapterLangSmithIngest, Enabled: true,
 			Listen: "127.0.0.1:0", ProviderBodies: on}}
-		ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+		ref, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -969,7 +1021,7 @@ func TestTwoRecorderDirectoriesAreBothCollected(t *testing.T) {
 		{Name: config.AdapterChanges, Enabled: true, SourceRoot: pluginData, Collector: once},
 		{Name: config.AdapterChanges, Enabled: true, SourceRoot: shimData, Collector: once},
 	}
-	ref, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true)
+	ref, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1009,7 +1061,7 @@ func TestTwoSpellingsOfOneRecorderDirectoryAreRefused(t *testing.T) {
 		{Name: config.AdapterChanges, Enabled: true, SourceRoot: data, Collector: once},
 		{Name: config.AdapterChanges, Enabled: true, SourceRoot: alias, Collector: once},
 	}
-	if _, err := newRefresher(view.New(zone, nil), zone, ads, 2<<20, true); err == nil || !strings.Contains(err.Error(), "both read") && !strings.Contains(err.Error(), "read "+data) {
+	if _, err := newRefresher(view.New(zone, nil), zone, ads, noMetrics, 2<<20, true); err == nil || !strings.Contains(err.Error(), "both read") && !strings.Contains(err.Error(), "read "+data) {
 		t.Fatalf("two spellings of one directory were accepted: %v", err)
 	}
 }

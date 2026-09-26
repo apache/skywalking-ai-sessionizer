@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
@@ -82,6 +83,12 @@ type Conversation struct {
 	// observations of shell commands and of edits inside subagents. A
 	// step lists its records under Changes.
 	WorkspaceChanges []WorkspaceChange `json:"workspace_changes"`
+	// ToolExecutions holds every tool execution record the session's landed
+	// files carry, joined to the step of the call it observed: what an
+	// observer around the call saw it do, such as which MCP server ran it.
+	// A step lists its records under Executions. A record whose call is not
+	// a step of the document is kept, with no step.
+	ToolExecutions []ToolExecution `json:"tool_executions"`
 }
 
 // ProviderBody names one landed provider body joined to a call: whether it
@@ -103,6 +110,14 @@ type WorkspaceChange struct {
 	Step string          `json:"step"`
 	Ref  sessionflow.Ref `json:"ref"`
 	changes.Record
+}
+
+// ToolExecution is one tool execution record, the step it joins, and where
+// it landed.
+type ToolExecution struct {
+	Step string          `json:"step"`
+	Ref  sessionflow.Ref `json:"ref"`
+	execution.Record
 }
 
 // Head identifies the fold the document was built from.
@@ -281,6 +296,9 @@ type Node struct {
 	// Changes names the workspace change records joined to
 	// this step, by id, in the order WorkspaceChanges lists them.
 	Changes []string `json:"changes,omitempty"`
+	// Executions names the tool execution records joined to this step, by
+	// id, in the order ToolExecutions lists them.
+	Executions []string `json:"executions,omitempty"`
 	// ProviderBodies names the provider bodies joined to a call step: its
 	// request, then its response, each only when joined exactly.
 	ProviderBodies []ProviderBody `json:"provider_bodies,omitempty"`

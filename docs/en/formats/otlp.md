@@ -2,7 +2,7 @@
 
 What [Export over OpenTelemetry](../setup/export-otlp.md) sends, for anyone building or checking a
 receiver: how files become log records, how they travel, the attributes every record carries, and
-how the token metrics are derived.
+how the metrics are derived.
 
 ## One log record per file
 
@@ -120,21 +120,37 @@ fails the build. See [Scenarios](../guides/scenario.md).
 
 ## Metrics
 
-`asz push` sends metrics as well, when an adapter produces them, under the name Claude Code's
-own OpenTelemetry exporter uses, so a receiver holds one metric name whichever produced the
-points. What the local adapter derives is a reconstructed subset of the exporter's family, not a
-copy of it, and this table says exactly which part:
+asz derives these metrics from the landed files when `metrics.enabled` is on, and `asz push` sends
+them when `export.otlp.metrics` is on. Both are on by default. The metrics are asz's own family,
+named for any agent rather than for one runtime:
 
-| | The runtime's exporter | Derived from the transcripts |
+| Metric | Unit | One point | Attributes |
+| --- | --- | --- | --- |
+| `agent.token.usage` | `tokens` | the tokens of the model calls that finished in a minute, of one type | `session.id`, `model`, `query_source`, `type` |
+| `agent.mcp.calls` | `{call}` | the calls to MCP servers observed in a minute | `session.id`, `mcp_server.name`, `mcp_server.source`, `mcp_tool.name`, `outcome`, `query_source` |
+| `agent.mcp.duration` | `ms` | the time the runtime measured around those calls, summed | the same as `agent.mcp.calls` |
+
+Each is a monotonic delta sum, and every value is a double. A request's resource says
+`service.name` `claude-code`, which asz normalises on the way out, and its instrumentation scope is
+asz's own. The `claude-code-otlp` adapter accepts what Claude Code's own exporter sends and keeps
+none of it, so one root has one source for each count.
+
+### Token usage
+
+`agent.token.usage` is derived from Claude Code transcripts. It counts what Claude Code's own
+OpenTelemetry exporter calls `claude_code.token.usage`, and differs from it exactly where this table
+says:
+
+| | Claude Code's exporter | Derived from the transcripts |
 | --- | --- | --- |
-| metric | `claude_code.token.usage`, `Number of tokens used`, unit `tokens`, a monotonic delta sum | the same name, description, unit and kind |
+| metric | `claude_code.token.usage`, `Number of tokens used`, unit `tokens`, a monotonic delta sum | `agent.token.usage`, with the same description, unit and kind |
 | `type` | `input`, `output`, `cacheRead`, `cacheCreation`, a point for each even when zero | the same four, zero included |
 | `query_source` | `main`, `subagent`, `auxiliary` | `main` and `subagent`, from the stream the call was made on; the auxiliary calls, such as the Haiku call that names a session, never reach a transcript |
 | `model`, `session.id` | yes | yes |
 | `user.id`, `user.email`, `user.account_uuid`, `user.account_id`, `organization.id`, `terminal.type`, `effort`, `speed`, and the agent, skill, plugin and MCP attribution | yes | no; a transcript does not carry them |
 | the other seven metrics: cost, active time, lines of code, commits, pull requests, sessions started, edit decisions | yes | no, and never estimated |
-| resource | `service.name` `claude-code`, `service.version`, `host.arch`, `os.type`, `os.version` | `service.name` `claude-code`; asz normalises both on the way out |
-| instrumentation scope | `com.anthropic.claude_code`, versioned as the runtime | asz's own, so a receiver that keys on the scope sees two streams of one name; the OAP keys on the name and the labels |
+| resource | `service.name` `claude-code`, `service.version`, `host.arch`, `os.type`, `os.version` | `service.name` `claude-code` |
+| instrumentation scope | `com.anthropic.claude_code`, versioned as the runtime | asz's own |
 | a point's window | the exporter's export interval, wall clock | the minute the call's last fragment ended, see below |
 | value | a double | a double |
 
@@ -145,19 +161,19 @@ account for. A new capture enters that directory only through the same test, whi
 identifying values:
 `go test ./internal/metrics -run TestCaptures -capture "$PWD/FILE.pb" -capture-name NAME`.
 
-With `metrics: true` on the `claude-code-local` adapter, the collector derives the points from
-the landed files by the assembler's own rule: the usage of a call is its last fragment's in line
-order, never a sum, and only a call that finished counts. A main transcript repeats the final usage
-on every fragment. A child's carries streaming partials on all but the last. A call has finished
-when one of its fragments reports a stop reason. A call that never does is left out, because its
-usage block is a streaming stub, not a count. That is about 10% of all calls in a corpus of 2,970
-files and 365,825 records written by Claude Code 2.1.220 to 2.1.251. It is 14.5% of the calls on
-child streams and 0.02% of those on main transcripts, as
-[Provider calls](../adapters/claude-code.md#provider-calls) reports.
+The collector derives the points from the landed files by the assembler's own rule: the usage of a
+call is its last fragment's in line order, never a sum, and only a call that finished counts. A main
+transcript repeats the final usage on every fragment. A child's carries streaming partials on all
+but the last. A call has finished when one of its fragments reports a stop reason. A call that never
+does is left out, because its usage block is a streaming stub, not a count. That is about 10% of all
+calls in a corpus of 2,970 files and 365,825 records written by Claude Code 2.1.220 to 2.1.251. It
+is 14.5% of the calls on child streams and 0.02% of those on main transcripts, as [Provider
+calls](../adapters/claude-code.md#provider-calls) reports.
 
 A call cut at a landed file boundary is read through following transcript files of its stream
-when the file's last record is a fragment of that call. There is no one-file limit. Metadata and
-change files do not interrupt the reading; the first unrelated transcript record does. A tool
+when the file's last record is a fragment of that call. There is no one-file limit. Metadata,
+change and execution files do not interrupt the reading; the first unrelated transcript record
+does. A tool
 result carries no call id, and in the same corpus a call's own tool results sit between its
 fragments on 24% of multi-fragment calls. Such a result ends the read-ahead. An unfinished child
 call remains eligible when its final fragment arrives later. On a main transcript every fragment
@@ -171,39 +187,53 @@ with a tool result does not wait. A single pass, the backfill over history that 
 derives with what is there and never waits. A call is never counted twice, however many files its
 records reach, and a record the runtime re-emitted before a context reset is the same call again.
 
-Points are summed per minute and attribute set, and the windows of one series never overlap: a
-point takes its minute unless the series already has a point at or past it, as when two children
-ran in the same minute or a child's file landed later, in which case it follows the series' last
-point. No point of a series is ever thrown away for another. The first derivation over a root
-with history is bounded by `metrics_lookback`, 24 hours unless set, and by the newest request the
-receiver adapter landed, so switching the flag on sends neither a year of tokens nor what the
-runtime's exporter already sent. A session the first pass did not finish keeps that look-back
-across retries and restarts, whether a file waited for its grace or an error stopped the session
-before its later files. Once every file of the session is derived, a later new file is derived
-whole. Before a request enters the
-spool, an immutable receipt under the session's `metrics/` records its exact bytes and the calls
-it counted. If saving progress fails, the retry uses that receipt even when more source fragments
-have arrived, so its accounting still matches the request already written. The retry applies every
-such receipt before it derives any file again, and a receipt only moves a series forward. So a file
-that waited for its grace in the failed pass takes a window after the ones already in the spool,
-and no two windows of a series overlap.
+### Calls to MCP servers
 
-The other source of the same family is the runtime's exporter itself: the `claude-code-otlp`
-adapter receives what Claude Code sends and lands each metrics request in the same spool, bytes as
-received. The receiver does not check whether it has landed a request before. A request the
-exporter sends twice lands twice, and `asz push` sends both copies. One root sends one source:
-`metrics` may be on for the local adapter or for the receiver, and the configuration refuses both.
+`agent.mcp.calls` and `agent.mcp.duration` are derived from the execution records the
+[Claude Code plugin](../adapters/claude-code-plugin.md#calls-to-mcp-servers) writes, never from a
+transcript, which does not say which server ran a call or how long it took. No runtime writes a
+metric of its own for these, so there is no exporter to compare them with.
 
-The points wait in the storage root's `_metrics/` spool, one write-once file per landed file
-with points or per request received, and go out in order under the same budget and the same
-once-only rule as the files. `export.otlp.logs` and `export.otlp.metrics` switch the two things a
-push sends, the files and rounds as logs and the spool as metrics, so a receiver that takes one
-and not the other is sent what it takes.
-On the way out the resource is normalised to asz's identity, the service, the layer, the sender,
-so the OAP holds one service for the runtime. A receiver that answers with a partial success has
-taken the request, and the protocol says not to send it again: the rejected records or points are
-counted on the pass line as `rejected`, the file is marked sent, and `push.state` gets a `rejected`
-line for it.
+One record is one call. It is counted once per session by the record's own id, in the minute it was
+observed. `mcp_server.name` is the server the plugin reported. `mcp_tool.name` is the runtime's
+name for the call after `mcp__<server>__`, where that name splits exactly, and otherwise the whole
+name. The server and the tool together name the target a call reached, which a receiver can treat
+as an endpoint of the agent. `mcp_server.source` is where the server's configuration came from,
+such as `user`, `project` or `dynamic`. `outcome` is `returned`, `failed` or `interrupted`.
+`query_source` is `main` or `subagent`, from the stream the call ran on.
+
+The duration is Claude Code's own time around the call. It includes any waiting before the call
+started, and it is not the server's own time. Divided by the calls of the same series, it is the
+mean. Measured on Claude Code 2.1.282, every record carried a duration, failures included. A call
+the permission check denied runs no hook, so it is not counted. Nothing says whether a tool reads
+or writes, because Claude Code passes a tool's annotations to neither the hooks nor the transcript.
+
+### Windows and the first pass
+
+Points are summed per minute and attribute set, and the windows of one series never overlap: a point
+takes its minute unless the series already has a point at or past it, as when two children ran in
+the same minute or a child's file landed later, in which case it follows the series' last point. No
+point of a series is ever thrown away for another. The first derivation over a root with history is
+bounded by `metrics.lookback`, 72 hours unless set, so a new deployment over a source with months of
+history does not send all of it. A session the first pass did not finish keeps that look-back across
+retries and restarts, whether a file waited for its grace or an error stopped the session before its
+later files. Once every file of the session is derived, a later new file is derived whole. Before a
+request enters the spool, an immutable receipt under the session's `metrics/` records its exact
+bytes and the calls it counted. If saving progress fails, the retry uses that receipt even when more
+source fragments have arrived, so its accounting still matches the request already written. The
+retry applies every such receipt before it derives any file again, and a receipt only moves a series
+forward. So a file that waited for its grace in the failed pass takes a window after the ones
+already in the spool, and no two windows of a series overlap.
+
+The points wait in the storage root's `_metrics/` spool, one write-once file per landed file with
+points, and go out in order under the same budget and the same once-only rule as the files.
+`export.otlp.logs` and `export.otlp.metrics` switch the two things a push sends, the files and
+rounds as logs and the spool as metrics, so a receiver that takes one and not the other is sent what
+it takes. On the way out the resource is normalised to asz's identity, the service, the layer, the
+sender, so the OAP holds one service for the runtime. A receiver that answers with a partial success
+has taken the request, and the protocol says not to send it again: the rejected records or points
+are counted on the pass line as `rejected`, the file is marked sent, and `push.state` gets a
+`rejected` line for it.
 
 ## Rate
 

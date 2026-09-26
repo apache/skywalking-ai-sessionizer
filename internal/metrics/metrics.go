@@ -53,14 +53,17 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
-// The metric, as the runtime's exporter names it.
+// The token metric. asz names it for an agent, not for one runtime, so every
+// runtime's tokens are one family. Claude Code's own exporter calls the same
+// count by a name of its own, and the claude-code-otlp adapter gives it this
+// name when it lands it, so a receiver holds one name whichever produced the
+// points.
 const (
 	// TokenUsage counts tokens, by type and model, per session and per query
-	// source; the exporter's claude_code.token.usage.
-	TokenUsage = "claude_code.token.usage"
+	// source.
+	TokenUsage = "agent.token.usage"
 	tokenUnit  = "tokens"
 	tokenDesc  = "Number of tokens used"
-
 	// RuntimeService is the service name the runtime's exporter puts on its
 	// resource. A derived request carries the same, and asz push normalises
 	// both to asz's identity on the way out.
@@ -81,6 +84,26 @@ const (
 
 	// StateFile holds what was derived and counted, under the spool.
 	StateFile = "metrics.state"
+)
+
+// The MCP family. No runtime writes a metric of a call to an MCP server, so
+// it is asz's alone, named beside the token metric. It is derived from
+// execution records, one observation of one call each, and never from a
+// transcript, which does not say which server ran a call or how long it
+// took. A server and a tool together name the target a call reached, which
+// a receiver can treat as an endpoint of the agent.
+const (
+	// MCPCalls counts calls to MCP servers, by server, tool and outcome.
+	MCPCalls     = "agent.mcp.calls"
+	mcpCallsUnit = "{call}"
+	mcpCallsDesc = "Number of calls to MCP servers an observer recorded"
+	// MCPDuration sums the time the observer measured around each call,
+	// in milliseconds. Divided by the calls of the same series it is the
+	// mean time a call took as the runtime saw it, which includes waiting
+	// before the call started and is not the server's own time.
+	MCPDuration     = "agent.mcp.duration"
+	mcpDurationUnit = "ms"
+	mcpDurationDesc = "Time the observer measured around calls to MCP servers"
 )
 
 // The token types, spelled as the exporter spells them.
@@ -185,13 +208,6 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		if d.Lookback > 0 {
 			since = d.Now().Add(-d.Lookback)
 		}
-		// The runtime's exporter may have been the source until now: what
-		// it sent is in the spool with the time it was received, and the
-		// derivation starts after the last of it, so a switch of source
-		// counts nothing twice.
-		if received, err := latestReceived(spool); err == nil && received.After(since) {
-			since = received
-		}
 	}
 	if sessions == nil {
 		if sessions, err = sessionDirs(d.Zone.Root()); err != nil {
@@ -292,22 +308,6 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 	return st, nil
 }
 
-// latestReceived is when the newest request from the runtime's exporter was
-// put in the spool; zero when there is none.
-func latestReceived(spool *storage.Spool) (time.Time, error) {
-	files, err := spool.List()
-	if err != nil {
-		return time.Time{}, err
-	}
-	var latest time.Time
-	for _, f := range files {
-		if f.Source != SourceLocal && f.At.After(latest) {
-			latest = f.At
-		}
-	}
-	return latest, nil
-}
-
 // call is what one provider call's fragments said, as far as they were read:
 // the last fragment's usage and model, its time, and whether the call
 // finished.
@@ -322,9 +322,21 @@ type call struct {
 
 // series names one time series of the metric: what a point's attributes
 // name, apart from the session, which is the state's own.
-type series struct{ model, source, typ string }
+type series struct {
+	metric                string
+	model, source, typ    string
+	server, tool, outcome string
+	// origin is where the runtime's configuration of the MCP server came
+	// from, one value per server.
+	origin string
+}
 
-func (s series) key() string { return s.model + "|" + s.source + "|" + s.typ }
+func (s series) key() string {
+	if s.metric == "" || s.metric == TokenUsage {
+		return s.model + "|" + s.source + "|" + s.typ
+	}
+	return s.metric + "|" + s.server + "|" + s.origin + "|" + s.tool + "|" + s.outcome + "|" + s.source
+}
 
 // point is one minute of one series, with the window it was given.
 type point struct {
@@ -372,10 +384,13 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 	// The metric is Claude Code's own family, derived from its transcripts
 	// alone. A root can hold another runtime's conversations beside them,
 	// and those carry calls and usage too, so without this a LangChain
-	// session's tokens went out as claude_code.token.usage. Every landed
+	// session's tokens went out as Claude Code's token metric. Every landed
 	// header names a dialect; the reader refuses one that does not. The
 	// mock dialect is a scenario writing Claude Code's shape directly, and
 	// the scenarios hold its metrics to the Claude Code build's.
+	if hdr.Kind == sessiondata.KindExecution {
+		return deriveExecutions(rd, f, h, &hdr, since, ss, res)
+	}
 	if d, _, _ := strings.Cut(hdr.Dialect, "/"); d != "claude-code" && d != "mock" {
 		if _, err := io.Copy(h, f); err != nil {
 			return nil, err
@@ -477,8 +492,14 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 		k.value = v
 		points = append(points, k)
 	}
-	// The same file derives the same bytes: points in one order, and the
-	// windows follow from it.
+	res.points = windows(points, res, ss)
+	return res, nil
+}
+
+// windows orders a file's points and gives each its window. The same file
+// derives the same bytes: points in one order, and the windows follow from
+// it.
+func windows(points []point, res *result, ss *sessionState) []point {
 	sort.Slice(points, func(i, j int) bool {
 		a, b := points[i], points[j]
 		if !a.minute.Equal(b.minute) {
@@ -506,8 +527,7 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 		}
 		res.lastEnd[p.series.key()] = p.end
 	}
-	res.points = points
-	return res, nil
+	return points
 }
 
 // take folds one fragment into the call: the last fragment's usage, model
@@ -566,37 +586,69 @@ func continueIn(path string, c *call) (more, matched bool, err error) {
 // scope, one metric, delta sums that are monotonic, as the exporter's SDK
 // writes them.
 func request(points []point, version string) *collmetricspb.ExportMetricsServiceRequest {
-	dps := make([]*metricspb.NumberDataPoint, 0, len(points))
+	byMetric := map[string][]*metricspb.NumberDataPoint{}
+	var names []string
 	for _, p := range points {
-		attrs := []*commonpb.KeyValue{
-			str("session.id", p.session),
-			str("type", p.series.typ),
-			str("query_source", p.series.source),
+		name := p.series.metric
+		if name == "" {
+			name = TokenUsage
 		}
-		if p.series.model != "" {
-			attrs = append(attrs, str("model", p.series.model))
+		var attrs []*commonpb.KeyValue
+		if name == TokenUsage {
+			attrs = []*commonpb.KeyValue{
+				str("session.id", p.session),
+				str("type", p.series.typ),
+				str("query_source", p.series.source),
+			}
+			if p.series.model != "" {
+				attrs = append(attrs, str("model", p.series.model))
+			}
+		} else {
+			attrs = []*commonpb.KeyValue{
+				str("session.id", p.session),
+				str("mcp_server.name", p.series.server),
+				str("mcp_server.source", p.series.origin),
+				str("mcp_tool.name", p.series.tool),
+				str("outcome", p.series.outcome),
+				str("query_source", p.series.source),
+			}
+		}
+		if _, ok := byMetric[name]; !ok {
+			names = append(names, name)
 		}
 		// A double, as the exporter's SDK encodes its counters, so a
 		// receiver reads one value kind from both sources.
-		dps = append(dps, &metricspb.NumberDataPoint{
+		byMetric[name] = append(byMetric[name], &metricspb.NumberDataPoint{
 			Attributes:        attrs,
 			StartTimeUnixNano: uint64(p.start.UnixNano()),
 			TimeUnixNano:      uint64(p.end.UnixNano()),
 			Value:             &metricspb.NumberDataPoint_AsDouble{AsDouble: float64(p.value)},
 		})
 	}
+	sort.Strings(names)
+	metrics := make([]*metricspb.Metric, 0, len(names))
+	for _, name := range names {
+		desc, unit := tokenDesc, tokenUnit
+		switch name {
+		case MCPCalls:
+			desc, unit = mcpCallsDesc, mcpCallsUnit
+		case MCPDuration:
+			desc, unit = mcpDurationDesc, mcpDurationUnit
+		}
+		metrics = append(metrics, &metricspb.Metric{
+			Name: name, Description: desc, Unit: unit,
+			Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{
+				DataPoints:             byMetric[name],
+				AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
+				IsMonotonic:            true,
+			}},
+		})
+	}
 	return &collmetricspb.ExportMetricsServiceRequest{ResourceMetrics: []*metricspb.ResourceMetrics{{
 		Resource: &resourcepb.Resource{Attributes: []*commonpb.KeyValue{str("service.name", RuntimeService)}},
 		ScopeMetrics: []*metricspb.ScopeMetrics{{
-			Scope: &commonpb.InstrumentationScope{Name: ScopeName, Version: version},
-			Metrics: []*metricspb.Metric{{
-				Name: TokenUsage, Description: tokenDesc, Unit: tokenUnit,
-				Data: &metricspb.Metric_Sum{Sum: &metricspb.Sum{
-					DataPoints:             dps,
-					AggregationTemporality: metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA,
-					IsMonotonic:            true,
-				}},
-			}},
+			Scope:   &commonpb.InstrumentationScope{Name: ScopeName, Version: version},
+			Metrics: metrics,
 		}},
 	}}}
 }

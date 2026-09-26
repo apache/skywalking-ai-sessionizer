@@ -28,6 +28,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
@@ -225,7 +226,45 @@ func (w *sdWriter) stream(stream string, events []*Event) error {
 	if _, err := w.land(dir, "transcript", "transcript.cursor", hdr, recs); err != nil {
 		return err
 	}
-	return w.changes(stream, events)
+	if err := w.changes(stream, events); err != nil {
+		return err
+	}
+	return w.executions(stream, events)
+}
+
+// executions lands what the plugin's hook saw of each call to an MCP server
+// on the stream, as the changes adapter lands the plugin's execution lines:
+// the line whole, as one data part.
+func (w *sdWriter) executions(stream string, events []*Event) error {
+	var recs []*sessiondata.Record
+	var off uint64
+	for _, e := range events {
+		if e.Kind != EvResult || e.Execution == nil || e.Replayed {
+			continue
+		}
+		xr := w.p.executionRecord(e)
+		line, err := xr.Marshal()
+		if err != nil {
+			return err
+		}
+		times := 1
+		if e.Execution.Twice {
+			times = 2
+		}
+		for range times {
+			r := &sessiondata.Record{ID: xr.ID, Tool: xr.Tool, Time: xr.Time, Parts: []sessiondata.Part{{
+				Kind: sessiondata.PartData, Data: line, State: model.ContentAvailable, Bytes: len(line)}}}
+			finish(r, uint64(len(recs)+1), &off)
+			recs = append(recs, r)
+		}
+	}
+	if len(recs) == 0 {
+		return nil
+	}
+	dir := w.z.StreamDir(w.p.Session, stream)
+	hdr := sessiondata.Header{Kind: sessiondata.KindExecution, Src: w.source("streams", stream+".execution"), Stream: stream}
+	_, err := w.land(dir, "execution", "execution.cursor", hdr, recs)
+	return err
 }
 
 // changes lands what the plugin would have observed on the stream: one
@@ -360,7 +399,11 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 				input = map[string]any{}
 			}
 			data := jsLine(input)
-			r.Parts = []sessiondata.Part{{Kind: sessiondata.PartCall, Data: data, ID: e.Tool.ID, Name: e.Tool.Name, State: "available", Bytes: len(data)}}
+			call := sessiondata.Part{Kind: sessiondata.PartCall, Data: data, ID: e.Tool.ID, Name: e.Tool.Name, State: "available", Bytes: len(data)}
+			// The adapter reads the MCP server and tool from the name, and so
+			// does the record written directly, so the two formats land alike.
+			call.Server, call.ServerTool, _ = claudecode.MCPName(e.Tool.Name)
+			r.Parts = []sessiondata.Part{call}
 		}
 	case EvResult:
 		r.From = sessiondata.FromExternal

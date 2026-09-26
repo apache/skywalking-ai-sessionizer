@@ -16,9 +16,9 @@
 # under the License.
 
 # Every kind of file a session leaves: the main transcript, a child agent's
-# transcript and meta file, a workflow's journal, manifest and script, and
-# the rounds. The push must carry all six kinds, and the export page's
-# rules hold for each.
+# transcript and meta file, a workflow's journal, manifest and script, the
+# plugin's record of a call to an MCP server, and the rounds. The push must
+# carry all seven kinds, and the export page's rules hold for each.
 title: every kind of file
 steps:
   - input: check everything
@@ -27,6 +27,13 @@ steps:
       text: Checking.
       tool: {id: t1, name: Bash, input: {command: make check}, result: {text: all green, after: 500ms}}
       usage: {in: 2, out: 50, cache_read: 900, cache_write: 100}
+  - call:
+      text: Asking the status server.
+      tool:
+        name: mcp__status__lookup
+        input: {service: checkout}
+        result: {text: "checkout: 3 of 3 ready", after: 400ms}
+        execution: {server: status, source: user, duration: 380ms}
   - call:
       agent: {name: helper, prompt: look at the tests, steps: [{call: {text: tests look fine, usage: {out: 20}}}], notify: true}
   - call:

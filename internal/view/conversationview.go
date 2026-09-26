@@ -89,6 +89,7 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 		Rounds: []sessionview.Round{}, Files: []sessionview.File{}, Talks: []sessionview.Node{}, Loose: []sessionview.Node{},
 		Relations: []sessionview.Relation{}, Unresolved: []sessionview.Unresolved{},
 		WorkspaceChanges: []sessionview.WorkspaceChange{},
+		ToolExecutions:   []sessionview.ToolExecution{},
 	}
 	if sn := c.View.Nodes[sessionflow.NodeID("session", c.Session)]; sn != nil {
 		v.Summary.From, v.Summary.To = millisOf(attrString(sn, "from_time")), millisOf(attrString(sn, "through_time"))
@@ -174,6 +175,17 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 	annotateChanges(v.Talks, byStep)
 	annotateChanges(v.Loose, byStep)
 	v.Summary.Changes = len(v.WorkspaceChanges)
+
+	// The tool execution records, joined to their steps the same way.
+	v.ToolExecutions = c.toolExecutions(landed, recs)
+	execsByStep := map[string][]string{}
+	for _, te := range v.ToolExecutions {
+		if te.Step != "" {
+			execsByStep[te.Step] = append(execsByStep[te.Step], te.ID)
+		}
+	}
+	annotateExecutions(v.Talks, execsByStep)
+	annotateExecutions(v.Loose, execsByStep)
 
 	// The provider bodies each call carries, as the round joined them. A call
 	// names where its request and its response landed; a reader loads them when
@@ -367,6 +379,28 @@ func countByte(b []byte, x byte) int {
 		}
 	}
 	return n
+}
+
+// compareTimes orders two record times by the instant they name. RFC 3339
+// text does not sort as text when its fractions differ in length, and Go's
+// RFC3339Nano, which the plugin writes, drops trailing zeros: as text, .11
+// sorts before .1, and .5 before the whole second. A time that does not
+// parse sorts after every one that does, by its text, so the order stays
+// total.
+func compareTimes(a, b string) int {
+	ta, ea := time.Parse(time.RFC3339Nano, a)
+	tb, eb := time.Parse(time.RFC3339Nano, b)
+	switch {
+	case ea == nil && eb == nil:
+		if c := ta.Compare(tb); c != 0 {
+			return c
+		}
+	case ea == nil:
+		return -1
+	case eb == nil:
+		return 1
+	}
+	return strings.Compare(a, b)
 }
 
 // millisOf renders a record time a round header carries as unix

@@ -204,6 +204,11 @@ func runHook(stdin io.Reader, dataDir, projectDir string, now time.Time) (code i
 			}
 		}
 	case hook.PostToolUse, hook.PostToolUseFailure:
+		if in.MCPServer != nil && p.st.MCP.On() {
+			if err := p.execution(); err != nil {
+				p.logf("%s %s execution: %v", in.ToolName, in.ToolUseID, err)
+			}
+		}
 		switch {
 		case p.st.IsScopeTool(in.ToolName):
 			for _, root := range p.roots() {

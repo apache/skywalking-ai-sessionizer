@@ -42,8 +42,7 @@ func SpoolName(session string, seq uint64) string {
 // part before the source, and it has at least six digits. Everything before
 // it is the session. A pattern such as metrics-<session>-* is never used,
 // because one session id can be another followed by a dash and digits, and
-// the other's files would then be taken for its own. A request the receiver
-// adapter put in the spool names no session, so no session owns it.
+// the other's files would then be taken for its own.
 func SpoolOwner(name string) (string, bool) {
 	rest, ok := strings.CutPrefix(name, "metrics-")
 	if !ok {

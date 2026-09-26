@@ -125,7 +125,7 @@ func shortDuration(d time.Duration) string {
 }
 
 // ParseRemove reads a removal policy: immediately, a Go duration such as 30m
-// or 24h, or a whole number of days such as 7d, as metrics_lookback takes
+// or 24h, or a whole number of days such as 7d, as metrics.lookback takes
 // them. Zero, a negative value and anything else are refused, because a
 // retention of nothing is immediately said another way.
 func ParseRemove(s string) (Removal, error) {

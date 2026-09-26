@@ -2,8 +2,10 @@
 
 The plugin records which files each tool call changed, including shell commands and edits inside
 subagents. asz collects the records, and the conversation page shows each change beside the step
-that made it. [Claude Code Plugin Internals](../adapters/claude-code-plugin.md) explains what is
-recorded and how.
+that made it. The plugin also records each call to an MCP server: which server ran it, how it ended
+and how long it took. The conversation document lists each of these records with its step, and asz
+derives the [MCP metrics](export-otlp.md#metrics) from them.
+[Claude Code Plugin Internals](../adapters/claude-code-plugin.md) explains what is recorded and how.
 
 ## Install
 
@@ -127,6 +129,8 @@ exclude:
   remove: []
 read_only:
   enabled: true
+mcp:
+  enabled: true
 tools:
   scope: [Bash, PowerShell, Monitor]
 retention:
@@ -142,6 +146,7 @@ size_cap: 1048576
   adds rules and `remove` drops a default. A rule that starts with `/` is relative to the root; any
   other name matches at any depth.
 - `read_only.enabled`: skip the scan around a shell command that only reads.
+- `mcp.enabled`: record each call to an MCP server.
 - `tools.scope`: the tools watched with a scan.
 - `retention.idle`: drop the saved file contents of a root that has been idle this long.
 - `retention.ttl`: delete an output file not written for this long.

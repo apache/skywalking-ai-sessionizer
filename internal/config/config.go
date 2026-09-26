@@ -35,8 +35,34 @@ type Config struct {
 	Storage  Storage   `yaml:"storage"`
 	Adapters []Adapter `yaml:"adapters"`
 	Parse    Parse     `yaml:"parse"`
+	Metrics  Metrics   `yaml:"metrics"`
 	Export   Export    `yaml:"export"`
 }
+
+// Metrics configures what asz derives from the landed files. It is one
+// switch for the root, whichever adapters landed the files: every metric
+// asz defines is derived from every landed file it applies to, the token
+// usage of a Claude Code conversation and the calls the plugin saw reach an
+// MCP server alike. export.otlp.metrics says whether a push sends them.
+type Metrics struct {
+	// Enabled derives the metrics. On unless set to false.
+	Enabled *bool `yaml:"enabled"`
+	// Lookback bounds the first derivation over a root, the one pass that
+	// runs before the root has any metrics state: a minute older than this
+	// is not derived, so a new deployment over months of history does not
+	// send all of it at once. Every later pass derives each new file whole.
+	// A duration such as 72h or 3d; empty means 72h; 0 or none means
+	// everything.
+	Lookback string `yaml:"lookback"`
+}
+
+// DefaultLookback is three days. A new deployment usually starts cold over a
+// source that already holds history, and three days is enough to fill a
+// dashboard without sending everything the source keeps.
+const DefaultLookback = 72 * time.Hour
+
+// On reports whether metrics are derived.
+func (m Metrics) On() bool { return m.Enabled == nil || *m.Enabled }
 
 // Parse configures assembly into rounds.
 type Parse struct {
@@ -103,27 +129,27 @@ func (o OTLP) SendMetrics() bool { return o.Metrics == nil || *o.Metrics }
 
 func boolPtr(b bool) *bool { return &b }
 
-// Lookback is the metrics look-back as a duration: 24h when unset, zero
-// for 0 or none, and a d suffix counts days, since a look-back is spoken of
-// in days.
-func (a Adapter) Lookback() (time.Duration, error) {
-	s := strings.TrimSpace(a.MetricsLookback)
+// LookbackDuration is the look-back as a duration: 72h when unset, zero for
+// 0 or none, and a d suffix counts days, since a look-back is spoken of in
+// days.
+func (m Metrics) LookbackDuration() (time.Duration, error) {
+	s := strings.TrimSpace(m.Lookback)
 	switch s {
 	case "":
-		return 24 * time.Hour, nil
+		return DefaultLookback, nil
 	case "0", "none":
 		return 0, nil
 	}
 	if days, ok := strings.CutSuffix(s, "d"); ok {
 		n, err := strconv.Atoi(days)
 		if err != nil || n < 0 {
-			return 0, fmt.Errorf("config: metrics_lookback %q is not a number of days", s)
+			return 0, fmt.Errorf("config: metrics.lookback %q is not a number of days", s)
 		}
 		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil || d < 0 {
-		return 0, fmt.Errorf("config: metrics_lookback %q is not a duration such as 24h or 7d", s)
+		return 0, fmt.Errorf("config: metrics.lookback %q is not a duration such as 24h or 7d", s)
 	}
 	return d, nil
 }
@@ -156,13 +182,6 @@ type Adapter struct {
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
 
-	// Metrics, on claude-code-local, turns on the runtime's own metric
-	// family derived from the landed files: the same names and attributes
-	// the runtime's exporter sends, so a receiver sees one family whichever
-	// produced it. Phase one is token usage. On claude-code-otlp it says
-	// the received metrics are landed and pushed. It cannot be on for both
-	// at once, since the two would count the same tokens twice.
-	Metrics bool `yaml:"metrics"`
 	// Listen, on claude-code-otlp, is the address the receiver listens on
 	// for the runtime's exporter, such as 127.0.0.1:4317, over gRPC and
 	// HTTP with protobuf on the one port.
@@ -192,10 +211,6 @@ type Adapter struct {
 	// it was. The Claude Code provider adapter is its own adapter and does
 	// not take this.
 	ProviderBodies bool `yaml:"provider_bodies"`
-	// MetricsLookback bounds the first derivation over a root that has
-	// history: a minute older than this is not derived. A duration such as
-	// 24h or 7d; empty means 24h; 0 or none means everything.
-	MetricsLookback string `yaml:"metrics_lookback"`
 
 	Collector Collector `yaml:"collector"`
 }
@@ -286,9 +301,6 @@ func Default() *Config {
 			Name:    AdapterClaudeCodeLocal,
 			Enabled: true,
 			Exclude: []string{"/private/tmp/**"},
-			// The look-back is written out, as every default is, so the
-			// file says what the first derivation reaches back to.
-			MetricsLookback: "24h",
 			Collector: Collector{
 				Mode:          ModeWatch,
 				Interval:      DefaultInterval,
@@ -296,12 +308,10 @@ func Default() *Config {
 			},
 		}, {
 			// The runtime's own exporter, received. Off until pointed at:
-			// the file names the address the runtime would be given, and
-			// metrics on here means the local adapter leaves them to it.
+			// the file names the address the runtime would be given.
 			Name:    AdapterClaudeCodeOTLP,
 			Enabled: false,
 			Listen:  "127.0.0.1:4317",
-			Metrics: true,
 		}, {
 			// The LangSmith tracing client, received. Off until pointed
 			// at: the file names the address an application would be
@@ -340,6 +350,9 @@ func Default() *Config {
 			},
 		}},
 		Parse: Parse{MaxRoundBytes: 2 << 20},
+		// Written out, as every default is, so the file says what the first
+		// derivation reaches back to.
+		Metrics: Metrics{Enabled: boolPtr(true), Lookback: "72h"},
 		Export: Export{OTLP: OTLP{
 			Protocol:   "grpc",
 			Layer:      "AI_AGENT",
@@ -406,6 +419,12 @@ func Load(path string) (*Config, error) {
 	if loaded.Parse.MaxRoundBytes > 0 {
 		cfg.Parse.MaxRoundBytes = loaded.Parse.MaxRoundBytes
 	}
+	if loaded.Metrics.Enabled != nil {
+		cfg.Metrics.Enabled = loaded.Metrics.Enabled
+	}
+	if loaded.Metrics.Lookback != "" {
+		cfg.Metrics.Lookback = loaded.Metrics.Lookback
+	}
 	o := &loaded.Export.OTLP
 	if o.Protocol != "" {
 		cfg.Export.OTLP.Protocol = o.Protocol
@@ -467,7 +486,6 @@ func (c *Config) Validate() error {
 	// other adapter is one source, and an old name for an adapter is that
 	// adapter: two entries that read one directory would land it twice.
 	changesRoots := map[string]string{}
-	localMetrics, receiverMetrics := false, false
 	for i, a := range c.Adapters {
 		if a.Name == "" {
 			return fmt.Errorf("config: adapters[%d] has no name", i)
@@ -494,10 +512,6 @@ func (c *Config) Validate() error {
 			if a.Listen == "" {
 				return fmt.Errorf("config: adapter %q needs listen, the address the runtime's exporter is pointed at, such as 127.0.0.1:4317", a.Name)
 			}
-			receiverMetrics = receiverMetrics || a.Metrics
-		}
-		if a.Name == AdapterClaudeCodeLocal && a.Enabled && a.Metrics {
-			localMetrics = true
 		}
 		if a.Name != AdapterLangSmithIngest && a.ProviderBodies {
 			return fmt.Errorf("config: adapter %q does not take provider_bodies; only %q does, and %q lands Claude Code's bodies on its own", a.Name, AdapterLangSmithIngest, AdapterClaudeCodeProvider)
@@ -506,9 +520,8 @@ func (c *Config) Validate() error {
 			if a.Enabled && a.Listen == "" {
 				return fmt.Errorf("config: adapter %q needs listen, the address LANGSMITH_ENDPOINT is pointed at, such as 127.0.0.1:1985", a.Name)
 			}
-			if a.Metrics || a.MetricsLookback != "" || a.SourceRoot != "" ||
-				len(a.Include) > 0 || len(a.Exclude) > 0 {
-				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, token, thread_keys, scope, provider_bodies and collector, not source_root, include, exclude, metrics or metrics_lookback", a.Name)
+			if a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 {
+				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, token, thread_keys, scope, provider_bodies and collector, not source_root, include or exclude", a.Name)
 			}
 			// It takes a period and a byte budget, unlike the metrics
 			// receiver: what it accepts waits in an inbox until a pass
@@ -524,22 +537,19 @@ func (c *Config) Validate() error {
 			continue
 		}
 		if a.Name == AdapterClaudeCodeOTLP {
-			if a.Collector != (Collector{}) || a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 || a.MetricsLookback != "" {
-				return fmt.Errorf("config: adapter %q is a receiver: it takes listen and metrics, not collector, source_root, include, exclude or metrics_lookback", a.Name)
+			if a.Collector != (Collector{}) || a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 {
+				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, not collector, source_root, include or exclude", a.Name)
 			}
 			continue
 		}
-		if isChanges(a.Name) && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
-			return fmt.Errorf("config: adapter %q reads change records only: it takes source_root, include, exclude and collector, not metrics, metrics_lookback or listen", a.Name)
+		if isChanges(a.Name) && a.Listen != "" {
+			return fmt.Errorf("config: adapter %q reads the plugin's records only: it takes source_root, include, exclude and collector, not listen", a.Name)
 		}
-		if a.Name == AdapterClaudeCodeProvider && (a.Metrics || a.MetricsLookback != "" || a.Listen != "") {
-			return fmt.Errorf("config: adapter %q reads provider bodies only: it takes source_root, include, exclude and collector, not metrics, metrics_lookback or listen", a.Name)
+		if a.Name == AdapterClaudeCodeProvider && a.Listen != "" {
+			return fmt.Errorf("config: adapter %q reads provider bodies only: it takes source_root, include, exclude and collector, not listen", a.Name)
 		}
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)
-		}
-		if _, err := a.Lookback(); err != nil {
-			return fmt.Errorf("adapter %q: %w", a.Name, err)
 		}
 	}
 	if p := c.Export.OTLP.Protocol; p != "grpc" && p != "http" {
@@ -548,11 +558,8 @@ func (c *Config) Validate() error {
 	if !c.Export.OTLP.SendLogs() && !c.Export.OTLP.SendMetrics() {
 		return errors.New("config: export.otlp has both logs and metrics off; a push would send nothing")
 	}
-	// The same tokens must not be counted twice: derived from the
-	// transcripts and received from the runtime's exporter are two sources
-	// of one metric, and a root sends one of them.
-	if localMetrics && receiverMetrics {
-		return fmt.Errorf("config: %s has metrics on while %s is enabled with metrics; the two would count the same tokens twice, so turn one off", AdapterClaudeCodeLocal, AdapterClaudeCodeOTLP)
+	if _, err := c.Metrics.LookbackDuration(); err != nil {
+		return err
 	}
 	return nil
 }

@@ -97,6 +97,10 @@ type Properties struct {
 	// to the same nodes and relations: a change record is evidence beside a
 	// step, never a step. Checked when a scenario has changes.
 	ChangesLeaveTheFold *bool `yaml:"changes_leave_the_fold"`
+	// ExecutionsLeaveTheFold says the same scenario without its execution
+	// records folds to the same nodes, relations and talks: a record is
+	// evidence beside a step, never a step.
+	ExecutionsLeaveTheFold *bool `yaml:"executions_leave_the_fold"`
 	// ProviderBodiesLeaveTheFold says the same scenario without its provider
 	// bodies folds to the same nodes and relations. Checked when a scenario
 	// writes provider bodies.
@@ -183,7 +187,7 @@ type Verify struct {
 var landedPrefix = map[string]string{
 	"transcript": "transcript", "agent_meta": "meta", "journal": "journal",
 	"workflow_manifest": "manifest", "workflow_script": "script", "changes": "changes",
-	"provider_body": "provider_body",
+	"provider_body": "provider_body", "execution": "execution",
 }
 
 // Resolve finds the landed file a Lose names among a session's files. The
@@ -277,6 +281,12 @@ type View struct {
 	ChangedFiles  *int           `yaml:"changed_files"`
 	CapturedBy    map[string]int `yaml:"captured_by"`
 	ChangesJoined *int           `yaml:"changes_joined"`
+	// Executions counts the tool execution records, ExecutionsJoined the
+	// records that found their step, and Outcomes the records by how the
+	// call ended.
+	Executions       *int           `yaml:"executions"`
+	ExecutionsJoined *int           `yaml:"executions_joined"`
+	Outcomes         map[string]int `yaml:"outcomes"`
 	// ProviderBodies counts the landed provider bodies, and CapturedPrompts
 	// the calls that list a request.
 	// ProviderFiles counts the session's provider_body files.
@@ -566,6 +576,27 @@ func checkView(root, session string, want *View) ([]string, error) {
 	if want.CapturedPrompts != nil && doc.Summary.CapturedPrompts != *want.CapturedPrompts {
 		bad("view.captured_prompts is %d, want %d", doc.Summary.CapturedPrompts, *want.CapturedPrompts)
 	}
+	if want.Executions != nil && len(doc.ToolExecutions) != *want.Executions {
+		bad("view.executions is %d, want %d", len(doc.ToolExecutions), *want.Executions)
+	}
+	if want.ExecutionsJoined != nil || want.Outcomes != nil {
+		joined := 0
+		outcomes := map[string]int{}
+		for _, te := range doc.ToolExecutions {
+			outcomes[te.Outcome]++
+			if te.Step != "" {
+				joined++
+			}
+		}
+		if want.ExecutionsJoined != nil && joined != *want.ExecutionsJoined {
+			bad("view.executions_joined is %d, want %d", joined, *want.ExecutionsJoined)
+		}
+		for o, n := range want.Outcomes {
+			if outcomes[o] != n {
+				bad("view.outcomes[%s] is %d, want %d", o, outcomes[o], n)
+			}
+		}
+	}
 	if want.ChangedFiles != nil || want.CapturedBy != nil || want.ChangesJoined != nil {
 		files, joined := 0, 0
 		bySource := map[string]int{}
@@ -618,6 +649,8 @@ type Summary struct {
 	TalksOn    map[string]int
 	Unresolved map[string]int // kind -> open references
 	Streams    []string
+	// Records is how many records each stream holds, by stream.
+	Records map[string]int
 }
 
 // Summarize reads a fold into a Summary.
@@ -626,7 +659,7 @@ func Summarize(root, session string) (*Summary, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Summary{Kinds: map[string]int{}, Relations: map[string]int{}, TalksOn: map[string]int{}, Unresolved: map[string]int{}}
+	s := &Summary{Kinds: map[string]int{}, Relations: map[string]int{}, TalksOn: map[string]int{}, Unresolved: map[string]int{}, Records: map[string]int{}}
 	for _, n := range v.Nodes {
 		s.Kinds[n.Kind]++
 		if n.Kind == model.KindTalk {
@@ -634,6 +667,11 @@ func Summarize(root, session string) (*Summary, error) {
 		}
 		if n.Kind == model.KindStream {
 			s.Streams = append(s.Streams, n.Stream)
+			var attrs struct {
+				Records int `json:"records"`
+			}
+			_ = json.Unmarshal(n.Attrs, &attrs)
+			s.Records[n.Stream] = attrs.Records
 		}
 	}
 	for _, r := range v.Relations {
@@ -674,6 +712,34 @@ func Compare(a, b *Summary) []string {
 	diff("unresolved", a.Unresolved, b.Unresolved)
 	if strings.Join(a.Streams, ",") != strings.Join(b.Streams, ",") {
 		out = append(out, fmt.Sprintf("streams %v against %v", a.Streams, b.Streams))
+	}
+	return out
+}
+
+// CompareRecords says how the record counts of the streams in two summaries
+// differ. Evidence beside a stream, such as a change record, a provider body
+// or an execution record, must not enter the stream: it would add no node,
+// and still change the stream's record count and time range, so the same
+// session would fold differently with and without it. Formats are not
+// compared this way, because each lands its own records.
+func CompareRecords(a, b *Summary) []string {
+	var out []string
+	keys := map[string]bool{}
+	for k := range a.Records {
+		keys[k] = true
+	}
+	for k := range b.Records {
+		keys[k] = true
+	}
+	var names []string
+	for k := range keys {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	for _, k := range names {
+		if a.Records[k] != b.Records[k] {
+			out = append(out, fmt.Sprintf("records on %s: %d against %d", k, a.Records[k], b.Records[k]))
+		}
 	}
 	return out
 }

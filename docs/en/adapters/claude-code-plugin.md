@@ -67,6 +67,40 @@ the model's own words, not in Claude Code's shape. Records of a different shape 
 dialect, even when the same runtime produced them, as the
 [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) says.
 
+## Calls to MCP servers
+
+Claude Code runs the plugin's hook after every call to an MCP server, on the main stream and inside
+subagents. The hooks match `mcp__.*`: `PostToolUse` after a call that returned, and
+`PostToolUseFailure` after one that did not. The plugin appends one `execution/1` record per call,
+to a file beside the stream's change records:
+
+```text
+${CLAUDE_PLUGIN_DATA}/output/<session-id>/main.execution.jsonl
+${CLAUDE_PLUGIN_DATA}/output/<session-id>/<agent-id>.execution.jsonl
+```
+
+A record names the call by its tool-use id. It carries the server's name and where its
+configuration came from, how the call ended, `returned`, `failed` or `interrupted`, and the time
+Claude Code measured around it. It keeps the size and the SHA-256 of the arguments and of the
+answer, never their text. `pkg/execution` in the repository defines the shape, and
+[Execution records](../formats/session-data.md#execution-records) describes it as asz lands it.
+
+Measured on Claude Code 2.1.282 with a test MCP server, in the fixture
+`plugins/claude-code/testdata/mcp-hooks-2.1.282.jsonl`:
+
+- An error the server returned, a server that exited and a call that timed out all reach
+  `PostToolUseFailure`.
+- Every hook carried `duration_ms`, failures included.
+- A call the permission check denied reaches no hook and leaves no record.
+- The arguments a record measures are what the server received. A `PreToolUse` hook that rewrote
+  the input changed what the server received and what the hook after the call saw. The transcript
+  kept the model's own input.
+- A server started with `--mcp-config` has the source `dynamic`.
+- Claude Code passes a tool's annotations, such as a hint that it only reads, to neither the model,
+  the hooks nor the transcript. So a record cannot say whether a tool reads or writes.
+
+`mcp.enabled: false` in the settings turns the records off.
+
 ## Exclusions
 
 Exclusion means no observation: a change under an excluded directory is never seen. Every record

@@ -16,13 +16,14 @@
 // under the License.
 
 // Package claudecodeotlp is the claude-code-otlp adapter: an OpenTelemetry
-// receiver Claude Code's own exporter is pointed at. Phase one takes the
-// runtime's metrics and lands each request in the storage root's metrics
-// spool, bytes as received, for asz push to send on under asz's identity.
-// Logs and traces are accepted and dropped, counted so the status says so,
-// which keeps a runtime configured with every exporter working. Nothing
-// here reads a transcript: the two adapters for the one runtime meet only
-// in the spool, and the configuration refuses to run both with metrics on.
+// receiver Claude Code's own exporter can be pointed at. It accepts metrics,
+// logs and traces, counts each request so the status says what the runtime
+// sends, and keeps none of them. A runtime configured with an exporter keeps
+// working, and nothing it sends is counted twice.
+//
+// asz does not land the exporter's metrics. Every metric asz sends is derived
+// from the landed files, under one name for every runtime, so one root has
+// one source for each count.
 package claudecodeotlp
 
 import (
@@ -32,6 +33,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,60 +42,35 @@ import (
 	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	colltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
-
-	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
 const (
 	// Name is the adapter's name in the configuration.
 	Name = "claude-code-otlp"
-	// RuntimeName is the runtime the requests concern, the same service the
-	// local adapter's sessions are attributed to.
-	RuntimeName = "Claude Code"
 	// Version is the adapter's contract version.
 	Version = "0.1.0"
-	// SourceOTLP names the spool files this adapter writes.
-	SourceOTLP = "otlp"
 	// MaxRequest bounds one request, well above what the runtime's exporter
 	// sends in a minute.
 	MaxRequest = 64 << 20
 )
 
-// Stats counts what the receiver did since it started.
+// Stats counts the requests accepted and dropped since the receiver started.
 type Stats struct {
-	Metrics int64 // metrics requests landed in the spool
-	// MetricsDropped counts metrics requests accepted and dropped because
-	// the adapter has metrics off: the local adapter derives them instead.
-	MetricsDropped int64
-	Logs           int64 // logs requests accepted and dropped
-	Traces         int64 // traces requests accepted and dropped
-	Bytes          int64 // metrics bytes landed
-	Errors         int64
+	Metrics int64
+	Logs    int64
+	Traces  int64
 }
 
 // Receiver listens for the runtime's exporter on one address, over gRPC
-// and over HTTP with protobuf, the two protocols the runtime offers, and
-// lands what it receives.
+// and over HTTP with protobuf, the two protocols the runtime offers.
 type Receiver struct {
-	Zone *storage.Zone
 	// Listen is the address, such as 127.0.0.1:4317. Both protocols share
 	// it: gRPC and HTTP/1.1 are told apart on the first bytes.
 	Listen string
-	// LandMetrics says metrics are landed in the spool. Off, they are
-	// accepted and dropped, for a root whose local adapter derives them.
-	LandMetrics bool
-	Now         func() time.Time
 
-	spool          *storage.Spool
-	metricsDropped atomic.Int64
-	metrics        atomic.Int64
-	logs           atomic.Int64
-	traces         atomic.Int64
-	bytes          atomic.Int64
-	errs           atomic.Int64
+	metrics atomic.Int64
+	logs    atomic.Int64
+	traces  atomic.Int64
 
 	mu   sync.Mutex
 	ln   net.Listener
@@ -104,7 +81,7 @@ type Receiver struct {
 
 // Stats reports the counts so far.
 func (r *Receiver) Stats() Stats {
-	return Stats{Metrics: r.metrics.Load(), MetricsDropped: r.metricsDropped.Load(), Logs: r.logs.Load(), Traces: r.traces.Load(), Bytes: r.bytes.Load(), Errors: r.errs.Load()}
+	return Stats{Metrics: r.metrics.Load(), Logs: r.logs.Load(), Traces: r.traces.Load()}
 }
 
 // Addr is the address the receiver listens on, once started.
@@ -121,13 +98,9 @@ func (r *Receiver) Addr() string {
 // both protocols: a connection that opens with an HTTP/2 preface is gRPC,
 // anything else is HTTP/1.1.
 func (r *Receiver) Start() error {
-	if r.Now == nil {
-		r.Now = time.Now
-	}
 	if r.Listen == "" {
 		return errors.New("claude-code-otlp: no listen address")
 	}
-	r.spool = storage.NewSpool(r.Zone)
 	ln, err := net.Listen("tcp", r.Listen)
 	if err != nil {
 		return fmt.Errorf("claude-code-otlp: %w", err)
@@ -137,7 +110,7 @@ func (r *Receiver) Start() error {
 	collogspb.RegisterLogsServiceServer(r.rpc, &logsServer{r: r})
 	colltracepb.RegisterTraceServiceServer(r.rpc, &traceServer{r: r})
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/metrics", r.serveMetrics)
+	mux.HandleFunc("/v1/metrics", r.serveDropped(&r.metrics))
 	mux.HandleFunc("/v1/logs", r.serveDropped(&r.logs))
 	mux.HandleFunc("/v1/traces", r.serveDropped(&r.traces))
 	r.web = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
@@ -191,58 +164,20 @@ func (r *Receiver) Stop() {
 	<-done
 }
 
-// land writes one metrics request to the spool, bytes as received, or
-// drops it when the adapter has metrics off.
-func (r *Receiver) land(data []byte) error {
-	if !r.LandMetrics {
-		r.metricsDropped.Add(1)
-		return nil
-	}
-	if _, err := r.spool.Put(SourceOTLP, data, r.Now()); err != nil {
-		r.errs.Add(1)
-		return err
-	}
-	r.metrics.Add(1)
-	r.bytes.Add(int64(len(data)))
-	return nil
-}
-
-func (r *Receiver) serveMetrics(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		http.Error(w, "POST a metrics request", http.StatusMethodNotAllowed)
-		return
-	}
-	if ct := req.Header.Get("Content-Type"); ct != "application/x-protobuf" {
-		// The runtime can also send http/json; phase one lands protobuf
-		// only, which is what the runtime's default protocol sends.
-		http.Error(w, "content type "+ct+" is not application/x-protobuf; set OTEL_EXPORTER_OTLP_PROTOCOL to grpc or http/protobuf", http.StatusUnsupportedMediaType)
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(req.Body, MaxRequest+1))
-	if err != nil || len(data) > MaxRequest {
-		http.Error(w, "the request is too large or could not be read", http.StatusRequestEntityTooLarge)
-		return
-	}
-	var msg collmetricspb.ExportMetricsServiceRequest
-	if err := proto.Unmarshal(data, &msg); err != nil {
-		http.Error(w, "not an ExportMetricsServiceRequest: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := r.land(data); err != nil {
-		http.Error(w, err.Error(), http.StatusServiceUnavailable)
-		return
-	}
-	out, _ := proto.Marshal(&collmetricspb.ExportMetricsServiceResponse{})
-	w.Header().Set("Content-Type", "application/x-protobuf")
-	_, _ = w.Write(out)
-}
-
-// serveDropped accepts a logs or traces request and keeps nothing of it,
-// counting it so the status can say what the runtime is sending.
+// serveDropped accepts a request and keeps nothing of it, counting it so the
+// status can say what the runtime is sending. The answer is an empty export
+// response in the request's own encoding, as OTLP asks: no bytes in
+// protobuf, and {} in JSON.
 func (r *Receiver) serveDropped(counter *atomic.Int64) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(req.Body, MaxRequest))
 		counter.Add(1)
+		if strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{}"))
+			return
+		}
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.WriteHeader(http.StatusOK)
 	}
@@ -253,17 +188,8 @@ type metricsServer struct {
 	r *Receiver
 }
 
-func (s *metricsServer) Export(_ context.Context, req *collmetricspb.ExportMetricsServiceRequest) (*collmetricspb.ExportMetricsServiceResponse, error) {
-	// Landed as the bytes of the message as received: the runtime's
-	// request, re-encoded from the decoded message, is the same bytes for
-	// the same message, and what push sends is what the spool holds.
-	data, err := proto.Marshal(req)
-	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
-	if err := s.r.land(data); err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
-	}
+func (s *metricsServer) Export(context.Context, *collmetricspb.ExportMetricsServiceRequest) (*collmetricspb.ExportMetricsServiceResponse, error) {
+	s.r.metrics.Add(1)
 	return &collmetricspb.ExportMetricsServiceResponse{}, nil
 }
 

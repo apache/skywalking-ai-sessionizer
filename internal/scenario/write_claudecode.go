@@ -39,7 +39,7 @@ import (
 // and digest of the bytes written, for the session's marker.
 func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 	proj := filepath.Join(root, p.Project)
-	w := &ccWriter{p: p, files: map[string][]string{}, plugin: map[string][]string{}}
+	w := &ccWriter{p: p, files: map[string][]string{}, plugin: map[string][]string{}, execs: map[string][]string{}}
 	lost := p.lostStreams()
 	for i := range p.Events {
 		e := &p.Events[i]
@@ -160,6 +160,11 @@ func writeClaudeCode(p *Plan, root string) ([]string, []MarkerFile, error) {
 			return nil, nil, err
 		}
 	}
+	for stream, lines := range w.execs {
+		if err := putUnder(root, PluginOutputDir+"/"+p.Session+"/"+stream+".execution.jsonl", lines); err != nil {
+			return nil, nil, err
+		}
+	}
 	// The provider bodies, where Claude Code writes them: one flat directory
 	// for every session, each file stamped with when it was written, which
 	// is the order the adapter lands them in.
@@ -198,6 +203,8 @@ type ccWriter struct {
 	files map[string][]string
 	// plugin holds the lines the asz plugin would have written, by stream.
 	plugin map[string][]string
+	// execs are the plugin's execution records, one file per stream.
+	execs map[string][]string
 }
 
 func ccTime(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000Z") }
@@ -343,6 +350,14 @@ func (w *ccWriter) event(e *Event) error {
 				// The plugin observed the tool and wrote what it found.
 				line, _ := w.p.pluginRecord(e).Marshal()
 				w.plugin[s] = append(w.plugin[s], string(line))
+			}
+			if e.Execution != nil && !e.Replayed {
+				// The plugin's hook after the call saw which server ran it.
+				line, _ := w.p.executionRecord(e).Marshal()
+				w.execs[s] = append(w.execs[s], string(line))
+				if e.Execution.Twice {
+					w.execs[s] = append(w.execs[s], string(line))
+				}
 			}
 		}
 		w.add(s, w.rec(m, s))

@@ -365,11 +365,8 @@ func TestAPassRunAgainWritesNothingMore(t *testing.T) {
 	}
 }
 
-// The look-back bounds the first pass only, and the runtime's own metrics
-// already in the spool bound it further: the derivation starts after the
-// last request the receiver landed, so a switch of source counts nothing
-// twice.
-func TestLookbackAndReceivedMetricsBoundTheFirstPass(t *testing.T) {
+// The look-back bounds the first pass only.
+func TestLookbackBoundsTheFirstPass(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
 	now := base
 	land(t, z, "s1", "main", 1, []call{{id: "old", model: "m", at: now.Add(-48 * time.Hour), frags: 1, in: 100, out: 100}})
@@ -391,30 +388,14 @@ func TestLookbackAndReceivedMetricsBoundTheFirstPass(t *testing.T) {
 		t.Fatalf("a later pass must derive an old file whole: requests=%d err=%v", st.Requests, err)
 	}
 
-	z2 := storage.NewZone(t.TempDir())
-	land(t, z2, "s1", "main", 1, []call{
-		{id: "before", model: "m", at: now.Add(-30 * time.Minute), frags: 1, in: 5, out: 5},
-		{id: "after", model: "m", at: now.Add(-5 * time.Minute), frags: 1, in: 6, out: 6},
-	})
-	data, _ := proto.Marshal(&collmetricspb.ExportMetricsServiceRequest{})
-	if _, err := storage.NewSpool(z2).Put("otlp", data, now.Add(-10*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	d2 := deriver(z2, now, metrics.Options{Lookback: 24 * time.Hour})
-	if _, err := d2.Pass(nil); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := points(t, z2); total(got["main/input/m#s1"]) != 6 {
-		t.Fatalf("what the receiver already landed must not be derived again: %v", got)
-	}
 }
 
 // TestAnotherRuntimesTranscriptDerivesNothing.
 //
-// The metric is Claude Code's own family. A root can hold a LangChain
-// conversation beside Claude Code's, landed by the receiver with calls and
-// usage of its own, and those tokens went out as claude_code.token.usage
-// because the derivation read every transcript in the root.
+// The token metric counts the model calls of Claude Code transcripts only. A
+// root can hold a LangChain conversation beside Claude Code's, landed by the
+// receiver with calls and usage of its own, and those tokens went out as
+// Claude Code's because the derivation read every transcript in the root.
 func TestAnotherRuntimesTranscriptDerivesNothing(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
 	c := call{id: "c1", model: "m", at: base, frags: 1, in: 4, out: 60}

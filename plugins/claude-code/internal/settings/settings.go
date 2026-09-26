@@ -47,6 +47,8 @@ type Settings struct {
 	// ReadOnly says whether a shell command the classifier marks read-only
 	// skips its scans. On by default.
 	ReadOnly ReadOnly `yaml:"read_only"`
+	// MCP is the recording of calls to MCP servers.
+	MCP MCP `yaml:"mcp"`
 	// Tools names the tools observed with a scan: the shells. Editing
 	// tools are observed from their own response and need no entry.
 	Tools Tools `yaml:"tools"`
@@ -73,6 +75,16 @@ type ReadOnly struct {
 
 // On reports whether the skip is enabled.
 func (r ReadOnly) On() bool { return r.Enabled == nil || *r.Enabled }
+
+// MCP is the recording of calls to MCP servers: which server, how the call
+// ended, how long it took, and the size of what went each way. It keeps no
+// parameter or answer text, so it is on unless turned off.
+type MCP struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+// On reports whether calls to MCP servers are recorded.
+func (m MCP) On() bool { return m.Enabled == nil || *m.Enabled }
 
 // Tools names the tools observed with a scan.
 //
@@ -136,6 +148,9 @@ func Load(dataDir string) (*Settings, error) {
 	s.Exclude.Add, s.Exclude.Remove = loaded.Exclude.Add, loaded.Exclude.Remove
 	if loaded.ReadOnly.Enabled != nil {
 		s.ReadOnly = loaded.ReadOnly
+	}
+	if loaded.MCP.Enabled != nil {
+		s.MCP = loaded.MCP
 	}
 	if len(loaded.Tools.Scope) > 0 {
 		s.Tools.Scope = loaded.Tools.Scope

@@ -566,7 +566,7 @@ func TestPushSendsTheMetricsSpoolUnderTheServiceIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := storage.NewSpool(z).Put("otlp", data, time.Now()); err != nil {
+			if _, _, err := storage.NewSpool(z).PutNamed("metrics-test-000001-local.pb", data); err != nil {
 				t.Fatal(err)
 			}
 			rcv := startReceiver(t)
@@ -605,7 +605,7 @@ func TestPushSendsTheMetricsSpoolUnderTheServiceIdentity(t *testing.T) {
 func TestPushSendsOnlyWhatIsSwitchedOn(t *testing.T) {
 	spooled := func(z *storage.Zone) {
 		data, _ := proto.Marshal(&collmetricspb.ExportMetricsServiceRequest{})
-		if _, err := storage.NewSpool(z).Put("otlp", data, time.Now()); err != nil {
+		if _, _, err := storage.NewSpool(z).PutNamed("metrics-test-000001-local.pb", data); err != nil {
 			t.Fatal(err)
 		}
 	}
