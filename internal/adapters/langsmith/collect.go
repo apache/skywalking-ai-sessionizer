@@ -400,7 +400,11 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		}
 		g.items = append(g.items, item)
 	}
-	stamp := c.Now().UTC().Format("20060102T150405.000000000Z")
+	// One time for the whole pass: it names every file the pass lands and is
+	// the collected time in each file's header, as in every other adapter, so
+	// a reader that has only the header, such as a server that stores files by
+	// session and sequence, derives the file's name from it.
+	now := c.Now().UTC()
 	// Every session of the request is checked before any is landed. Checking
 	// one at a time landed the first and then set the request aside on the
 	// second, and the first was indexed but never reported for parsing.
@@ -415,7 +419,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		if len(g.items) == 0 {
 			continue
 		}
-		if err := c.land(g, stamp, request, open); err != nil {
+		if err := c.land(g, now, request, open); err != nil {
 			return out, err
 		}
 		out.Files += g.files
@@ -620,7 +624,7 @@ func (c *Collector) check(g *grouped, open *pending, request Waiting) error {
 // session, and the sequence is what lets assembly track its progress with one
 // watermark. Two requests carrying the same session are therefore serialised
 // here, however they arrived.
-func (c *Collector) land(g *grouped, stamp string, request Waiting, open *pending) error {
+func (c *Collector) land(g *grouped, now time.Time, request Waiting, open *pending) error {
 	dir := c.Zone.SessionDir(g.session)
 	p := c.place(g, open)
 	sh, shapePath, streams, byStream := p.shape, p.shapePath, p.streams, p.byStream
@@ -642,12 +646,12 @@ func (c *Collector) land(g *grouped, stamp string, request Waiting, open *pendin
 		return err
 	}
 	for _, stream := range streams {
-		if err := c.landStream(g, state, stream, byStream[stream], stamp, request); err != nil {
+		if err := c.landStream(g, state, stream, byStream[stream], now, request); err != nil {
 			return err
 		}
 	}
 	if c.ProviderBodies {
-		landed, err := c.landBodies(g.session, state, bodiesOf(g.items, p.placed), stamp, request)
+		landed, err := c.landBodies(g.session, state, bodiesOf(g.items, p.placed), now, request)
 		if err != nil {
 			return err
 		}
@@ -747,7 +751,7 @@ func (c *Collector) encodable(session, stream string, records []sessiondata.Reco
 
 // landStream writes one stream's records out of one request.
 func (c *Collector) landStream(g *grouped, state *storage.SessionState, stream string,
-	records []sessiondata.Record, stamp string, request Waiting) error {
+	records []sessiondata.Record, now time.Time, request Waiting) error {
 	if len(records) == 0 {
 		return nil
 	}
@@ -780,12 +784,12 @@ func (c *Collector) landStream(g *grouped, state *storage.SessionState, stream s
 		}
 		seq := state.Take()
 		header := &sessiondata.Header{
-			Seq: seq, At: c.Now().UTC().Format(time.RFC3339Nano),
+			Seq: seq, At: now.Format(time.RFC3339Nano),
 			Kind: sessiondata.KindTranscript, Adapter: Name + "/" + Version,
 			Dialect: Dialect, Src: filepath.Base(request.Path),
 			Session: g.session, Stream: stream,
 		}
-		path := filepath.Join(streamDir, storage.LandedName("transcript", stamp, seq))
+		path := filepath.Join(streamDir, storage.LandedName("transcript", storage.Stamp(now), seq))
 		batch := records[start:end]
 		// A failure here is almost always the disk, and a disk is retried:
 		// treating every write failure as a bad request took a valid batch

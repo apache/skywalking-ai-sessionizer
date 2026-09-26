@@ -247,6 +247,47 @@ func landIntoBudget(t *testing.T, zone *storage.Zone, kase string, budget int64)
 	return landed.Sessions
 }
 
+// TestAFileIsNamedForTheTimeItsHeaderSays. Every file one pass lands carries
+// the pass's time twice: in its name and as the collected time in its header.
+// A server that stores files by session and sequence keeps only the header,
+// and names the file from it, so the two must agree. The collector took the
+// name's time once per pass and the header's once per file. On a real root,
+// all 50 LangChain files were named apart from their header, by up to 99
+// milliseconds, and none of the 7,185 Claude Code files was.
+func TestAFileIsNamedForTheTimeItsHeaderSays(t *testing.T) {
+	zone, sessions := land(t, "subagent")
+	checked := 0
+	for _, session := range sessions {
+		files, err := storage.LandedFiles(zone, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, lf := range files {
+			f, err := os.Open(lf.Path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rd, err := sessiondata.NewReader(f)
+			if err != nil {
+				f.Close()
+				t.Fatal(err)
+			}
+			at, err := time.Parse(time.RFC3339Nano, rd.Header().At)
+			f.Close()
+			if err != nil {
+				t.Fatalf("%s: header time %q: %v", lf.Path, rd.Header().At, err)
+			}
+			if !strings.Contains(filepath.Base(lf.Path), "-"+storage.Stamp(at)+"-") {
+				t.Fatalf("%s is not named for its header's time %s", filepath.Base(lf.Path), rd.Header().At)
+			}
+			checked++
+		}
+	}
+	if checked < 3 {
+		t.Fatalf("checked %d files; the capture lands a transcript per stream and its provider bodies", checked)
+	}
+}
+
 // fold reads the conversation back out of its rounds.
 func fold(t *testing.T, zone *storage.Zone, session string) *sessionflow.View {
 	t.Helper()
