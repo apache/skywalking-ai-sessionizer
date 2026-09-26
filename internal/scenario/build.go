@@ -190,14 +190,15 @@ adapters:
   - name: claude-code-local
     enabled: true
     source_root: %s
-    # The runtime's own metric family, derived from what is landed, with
-    # no look-back: a scenario is history by construction.
-    metrics: true
-    metrics_lookback: none
 %s  - name: claude-code-changes
     enabled: true
     source_root: %s/plugins/data
-%s%s# To export the session with asz push, name the receiver:
+%s%s# The metrics, derived from what is landed with no look-back: a scenario is
+# history by construction.
+metrics:
+  enabled: true
+  lookback: none
+# To export the session with asz push, name the receiver:
 # export:
 #   otlp:
 #     protocol: grpc

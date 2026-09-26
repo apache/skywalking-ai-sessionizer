@@ -126,6 +126,8 @@ func kindOf(hdr *sessiondata.Header, rec *sessiondata.Record) Kind {
 		return KindChanges
 	case sessiondata.KindProviderBody:
 		return KindProviderBody
+	case sessiondata.KindExecution:
+		return KindExecution
 	}
 	switch rec.From {
 	case sessiondata.FromAgent:
@@ -200,6 +202,7 @@ func blocksOf(in *Interner, rec *sessiondata.Record) []Block {
 		switch p.Kind {
 		case sessiondata.PartCall:
 			b.Kind, b.ToolID, b.Name = BlockToolUse, in.ID(p.ID), in.ID(p.Name)
+			b.Server, b.ServerTool = in.ID(p.Server), in.ID(p.ServerTool)
 		case sessiondata.PartResult:
 			b.Kind, b.ToolID = BlockToolResult, in.ID(p.Of)
 		case sessiondata.PartText:

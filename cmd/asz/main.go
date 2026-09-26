@@ -191,7 +191,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: the receiver runs in watch mode only; not started with -once\n", ad.Name)
 				continue
 			}
-			if err := startReceiver(cfg, ad); err != nil {
+			if err := startReceiver(ad); err != nil {
 				fatal(err)
 			}
 		case config.AdapterLangSmithIngest:
@@ -273,24 +273,13 @@ var receivers int
 
 // startReceiver opens a claude-code-otlp receiver on its address and leaves
 // it listening for the life of the process.
-func startReceiver(cfg *config.Config, ad config.Adapter) error {
-	zoneRoot, err := cfg.ResolvedRoot()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
-		return err
-	}
-	r := &claudecodeotlp.Receiver{Zone: storage.NewZone(zoneRoot), Listen: ad.Listen, LandMetrics: ad.Metrics}
+func startReceiver(ad config.Adapter) error {
+	r := &claudecodeotlp.Receiver{Listen: ad.Listen}
 	if err := r.Start(); err != nil {
 		return err
 	}
 	receivers++
-	what := "metrics landed in the spool"
-	if !ad.Metrics {
-		what = "metrics accepted and dropped, metrics: false"
-	}
-	fmt.Printf("receiver    : %s on %s, gRPC and HTTP; %s; logs and traces accepted and dropped\n", ad.Name, r.Addr(), what)
+	fmt.Printf("receiver    : %s on %s, gRPC and HTTP; metrics, logs and traces accepted and dropped\n", ad.Name, r.Addr())
 	return nil
 }
 
@@ -463,7 +452,7 @@ func printIndexDetail(ix *index.Index, id string) {
 		index.KindMeta: "agent_meta", index.KindJournal: "journal",
 		index.KindManifest: "manifest", index.KindScript: "script",
 		index.KindOther: "other", index.KindUnknown: "unknown", index.KindChanges: "changes",
-		index.KindProviderBody: "provider_body",
+		index.KindProviderBody: "provider_body", index.KindExecution: "execution",
 	}
 	byKind := map[index.Kind]int{}
 	msgs := map[uint32]int{}
@@ -807,7 +796,7 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 		return err
 	}
 	zone := storage.NewZone(zoneRoot)
-	ref, err := newRefresher(nil, zone, ads, cfg.Parse.MaxRoundBytes, once)
+	ref, err := newRefresher(nil, zone, ads, cfg.Metrics, cfg.Parse.MaxRoundBytes, once)
 	if err != nil {
 		return err
 	}
@@ -890,15 +879,12 @@ func pushOnly(cfg *config.Config) error {
 	}
 }
 
-// newDeriver is the metrics derivation an adapter asked for, or nil. A
-// single pass is the backfill path over history that already exists, with
-// no later pass to derive what it left waiting, so it never waits for the
-// next file of a stream; only a watching collector does.
-func newDeriver(zone *storage.Zone, ad config.Adapter, once bool) (*metrics.Deriver, error) {
-	if !ad.Metrics {
-		return nil, nil
-	}
-	lookback, err := ad.Lookback()
+// newDeriver is the metrics derivation over a root. A single pass is the
+// backfill path over history that already exists, with no later pass to
+// derive what it left waiting, so it never waits for the next file of a
+// stream; only a watching collector does.
+func newDeriver(zone *storage.Zone, mc config.Metrics, once bool) (*metrics.Deriver, error) {
+	lookback, err := mc.LookbackDuration()
 	if err != nil {
 		return nil, err
 	}

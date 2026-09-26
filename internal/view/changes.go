@@ -44,21 +44,7 @@ import (
 // tool-use id, which the change record names and the step's call part
 // carries; nothing is matched by time.
 func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2]uint64]*sessiondata.Record) []sessionview.WorkspaceChange {
-	// Which step carries which tool-use id, from the call part each tool
-	// step points at.
-	stepOf := map[string]string{}
-	for _, n := range c.View.Nodes {
-		if (n.Kind != model.KindTool && n.Kind != model.KindAgentCall) || n.Ref == nil {
-			continue
-		}
-		rec := recs[[2]uint64{n.Ref.Seq, n.Ref.Row}]
-		if rec == nil {
-			continue
-		}
-		if p := partAt(rec, n.Ref.Block); p != nil && p.Kind == sessiondata.PartCall && p.ID != "" {
-			stepOf[p.ID] = n.ID
-		}
-	}
+	stepOf := c.stepsByToolUse(recs)
 
 	var out []sessionview.WorkspaceChange
 	seen := map[string]bool{}
@@ -134,8 +120,8 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 	// stay: the runtime's is listed first, and a viewer showing one
 	// prefers it.
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Time != out[j].Time {
-			return out[i].Time < out[j].Time
+		if c := compareTimes(out[i].Time, out[j].Time); c != 0 {
+			return c < 0
 		}
 		if out[i].CapturedBy != out[j].CapturedBy {
 			return out[i].CapturedBy == changes.CapturedByClaudeCode
@@ -146,6 +132,25 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 		out = []sessionview.WorkspaceChange{}
 	}
 	return out
+}
+
+// stepsByToolUse says which step carries which tool-use id, from the call
+// part each tool step points at.
+func (c *Conversation) stepsByToolUse(recs map[[2]uint64]*sessiondata.Record) map[string]string {
+	stepOf := map[string]string{}
+	for _, n := range c.View.Nodes {
+		if (n.Kind != model.KindTool && n.Kind != model.KindAgentCall) || n.Ref == nil {
+			continue
+		}
+		rec := recs[[2]uint64{n.Ref.Seq, n.Ref.Row}]
+		if rec == nil {
+			continue
+		}
+		if p := partAt(rec, n.Ref.Block); p != nil && p.Kind == sessiondata.PartCall && p.ID != "" {
+			stepOf[p.ID] = n.ID
+		}
+	}
+	return stepOf
 }
 
 // partAt returns the part a reference names, or the only part when the

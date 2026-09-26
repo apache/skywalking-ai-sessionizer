@@ -55,15 +55,6 @@ adapters:
     exclude:
       - /private/tmp/**
 
-    # A reconstructed subset of the runtime's own metric family, derived
-    # from the landed files and sent by asz push: claude_code.token.usage
-    # under the name Claude Code's OpenTelemetry exporter uses, with the
-    # labels a transcript can supply. The first derivation over a root with
-    # history reaches back metrics_lookback, 24h unless set; 0 or none
-    # means everything.
-    metrics: false
-    metrics_lookback: 24h
-
     collector:
       # watch runs the pipeline continuously: every interval it lands what
       # is new, parses what moved, and sends what the export block asks
@@ -87,16 +78,13 @@ adapters:
       # repack re-cuts an existing root into a new one.
       max_delta_bytes: 2097152
 
-  # The runtime's own OpenTelemetry exporter, received here. Point Claude
-  # Code at listen with CLAUDE_CODE_ENABLE_TELEMETRY=1,
-  # OTEL_METRICS_EXPORTER=otlp and OTEL_EXPORTER_OTLP_ENDPOINT, over gRPC
-  # or http/protobuf. Phase one lands its metrics in the spool for asz push;
-  # logs and traces are accepted and dropped. metrics may be on here or on
-  # claude-code-local, never both, so the same tokens are not counted twice.
+  # A listener for the runtime's own OpenTelemetry exporter. It accepts
+  # metrics, logs and traces over gRPC or HTTP and keeps none of them, so a
+  # Claude Code already set to export keeps working. The metrics asz sends
+  # are derived from the landed files; see metrics below.
   - name: claude-code-otlp
     enabled: false
     listen: 127.0.0.1:4317
-    metrics: true
 
   # The workspace change records the asz Claude Code plugin writes: which
   # files each shell command changed, and each edit made inside a
@@ -224,6 +212,20 @@ parse:
   # and the rest of the evidence goes to the next round. A round covering
   # a single landed file is published whole even when larger.
   max_round_bytes: 2097152
+
+# The metrics asz derives from the landed files, for every adapter at once:
+# agent.token.usage from the model calls of a Claude Code conversation, and
+# agent.mcp.calls and agent.mcp.duration from the MCP calls the Claude Code
+# plugin saw. They wait in the root's spool, and asz push sends them when
+# export.otlp.metrics is on.
+metrics:
+  enabled: true
+  # How far back the first derivation over a root reaches. It runs once,
+  # before the root holds any metrics, which is usually a new deployment
+  # over a source that already has history. A minute older than this is
+  # not derived. Every later pass derives each new file whole. A duration
+  # such as 72h or 3d; 0 or none means everything.
+  lookback: 72h
 
 export:
   # asz collect sends every landed file and every round to an OpenTelemetry

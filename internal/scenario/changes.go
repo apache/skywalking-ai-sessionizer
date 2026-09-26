@@ -189,30 +189,36 @@ func (p *Plan) runtimeResult(e *Event) map[string]any {
 // nothing with the original, so a scenario can be built again without its
 // changes and the two folds compared.
 func stripChanges(steps []Step) []Step {
+	return mapTools(steps, func(t *Tool) { t.Changes = nil })
+}
+
+// mapTools returns the steps with edit applied to a copy of every tool,
+// nested ones included, sharing nothing with the original.
+func mapTools(steps []Step, edit func(*Tool)) []Step {
 	out := make([]Step, len(steps))
 	for i, s := range steps {
 		if s.Call != nil {
 			c := *s.Call
-			if c.Tool != nil && len(c.Tool.Changes) > 0 {
+			if c.Tool != nil {
 				t := *c.Tool
-				t.Changes = nil
+				edit(&t)
 				c.Tool = &t
 			}
 			if c.Agent != nil {
 				a := *c.Agent
-				a.Steps = stripChanges(a.Steps)
+				a.Steps = mapTools(a.Steps, edit)
 				c.Agent = &a
 			}
 			if c.Skill != nil {
 				k := *c.Skill
-				k.Steps = stripChanges(k.Steps)
+				k.Steps = mapTools(k.Steps, edit)
 				c.Skill = &k
 			}
 			if c.Workflow != nil {
 				w := *c.Workflow
 				w.Children = make([]Child, len(w.Children))
 				for j, child := range c.Workflow.Children {
-					child.Steps = stripChanges(child.Steps)
+					child.Steps = mapTools(child.Steps, edit)
 					w.Children[j] = child
 				}
 				c.Workflow = &w
@@ -224,31 +230,37 @@ func stripChanges(steps []Step) []Step {
 	return out
 }
 
-// HasChanges reports whether any tool in the steps changes a file.
-func HasChanges(steps []Step) bool {
+// anyTool reports whether any tool in the steps, nested ones included,
+// satisfies has.
+func anyTool(steps []Step, has func(*Tool) bool) bool {
 	for _, s := range steps {
 		if s.Call == nil {
 			continue
 		}
 		c := s.Call
-		if c.Tool != nil && len(c.Tool.Changes) > 0 {
+		if c.Tool != nil && has(c.Tool) {
 			return true
 		}
-		if c.Agent != nil && HasChanges(c.Agent.Steps) {
+		if c.Agent != nil && anyTool(c.Agent.Steps, has) {
 			return true
 		}
-		if c.Skill != nil && HasChanges(c.Skill.Steps) {
+		if c.Skill != nil && anyTool(c.Skill.Steps, has) {
 			return true
 		}
 		if c.Workflow != nil {
 			for _, child := range c.Workflow.Children {
-				if HasChanges(child.Steps) {
+				if anyTool(child.Steps, has) {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// HasChanges reports whether any tool in the steps changes a file.
+func HasChanges(steps []Step) bool {
+	return anyTool(steps, func(t *Tool) bool { return len(t.Changes) > 0 })
 }
 
 // WithoutChanges is the scenario with every change removed.

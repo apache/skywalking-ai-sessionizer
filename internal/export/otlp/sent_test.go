@@ -66,7 +66,7 @@ func spool(t *testing.T, z *storage.Zone) (string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path, err := storage.NewSpool(z).Put("otlp", data, time.Now())
+	path, _, err := storage.NewSpool(z).PutNamed("metrics-test-000001-local.pb", data)
 	if err != nil {
 		t.Fatal(err)
 	}

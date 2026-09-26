@@ -189,6 +189,10 @@ type Tool struct {
 	// change record beside the stream. Both land as changes/1 and both
 	// join the step, so the same scenario checks the two paths.
 	Changes []Change `yaml:"changes"`
+	// Execution is what the plugin's hook saw of a call to an MCP server.
+	// A claude-code build writes it the way the plugin does, to the
+	// stream's execution file; an sd build lands it. Both join the step.
+	Execution *Execution `yaml:"execution"`
 }
 
 // Change is one file a tool changed. A side that is absent, nil in YAML or

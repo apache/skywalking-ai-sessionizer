@@ -50,14 +50,15 @@ func (b *builder) stage1Canonical() {
 	// record count and time range, so a session with such records would
 	// fold differently from the same session without them. A provider body
 	// is set aside for the same reason: it is what a call sent and got back,
-	// joined to the call by a view, and no step of any stream.
+	// joined to the call by a view, and no step of any stream. So is an
+	// execution record, which says what an observer saw a call do.
 	bounded := make([]int32, 0, len(all))
 	for _, i := range all {
 		e := &b.ix.Entries[i]
 		if b.opt.ThroughSeq > 0 && uint64(e.Seq) > b.opt.ThroughSeq {
 			continue
 		}
-		if e.Kind == index.KindChanges || e.Kind == index.KindProviderBody {
+		if e.Kind == index.KindChanges || e.Kind == index.KindProviderBody || e.Kind == index.KindExecution {
 			continue
 		}
 		bounded = append(bounded, i)

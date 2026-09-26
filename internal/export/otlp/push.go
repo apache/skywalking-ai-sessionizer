@@ -96,10 +96,8 @@ type Pusher struct {
 	NoLogs    bool
 	NoMetrics bool
 	// MetricsService is the service the metrics spool is attributed to: the
-	// requests the local adapter derived and the ones the runtime's exporter
-	// sent both concern the one runtime, and they leave under its name so a
-	// receiver holds one service whichever produced the points. Empty means
-	// ServiceName.
+	// derived requests concern the runtime whose landed files they came from,
+	// and they leave under its name. Empty means ServiceName.
 	MetricsService string
 	// BatchBytes is how many file bytes one request carries at most. A file
 	// larger than the budget is sent alone, in a request of its own.
@@ -347,8 +345,7 @@ func (p *Pusher) Pass() (*Stats, error) {
 // pushSpool sends the metrics spool: every request not yet sent, in the
 // order it was put, one request each, under the same budget and the same
 // once-only rule as the files. The resource is normalised on the way out
-// to asz's identity, so a receiver holds one service for the runtime
-// whether asz derived the points or the runtime's exporter sent them.
+// to asz's identity, so a receiver holds one service for the runtime.
 func (p *Pusher) pushSpool(b *batch) {
 	st, state := b.st, b.state
 	files, err := storage.NewSpool(p.Zone).List()

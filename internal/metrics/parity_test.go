@@ -52,6 +52,10 @@ func capture(t *testing.T) *collmetricspb.ExportMetricsServiceRequest {
 	return &req
 }
 
+// exporterTokenUsage is what Claude Code's exporter calls the metric asz
+// derives as agent.token.usage.
+const exporterTokenUsage = "claude_code.token.usage"
+
 func find(req *collmetricspb.ExportMetricsServiceRequest, name string) *metricspb.Metric {
 	for _, rm := range req.ResourceMetrics {
 		for _, sm := range rm.ScopeMetrics {
@@ -91,10 +95,15 @@ func contains(list []string, s string) bool {
 // page lists as not derived. Every other metric the exporter sent is on
 // the page's list of metrics not derived. A newer runtime that sends
 // another label or another metric fails here, and the page is updated.
+//
+// The exporter calls the metric by the runtime's name, and asz by its own,
+// agent.token.usage, since a runtime's vocabulary stops at its adapter. The
+// name is the one difference the page lists for the metric itself.
 func TestDerivedPointsMatchTheCapturedExporter(t *testing.T) {
-	theirs := find(capture(t), metrics.TokenUsage)
+	landed := capture(t)
+	theirs := find(landed, exporterTokenUsage)
 	if theirs == nil {
-		t.Fatal("the capture carries no token metric")
+		t.Fatal("the capture carries no token metric under the exporter's name")
 	}
 
 	z := storage.NewZone(t.TempDir())
@@ -118,7 +127,7 @@ func TestDerivedPointsMatchTheCapturedExporter(t *testing.T) {
 	}
 
 	// The metric itself.
-	if ours.Name != theirs.Name || ours.Unit != theirs.Unit || ours.Description != theirs.Description {
+	if ours.Name == theirs.Name || ours.Unit != theirs.Unit || ours.Description != theirs.Description {
 		t.Fatalf("metric: derived %q %q %q, exporter %q %q %q", ours.Name, ours.Unit, ours.Description, theirs.Name, theirs.Unit, theirs.Description)
 	}
 	if ours.GetSum().GetAggregationTemporality() != theirs.GetSum().GetAggregationTemporality() || ours.GetSum().GetIsMonotonic() != theirs.GetSum().GetIsMonotonic() {
@@ -181,13 +190,13 @@ func TestDerivedPointsMatchTheCapturedExporter(t *testing.T) {
 	}
 
 	// Every other metric in the capture is one the page says is not derived.
-	for _, rm := range capture(t).ResourceMetrics {
+	for _, rm := range landed.ResourceMetrics {
 		for _, sm := range rm.ScopeMetrics {
 			if sm.GetScope().GetName() != "com.anthropic.claude_code" {
 				t.Fatalf("the exporter's scope is %q; the export page names another", sm.GetScope().GetName())
 			}
 			for _, m := range sm.Metrics {
-				if m.Name != metrics.TokenUsage && !contains(metrics.NotDerivedMetrics, m.Name) {
+				if m.Name != exporterTokenUsage && !contains(metrics.NotDerivedMetrics, m.Name) {
 					t.Fatalf("the exporter sent %s, which is neither derived nor listed as not derived", m.Name)
 				}
 			}

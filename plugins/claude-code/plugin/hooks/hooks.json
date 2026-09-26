@@ -1,14 +1,16 @@
 {
-  "description": "file-changes: a scan around each shell command, the runtime's own patch for each edit inside a subagent, and the retention rules at the session's start and end.",
+  "description": "file changes and MCP calls: a scan around each shell command, the runtime's own patch for each edit inside a subagent, which MCP server each call went to with how it ended and how long it took, and the retention rules at the session's start and end.",
   "hooks": {
     "PreToolUse": [
       {"matcher": "Bash|PowerShell|Monitor", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 60}]}
     ],
     "PostToolUse": [
-      {"matcher": "Bash|PowerShell|Monitor|Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 60}]}
+      {"matcher": "Bash|PowerShell|Monitor|Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 60}]},
+      {"matcher": "mcp__.*", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 10}]}
     ],
     "PostToolUseFailure": [
-      {"matcher": "Bash|PowerShell|Monitor", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 60}]}
+      {"matcher": "Bash|PowerShell|Monitor", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 60}]},
+      {"matcher": "mcp__.*", "hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 10}]}
     ],
     "SessionStart": [
       {"hooks": [{"type": "command", "command": "asz-changes", "args": ["hook"], "timeout": 30}]}

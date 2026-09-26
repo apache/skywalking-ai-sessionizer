@@ -29,17 +29,29 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 )
 
 // Dir is the output directory under the plugin's data directory.
 const Dir = "output"
 
-// Path is the file a session's stream is written to.
+// Path is the file a session's stream's change records are written to.
 func Path(dataDir, session, stream string) string {
 	return filepath.Join(dataDir, Dir, session, stream+".jsonl")
 }
 
-// Append writes one record as one line.
+// ExecutionSuffix ends the name of the file a stream's execution records go
+// to. They are a file of their own, so each file holds one kind of record
+// and lands as one kind.
+const ExecutionSuffix = ".execution.jsonl"
+
+// ExecutionPath is the file a session's stream's execution records are
+// written to.
+func ExecutionPath(dataDir, session, stream string) string {
+	return filepath.Join(dataDir, Dir, session, stream+ExecutionSuffix)
+}
+
+// Append writes one change record as one line.
 func Append(dataDir string, r *changes.Record) error {
 	if err := r.Validate(); err != nil {
 		return err
@@ -48,7 +60,22 @@ func Append(dataDir string, r *changes.Record) error {
 	if err != nil {
 		return err
 	}
-	path := Path(dataDir, r.Session, r.Stream)
+	return appendLine(Path(dataDir, r.Session, r.Stream), line)
+}
+
+// AppendExecution writes one execution record as one line.
+func AppendExecution(dataDir string, r *execution.Record) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	line, err := r.Marshal()
+	if err != nil {
+		return err
+	}
+	return appendLine(ExecutionPath(dataDir, r.Session, r.Stream), line)
+}
+
+func appendLine(path string, line []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

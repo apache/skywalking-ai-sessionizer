@@ -102,10 +102,9 @@ func TestRepoConfigSpellsOutEveryValue(t *testing.T) {
 	}
 }
 
-// The receiver adapter needs an address, and the same tokens are never
-// counted twice: local derivation and the runtime's exporter cannot both
-// have metrics on.
-func TestReceiverNeedsAnAddressAndMetricsComeFromOneSource(t *testing.T) {
+// The receiver adapter needs an address, and it is a server with no
+// collector.
+func TestReceiverNeedsAnAddress(t *testing.T) {
 	cfg := Default()
 	if cfg.Adapters[1].Name != AdapterClaudeCodeOTLP {
 		t.Fatalf("the defaults list %s second, want the receiver", cfg.Adapters[1].Name)
@@ -121,22 +120,51 @@ func TestReceiverNeedsAnAddressAndMetricsComeFromOneSource(t *testing.T) {
 		t.Fatal("a receiver with collector settings was accepted; it is a server")
 	}
 	cfg.Adapters[1].Collector = Collector{}
-	cfg.Adapters[1].Listen = "127.0.0.1:4317"
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("a receiver with metrics beside a local adapter without metrics must be accepted: %v", err)
+		t.Fatalf("a receiver with an address must be accepted: %v", err)
 	}
-	cfg.Adapters[0].Metrics = true
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("metrics on both adapters was accepted")
+}
+
+// Metrics are one section for the root, read as written, false included.
+// A section left out derives every metric with a look-back of three days.
+func TestMetricsAreOneSectionForTheRoot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asz.yaml")
+	load := func(body string) (*Config, error) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return Load(path)
 	}
-	cfg.Adapters[1].Metrics = false
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("local metrics beside a receiver without metrics must be accepted: %v", err)
+	cfg, err := load("parse:\n  max_round_bytes: 1048576\n")
+	if err != nil {
+		t.Fatal(err)
 	}
-	cfg.Adapters[1].Enabled = false
-	cfg.Adapters[1].Metrics = true
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("a disabled receiver must not count: %v", err)
+	if d, err := cfg.Metrics.LookbackDuration(); !cfg.Metrics.On() || err != nil || d != 72*time.Hour {
+		t.Fatalf("a file without a metrics section: on=%v look-back %s %v, want on and 72h", cfg.Metrics.On(), d, err)
+	}
+	// A section built in code, with nothing set, is the same.
+	if d, err := (Metrics{}).LookbackDuration(); !(Metrics{}).On() || err != nil || d != 72*time.Hour {
+		t.Fatalf("an empty metrics section: look-back %s %v, want on and 72h", d, err)
+	}
+	if cfg, err = load("metrics:\n  enabled: false\n"); err != nil || cfg.Metrics.On() {
+		t.Fatalf("enabled: false was not read: %v", err)
+	}
+	for body, want := range map[string]time.Duration{
+		"metrics:\n  lookback: 3d\n":   72 * time.Hour,
+		"metrics:\n  lookback: 6h\n":   6 * time.Hour,
+		"metrics:\n  lookback: none\n": 0,
+	} {
+		cfg, err := load(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d, err := cfg.Metrics.LookbackDuration(); err != nil || d != want {
+			t.Fatalf("%q: look-back %s %v, want %s", body, d, err, want)
+		}
+	}
+	if _, err := load("metrics:\n  lookback: soon\n"); err == nil {
+		t.Fatal("a look-back that is not a duration was accepted")
 	}
 }
 

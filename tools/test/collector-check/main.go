@@ -137,9 +137,10 @@ func run(root, logs string) error {
 	// source and type, and how many requests carried it.
 	tokens := map[string]int64{}
 	metricRequests := 0
-	// Points from the runtime's exporter, received by the claude-code-otlp
-	// adapter and pushed on: the exporter marks them with sender.
-	received := 0
+	// The calls to MCP servers and their time, as the Collector received
+	// them, by server, tool and outcome.
+	mcpCalls := map[string]int64{}
+	mcpMS := map[string]int64{}
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
@@ -157,8 +158,9 @@ func run(root, logs string) error {
 				}
 				for _, sm := range rm.ScopeMetrics {
 					for _, m := range sm.Metrics {
-						if m.Name != "claude_code.token.usage" || !m.Sum.IsMonotonic {
-							return fmt.Errorf("a metrics request carries %s monotonic=%v", m.Name, m.Sum.IsMonotonic)
+						want, ok := map[string]string{"agent.token.usage": "tokens", "agent.mcp.calls": "{call}", "agent.mcp.duration": "ms"}[m.Name]
+						if !ok || !m.Sum.IsMonotonic || m.Unit != want {
+							return fmt.Errorf("a metrics request carries %s unit %q monotonic=%v", m.Name, m.Unit, m.Sum.IsMonotonic)
 						}
 						for _, dp := range m.Sum.DataPoints {
 							a := attrs(dp.Attributes)
@@ -166,17 +168,19 @@ func run(root, logs string) error {
 							if dp.AsInt != "" {
 								n, _ = strconv.ParseInt(dp.AsInt, 10, 64)
 							}
+							// The receiver accepts the runtime's exporter and
+							// keeps nothing, so none of its points is sent on.
 							if a["sender"] == "telemetrygen" {
-								// Received from the exporter and forwarded as sent:
-								// the unit is the exporter's to set, and this one
-								// sets none.
-								received++
-								continue
+								return fmt.Errorf("a point the exporter sent to asz's receiver reached the Collector: %v", a)
 							}
-							if m.Unit != "tokens" {
-								return fmt.Errorf("a derived point of %s carries the unit %q, want tokens", m.Name, m.Unit)
+							switch m.Name {
+							case "agent.token.usage":
+								tokens[a["query_source"]+"/"+a["type"]] += n
+							case "agent.mcp.calls":
+								mcpCalls[a["mcp_server.name"]+"/"+a["mcp_tool.name"]+"/"+a["outcome"]] += n
+							case "agent.mcp.duration":
+								mcpMS[a["mcp_server.name"]+"/"+a["mcp_tool.name"]+"/"+a["outcome"]] += n
 							}
-							tokens[a["query_source"]+"/"+a["type"]] += n
 						}
 					}
 				}
@@ -259,7 +263,7 @@ func run(root, logs string) error {
 			return fmt.Errorf("the root holds %d files of kind %s, the Collector received %d; it received %v", n, k, kinds[k], kinds)
 		}
 	}
-	for _, k := range []string{"transcript", "agent_meta", "journal", "workflow_manifest", "workflow_script", "round"} {
+	for _, k := range []string{"transcript", "agent_meta", "journal", "workflow_manifest", "workflow_script", "execution", "round"} {
 		if rootKinds[k] == 0 {
 			return fmt.Errorf("the root holds no file of kind %s, so the check exercised less than the export page names", k)
 		}
@@ -327,12 +331,15 @@ func run(root, logs string) error {
 			return fmt.Errorf("no %s tokens reached the Collector; it received %v", k, tokens)
 		}
 	}
-	// The other source reached the Collector too: points a real external
-	// exporter sent to asz's receiver, landed, and pushed on.
-	if received == 0 {
-		return fmt.Errorf("no point from the exporter through the receiver reached the Collector; it received %d metrics requests", metricRequests)
+	// Each execution record the root holds is one call. The all-kinds
+	// scenario has one call to the status server, which returned in 380ms.
+	if want := int64(rootKinds["execution"]); mcpCalls["status/lookup/returned"] != want || want == 0 {
+		return fmt.Errorf("the root holds %d execution records, the Collector received calls %v", want, mcpCalls)
 	}
-	fmt.Printf("ok: %d requests, %d records, kinds %v, resources %v; %d metrics requests, derived tokens %v, %d points received from the exporter\n",
-		requests, len(recs), kinds, services, metricRequests, tokens, received)
+	if got, want := mcpMS["status/lookup/returned"], 380*int64(rootKinds["execution"]); got != want {
+		return fmt.Errorf("the Collector received %dms for the calls to the status server, want %d", got, want)
+	}
+	fmt.Printf("ok: %d requests, %d records, kinds %v, resources %v; %d metrics requests, derived tokens %v, MCP calls %v\n",
+		requests, len(recs), kinds, services, metricRequests, tokens, mcpCalls)
 	return nil
 }

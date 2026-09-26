@@ -43,13 +43,14 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
 // The file kinds the export page names.
 var wireKinds = map[string]bool{
-	"changes": true, "provider_body": true,
+	"changes": true, "execution": true, "provider_body": true,
 	"transcript": true, "agent_meta": true, "journal": true, "workflow_manifest": true, "workflow_script": true, "round": true,
 }
 
@@ -60,10 +61,10 @@ var wireKinds = map[string]bool{
 // receiver bounds a read on, delivery once and at least once, and the
 // export path: writing every body back gives a root that verifies and
 // folds the same.
-func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Push, tokens map[string]int64, checkTokens bool) ([]string, error) {
+func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Push, tokens, mcp map[string]int64, checkTokens bool) ([]string, error) {
 	var problems []string
 	for _, protocol := range []string{otlp.ProtocolGRPC, otlp.ProtocolHTTP} {
-		found, err := pushOver(protocol, out, session, f, want, tokens, checkTokens)
+		found, err := pushOver(protocol, out, session, f, want, tokens, mcp, checkTokens)
 		if err != nil {
 			return nil, fmt.Errorf("over %s: %w", protocol, err)
 		}
@@ -74,7 +75,7 @@ func pushFollowsTheWire(out, session string, f scenario.Format, want *expect.Pus
 	return problems, nil
 }
 
-func pushOver(protocol, out, session string, f scenario.Format, want *expect.Push, tokens map[string]int64, checkTokens bool) ([]string, error) {
+func pushOver(protocol, out, session string, f scenario.Format, want *expect.Push, tokens, mcp map[string]int64, checkTokens bool) ([]string, error) {
 	rcv, err := otlptest.Start()
 	if err != nil {
 		return nil, err
@@ -331,6 +332,33 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 		if st.Metrics == 0 && len(tokens) > 0 {
 			bad("metrics: the plan has tokens but the push sent no metrics request")
 		}
+		// The MCP family says what the plan's execution records say: each
+		// call counted once, and its measured time summed, per series.
+		gotMCP := map[string]int64{}
+		for _, req := range rcv.MetricsRequests() {
+			for _, rm := range req.GetResourceMetrics() {
+				for _, sm := range rm.GetScopeMetrics() {
+					for _, m := range sm.GetMetrics() {
+						if m.GetName() != metrics.MCPCalls && m.GetName() != metrics.MCPDuration {
+							continue
+						}
+						for _, dp := range m.GetSum().GetDataPoints() {
+							gotMCP[m.GetName()+"/"+mcpKey(otlptest.Attrs(dp.GetAttributes()))] += int64(dp.GetAsDouble())
+						}
+					}
+				}
+			}
+		}
+		for k, v := range mcp {
+			if gotMCP[k] != v {
+				bad("metrics: %s on the wire is %d, the plan says %d", k, gotMCP[k], v)
+			}
+		}
+		for k, v := range gotMCP {
+			if _, planned := mcp[k]; !planned {
+				bad("metrics: %s on the wire is %d, the plan has no such calls", k, v)
+			}
+		}
 	}
 
 	// Sent once: a second pass sends nothing.
@@ -381,6 +409,42 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 	return out2, nil
 }
 
+// mcpOnTheWire checks one metric of the MCP family: its unit, a monotonic
+// delta sum, and points that name the session, the server, the tool, how the
+// call ended and the stream that made it.
+func mcpOnTheWire(m *metricspb.Metric, i int, session string, bad func(string, ...any), window func(string, uint64, uint64)) {
+	unit := "{call}"
+	if m.GetName() == metrics.MCPDuration {
+		unit = "ms"
+	}
+	if m.GetUnit() != unit {
+		bad("request %d: %s has unit %q, want %q", i, m.GetName(), m.GetUnit(), unit)
+	}
+	sum := m.GetSum()
+	if sum == nil || sum.GetAggregationTemporality() != metricspb.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA || !sum.GetIsMonotonic() {
+		bad("request %d: %s is not a monotonic delta sum", i, m.GetName())
+		return
+	}
+	for _, dp := range sum.GetDataPoints() {
+		a := otlptest.Attrs(dp.GetAttributes())
+		switch {
+		case a["session.id"] != session, a["mcp_server.name"] == "", a["mcp_tool.name"] == "",
+			a["outcome"] != execution.OutcomeReturned && a["outcome"] != execution.OutcomeFailed && a["outcome"] != execution.OutcomeInterrupted,
+			a["query_source"] != metrics.SourceMain && a["query_source"] != metrics.SourceSubagent:
+			bad("request %d: a %s point carries %v", i, m.GetName(), a)
+		}
+		if _, ok := dp.GetValue().(*metricspb.NumberDataPoint_AsDouble); !ok || dp.GetTimeUnixNano() <= dp.GetStartTimeUnixNano() || dp.GetAsDouble() < 0 {
+			bad("request %d: a %s point is not a positive window of a double count", i, m.GetName())
+		}
+		window(m.GetName()+"/"+mcpKey(a), dp.GetStartTimeUnixNano(), dp.GetTimeUnixNano())
+	}
+}
+
+// mcpKey names one series of the MCP family by its labels.
+func mcpKey(a map[string]string) string {
+	return a["mcp_server.name"] + "/" + a["mcp_server.source"] + "/" + a["mcp_tool.name"] + "/" + a["outcome"] + "/" + a["query_source"]
+}
+
 // tokensOnTheWire checks the shape of every metrics request as the export
 // page states it: asz's identity on the resource, the runtime's metric with
 // its unit, monotonic delta sums, one-minute points that name the session.
@@ -416,6 +480,12 @@ func tokensOnTheWire(rcv *otlptest.Receiver, session string) (out []string) {
 					bad("request %d scope is %q", i, sm.GetScope().GetName())
 				}
 				for _, m := range sm.GetMetrics() {
+					if m.GetName() == metrics.MCPCalls || m.GetName() == metrics.MCPDuration {
+						mcpOnTheWire(m, i, session, bad, func(key string, start, end uint64) {
+							windows[key] = append(windows[key], window{start, end})
+						})
+						continue
+					}
 					if m.GetName() != metrics.TokenUsage || m.GetUnit() != "tokens" {
 						bad("request %d carries metric %s %s", i, m.GetName(), m.GetUnit())
 						continue

@@ -238,8 +238,12 @@ func partOf(raw json.RawMessage, tur *toolResult, hasTUR bool) (sessiondata.Part
 		}
 
 	case "tool_use", "server_tool_use":
-		return sessiondata.Part{Kind: sessiondata.PartCall, ID: b.ID, Name: b.Name,
-			Data: b.Input, State: model.ContentAvailable, Bytes: len(b.Input)}, nil
+		p := sessiondata.Part{Kind: sessiondata.PartCall, ID: b.ID, Name: b.Name,
+			Data: b.Input, State: model.ContentAvailable, Bytes: len(b.Input)}
+		if b.Type == "tool_use" {
+			p.Server, p.ServerTool, _ = MCPName(b.Name)
+		}
+		return p, nil
 
 	case "tool_result":
 		p := sessiondata.Part{Kind: sessiondata.PartResult, Of: b.ToolUseID,

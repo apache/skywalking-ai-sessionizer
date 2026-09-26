@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -45,6 +46,42 @@ func Convert(ord, off uint64, payload []byte) *sessiondata.Record {
 	r, ok := changes.Decode(payload)
 	if !ok {
 		rec.Parts = []sessiondata.Part{unknownPart(payload, "the line is not a changes/1 record")}
+		return rec
+	}
+	if err := r.Validate(); err != nil {
+		rec.Parts = []sessiondata.Part{unknownPart(payload, err.Error())}
+		return rec
+	}
+	rec.ID, rec.Tool, rec.Time = r.ID, r.Tool, r.Time
+	rec.Parts = []sessiondata.Part{{
+		Kind: sessiondata.PartData, Data: json.RawMessage(payload),
+		State: model.ContentAvailable, Bytes: len(payload),
+	}}
+	return rec
+}
+
+// ConvertKind turns one line into a record of the kind its file holds.
+func ConvertKind(kind sessiondata.Kind, ord, off uint64, payload []byte) *sessiondata.Record {
+	if kind == sessiondata.KindExecution {
+		return ConvertExecution(ord, off, payload)
+	}
+	return Convert(ord, off, payload)
+}
+
+// ConvertExecution turns one execution record the plugin wrote into a
+// Session Data record, the same framing as a change record: its identity,
+// the call it joins to and its time lifted onto the record, and the line
+// kept whole, byte for byte, as one data part.
+func ConvertExecution(ord, off uint64, payload []byte) *sessiondata.Record {
+	sum := sha256.Sum256(payload)
+	rec := &sessiondata.Record{
+		Ord: ord, Off: off,
+		Sha:   hex.EncodeToString(sum[:])[:12],
+		Bytes: len(payload),
+	}
+	r, ok := execution.Decode(payload)
+	if !ok {
+		rec.Parts = []sessiondata.Part{unknownPart(payload, "the line is not an execution/1 record")}
 		return rec
 	}
 	if err := r.Validate(); err != nil {

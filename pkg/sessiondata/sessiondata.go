@@ -62,6 +62,12 @@ const (
 	// tool-use id. The kind is one word because a landed file's name
 	// prefix is the kind.
 	KindChanges Kind = "changes"
+	// KindExecution holds tool execution records, execution/1: what an
+	// observer around a tool call saw it do, such as which MCP server ran
+	// it and how long it took. Like changes, they are evidence beside a
+	// stream's transcript, never steps of it, and a view joins them to
+	// steps by tool-use id. One call can have several.
+	KindExecution Kind = "execution"
 )
 
 // PartKind names what a piece of content IS.
@@ -130,6 +136,13 @@ type Part struct {
 	Of string `json:"of,omitempty"`
 	// Name is what was called.
 	Name string `json:"name,omitempty"`
+	// Server and ServerTool say which MCP server a call is addressed to and
+	// which of its tools, read from the name the runtime gave the call. They
+	// are set only where the runtime's naming splits the name exactly. The
+	// server is the runtime's name for it, which can be a form of the
+	// configured name with some characters replaced, not the name itself.
+	Server     string `json:"server,omitempty"`
+	ServerTool string `json:"server_tool,omitempty"`
 	// Failed reports whether a call returned an error, when the runtime said so.
 	//
 	// It is a pointer because absence and false are different answers: most
