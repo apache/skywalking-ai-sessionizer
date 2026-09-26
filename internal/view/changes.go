@@ -115,19 +115,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 		f.Close()
 	}
 
-	// By time, then by id, so the same files give the same list. A record
-	// the runtime captured and one the plugin captured for one call both
-	// stay: the runtime's is listed first, and a viewer showing one
-	// prefers it.
-	sort.SliceStable(out, func(i, j int) bool {
-		if c := compareTimes(out[i].Time, out[j].Time); c != 0 {
-			return c < 0
-		}
-		if out[i].CapturedBy != out[j].CapturedBy {
-			return out[i].CapturedBy == changes.CapturedByClaudeCode
-		}
-		return out[i].ID < out[j].ID
-	})
+	sort.SliceStable(out, func(i, j int) bool { return c.changeBefore(&out[i], &out[j]) })
 	if out == nil {
 		out = []sessionview.WorkspaceChange{}
 	}
@@ -163,6 +151,21 @@ func partAt(rec *sessiondata.Record, block *int) *sessiondata.Part {
 		return &rec.Parts[0]
 	}
 	return nil
+}
+
+// changeBefore orders workspace changes: by time, then by where each was
+// read, so the same files give the same list. A record the runtime captured
+// and one the plugin captured for one call both stay: the runtime's is listed
+// first, and a viewer showing one prefers it.
+func (c *Conversation) changeBefore(a, b *sessionview.WorkspaceChange) bool {
+	if byTime := compareTimes(a.Time, b.Time); byTime != 0 {
+		return byTime < 0
+	}
+	ra, rb := a.CapturedBy == changes.CapturedByClaudeCode, b.CapturedBy == changes.CapturedByClaudeCode
+	if ra != rb {
+		return ra
+	}
+	return comparePositions(c.pointOf(&a.Ref), c.pointOf(&b.Ref)) < 0
 }
 
 // annotateChanges writes each step's change ids onto the step, in the

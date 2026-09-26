@@ -487,21 +487,32 @@ func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
 	}
 	parent := map[string]string{}
 	from := map[string][]origin{}
-	// In relation id order, as the relations list is. The fold holds them in a
-	// map, and a stream with more than one candidate listed its origins in a
-	// different order on each read: measured on a real conversation whose
-	// stream had three, five reads gave three orders.
-	var starts []*sessionflow.Relation
+	// Each stream's origins in the order their steps happened. The fold holds
+	// the relations in a map, and a stream with more than one candidate listed
+	// its origins in a different order on each read: measured on a real
+	// conversation whose stream had three, five reads gave three orders. Each
+	// stream's origins are ordered on their own: one merge over every stream's
+	// origins is not the same, since an untimed step holds back the rest of its
+	// lane, and another stream's origin would move this stream's.
+	startsOf := map[string][]*sessionflow.Relation{}
 	for _, r := range c.View.Relations {
-		if r.Type == model.RelStarts {
-			starts = append(starts, r)
+		// an origin whose step is in no stream is not listed, so it takes no
+		// part in the order either
+		if n := c.View.Nodes[r.From]; r.Type == model.RelStarts && n != nil && n.Stream != "" {
+			startsOf[r.To] = append(startsOf[r.To], r)
 		}
 	}
-	sort.Slice(starts, func(i, j int) bool { return starts[i].ID < starts[j].ID })
-	for _, r := range starts {
-		if n := c.View.Nodes[r.From]; n != nil && n.Stream != "" {
-			parent[r.To] = n.Stream
-			from[r.To] = append(from[r.To], origin{r.From, n.Stream, r.Quality, c.talkOf(r.From)})
+	stepPoint := func(r *sessionflow.Relation) point {
+		if n := c.View.Nodes[r.From]; n != nil {
+			return c.pointOf(n.Ref)
+		}
+		return point{}
+	}
+	for stream, starts := range startsOf {
+		for _, r := range inOrder(starts, stepPoint, relationTie) {
+			n := c.View.Nodes[r.From]
+			parent[stream] = n.Stream
+			from[stream] = append(from[stream], origin{r.From, n.Stream, r.Quality, c.talkOf(r.From)})
 		}
 	}
 	names := c.journalNames()

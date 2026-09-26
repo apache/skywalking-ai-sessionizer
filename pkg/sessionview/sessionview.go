@@ -307,15 +307,17 @@ type Node struct {
 	Edges    []Edge `json:"edges,omitempty"`
 }
 
-// Edge is one relation seen from a node. Edges are listed by relation id
-// and then direction, so the same fold gives the same list every time.
+// Edge is one relation seen from a node. Edges are listed in the order the
+// relations happened, each at the earliest record its evidence names, so the
+// same fold gives the same list every time.
 type Edge struct {
 	Type    string `json:"type"`
 	Other   string `json:"other"`
 	Dir     string `json:"dir"` // "out" or "in"
 	Quality string `json:"quality"`
 	Via     string `json:"via,omitempty"`
-	// ID is the relation's id, for ordering; it is not written.
+	// ID is the relation's id, which finds the relation's evidence and decides
+	// between relations one record supports; it is not written.
 	ID string `json:"-"`
 }
 

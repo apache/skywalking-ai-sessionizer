@@ -77,11 +77,11 @@ producer of them.
 | `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
-| `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`; several means it did not choose, and neither does a view |
+| `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
 | `segments` | one per activity window: `id`, `state`, `committable`, `talks`, `from`, `to` |
 | `talks` | one tree per talk, in time order. See the node below |
 | `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold, so the document covers the whole session |
-| `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence` |
+| `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence`; in the order they happened, each at the earliest record its evidence names |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
 | `workspace_changes` | one per workspace change record the session's files carry, joined to its step. See below. |
 | `tool_executions` | one per tool execution record the session's files carry, joined to its step. See below. |
@@ -92,6 +92,16 @@ document holds whatever could still be folded: the fold stops before a missing o
 `head` names the last round it reached, and the rounds after the gap are listed and not verified.
 A viewer shows the problem; it never gets an error instead of a document. Only a chain with no
 usable round at all is an error, because there is nothing to show.
+
+A stream's `opened_by`, the `relations` list and a node's `edges` are in the order things happened,
+never in the order of an id. Inside one stream or one workflow run, a record's position orders it:
+its file's `seq`, then its `row`, then its `block`. A position means nothing across streams, since a
+child's file can land before its parent's, so streams and runs are merged by time: each next item is
+the earliest of the next items of every stream, a timed item before an untimed one. An item several
+records support, such as a relation, happened at the earliest of them by the same rule. Each list is
+ordered on its own. An id decides only between items that one record supports, such as two relations
+with the same evidence. Talks, workspace changes and tool executions are in time order, as their own
+sections say.
 
 ## A node in `talks`
 
@@ -118,7 +128,7 @@ usable round at all is an error, because there is nothing to show.
 | a call to an MCP server has in `attrs` | `mcp_server` and `mcp_tool`, the server and the tool the runtime's name for the call addresses, where the name splits exactly (see [Parts](session-data.md#parts)). They are the runtime's names; which server ran the call, by its configured name, is in the call's execution record |
 | a `turn.duration` step adds | `duration_ms`, `duration_measured_by` |
 | `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced |
-| `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, ordered by relation id and then direction, so a viewer draws cross-stream flow without searching `relations` and the same fold gives the same list |
+| `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, in the order the relations happened, each at the earliest record its evidence names, so a viewer draws cross-stream flow without searching `relations`; a workflow launch lists the streams it started in the order its run names them |
 
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
 the fold and the records say. Where the fold says `unavailable`, the document says it too.
@@ -146,7 +156,7 @@ request. A gap under one millisecond keeps `request_to_result_join` and leaves o
 ## Workspace changes
 
 `workspace_changes` lists which files each tool call changed, one entry per change record, in
-time order. An entry carries where the record was read from and the step it joins to, then the
+time order, and at one time the runtime's record first, then by where each was read. An entry carries where the record was read from and the step it joins to, then the
 record's own fields as `changes/1` lists them:
 
 | Key | Value |
@@ -168,7 +178,7 @@ means the call was not observed, never that it changed nothing.
 ## Tool executions
 
 `tool_executions` lists what an observer around a tool call saw it do, one entry per execution
-record, in time order. An entry carries where the record was read from and the step it joins to,
+record, in time order, and at one time by where each was read. An entry carries where the record was read from and the step it joins to,
 then the record's own fields as [`execution/1`](session-data.md#execution-records) lists them:
 
 | Key | Value |

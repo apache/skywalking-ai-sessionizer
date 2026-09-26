@@ -28,7 +28,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -151,7 +150,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 		ID: n.ID, Kind: n.Kind, Parent: n.Parent, Stream: n.Stream,
 		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: withoutProviderBodies(n.Attrs),
 	}
-	// Both directions together, by relation id and then direction, so the
+	// Both directions together, in the order the relations happened, so the
 	// same fold renders the same edges in the same order every time; a
 	// relation from a node to itself appears once in each direction.
 	for _, r := range c.from[n.ID] {
@@ -160,12 +159,13 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 	for _, r := range c.to[n.ID] {
 		out.Edges = append(out.Edges, edge{Type: r.Type, Other: r.From, Dir: "in", Quality: r.Quality, Via: r.Via, ID: r.ID})
 	}
-	sort.SliceStable(out.Edges, func(i, j int) bool {
-		if out.Edges[i].ID != out.Edges[j].ID {
-			return out.Edges[i].ID < out.Edges[j].ID
-		}
-		return out.Edges[i].Dir < out.Edges[j].Dir
-	})
+	out.Edges = inOrder(out.Edges, func(e edge) point { return c.relationPoint(c.View.Relations[e.ID]) },
+		func(a, b edge) bool {
+			if a.ID != b.ID {
+				return a.ID < b.ID
+			}
+			return a.Dir < b.Dir
+		})
 	// The content a reader sees, taken from the part this node points at.
 	//
 	// Only a leaf carries content. A provider call is a container - its text,

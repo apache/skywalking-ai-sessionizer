@@ -79,17 +79,20 @@ func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]u
 		}
 		f.Close()
 	}
-	// By time, then by id, so the same files give the same list.
-	sort.SliceStable(out, func(i, j int) bool {
-		if c := compareTimes(out[i].Time, out[j].Time); c != 0 {
-			return c < 0
-		}
-		return out[i].ID < out[j].ID
-	})
+	sort.SliceStable(out, func(i, j int) bool { return c.executionBefore(&out[i], &out[j]) })
 	if out == nil {
 		out = []sessionview.ToolExecution{}
 	}
 	return out
+}
+
+// executionBefore orders tool executions: by time, then by where each was
+// read, so the same files give the same list.
+func (c *Conversation) executionBefore(a, b *sessionview.ToolExecution) bool {
+	if byTime := compareTimes(a.Time, b.Time); byTime != 0 {
+		return byTime < 0
+	}
+	return comparePositions(c.pointOf(&a.Ref), c.pointOf(&b.Ref)) < 0
 }
 
 // annotateExecutions writes each step's execution record ids onto the step,
