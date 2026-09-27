@@ -140,8 +140,8 @@
   how times are written and compared. [Session Flow](../formats/session-flow.md) says that ids and
   `attrs` keys sort in code point order, and when a call's `provider_bodies` makes a round
   unreadable. [asz.view](../formats/asz-view.md) says that times round down to the millisecond,
-  that `attrs` and data are as written, what white space is, and which record gives a call its
-  result.
+  that `attrs` and data are as written, what white space is, which record gives a call its result,
+  and how deep a tree is written.
 - The Claude Code adapter page said a `claude_code.tool.execution` span from Claude Code's
   OpenTelemetry export supplies a tool's execution time. asz keeps nothing of that export, and no
   such span was measured, so the page now says the export may carry it and that this is unmeasured.

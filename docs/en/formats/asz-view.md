@@ -82,7 +82,7 @@ producer of them.
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
 | `segments` | one per activity window: `id`, `state`, `committable`, `talks`, `from`, `to` |
 | `talks` | one tree per talk, in time order. See the node below |
-| `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold, so the document covers the whole session |
+| `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold within twelve levels of its root, so the document covers the whole session |
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence`; in the order they happened, each at the earliest record its evidence names |
 | `unresolved` | one per reference the assembler could not resolve, open or since resolved: `id`, `kind`, `ref`, `reason`, `state` |
 | `workspace_changes` | one per workspace change record the session's files carry, joined to its step. See below. |
@@ -131,7 +131,7 @@ say.
 | a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly; `changes` and `executions`, the records joined to it |
 | a call to an MCP server has in `attrs` | `mcp_server` and `mcp_tool`, the server and the tool the runtime's name for the call addresses, where the name splits exactly (see [Parts](session-data.md#parts)). They are the runtime's names; which server ran the call, by its configured name, is in the call's execution record |
 | a `turn.duration` step adds | `duration_ms`, `duration_measured_by` |
-| `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced |
+| `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced. A tree is written down to twelve levels below its root, a talk or an entry of `loose`, and a node deeper than that is left out. No talk measured has more than three |
 | `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, in the order the relations happened, each at the earliest record its evidence names, so a viewer draws cross-stream flow without searching `relations`; a workflow launch lists the streams it started in the order its run names them |
 
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what
