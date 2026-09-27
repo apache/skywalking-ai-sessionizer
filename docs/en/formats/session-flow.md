@@ -73,7 +73,9 @@ fields above reproduce with the round.
 The order of the frames is part of the bytes. asz writes the header, then every node, then every
 relation, then every unresolved entry, each group sorted by id, and then the commit. Without the
 sort, two runs over the same input could order the frames differently and produce different
-digests.
+digests. For the same reason, a node's `attrs` is one JSON object whose keys asz writes in sorted
+order. Ids and keys sort in code point order: two strings compare by their Unicode code points,
+one by one, which is also the order of their UTF-8 bytes.
 
 ### Entities
 
@@ -228,6 +230,9 @@ another reader about what the round said.
 - A `revision` differs from the header's `round`.
 - A reference is sequence 0 row 0, or names a sequence past `through_seq`, which the round's input
   digest does not cover.
+- A node's `provider_bodies` attribute is neither null nor a list of `{role, ref}`, a `role` is
+  neither `request` nor `response`, or a `ref` has a `seq` or a `row` of 0. Each `ref` is a
+  reference, and the rule above applies to it as well.
 - A relation that is not a tombstone lacks `type`, `from` or `to`.
 - An unresolved entry that is not a tombstone has a state other than `open`, `resolved` or
   `terminal`.

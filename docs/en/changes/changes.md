@@ -134,6 +134,14 @@
 
 ## Documentation
 
+- The format pages state every rule a reader needs to build the same document, so a reader in any
+  language follows the pages and never asz's code. [Session Data](../formats/session-data.md#reading-a-record)
+  gives the type of every record and part field, what a reader does with a line of another type, and
+  how times are written and compared. [Session Flow](../formats/session-flow.md) says that ids and
+  `attrs` keys sort in code point order, and when a call's `provider_bodies` makes a round
+  unreadable. [asz.view](../formats/asz-view.md) says that times round down to the millisecond,
+  that `attrs` and data are as written, what white space is, and which record gives a call its
+  result.
 - The Claude Code adapter page said a `claude_code.tool.execution` span from Claude Code's
   OpenTelemetry export supplies a tool's execution time. asz keeps nothing of that export, and no
   such span was measured, so the page now says the export may carry it and that this is unmeasured.

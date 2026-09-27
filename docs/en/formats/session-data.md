@@ -142,6 +142,32 @@ a snapshot cursor, so a lost one is found only by the round chain (see
 [Retention](storage-root.md#retention)). A repeated record is not a gap (see
 [Landed files](storage-root.md#landed-files)).
 
+### Reading a record
+
+The format is JSON, and a reader in any language reads it with its own JSON library. The rules
+below and the rest of this page are the contract. A reader does not have to copy what asz's code
+does with input that asz never writes.
+
+Every field of a record, as the table in [Record](#record) lists them, has one type. `ord`, `off`
+and `bytes` are integers, and `ord` and `off` are never negative. `flags` is a list of strings.
+`parts` and `dropped` are lists of objects, typed in [Parts](#parts) and [Dropped](#dropped).
+`usage` is an object whose `in`, `out`, `cache_read` and `cache_write` are integers. Every other
+field is a string. An integer is a whole number, written with no fraction and no exponent, that
+fits in 64 bits with its sign. A field written as null is the same as a field left out. A reader
+ignores a field this page does not list, so a later version can add one.
+
+A line with a field of another type is not a record. asz's reader stops at a line it cannot
+decode, such as one whose `off` is a string, as it stops at a line that is not JSON, and reads no
+record after it in the file.
+
+A `time` is written as RFC 3339: a four-digit year, the letter `T`, the time of day to the
+second with a fraction of up to nine digits or none, and `Z` or an offset such as `+08:00`. Times
+compare as the instants they name, never as text. As text, `2026-01-01T12:00:00.11Z` sorts before
+`2026-01-01T12:00:00.1Z`, and `2026-01-01T12:00:00.5Z` before `2026-01-01T12:00:00Z`: in both
+pairs the first is the later time. `2026-01-01T20:00:00+08:00` sorts after `2026-01-01T12:00:01Z`
+as text, though it is a second earlier. A value that is not such a time means the record has no
+time.
+
 ### Addressing a record
 
 A round points at a record with `{seq, row}`, and at one of its parts with `{seq, row, block}`
@@ -239,6 +265,9 @@ reads every landed file this way.
 | `media` | an image or a document | `media`, `data` |
 | `data` | structure that is not prose: a record the runtime keeps for itself, a manifest | `data` |
 | `unknown` | content the dialect could not describe | the bytes in `data` as one JSON string, the bytes themselves or their base64 when `encoding` is `base64`, and the reason in `text` |
+
+In a part, `k`, `text`, `id`, `name`, `of`, `server`, `server_tool`, `media`, `encoding` and
+`state` are strings, `bytes` is an integer, `failed` is a boolean, and `data` is any JSON value.
 
 `server` and `server_tool` say which MCP server a call is addressed to and which of its tools. An
 adapter sets them only where its runtime's name for the call splits exactly. Claude Code names such a
@@ -381,7 +410,8 @@ runs after every call to an MCP server. Measured on Claude Code 2.1.282:
 
 `dropped` exists so a loss is stated rather than silent. It lists only what the dialect understood
 and chose not to carry. Everything it did not understand travels as an `unknown` part, so a later
-version of the dialect can interpret it without collecting again.
+version of the dialect can interpret it without collecting again. In an entry, `what` and `why`
+are strings and `bytes` is an integer.
 
 A source record is not always kept whole, so a `.sd` file is the only landed copy of what its parts
 hold, and everything above the adapter treats it as the authority. Content that was converted to
