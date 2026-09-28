@@ -21,8 +21,9 @@
   tool result under the call it answers. A response shows the answer, the model and the token
   counts. What it added stays unavailable for a LangChain call, because no request names the one
   before it, and it now says so. It used to say the request before was not among the loaded bodies,
-  here and for the first call of any chain, where nothing is missing. The renderer is Horizon's, now
-  pinned at `88e0110`, which also draws a light theme's scrollbars and other native controls light.
+  here and for the first call of any chain, where nothing is missing. The renderer is Horizon's,
+  pinned at `88e0110` for this, which also draws a light theme's scrollbars and other native
+  controls light.
 - A landed LangChain file is named for the collected time in its header. The collector read the
   clock once per pass for the name and once per file for the header, so a server that stores files by
   session and sequence and names them from the header, as the OAP does, named them apart from asz. On
@@ -54,6 +55,13 @@
   records in `executions`, joined by the tool-use id. `mcp.enabled: false` in the plugin's
   settings turns them off. The shapes were measured on Claude Code 2.1.282, and the real hook
   payloads are the plugin's test data.
+- `asz view` draws what the plugin recorded of each call to an MCP server. A call named by its
+  server and tool sits on its own MCP lane, its card shows how it ended and the time measured
+  around it, and the inspector gains an Execution tab. The Evidence tab lists each change and
+  execution record after the step's own positions, and shows what the document carries for the
+  picked one: the step's text, a call's result on its result position, or the record itself. It
+  used to show the step's text under every position. The renderer is Horizon's, now pinned at
+  `c903e77`.
 
 ## Metrics
 

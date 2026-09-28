@@ -1,6 +1,6 @@
 var __defProp = Object.defineProperty;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+var __defNormalProp = (obj, key, value2) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value: value2 }) : obj[key] = value2;
+var __publicField = (obj, key, value2) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value2);
 function esc(v) {
   return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[c]);
 }
@@ -619,13 +619,14 @@ function kindTitle(kind, s) {
   return m.title ? s[m.title] : m.raw ?? kind;
 }
 const CONTAINER_KINDS = /* @__PURE__ */ new Set(["talk", "run", "stream", "segment", "session", "epoch"]);
-const TRACKS = ["input", "messages", "context", "model", "tools", "agents", "annotation"];
+const TRACKS = ["input", "messages", "context", "model", "tools", "mcp", "agents", "annotation"];
 const TRACK_NAME = {
   input: "laneInput",
   messages: "laneResponses",
   context: "laneContext",
   model: "laneModel",
   tools: "laneTools",
+  mcp: "laneMcp",
   agents: "laneAgents",
   annotation: "laneNotices"
 };
@@ -770,6 +771,9 @@ class ConversationModel {
      *  `step`, never its id, which two producers share. */
     __publicField(this, "changesByStep", /* @__PURE__ */ new Map());
     __publicField(this, "workspaceChanges");
+    /** Execution records by the step they join to, the record's `step`. */
+    __publicField(this, "executionsByStep", /* @__PURE__ */ new Map());
+    __publicField(this, "toolExecutions");
     this.doc = doc;
     for (const s of doc.streams) {
       this.streamByName.set(s.name, s);
@@ -778,12 +782,15 @@ class ConversationModel {
     for (const seg of doc.segments) this.segmentById.set(seg.id, seg);
     this.workspaceChanges = doc.workspace_changes ?? [];
     for (const wc of this.workspaceChanges) if (wc.step) push(this.changesByStep, wc.step, wc);
+    this.toolExecutions = doc.tool_executions ?? [];
+    for (const x of this.toolExecutions) if (x.step) push(this.executionsByStep, x.step, x);
     let order = 0;
     const flatten = (root, talkId, streamFallback) => {
       const walk = (n, run, depth) => {
         if (n.kind === "run") run = n.id;
         if (!CONTAINER_KINDS.has(n.kind)) {
           const meta = kindOf(n.kind);
+          const mcp = mcpOf(n);
           const step = {
             id: n.id,
             kind: n.kind,
@@ -792,7 +799,7 @@ class ConversationModel {
             stream: n.stream || streamFallback,
             run,
             talk: talkId,
-            track: meta.track,
+            track: mcp ? "mcp" : meta.track,
             type: meta.type,
             name: n.name,
             text: n.text,
@@ -815,6 +822,7 @@ class ConversationModel {
             dropped: n.dropped,
             edges: n.edges ?? [],
             hasChanges: this.changesByStep.has(n.id),
+            mcp,
             order: order++,
             depth
           };
@@ -888,6 +896,10 @@ class ConversationModel {
   changesOf(stepId) {
     return this.changesByStep.get(stepId) ?? [];
   }
+  /** The execution records joined to a step, in document order. */
+  executionsOf(stepId) {
+    return this.executionsByStep.get(stepId) ?? [];
+  }
   /** The streams the assembler could tie to the start or the end of a stream
    *  from THIS stream's steps. Several candidates for one call are all kept:
    *  the assembler did not choose, and neither does a view. */
@@ -959,6 +971,16 @@ function push(m, k, v) {
   if (list) list.push(v);
   else m.set(k, [v]);
 }
+function mcpOf(n) {
+  if (n.kind !== "tool") return void 0;
+  const server = attrString(n.attrs, "mcp_server");
+  const tool2 = attrString(n.attrs, "mcp_tool");
+  return server && tool2 ? { server, tool: tool2 } : void 0;
+}
+function attrString(attrs, key) {
+  const v = attrs == null ? void 0 : attrs[key];
+  return typeof v === "string" ? v : "";
+}
 const ENGLISH = {
   round: "round",
   segments: "segments",
@@ -1010,6 +1032,7 @@ const ENGLISH = {
   reasoning: "Reasoning",
   toolWord: "Tool",
   callWord: "call",
+  mcpWord: "MCP",
   turn: "turn",
   input: "input",
   result: "result",
@@ -1046,6 +1069,7 @@ const ENGLISH = {
   laneContext: "Context put in",
   laneModel: "Model calls",
   laneTools: "Tools",
+  laneMcp: "MCP",
   laneAgents: "Agent activity",
   laneNotices: "Runtime notices",
   laneNested: "Nested streams",
@@ -1133,6 +1157,8 @@ const ENGLISH = {
   part: "part",
   record: "record",
   clippedText: "the text as the document carries it",
+  recordAsCarried: "the record as the document carries it",
+  resultAsCarried: "the call’s result as the document carries it",
   fullTextNote: "clipped: {shown} of {total} bytes",
   loadFullRecord: "Load the landed record",
   loadingRecord: "reading…",
@@ -1157,6 +1183,21 @@ const ENGLISH = {
   close: "Close",
   whatDoesMean: "What does {key} mean?",
   changes: "Changes",
+  execution: "Execution",
+  executionPillTitle: "What the observer around this call saw it do — open the Execution tab",
+  moreObservations: "{n} more",
+  executionRecordsForStep: "{n} execution records — open the Execution tab →",
+  executionRecordRef: "execution record",
+  mcpServer: "MCP server",
+  mcpTool: "MCP tool",
+  observedBy: "Observed by",
+  configuredIn: "Configured in",
+  measuredTime: "Measured time",
+  measuredTimeText: "The time the runtime measured around the call. It includes any waiting before the call started, so it is not the server's own time.",
+  notReported: "not reported",
+  sentToServer: "Sent to the server",
+  cameBack: "Came back",
+  sizeAndDigest: "{bytes} B · SHA-256 {digest}",
   prompt: "Prompt",
   promptNotHere: "The bodies of this call are not among the files this document lists.",
   promptBothStored: "The request this call sent and the response it received are stored.",
@@ -1732,20 +1773,72 @@ function trapFocus(ctx, e) {
     (e.shiftKey ? last : first).focus();
   }
 }
+function executionPill(ctx, step) {
+  const { s, f, model: m } = ctx;
+  const records = m.executionsOf(step.id);
+  if (!records.length) return "";
+  const first = records[0];
+  let text = first.outcome;
+  if (first.duration_ms != null) text += ` · ${f.duration(first.duration_ms)}`;
+  if (records.length > 1) text += ` · ${fill(s.moreObservations, { n: records.length - 1 })}`;
+  return `<button type="button" class="acv-execution-pill${first.outcome === "returned" ? "" : " failed"}" data-to-execution="${esc(
+    step.id
+  )}" title="${esc(s.executionPillTitle)}">${esc(text)}</button>`;
+}
+function drawExecutionTab(ctx, body, step) {
+  var _a;
+  const { s, f, model: m } = ctx;
+  const row = (dt, dd, mono = false) => `<dt>${esc(dt)}</dt><dd class="${mono ? "mono" : ""}">${dd}</dd>`;
+  let html = "";
+  for (const r of m.executionsOf(step.id)) {
+    const ended = Date.parse(r.time);
+    html += `<div class="acv-kicker" style="margin-top:14px">${esc(s.observedBy)} <span class="mono">${esc(r.observed_by)} · ${esc(r.boundary)}</span></div>`;
+    html += `<dl class="acv-definition">`;
+    html += row(s.mcpServer, r.server ? esc(r.server.name) : "—", true);
+    if ((_a = r.server) == null ? void 0 : _a.source) html += row(s.configuredIn, esc(r.server.source), true);
+    html += row(s.outcomeWord, esc(r.outcome), true);
+    html += row(
+      s.measuredTime,
+      r.duration_ms != null ? esc(f.duration(r.duration_ms)) : `<span class="acv-faint">${esc(s.notReported)}</span>`
+    );
+    html += row(s.observedAt, Number.isFinite(ended) ? esc(f.dateTime(ended)) : esc(r.time));
+    if (r.arguments) html += row(s.sentToServer, value(ctx, r.arguments), true);
+    if (r.result) html += row(s.cameBack, value(ctx, r.result), true);
+    html += row(
+      s.readFrom,
+      `seq ${esc(String(r.ref.seq))} · row ${esc(String(r.ref.row))}${r.ref.block != null ? ` · block ${esc(String(r.ref.block))}` : ""} <button type="button" class="acv-linkish" data-to-evidence data-ref-seq="${esc(String(r.ref.seq))}" data-ref-row="${esc(String(r.ref.row))}" data-ref-block="${esc(String(r.ref.block ?? ""))}">${esc(s.openEvidence)}</button>`,
+      true
+    );
+    html += `</dl>`;
+  }
+  html += `<div class="acv-warning"><strong>${esc(s.measuredTime)}</strong><br>${esc(s.measuredTimeText)}</div>`;
+  body.innerHTML = html;
+  body.querySelectorAll("[data-to-evidence]").forEach(
+    (b) => b.onclick = () => {
+      const block2 = b.dataset.refBlock;
+      ctx.state.rawRef = { seq: Number(b.dataset.refSeq), row: Number(b.dataset.refRow), ...block2 ? { block: Number(block2) } : {} };
+      ctx.showTab("evidence");
+    }
+  );
+}
+function value(ctx, v) {
+  const { s, f } = ctx;
+  return esc(fill(s.sizeAndDigest, { bytes: f.number(v.bytes), digest: v.sha256 ? v.sha256.slice(0, 12) : "—" }));
+}
 const REMINDER = "<system-reminder>";
 const MARKED_IN_MESSAGE = 2;
 const MARKED_IN_LIST = 1;
 const NOT_MARKED = -1;
 function readBody(bytes, role) {
   const text = new TextDecoder().decode(bytes);
-  let value;
+  let value2;
   try {
-    value = JSON.parse(text);
+    value2 = JSON.parse(text);
   } catch {
     return { kind: "other", raw: null, text };
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { kind: "other", raw: value };
-  const body = value;
+  if (!value2 || typeof value2 !== "object" || Array.isArray(value2)) return { kind: "other", raw: value2 };
+  const body = value2;
   if (role === "request") {
     if (isObjectList(body["messages"])) return readRequest(body);
     const prompt = langChainPrompt(body["messages"]);
@@ -1756,13 +1849,13 @@ function readBody(bytes, role) {
     const generation = langChainGeneration(body["generations"]);
     if (generation) return readLangChainResponse(body, generation);
   }
-  return { kind: "other", raw: value };
+  return { kind: "other", raw: value2 };
 }
-function isObjectList(value) {
-  return Array.isArray(value) && value.every(isObject);
+function isObjectList(value2) {
+  return Array.isArray(value2) && value2.every(isObject);
 }
-function isObject(value) {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+function isObject(value2) {
+  return !!value2 && typeof value2 === "object" && !Array.isArray(value2);
 }
 function readRequest(body) {
   const rest = /* @__PURE__ */ Object.create(null);
@@ -1795,36 +1888,36 @@ function readResponse(body) {
     raw: body
   };
 }
-function readSystem(value) {
-  if (typeof value === "string") return [{ kind: "text", text: value }];
-  if (!Array.isArray(value)) return [];
-  return value.map(readBlock);
+function readSystem(value2) {
+  if (typeof value2 === "string") return [{ kind: "text", text: value2 }];
+  if (!Array.isArray(value2)) return [];
+  return value2.map(readBlock);
 }
-function readTools(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map((t) => {
+function readTools(value2) {
+  if (!Array.isArray(value2)) return [];
+  return value2.map((t) => {
     const tool2 = t ?? {};
     const description = typeof tool2["description"] === "string" ? tool2["description"] : "";
     return { name: typeof tool2["name"] === "string" ? tool2["name"] : "", description, raw: t };
   });
 }
-function readMessage(value) {
-  const m = value ?? {};
+function readMessage(value2) {
+  const m = value2 ?? {};
   const content = m["content"];
   const blocks = typeof content === "string" ? [{ kind: "text", text: content }] : Array.isArray(content) ? content.map(readBlock) : [];
-  return { role: typeof m["role"] === "string" ? m["role"] : "", blocks, raw: value };
+  return { role: typeof m["role"] === "string" ? m["role"] : "", blocks, raw: value2 };
 }
-function readBlock(value) {
-  if (typeof value === "string") return { kind: "text", text: value };
-  if (!value || typeof value !== "object") return { kind: "unknown", json: value };
-  const b = value;
+function readBlock(value2) {
+  if (typeof value2 === "string") return { kind: "text", text: value2 };
+  if (!value2 || typeof value2 !== "object") return { kind: "unknown", json: value2 };
+  const b = value2;
   const kind = typeof b["type"] === "string" ? b["type"] : "unknown";
   if (kind === "text" && typeof b["text"] === "string") {
     return { kind, text: b["text"], reminder: b["text"].includes(REMINDER) };
   }
   if (kind === "thinking") {
     const thinking = typeof b["thinking"] === "string" ? b["thinking"] : "";
-    return { kind, text: thinking, json: value };
+    return { kind, text: thinking, json: value2 };
   }
   if (kind === "tool_use") {
     return {
@@ -1840,10 +1933,10 @@ function readBlock(value) {
       ...typeof b["tool_use_id"] === "string" ? { id: b["tool_use_id"] } : {},
       ...b["is_error"] === true ? { failed: true } : {}
     };
-    if (typeof content === "string") return { kind, text: content, json: value, ...about };
-    return { kind, json: content ?? value, ...about };
+    if (typeof content === "string") return { kind, text: content, json: value2, ...about };
+    return { kind, json: content ?? value2, ...about };
   }
-  return { kind, json: value };
+  return { kind, json: value2 };
 }
 function langChainPrompt(messages) {
   if (!Array.isArray(messages) || messages.length !== 1) return null;
@@ -1886,14 +1979,14 @@ function readLangChainResponse(body, generation) {
     raw: body
   };
 }
-function readLangChainMessage(value) {
-  const fields = langChainFields(value);
+function readLangChainMessage(value2) {
+  const fields = langChainFields(value2);
   const type = typeof fields["type"] === "string" ? fields["type"] : "";
   const role = typeof fields["role"] === "string" ? fields["role"] : "";
-  return { role: type && type !== "chat" ? type : role, blocks: langChainBlocks(fields, value), raw: value };
+  return { role: type && type !== "chat" ? type : role, blocks: langChainBlocks(fields, value2), raw: value2 };
 }
-function langChainContentBlock(value) {
-  return isObject(value) && value["type"] === "tool_call" ? langChainToolCall(value) : readBlock(value);
+function langChainContentBlock(value2) {
+  return isObject(value2) && value2["type"] === "tool_call" ? langChainToolCall(value2) : readBlock(value2);
 }
 function langChainToolCall(c) {
   const id = typeof c["id"] === "string" ? c["id"] : void 0;
@@ -1958,13 +2051,13 @@ function settings(r) {
 function same(a, b, markedTo) {
   return canonical(a, markedTo) === canonical(b, markedTo);
 }
-function size(value) {
-  return new TextEncoder().encode(JSON.stringify(value) ?? "").length;
+function size(value2) {
+  return new TextEncoder().encode(JSON.stringify(value2) ?? "").length;
 }
-function canonical(value, markedTo, depth = 0) {
-  if (Array.isArray(value)) return `[${value.map((v) => canonical(v, markedTo, depth + 1)).join(",")}]`;
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  const obj = value;
+function canonical(value2, markedTo, depth = 0) {
+  if (Array.isArray(value2)) return `[${value2.map((v) => canonical(v, markedTo, depth + 1)).join(",")}]`;
+  if (value2 === null || typeof value2 !== "object") return JSON.stringify(value2) ?? "null";
+  const obj = value2;
   const parts = [];
   for (const k of Object.keys(obj).sort()) {
     if (depth <= markedTo && k === "cache_control") continue;
@@ -2086,13 +2179,13 @@ class Reader {
         depth--;
         if (depth === 0) {
           this.pos = j + 1;
-          const value = t.slice(start, j + 1);
+          const value2 = t.slice(start, j + 1);
           try {
-            JSON.parse(value);
+            JSON.parse(value2);
           } catch {
             throw new Malformed();
           }
-          return { value, closed: true };
+          return { value: value2, closed: true };
         }
       }
       j++;
@@ -2105,10 +2198,10 @@ class Reader {
     const t = this.t;
     const start = this.pos;
     while (this.pos < t.length && /[-+0-9.eEa-z]/.test(t[this.pos])) this.pos++;
-    const value = t.slice(start, this.pos);
-    if (this.done) return { value, closed: false };
-    if (!/^(?:-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|true|false|null)$/.test(value)) throw new Malformed();
-    return { value, closed: true };
+    const value2 = t.slice(start, this.pos);
+    if (this.done) return { value: value2, closed: false };
+    if (!/^(?:-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?|true|false|null)$/.test(value2)) throw new Malformed();
+    return { value: value2, closed: true };
   }
 }
 function structure(text) {
@@ -2192,8 +2285,8 @@ function drawStructured(st, s) {
     if (f.block) {
       return `<span class="acv-field block"><span class="acv-field-key">${esc(f.key)}</span>${copy}<span class="acv-field-text">${esc(f.value)}${tail}</span></span>`;
     }
-    const value = f.value === "" ? '<span class="acv-faint">""</span>' : esc(f.value);
-    return `<span class="acv-field"><span class="acv-field-key">${esc(f.key)}</span><span class="acv-field-value">${value}${tail}</span>${copy}</span>`;
+    const value2 = f.value === "" ? '<span class="acv-faint">""</span>' : esc(f.value);
+    return `<span class="acv-field"><span class="acv-field-key">${esc(f.key)}</span><span class="acv-field-value">${value2}${tail}</span>${copy}</span>`;
   };
   const pair = editPair(st);
   const rest = pair ? st.fields.filter((f) => !EDIT_PAIR.includes(f.key)) : st.fields;
@@ -2215,8 +2308,8 @@ function copyField(btn, copied) {
   var _a;
   const text = (_a = btn.closest(".acv-field, [data-copy-scope]")) == null ? void 0 : _a.querySelector(".acv-copy-src, .acv-field-text, .acv-field-value, .acv-copy-text");
   if (!text || typeof navigator === "undefined" || !navigator.clipboard) return;
-  const value = text.querySelector(".acv-faint") ? "" : Array.from(text.childNodes).filter((node) => !(node instanceof HTMLElement && node.classList.contains("acv-field-cut"))).map((node) => node.textContent ?? "").join("");
-  void navigator.clipboard.writeText(value).then(() => {
+  const value2 = text.querySelector(".acv-faint") ? "" : Array.from(text.childNodes).filter((node) => !(node instanceof HTMLElement && node.classList.contains("acv-field-cut"))).map((node) => node.textContent ?? "").join("");
+  void navigator.clipboard.writeText(value2).then(() => {
     const was = btn.textContent;
     btn.textContent = copied;
     btn.classList.add("done");
@@ -2548,9 +2641,9 @@ function textBlock$1(ctx, text, key) {
     s
   )}<span class="acv-copy-src" hidden>${esc(text)}</span></div>${more}`;
 }
-function json(ctx, value, key) {
+function json(ctx, value2, key) {
   const { s, state } = ctx;
-  const text = JSON.stringify(value, null, 2) ?? "";
+  const text = JSON.stringify(value2, null, 2) ?? "";
   const long = text.length > JSON_PREVIEW;
   const open = long && state.openTexts.has(key);
   const more = long && !open ? `<button type="button" class="acv-linkish acv-text-more" data-text-toggle="${esc(key)}">${esc(s.showAllLines)}</button>` : "";
@@ -2617,11 +2710,15 @@ function drawInspector(ctx) {
   const changesTab = ctx.q('[data-tab="changes"]');
   const hasChanges = !!(e && m.changesOf(e.id).length);
   changesTab.hidden = !hasChanges;
+  const executionTab = ctx.q('[data-tab="execution"]');
+  const hasExecutions = !!(e && m.executionsOf(e.id).length);
+  executionTab.hidden = !hasExecutions;
   const offered = {
     details: true,
     evidence: true,
     relations: hasRels,
     changes: hasChanges,
+    execution: hasExecutions,
     prompt: prompts
   };
   const tab = offered[state.tab] ? state.tab : "details";
@@ -2640,6 +2737,7 @@ function drawInspector(ctx) {
   if (tab === "details") drawDetails(ctx, body, e);
   else if (tab === "relations") drawRelations(ctx, body, e);
   else if (tab === "changes") drawChangesTab(ctx, body, e);
+  else if (tab === "execution") drawExecutionTab(ctx, body, e);
   else if (tab === "prompt") drawPrompt(ctx, body, e);
   else void drawEvidence(ctx, body, e);
 }
@@ -2719,7 +2817,7 @@ function containment(ctx, e) {
   return { text: crumbs.join(" › "), ids: ids.join(" › ") };
 }
 function drawDetails(ctx, body, e) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d;
   const { s, f, model: m, state } = ctx;
   const st = m.streamByName.get(e.stream);
   const seg = state.talk ? m.segmentById.get(state.talk.segment) : void 0;
@@ -2744,6 +2842,10 @@ function drawDetails(ctx, body, e) {
     html += `<dt></dt><dd><div class="acv-warning" style="margin:0"><strong>${esc(s.requestToResultWhat)}</strong><br>${esc(s.requestToResultText)}</div></dd>`;
   }
   if (e.name) html += field(s.name, esc(e.name));
+  if (e.mcp) {
+    html += field(s.mcpServer, esc(e.mcp.server), true);
+    html += field(s.mcpTool, esc(e.mcp.tool), true);
+  }
   if (e.failed !== void 0) html += field(s.failedField, e.failed ? esc(s.yes) : esc(s.no));
   if (e.state) html += field(s.contentState, esc(e.state));
   if (e.bytes) html += field(s.contentBytes, f.number(e.bytes));
@@ -2778,11 +2880,16 @@ function drawDetails(ctx, body, e) {
   if (changes) {
     html += `<button type="button" class="acv-linkish acv-to-changes" data-to-changes>${esc(fill(s.changeRecordsForStep, { n: changes }))}</button>`;
   }
+  const executions = m.executionsOf(e.id).length;
+  if (executions) {
+    html += `<button type="button" class="acv-linkish acv-to-changes" data-to-execution>${esc(fill(s.executionRecordsForStep, { n: executions }))}</button>`;
+  }
   if (state.navStack.length) html += `<button type="button" class="acv-btn" style="margin-top:12px" data-back-parent>${esc(s.backToParentStream)}</button>`;
   body.innerHTML = html;
   (_a = body.querySelector("[data-to-relations]")) == null ? void 0 : _a.addEventListener("click", () => ctx.showTab("relations"));
   (_b = body.querySelector("[data-to-changes]")) == null ? void 0 : _b.addEventListener("click", () => ctx.showTab("changes"));
-  (_c = body.querySelector("[data-back-parent]")) == null ? void 0 : _c.addEventListener("click", () => ctx.goBack());
+  (_c = body.querySelector("[data-to-execution]")) == null ? void 0 : _c.addEventListener("click", () => ctx.showTab("execution"));
+  (_d = body.querySelector("[data-back-parent]")) == null ? void 0 : _d.addEventListener("click", () => ctx.goBack());
   body.querySelectorAll("[data-copy]").forEach(
     (b) => b.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -2834,38 +2941,44 @@ function detailBlock(ctx, e, text, bytes) {
 }
 async function drawEvidence(ctx, body, e) {
   var _a;
-  const { s, f, state } = ctx;
-  const refs = (e.ref ? [e.ref] : []).concat(e.refs ?? []);
-  const seen = /* @__PURE__ */ new Set();
-  const list = refs.filter((r) => {
-    const k = `${r.seq}/${r.row}/${r.block ?? ""}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const { s, f, model: m, state } = ctx;
   const same2 = (a, b) => a.seq === b.seq && a.row === b.row && (a.block ?? null) === (b.block ?? null);
+  const list = [];
+  const add = (r) => {
+    if (!list.some((x) => same2(x, r))) list.push(r);
+  };
+  (e.ref ? [e.ref] : []).concat(e.refs ?? []).forEach(add);
   const own = list.length;
-  if (state.rawRef && !list.some((r) => same2(r, state.rawRef))) list.push(state.rawRef);
+  for (const x of [...m.changesOf(e.id), ...m.executionsOf(e.id)]) add(x.ref);
   if (!list.length) {
     body.innerHTML = `<div class="acv-empty">${esc(s.derivedByAssembly)}</div>`;
     return;
   }
   const pick = (state.rawRef && list.find((r) => same2(r, state.rawRef))) ?? list[0];
-  const role = (i) => i >= own ? s.changeRecordRef : e.kind === "tool" || e.kind === "agent.call" ? i === 0 ? s.request : s.result : own > 1 ? `${s.part} ${i + 1}` : s.record;
-  const shown = e.text ? new TextEncoder().encode(e.text).length : 0;
-  const clipped = e.bytes && shown && e.bytes > shown;
+  const call = e.kind === "tool" || e.kind === "agent.call";
+  const role = (i) => i >= own ? m.executionsOf(e.id).some((x) => same2(x.ref, list[i])) ? s.executionRecordRef : s.changeRecordRef : call ? i === 0 ? s.request : s.result : own > 1 ? `${s.part} ${i + 1}` : s.record;
+  const at = list.indexOf(pick);
+  const isResult = call && at >= 1 && at < own;
+  const text = isResult ? e.result : e.text;
+  const bytes = isResult ? e.resultBytes : e.bytes;
+  const shown = text ? new TextEncoder().encode(text).length : 0;
+  const clipped = bytes && shown && bytes > shown;
+  const carried = at >= own ? m.executionsOf(e.id).find((x) => same2(x.ref, pick)) ?? m.changesOf(e.id).find((x) => same2(x.ref, pick)) : void 0;
+  const stepContent = `${text ? `<div class="acv-kicker" style="margin-top:12px">${esc(isResult ? s.resultAsCarried : s.clippedText)}${clipped ? ` · ${esc(fill(s.fullTextNote, { shown: f.number(shown), total: f.number(bytes) }))}` : ""}</div>
+      <div class="acv-block">${esc(text)}</div>` : ""}
+    ${((_a = e.flags) == null ? void 0 : _a.length) ? `<div class="acv-kicker" style="margin-top:12px">${esc(s.flags)}</div><div class="acv-provenance">${e.flags.map((x) => `<span class="acv-source-badge">${esc(x)}</span>`).join("")}</div>` : ""}
+    ${(e.dropped ?? []).map((d) => `<div class="acv-warning">${esc(s.dropped)} ${esc(d.what)} · ${f.number(d.bytes)} B<br>${esc(d.why ?? "")}</div>`).join("")}`;
   body.innerHTML = `
     <div class="acv-kicker">${esc(s.landedPositions)}</div>
     <div class="acv-ref-row">${list.map(
-    (r, i) => `<button type="button" class="acv-ref-chip${r === pick ? " on" : ""}" data-ref="${r.seq}/${r.row}/${r.block ?? ""}">
-        <b>${esc(role(i))}</b><span>seq ${r.seq} · row ${r.row}${r.block != null ? ` · block ${r.block}` : ""}</span></button>`
+    (r, i) => `<button type="button" class="acv-ref-chip${r === pick ? " on" : ""}" data-ref="${esc(`${r.seq}/${r.row}/${r.block ?? ""}`)}">
+        <b>${esc(role(i))}</b><span>seq ${esc(String(r.seq))} · row ${esc(String(r.row))}${r.block != null ? ` · block ${esc(String(r.block))}` : ""}</span></button>`
   ).join("")}</div>
-    ${e.text ? `<div class="acv-kicker" style="margin-top:12px">${esc(s.clippedText)}${clipped ? ` · ${esc(fill(s.fullTextNote, { shown: f.number(shown), total: f.number(e.bytes) }))}` : ""}</div>
-      <div class="acv-block">${esc(e.text)}</div>` : ""}
-    ${((_a = e.flags) == null ? void 0 : _a.length) ? `<div class="acv-kicker" style="margin-top:12px">${esc(s.flags)}</div><div class="acv-provenance">${e.flags.map((x) => `<span class="acv-source-badge">${esc(x)}</span>`).join("")}</div>` : ""}
-    ${(e.dropped ?? []).map((d) => `<div class="acv-warning">${esc(s.dropped)} ${esc(d.what)} · ${f.number(d.bytes)} B<br>${esc(d.why ?? "")}</div>`).join("")}
+    ${carried ? `<div class="acv-kicker" style="margin-top:12px">${esc(s.recordAsCarried)}</div><pre class="acv-raw acv-carried">${renderJSON(ctx, carried, 0, void 0, true)}</pre>` : stepContent}
     <div class="acv-explain-box"></div>
     <div class="acv-record-box">${ctx.loadRecord ? `<button type="button" class="acv-btn" data-load-record>${esc(s.loadFullRecord)}</button>` : ""}</div>`;
+  const carriedBox = body.querySelector(".acv-carried");
+  if (carriedBox) bindTerms(ctx, body, carriedBox);
   body.querySelectorAll("[data-ref]").forEach(
     (b) => b.onclick = () => {
       const [seq, row, block2] = b.dataset.ref.split("/");
@@ -2888,17 +3001,21 @@ async function drawEvidence(ctx, body, e) {
       }
       if (!box.isConnected) return;
       box.innerHTML = `<div class="acv-kicker" style="margin-top:14px">${esc(s.theLandedRecord)}</div><pre class="acv-raw">${renderJSON(ctx, rec, 0)}</pre>`;
-      box.querySelectorAll("[data-term]").forEach(
-        (b) => b.onclick = (ev) => {
-          ev.stopPropagation();
-          state.explain = state.explain === b.dataset.term ? null : b.dataset.term;
-          box.querySelectorAll("[data-term]").forEach((x) => x.classList.toggle("on", x.dataset.term === state.explain));
-          drawExplain(ctx, body);
-        }
-      );
+      bindTerms(ctx, body, box);
     };
   }
   drawExplain(ctx, body);
+}
+function bindTerms(ctx, body, box) {
+  const { state } = ctx;
+  box.querySelectorAll("[data-term]").forEach(
+    (b) => b.onclick = (ev) => {
+      ev.stopPropagation();
+      state.explain = state.explain === b.dataset.term ? null : b.dataset.term;
+      box.querySelectorAll("[data-term]").forEach((x) => x.classList.toggle("on", x.dataset.term === state.explain));
+      drawExplain(ctx, body);
+    }
+  );
 }
 function explainable(ctx, key) {
   var _a, _b;
@@ -2908,7 +3025,7 @@ function explainable(ctx, key) {
   if ((_b = g.fields) == null ? void 0 : _b[key]) return "field";
   return null;
 }
-function renderJSON(ctx, v, depth, key) {
+function renderJSON(ctx, v, depth, key, whole = false) {
   const pad = "  ".repeat(depth);
   const label = key == null ? "" : explainable(ctx, key) ? `<span class="acv-jkey">"${esc(key)}"</span><button type="button" class="acv-q" data-term="${esc(key)}" aria-label="${esc(fill(ctx.s.whatDoesMean, { key }))}" title="${esc(fill(ctx.s.whatDoesMean, { key }))}">?</button>: ` : `<span class="acv-jkey plain">"${esc(key)}"</span>: `;
   if (v === null) return `${pad}${label}<span class="acv-jnull">null</span>
@@ -2917,7 +3034,7 @@ function renderJSON(ctx, v, depth, key) {
     if (!v.length) return `${pad}${label}[]
 `;
     return `${pad}${label}[
-${v.map((x) => renderJSON(ctx, x, depth + 1)).join("")}${pad}]
+${v.map((x) => renderJSON(ctx, x, depth + 1, void 0, whole)).join("")}${pad}]
 `;
   }
   if (typeof v === "object") {
@@ -2925,11 +3042,11 @@ ${v.map((x) => renderJSON(ctx, x, depth + 1)).join("")}${pad}]
     if (!ks.length) return `${pad}${label}{}
 `;
     return `${pad}${label}{
-${ks.map((k) => renderJSON(ctx, v[k], depth + 1, k)).join("")}${pad}}
+${ks.map((k) => renderJSON(ctx, v[k], depth + 1, k, whole)).join("")}${pad}}
 `;
   }
   const cls = typeof v === "number" ? "acv-jnum" : typeof v === "boolean" ? "acv-jbool" : "acv-jstr";
-  const text = typeof v === "string" ? `"${v.length > 300 ? `${v.slice(0, 300)}…` : v}"` : String(v);
+  const text = typeof v === "string" ? `"${!whole && v.length > 300 ? `${v.slice(0, 300)}…` : v}"` : String(v);
   return `${pad}${label}<span class="${cls}">${esc(text)}</span>
 `;
 }
@@ -3370,7 +3487,9 @@ function paintViewport(ctx) {
     if (!inView(q.x, q.w)) continue;
     const says = e.kind === "context.injection" ? injectionSays(e.text) : null;
     const mark = e.hasChanges ? icon(tallyChanges(ctx.model.changesOf(e.id)).observation === "skipped" ? ICON_READONLY : ICON_CHANGES, "acv-clip-mark") : "";
-    html += `<button type="button" class="acv-clip acv-kind-${e.type}${e.id === state.sel ? " selected" : ""}${p.near && !p.near.has(e.id) ? " dim" : ""}${mark ? " marked" : ""}" data-node="${esc(e.id)}" data-talk="${esc(e.talk ?? "")}" title="${esc(e.at ? `${f.time(e.at)} · ` : "")}${esc(kindTitle(e.kind, s))}${e.name ? ` · ${esc(e.name)}` : ""}${mark ? ` · ${esc(s.changes)}` : ""}" style="left:${q.x}px;top:${q.y}px;width:${q.w}px">${mark}${esc(says ? says.says : e.name || kindTitle(e.kind, s))}</button>`;
+    const observed = ctx.model.executionsOf(e.id)[0];
+    const label = says ? says.says : e.mcp ? `${e.mcp.server} · ${e.mcp.tool}` : e.name || kindTitle(e.kind, s);
+    html += `<button type="button" class="acv-clip acv-kind-${e.type}${e.id === state.sel ? " selected" : ""}${p.near && !p.near.has(e.id) ? " dim" : ""}${mark ? " marked" : ""}" data-node="${esc(e.id)}" data-talk="${esc(e.talk ?? "")}" title="${esc(e.at ? `${f.time(e.at)} · ` : "")}${esc(kindTitle(e.kind, s))}${e.name ? ` · ${esc(e.name)}` : ""}${observed ? ` · ${esc(observed.outcome)}` : ""}${mark ? ` · ${esc(s.changes)}` : ""}" style="left:${q.x}px;top:${q.y}px;width:${q.w}px">${mark}${esc(label)}</button>`;
   }
   for (const fo of p.folders) {
     const q = p.fpos.get(fo.key);
@@ -3510,7 +3629,7 @@ function present(ctx, e) {
     case "thinking":
       return { cls: `acv-activity${child}`, role: `${agent} · ${s.reasoning}`, color: "model" };
     case "tool":
-      return { cls: `acv-activity${child}`, role: `${agent} → ${s.toolWord} · ${e.name || s.callWord}`, color: "tool" };
+      return e.mcp ? { cls: `acv-activity${child}`, role: `${agent} → ${s.mcpWord} · ${e.mcp.server}`, color: "tool" } : { cls: `acv-activity${child}`, role: `${agent} → ${s.toolWord} · ${e.name || s.callWord}`, color: "tool" };
     default:
       return { cls: `acv-activity${child}`, role: `${agent} · ${kindTitle(e.kind, s)}`, color: "instruction" };
   }
@@ -3528,13 +3647,13 @@ function stepCard(ctx, e, prev, near) {
   const fs = folder ? m.streamById.get(folder.other) : void 0;
   const link = fs ? `<button type="button" class="acv-stream-link" data-open="${esc(fs.name)}">${esc(s.openStream)} ${esc(fs.label || fs.name.slice(0, 10))} →</button>` : "";
   const unavailable = e.state && e.state !== "available" ? `<span class="acv-mini acv-warn">[${esc(e.state)}]</span>` : "";
-  const title = e.durationMs ? `${f.duration(e.durationMs)} ${s.turn}` : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says : e.name || kindTitle(e.kind, s);
+  const title = e.durationMs ? `${f.duration(e.durationMs)} ${s.turn}` : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says : e.mcp ? `${e.mcp.server} · ${e.mcp.tool}` : e.name || kindTitle(e.kind, s);
   return `${sep}<div class="acv-card ${p.cls}${e.id === state.sel ? " selected" : ""}${near && !near.has(e.id) ? " dim" : ""}" role="button" tabindex="0" data-card="${esc(e.id)}" title="${esc(s.locateInTimeline)}"${indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
     <span class="acv-time"><strong>${esc(f.time(e.at))}</strong>${esc(e.kind)}</span>
     <span class="acv-content">
       <span class="acv-role">${esc(p.role)}</span>
       <span class="acv-title acv-kind-${p.color}"><span class="acv-type-mark"></span>${esc(title)}
-        <span class="acv-mini">${e.bytes ? `${f.number(e.bytes)} B` : ""}</span> ${unavailable}${changePill(ctx, e)}</span>
+        <span class="acv-mini">${e.bytes ? `${f.number(e.bytes)} B` : ""}</span> ${unavailable}${changePill(ctx, e)}${executionPill(ctx, e)}</span>
       ${e.text ? `${e.result ? `<span class="acv-result-label">${esc(s.input)}${e.bytes ? ` · ${f.number(e.bytes)} B` : ""}</span>` : ""}
         ${textBlock(ctx, e, "in", e.text, e.bytes, mono ? "mono" : "").html}` : ""}
       ${e.result ? resultBlock(ctx, e) : ""}
@@ -3694,6 +3813,13 @@ function bindTranscript(ctx) {
       ctx.showTab("changes");
       return;
     }
+    const toExecution = target.closest("[data-to-execution]");
+    if (toExecution) {
+      ev.stopPropagation();
+      ctx.select(toExecution.dataset.toExecution, true, false);
+      ctx.showTab("execution");
+      return;
+    }
     const card = target.closest("[data-card]");
     if (card) {
       ev.stopPropagation();
@@ -3772,6 +3898,7 @@ function skeleton(s) {
           <button class="acv-tab" type="button" role="tab" data-tab="relations" aria-selected="false">${esc(s.relations)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="evidence" aria-selected="false">${esc(s.evidence)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="changes" aria-selected="false" hidden>${esc(s.changes)}</button>
+          <button class="acv-tab" type="button" role="tab" data-tab="execution" aria-selected="false" hidden>${esc(s.execution)}</button>
           <button class="acv-tab" type="button" role="tab" data-tab="prompt" aria-selected="false" hidden>${esc(s.prompt)}</button>
         </div>
         <div class="acv-inspector-body" role="tabpanel"></div>
