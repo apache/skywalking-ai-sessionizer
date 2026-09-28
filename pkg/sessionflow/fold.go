@@ -350,7 +350,14 @@ func Before(a, b *Node) bool {
 		if ap.Row != bp.Row {
 			return ap.Row < bp.Row
 		}
-		if ap.Block != nil && bp.Block != nil && *ap.Block != *bp.Block {
+		// A node on the whole record comes before the nodes on its parts.
+		// Leaving the two to the id made the order a cycle: block 1 before a
+		// whole record by id, the whole record before block 0 by id, and
+		// block 0 before block 1, so a sort could return any of them.
+		if (ap.Block == nil) != (bp.Block == nil) {
+			return ap.Block == nil
+		}
+		if ap.Block != nil && *ap.Block != *bp.Block {
 			return *ap.Block < *bp.Block
 		}
 	case ap != nil:

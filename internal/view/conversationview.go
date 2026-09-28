@@ -309,11 +309,13 @@ func (c *Conversation) files(landed []storage.LandedFile) ([]sessionview.File, m
 	type span struct{ from, to int64 }
 	spans := map[uint64]span{}
 	for pos, ns := range c.at {
-		s := spans[pos[0]]
-		if s.from == 0 || ns < s.from {
+		// A file's first time sets both ends, so a time before 1970 is kept
+		// and the result does not depend on the order the map gives.
+		s, seen := spans[pos[0]]
+		if !seen || ns < s.from {
 			s.from = ns
 		}
-		if ns > s.to {
+		if !seen || ns > s.to {
 			s.to = ns
 		}
 		spans[pos[0]] = s

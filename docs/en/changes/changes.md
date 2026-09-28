@@ -45,7 +45,8 @@
   `mcp__<server>__<tool>`. A landed call part now carries `server` and `server_tool` when the name
   splits exactly, with one `__` after `mcp__`, and the step's `attrs` carry `mcp_server` and
   `mcp_tool`. A name with a second `__` is left whole, since the separator cannot be told apart
-  from a name that holds it. A session collected before this has neither, because landed records
+  from a name that holds it, and so is one whose underscores run together: `mcp__foo___bar` is
+  `foo` and `_bar`, or `foo_` and `bar`. It used to be split as the first. A session collected before this has neither, because landed records
   are never rewritten.
 - The Claude Code plugin records each call to an MCP server. Its hooks after every `mcp__` call
   write an `execution/1` record: the server and where its configuration came from, how the call
@@ -121,6 +122,15 @@
   one read to the next: on a real conversation whose stream had three, five reads gave three
   orders.
 
+- On one record, a node on the whole record comes before the nodes on its parts, and those follow
+  their block. The two used to be decided by id, which made a cycle, so a sort could return the
+  siblings in any order from one read to the next. The OAP already ordered them this way.
+- The page reads a record's time only up to the first line of a file that does not decode, as
+  Session Data says a reader stops there; it read the times of the records after it. Reading them
+  now decodes each record, which on a 142 MB session takes about 0.25 s more. A file's first and
+  last time, and a node's, keep a time before 1970, which the last time used to lose, and no
+  longer depend on the order Go gives a map when a record is at exactly 1970-01-01T00:00:00Z.
+
 ## Release
 
 - The `pypi` skill says what a release manager sets up before an upload. PyPI requires two-factor
@@ -142,6 +152,10 @@
 
 ## Documentation
 
+- [asz.view](../formats/asz-view.md) said the document carries no RFC 3339 strings. A workspace
+  change and a tool execution keep their record's `time` as that string, and the page now says so.
+  It also says how siblings on one record are ordered. [Session Data](../formats/session-data.md)
+  and [OpenTelemetry export](../formats/otlp.md) list `execution` among the kinds a file can have.
 - The format pages state every rule a reader needs to build the same document, so a reader in any
   language follows the pages and never asz's code. [Session Data](../formats/session-data.md#reading-a-record)
   gives the type of every record and part field, what a reader does with a line of another type, and

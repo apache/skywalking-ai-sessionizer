@@ -211,15 +211,19 @@ func (c *Conversation) Time(n *sessionflow.Node) int64 {
 // Span returns the first and last observed time under a node.
 func (c *Conversation) Span(n *sessionflow.Node) (int64, int64) {
 	var lo, hi int64
+	seen := false
 	var walk func(*sessionflow.Node)
 	walk = func(x *sessionflow.Node) {
+		// 0 is none, and a time before 1970 is below it, so neither end
+		// starts from 0.
 		if t := c.Time(x); t != 0 {
-			if lo == 0 || t < lo {
+			if !seen || t < lo {
 				lo = t
 			}
-			if t > hi {
+			if !seen || t > hi {
 				hi = t
 			}
+			seen = true
 		}
 		for _, k := range c.View.Children(x.ID) {
 			walk(k)
@@ -336,10 +340,11 @@ func durationMillis(ns int64) int64 {
 // timesOf fills at with the time of every record in the session's landed
 // files, keyed by landed position, and lanes with the lane of every file.
 //
-// Only the time is taken from each line, without decoding the record: a
-// conversation has tens of thousands of records and the page needs one field
-// of each. A file that fails to read contributes no times rather than failing
-// the page; its records still render, without a moment.
+// Each record is decoded, so the times end where the reader stops: at a line
+// that does not decode, as Session Data defines it, no record after it has a
+// time. A file that fails to read contributes no times rather than failing
+// the page; its records still render, without a moment. A time of exactly
+// 1970-01-01T00:00:00Z is kept as none, because 0 is what none reads as.
 func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[uint64]string) error {
 	files, err := storage.LandedFiles(z, session)
 	if err != nil {
@@ -362,12 +367,12 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 			continue
 		}
 		for row := uint64(1); ; row++ {
-			line, err := r.NextRaw()
+			rec, err := r.Next()
 			if err != nil {
 				break
 			}
-			if ns, ok := sessiondata.LineTime(line); ok {
-				at[[2]uint64{lf.Seq, row}] = ns
+			if t, err := time.Parse(time.RFC3339Nano, rec.Time); err == nil && t.UnixNano() != 0 {
+				at[[2]uint64{lf.Seq, row}] = t.UnixNano()
 			}
 		}
 		f.Close()

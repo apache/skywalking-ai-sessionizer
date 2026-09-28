@@ -25,7 +25,9 @@ either.
 
 The document is JSON. Keys are `snake_case`, as in the two source formats, and are written in the
 order this page lists them. Times are unix milliseconds, rounded down, read from the `.sd` record a
-node references; a view is read and never digested, so it carries no RFC 3339 strings. A time a
+node references; a view is read and never digested. The one exception is a record the document lists
+as its own format writes it, a workspace change or a tool execution, whose `time` stays the RFC 3339
+string the record holds. A time a
 round's header carries is null when the header has none, and 0 when its value is not a time as
 [Reading a record](session-data.md#reading-a-record) defines one. The same head
 round over the same files gives the same document, so one built by `asz view` and one built by
@@ -131,7 +133,7 @@ say.
 | a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly; `changes` and `executions`, the records joined to it |
 | a call to an MCP server has in `attrs` | `mcp_server` and `mcp_tool`, the server and the tool the runtime's name for the call addresses, where the name splits exactly (see [Parts](session-data.md#parts)). They are the runtime's names; which server ran the call, by its configured name, is in the call's execution record |
 | a `turn.duration` step adds | `duration_ms`, `duration_measured_by` |
-| `children` | containment, in record order: a talk holds runs, a run holds steps, a call holds what it produced. A tree is written down to twelve levels below its root, a talk or an entry of `loose`, and a node deeper than that is left out. No talk measured has more than three |
+| `children` | containment, in record order: by landed position, and on one record a node on the whole record before the nodes on its parts, which follow their `block`, then by id: a talk holds runs, a run holds steps, a call holds what it produced. A tree is written down to twelve levels below its root, a talk or an entry of `loose`, and a node deeper than that is left out. No talk measured has more than three |
 | `edges` | every relation touching the node, in both directions, as `{type, other, dir, quality, via}`, in the order the relations happened, each at the earliest record its evidence names, so a viewer draws cross-stream flow without searching `relations`; a workflow launch lists the streams it started in the order its run names them |
 
 Keys a node has no value for are absent, not null. Nothing in a document is inferred beyond what

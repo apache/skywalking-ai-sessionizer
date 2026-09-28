@@ -26,10 +26,12 @@ const mcpPrefix = "mcp__"
 // mcp__<server>__<tool>, into the server and the tool, and reports whether
 // the split is exact.
 //
-// It is exact only when exactly one "__" follows the prefix. Claude Code
-// builds the name by joining the two with "__", so a server or a tool whose
-// own name holds "__" would make two splits possible, and then none is made
-// and the name is left whole. Measured on the local corpus on 2026-09-25, no
+// It is exact only when exactly one "__" follows the prefix, counting the
+// ones that overlap. Claude Code builds the name by joining the two with
+// "__", so a server or a tool whose own name holds "__" would make two splits
+// possible, and then none is made and the name is left whole. Underscores
+// that run together count too: "foo___bar" is server "foo" and tool "_bar",
+// or server "foo_" and tool "bar". Measured on the local corpus on 2026-09-25, no
 // MCP tool name held a second "__". The server part is Claude Code's form of
 // the configured name: "claude.ai Claude Docs" is called
 // "claude_ai_Claude_Docs", so it is not the configured name itself.
@@ -38,9 +40,14 @@ func MCPName(name string) (server, tool string, ok bool) {
 	if !found {
 		return "", "", false
 	}
-	server, tool, found = strings.Cut(rest, "__")
-	if !found || server == "" || tool == "" || strings.Contains(tool, "__") {
+	at, n := -1, 0
+	for i := 0; i+1 < len(rest); i++ {
+		if rest[i] == '_' && rest[i+1] == '_' {
+			at, n = i, n+1
+		}
+	}
+	if n != 1 || at == 0 || at+2 == len(rest) {
 		return "", "", false
 	}
-	return server, tool, true
+	return rest[:at], rest[at+2:], true
 }

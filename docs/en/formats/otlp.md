@@ -96,7 +96,7 @@ body:
 | `asz.format` | `sd` for a landed file, `sf` for a round |
 | `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
 | `asz.file` | the file's path relative to the storage root |
-| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `provider_body`; for `sf`, `round` |
+| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `execution`, `provider_body`; for `sf`, `round` |
 | `asz.file.digest` | the file's SHA-256, the digest of the body as received |
 | `asz.lines` | how many lines the body has, the header and the closing line included |
 | `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |

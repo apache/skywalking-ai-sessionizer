@@ -41,7 +41,7 @@ stops at the first longer line.
 | `schema` | `sd/1` |
 | `seq` | the landed sequence number, monotonic per session |
 | `at` | when the file was collected |
-| `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes` or `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport, and no adapter writes either. |
+| `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `execution` or `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport, and no adapter writes either. |
 | `adapter` | how the records were acquired, with its contract version |
 | `dialect` | whose schema they were read as. A push receiver and a local reader for one runtime share a dialect and nothing else. |
 | `src` | the source, relative to the adapter's source root, with forward slashes on every platform |
@@ -271,8 +271,9 @@ In a part, `k`, `text`, `id`, `name`, `of`, `server`, `server_tool`, `media`, `e
 
 `server` and `server_tool` say which MCP server a call is addressed to and which of its tools. An
 adapter sets them only where its runtime's name for the call splits exactly. Claude Code names such a
-call `mcp__<server>__<tool>`, and the split is made only when exactly one `__` follows `mcp__`: a
-name that holds a second `__` could split two ways, so it is left whole. The server is Claude Code's
+call `mcp__<server>__<tool>`, and the split is made only when exactly one `__` follows `mcp__`,
+counting the ones that overlap: a name that holds a second `__`, or underscores that run together
+as in `foo___bar`, could split two ways, so it is left whole. The server is Claude Code's
 form of the configured name, so "claude.ai Claude Docs" is `claude_ai_Claude_Docs`. The name the
 server was configured with is in the call's execution record, when there is one.
 
