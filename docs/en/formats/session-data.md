@@ -160,6 +160,10 @@ A line with a field of another type is not a record. asz's reader stops at a lin
 decode, such as one whose `off` is a string, as it stops at a line that is not JSON, and reads no
 record after it in the file.
 
+A reader may count a line that holds more than 256 objects and lists open at once as one that does
+not decode, and the OAP does. No landed line comes near that. Measured over 423,944 lines of 94 real
+conversations, the deepest held 16, a model request carrying a tool's JSON Schema in its data.
+
 A `time` is written as RFC 3339: a four-digit year, the letter `T`, the time of day to the
 second with a fraction of up to nine digits or none, and `Z` or an offset such as `+08:00`. Times
 compare as the instants they name, never as text. As text, `2026-01-01T12:00:00.11Z` sorts before

@@ -152,6 +152,9 @@
 
 ## Documentation
 
+- [Session Data](../formats/session-data.md#reading-a-record) and [Session Flow](../formats/session-flow.md)
+  say a reader may refuse a line that holds more than 256 objects and lists open at once, as the
+  OAP does. The deepest real line measured holds 16.
 - [asz.view](../formats/asz-view.md) said the document carries no RFC 3339 strings. A workspace
   change and a tool execution keep their record's `time` as that string, and the page now says so.
   It also says how siblings on one record are ordered. [Session Data](../formats/session-data.md)
