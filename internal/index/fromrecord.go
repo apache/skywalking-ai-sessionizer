@@ -168,6 +168,8 @@ var flagNames = map[string]Flags{
 	"command":        FlagCommand,
 	"notice":         FlagNotice,
 	"auxiliary":      FlagAuxiliary,
+	"system_prompt":  FlagSystemPrompt,
+	"tool_schemas":   FlagToolSchemas,
 }
 
 // FlagName returns the written form of one flag.

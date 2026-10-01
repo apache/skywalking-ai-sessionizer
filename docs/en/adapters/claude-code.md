@@ -318,6 +318,21 @@ appear nowhere in the corpus. The first pass counted about 21,000 attachment rec
 `user` record with `isMeta:true` is text the harness wrote in the user role, so it is injected
 context too, not something a person said.
 
+**A prompt snapshot is named for what it carries.** A runtime built on the Claude Agent SDK writes
+what it sent the model outside the messages into the transcript, as a `prompt_snapshot` attachment:
+`systemPrompt`, the system prompt as a list of strings, and `tools`, each tool's `name`,
+`description` and `schema`. Such a record lands with the `system_prompt` flag when `systemPrompt`
+holds a value and the `tool_schemas` flag when `tools` does, beside `injected`. The type and the
+keys decide, never the text or the size. Measured on 31 conversations of one such runtime: 68
+snapshots among 589 injection steps, 34 with the prompt alone and 34 with the prompt and the tool
+schemas. In 27 of the 31, exactly two, one of each; three held four or six in the same ratio, and
+one held none. The roster delta, `agent_listing_delta`, is a type of its own and carries neither.
+The command-line corpus measured on this page held no `"tools":[`, so no snapshot with schemas;
+whether the command line writes one with the prompt alone is `unavailable`, because that corpus was
+searched for `"tools":[` only. The flags exist so a reader that serves a conversation to the people
+an agent served can withhold these steps by rule; [Session Data](../formats/session-data.md#flags)
+lists every flag.
+
 **One attachment is a person's input.** A `queued_command` with `commandMode:"prompt"` is a message
 typed while the agent was working. It becomes `message.external`, and any other mode stays
 `context.injection`. These turns have no `.message` twin. In the first pass, 614 human-typed turns
@@ -808,7 +823,7 @@ fed one turn at a time:
 | | Why |
 | --- | --- |
 | **Reasoning text** | Claude Code asks the provider not to return it, so most thinking blocks carry only a signature. `unavailable` where the runtime wrote none. See below. |
-| **Serialized request** | system prompt, tool schemas and cache annotations are absent from transcripts: 0 files contain `"tools":[`, and `compactMetadata.preservedMessages.allUuids` names 5 ids that exist nowhere on disk. asz produces no input manifest and no `input_of` relation, and reports model-context coverage as `unavailable`, as the model's [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) requires. Claude Code writes each request and response itself when told to, and the `claude-code-provider` adapter lands them beside the transcripts, joined to their calls in the view; see [Provider bodies](#provider-bodies). The fold is unchanged by them. |
+| **Serialized request** | system prompt, tool schemas and cache annotations are absent from transcripts: 0 files contain `"tools":[`, and `compactMetadata.preservedMessages.allUuids` names 5 ids that exist nowhere on disk. asz produces no input manifest and no `input_of` relation, and reports model-context coverage as `unavailable`, as the model's [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) requires. Claude Code writes each request and response itself when told to, and the `claude-code-provider` adapter lands them beside the transcripts, joined to their calls in the view; see [Provider bodies](#provider-bodies). The fold is unchanged by them. A runtime built on the Agent SDK writes both into the transcript as a `prompt_snapshot` attachment, landed with a flag for each; see [Step mapping](#step-mapping). |
 | **Injected preamble** | the instruction block prepended to the first user message has no transcript record. Its *data* survives as `attachment` records; its rendered form does not. |
 | **Per-call duration and cost** | not written to transcripts. Available via OTLP. |
 | **`tool.execution`** | no local record; the call and result are observable, the execution is not. |

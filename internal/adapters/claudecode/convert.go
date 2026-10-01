@@ -422,6 +422,8 @@ var flagNames = func(f index.Flags) []string {
 		{index.FlagTurnDuration, "turn_duration"},
 		{index.FlagCommand, "command"},
 		{index.FlagNotice, "notice"},
+		{index.FlagSystemPrompt, "system_prompt"},
+		{index.FlagToolSchemas, "tool_schemas"},
 	} {
 		if f.Has(m.bit) {
 			out = append(out, m.name)

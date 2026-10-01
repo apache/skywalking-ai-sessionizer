@@ -93,6 +93,11 @@ type indexRecord struct {
 		Type        string `json:"type"`
 		CommandMode string `json:"commandMode"`
 		Origin      origin `json:"origin"`
+		// SystemPrompt and Tools are on a prompt_snapshot: the system
+		// prompt the runtime sent, and the schemas of the tools it
+		// advertised. Kept raw, because only their presence is read.
+		SystemPrompt json.RawMessage `json:"systemPrompt"`
+		Tools        json.RawMessage `json:"tools"`
 	} `json:"attachment"`
 }
 
@@ -281,6 +286,21 @@ func flagsOf(d *indexRecord, tur *toolResult, hasTUR bool, src Source) index.Fla
 		} else {
 			f |= index.FlagInjection
 		}
+		// A prompt_snapshot is what a runtime built on the Agent SDK writes
+		// for what it sent the model outside the messages. It is named by
+		// the attachment's type and the keys it holds, never by its text or
+		// size, so a reader can withhold it by rule. Measured on 31
+		// conversations of such a runtime: 68 of these records, 34 with the
+		// prompt alone and 34 with the prompt and the tool schemas. The
+		// roster delta is a type of its own and carries neither.
+		if d.Attachment.Type == "prompt_snapshot" {
+			if nonEmptyList(d.Attachment.SystemPrompt) {
+				f |= index.FlagSystemPrompt
+			}
+			if nonEmptyList(d.Attachment.Tools) {
+				f |= index.FlagToolSchemas
+			}
+		}
 	}
 	if d.Type == "user" && (d.Origin.Kind == "human" || sdkPrompt(d)) && !d.IsMeta {
 		f |= index.FlagExternalInput
@@ -410,4 +430,10 @@ func between(s, openTag, closeTag string) string {
 		return ""
 	}
 	return strings.TrimSpace(rest[:j])
+}
+
+// nonEmptyList reports whether raw is a JSON list holding at least one value.
+func nonEmptyList(raw json.RawMessage) bool {
+	var items []json.RawMessage
+	return json.Unmarshal(raw, &items) == nil && len(items) > 0
 }

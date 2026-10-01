@@ -259,7 +259,7 @@ Every step is exactly one of these, plus an optional `after`, `checkpoint` and `
 | --- | --- |
 | `input` | a person's message; `trigger: external`; opens a run and a talk |
 | `queued: {text, mode}` | input that exists only as a queued attachment; `mode` is `prompt` or `task-notification` |
-| `inject: {type, text}` | material the harness put into context, of any type |
+| `inject: {type, text}` | material the harness put into context, of any type. `inject: {type: prompt_snapshot, system_prompt, tools}` is the snapshot a runtime built on the Agent SDK writes, landed with a flag for each thing it carries |
 | `call` | fragments in this order: `thinking`, `text`, then one of `tool`, `agent`, `skill`, `workflow`; `usage` on every fragment; the last carries the stop reason |
 | `result: {of, text, after, failed, string}` | a tool result arriving on its own, for a tool whose call gave none |
 | `error` | a synthetic message |
@@ -359,6 +359,7 @@ checkpoints:
     view: {state: verified, problems: 0, talks: 3, files: 6, first_talk: {label: run the build, runs: 2}}
     # with provider_bodies: the landed bodies, and the calls whose request is captured
     # view: {provider_bodies: 14, captured_prompts: 7, provider_files: 5}
+    # view: {flags: {injected: 3, system_prompt: 2}}   # the document's steps by each flag they carry
     verify: {problems: 0}                 # what asz verify reports over the root
   helped:
     lose: [{stream: checker, kind: transcript}]   # deleted from the root after this checkpoint's parse

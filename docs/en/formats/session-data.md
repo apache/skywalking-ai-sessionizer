@@ -115,7 +115,7 @@ role names. The part level carries what the content is.
 | `tool`, `child`, `batch`, `started_by` | joins the runtime states outside the content: the call a record refers to (a notification names the call it completes), the child stream a record names, the group it belongs to, the stream that started this one |
 | `label` | a name the runtime gave something. The only naming evidence in the data. |
 | `from` | who produced it: `agent`, `external`, `runtime`. A record's type is not what a record is; most records that look like a person are a tool answering. |
-| `time`, `trigger`, `flags` | when, what started the loop, and states such as `finished` |
+| `time`, `trigger`, `flags` | when, what started the loop, and what the record is beyond its producer; see [Flags](#flags) |
 | `usage` | what the provider reported: input, output, cache read and cache write tokens. Meaningful only where the call finished. |
 | `model` | the provider model the call ran on, as the runtime named it, on the records of a call. What a token count is reported under. Empty on records landed before it was kept. |
 | `parts` | the content |
@@ -123,11 +123,6 @@ role names. The part level carries what the content is.
 
 Empty identifiers are common and mean the runtime supplied none. Nothing is inferred to fill
 them.
-
-`child_result` is not only on a `journal` record. On a `transcript` record it marks a result that
-is a child's synchronous return, which is the parent's copy of the child's output. Assembly reads
-the flag only on a `journal` record. Nothing removes the parent's copy, so it stays as the result
-of the call that started the child.
 
 `asz verify` checks `ord`, `off` and `bytes` without the source. A provider body is a whole
 document at `ord` 1 and `off` 0, so for it `asz verify` rebuilds the body instead, as
@@ -141,6 +136,39 @@ adapter's `agent_meta`, `workflow_manifest` and `workflow_script` files are each
 a snapshot cursor, so a lost one is found only by the round chain (see
 [Retention](storage-root.md#retention)). A repeated record is not a gap (see
 [Landed files](storage-root.md#landed-files)).
+
+### Flags
+
+`flags` names what a record is beyond who produced it. An adapter sets each one from one field of
+its source, so a reader can act on a flag by rule.
+
+| Flag | On a record that |
+| --- | --- |
+| `external_input` | carries input from outside the agent, including input that exists only as an attachment |
+| `injected` | carries material the runtime put into model context |
+| `system_prompt` | is an injection carrying the system prompt the runtime sent |
+| `tool_schemas` | is an injection carrying the schemas of the tools the runtime advertised |
+| `finished` | carries a provider stop reason, so the call finished and its usage counts are real |
+| `synthetic` | is an assistant-role record the client wrote; no model produced it |
+| `context_reset` | is an explicit model-context reset |
+| `reset_summary` | is the summary that reset carried forward |
+| `child_result` | returns a child's value; see below |
+| `error` | is a provider or runtime error |
+| `launch_ack` | acknowledges that a child started, which is not its result |
+| `turn_duration` | carries the runtime's own measurement of a turn |
+| `command` | is a command run in line rather than said to the model |
+| `notice` | is the runtime telling the requester about the session itself |
+| `auxiliary` | names a child stream that is a plain model call the agent made inside its own work, not a child agent |
+
+`system_prompt` and `tool_schemas` exist so a reader that serves a conversation to the people an
+agent served can withhold what the runtime sent the model, by name rather than by guessing from the
+text or the size. The [Claude Code mapping](../adapters/claude-code.md#step-mapping) says which
+attachment carries them.
+
+`child_result` is not only on a `journal` record. On a `transcript` record it marks a result that
+is a child's synchronous return, which is the parent's copy of the child's output. Assembly reads
+the flag only on a `journal` record. Nothing removes the parent's copy, so it stays as the result
+of the call that started the child.
 
 ### Reading a record
 

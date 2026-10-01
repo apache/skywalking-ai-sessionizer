@@ -142,9 +142,16 @@ type Queued struct {
 }
 
 // Inject is material the harness put into model context, of a named type.
+//
+// A prompt snapshot is the one type with a shape of its own. SystemPrompt and
+// Tools are what the runtime sent the model outside the messages, and they
+// land with a flag for each, so a reader can withhold them by rule. A
+// snapshot carries no Text.
 type Inject struct {
-	Type string `yaml:"type"`
-	Text string `yaml:"text"`
+	Type         string    `yaml:"type"`
+	Text         string    `yaml:"text"`
+	SystemPrompt string    `yaml:"system_prompt"`
+	Tools        []ToolDef `yaml:"tools"`
 }
 
 // Call is one provider call. Its fragments are written in this order:
@@ -440,6 +447,16 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool, 
 		}
 		if n != 1 {
 			return fmt.Errorf("%s: a step is exactly one of input, queued, inject, call, result, error, reset, replay, system", at)
+		}
+		if s.Inject != nil && (s.Inject.SystemPrompt != "" || len(s.Inject.Tools) > 0) {
+			// The runtime carries these in one attachment type, and the
+			// adapter names them by that type, so a scenario says it.
+			if s.Inject.Type != "prompt_snapshot" {
+				return fmt.Errorf("%s: system_prompt and tools belong to an inject of type prompt_snapshot, the attachment the runtime carries them in", at)
+			}
+			if s.Inject.Text != "" {
+				return fmt.Errorf("%s: a prompt_snapshot carries system_prompt and tools, not text", at)
+			}
 		}
 		if s.After < 0 {
 			return fmt.Errorf("%s: after must not be negative", at)

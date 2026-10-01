@@ -77,6 +77,8 @@ const (
 // They are bits rather than fields because each is a yes/no an adapter can
 // answer from a single source field, and the alternative - storing the runtime
 // value - would put that runtime's vocabulary in the index.
+//
+// All sixteen bits are in use. The next flag widens the type.
 type Flags uint16
 
 const (
@@ -130,6 +132,16 @@ const (
 	// call that opened it stays a tool step. Set by the adapter from what it
 	// saw directly under the tool; never inferred here.
 	FlagAuxiliary
+	// FlagSystemPrompt marks an injection that carries the system prompt the
+	// runtime sent, and FlagToolSchemas one that carries the schemas of the
+	// tools it advertised. A reader that serves a conversation to the people
+	// an agent served may need to withhold both while the operator still
+	// sees them. A name on the record lets it do so by rule; without one it
+	// has only the text or the size to go on, which is a guess. Set by the
+	// adapter from the attachment's type and the keys it holds, never from
+	// the text.
+	FlagSystemPrompt
+	FlagToolSchemas
 )
 
 // Has reports whether every bit in f is set.

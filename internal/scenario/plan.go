@@ -123,6 +123,9 @@ type Event struct {
 	Call   string
 	Req    string
 	Text   string
+	// SystemPrompt and Tools are what a prompt snapshot carries.
+	SystemPrompt string
+	Tools        []ToolDef
 	// Replayed marks a copy the runtime re-emitted, with its run rewritten.
 	Replayed bool
 	// Lost marks a record the original file does not hold. It is planned
@@ -393,7 +396,7 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 		l.last = e.ID
 	case s.Inject != nil:
 		at := b.tick(l, s.After)
-		e := Event{Kind: EvInject, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-inject", Parent: l.last, Type: s.Inject.Type, Text: s.Inject.Text, Lost: lost}
+		e := Event{Kind: EvInject, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-inject", Parent: l.last, Type: s.Inject.Type, Text: s.Inject.Text, SystemPrompt: s.Inject.SystemPrompt, Tools: s.Inject.Tools, Lost: lost}
 		b.emit(e)
 		l.last = e.ID
 	case s.Call != nil:
@@ -695,4 +698,32 @@ func derivedSession(sc *Scenario) string {
 	}
 	x := hex.EncodeToString(h.Sum(nil))
 	return fmt.Sprintf("%s-%s-4%s-8%s-%s", x[0:8], x[8:12], x[13:16], x[17:20], x[20:32])
+}
+
+// isSnapshot reports whether an injection is a prompt snapshot rather than
+// text.
+func (e *Event) isSnapshot() bool { return e.SystemPrompt != "" || len(e.Tools) > 0 }
+
+// promptSnapshot is the attachment a runtime built on the Agent SDK writes
+// for what it sent the model outside the messages, in the shape measured:
+// the prompt as a list of strings, and each tool's schema under "schema",
+// where a provider request says "input_schema". A key the event has nothing
+// for is left out; the first snapshot measured had no tools key.
+func promptSnapshot(e *Event) map[string]any {
+	att := map[string]any{"type": e.Type, "reminderFold": false}
+	if e.SystemPrompt != "" {
+		att["systemPrompt"] = []string{e.SystemPrompt}
+	}
+	if len(e.Tools) > 0 {
+		tools := make([]map[string]any, 0, len(e.Tools))
+		for _, t := range e.Tools {
+			schema := t.InputSchema
+			if schema == nil {
+				schema = map[string]any{"type": "object", "properties": map[string]any{}}
+			}
+			tools = append(tools, map[string]any{"name": t.Name, "description": t.Description, "schema": schema})
+		}
+		att["tools"] = tools
+	}
+	return att
 }

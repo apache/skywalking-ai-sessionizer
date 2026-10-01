@@ -39,6 +39,15 @@
   is now external input that opens its talk. A session collected before this keeps the gap, because
   landed records are never rewritten.
 
+- A prompt snapshot is named for what it carries. A runtime built on the Claude Agent SDK writes
+  the system prompt and the tool schemas it sent into the transcript, as a `prompt_snapshot`
+  attachment, and asz landed it as an injection step with nothing saying so. Such a record now
+  carries the `system_prompt` flag when it holds the prompt and the `tool_schemas` flag when it
+  holds the schemas, beside `injected`, set from the attachment's type and keys and never from the
+  text, so a reader that serves a conversation to the people the agent served can withhold them by
+  rule. The page shows the flags on the step. A session collected before this keeps its records as
+  they are, because landed records are never rewritten; collecting it into a new root names them.
+
 ## MCP calls
 
 - A call to an MCP server names its server and its tool. Claude Code calls an MCP tool

@@ -371,6 +371,17 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 	case EvInject:
 		r.From, r.Flags = sessiondata.FromRuntime, []string{"injected"}
 		r.Parts = []sessiondata.Part{textPart(e.Text)}
+		if e.isSnapshot() {
+			// The runtime's object whole, as the adapter lands an attachment
+			// with no prose, and a flag for each thing it carries.
+			if e.SystemPrompt != "" {
+				r.Flags = append(r.Flags, "system_prompt")
+			}
+			if len(e.Tools) > 0 {
+				r.Flags = append(r.Flags, "tool_schemas")
+			}
+			r.Parts = []sessiondata.Part{dataPart(promptSnapshot(e))}
+		}
 	case EvFragment:
 		r.From, r.Call, r.Model = sessiondata.FromAgent, e.Call, ccModel
 		u := e.Usage

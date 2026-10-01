@@ -293,6 +293,9 @@ type View struct {
 	ProviderFiles   *int `yaml:"provider_files"`
 	ProviderBodies  *int `yaml:"provider_bodies"`
 	CapturedPrompts *int `yaml:"captured_prompts"`
+	// Flags counts the document's steps by each flag they carry, so a
+	// scenario can say which records landed named.
+	Flags map[string]int `yaml:"flags"`
 }
 
 // Talk is what a talk in the document must say.
@@ -575,6 +578,25 @@ func checkView(root, session string, want *View) ([]string, error) {
 	}
 	if want.CapturedPrompts != nil && doc.Summary.CapturedPrompts != *want.CapturedPrompts {
 		bad("view.captured_prompts is %d, want %d", doc.Summary.CapturedPrompts, *want.CapturedPrompts)
+	}
+	if want.Flags != nil {
+		got := map[string]int{}
+		var walk func([]sessionview.Node)
+		walk = func(nodes []sessionview.Node) {
+			for _, n := range nodes {
+				for _, name := range n.Flags {
+					got[name]++
+				}
+				walk(n.Children)
+			}
+		}
+		walk(doc.Talks)
+		walk(doc.Loose)
+		for name, n := range want.Flags {
+			if got[name] != n {
+				bad("view.flags.%s is %d, want %d", name, got[name], n)
+			}
+		}
 	}
 	if want.Executions != nil && len(doc.ToolExecutions) != *want.Executions {
 		bad("view.executions is %d, want %d", len(doc.ToolExecutions), *want.Executions)
