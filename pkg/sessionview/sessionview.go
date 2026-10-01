@@ -160,6 +160,15 @@ type Summary struct {
 	Kinds         map[string]int `json:"kinds"`
 	RelationTypes map[string]int `json:"relation_types"`
 	Quality       map[string]int `json:"quality"`
+
+	// Withheld counts what this document withholds, by name: the steps
+	// carrying each withheld flag, and under provider_bodies the session's
+	// landed bodies, which are served to no reader of a document that
+	// withholds anything, since a request carries the system prompt and
+	// the tool schemas again. Empty when nothing is withheld. A withheld
+	// step keeps its node, its flags and its size, loses its text, and
+	// has state omitted. It is never deleted, so every count still holds.
+	Withheld map[string]int `json:"withheld"`
 }
 
 // The three verification states.

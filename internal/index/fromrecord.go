@@ -155,21 +155,21 @@ func triggerOf(t string) Trigger {
 // flagNames is the mapping the adapter writes and the index reads back. It is
 // one table so the two cannot disagree.
 var flagNames = map[string]Flags{
-	"synthetic":      FlagSynthetic,
-	"context_reset":  FlagEpochBoundary,
-	"reset_summary":  FlagEpochSummary,
-	"finished":       FlagStopReason,
-	"external_input": FlagExternalInput,
-	"injected":       FlagInjection,
-	"child_result":   FlagChildResult,
-	"error":          FlagError,
-	"launch_ack":     FlagLaunchAck,
-	"turn_duration":  FlagTurnDuration,
-	"command":        FlagCommand,
-	"notice":         FlagNotice,
-	"auxiliary":      FlagAuxiliary,
-	"system_prompt":  FlagSystemPrompt,
-	"tool_schemas":   FlagToolSchemas,
+	"synthetic":                  FlagSynthetic,
+	"context_reset":              FlagEpochBoundary,
+	"reset_summary":              FlagEpochSummary,
+	"finished":                   FlagStopReason,
+	"external_input":             FlagExternalInput,
+	"injected":                   FlagInjection,
+	"child_result":               FlagChildResult,
+	"error":                      FlagError,
+	"launch_ack":                 FlagLaunchAck,
+	"turn_duration":              FlagTurnDuration,
+	"command":                    FlagCommand,
+	"notice":                     FlagNotice,
+	"auxiliary":                  FlagAuxiliary,
+	sessiondata.FlagSystemPrompt: FlagSystemPrompt,
+	sessiondata.FlagToolSchemas:  FlagToolSchemas,
 }
 
 // FlagName returns the written form of one flag.

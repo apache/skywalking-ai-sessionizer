@@ -133,6 +133,17 @@ export:
 | `logs` | `true` | Send the collected files and rounds. |
 | `metrics` | `true` | Send the metrics. `logs` or `metrics` must be on. |
 
+## view
+
+What `asz view` and `asz server` serve. asz knows nothing about who is reading, so these apply to
+every reader of the instance. Two audiences are two instances over the same root, each behind the
+deployment's own authentication, or one host that serves the API through its own route and adds
+`hide` per reader; see [Withholding](../formats/asz-view.md#withholding).
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `hide` | `[]` | The flags whose steps the page withholds from every reader: `system_prompt`, `tool_schemas`. A withheld step keeps its place, its flags and its size, loses its text, and has state `omitted`. The provider bodies go with it, since a request carries both again. |
+
 ## The changes adapter
 
 `changes` collects the records `asz-changes` writes: what each tool call changed on disk, for

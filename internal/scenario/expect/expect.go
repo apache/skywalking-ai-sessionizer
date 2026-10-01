@@ -296,6 +296,12 @@ type View struct {
 	// Flags counts the document's steps by each flag they carry, so a
 	// scenario can say which records landed named.
 	Flags map[string]int `yaml:"flags"`
+	// Hide builds the document with these flags withheld, as a view
+	// configured or asked to hide them does, and Withheld is what its
+	// summary must then count. Every step carrying a hidden flag must
+	// have lost its text and say omitted, and no call may list a body.
+	Hide     []string       `yaml:"hide"`
+	Withheld map[string]int `yaml:"withheld"`
 }
 
 // Talk is what a talk in the document must say.
@@ -532,12 +538,47 @@ func checkView(root, session string, want *View) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	doc, err := c.Build()
+	doc, err := c.BuildWithheld(want.Hide)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	bad := func(format string, a ...any) { out = append(out, fmt.Sprintf(format, a...)) }
+	if len(want.Hide) > 0 {
+		hidden := map[string]bool{}
+		for _, name := range want.Hide {
+			hidden[name] = true
+		}
+		var walk func([]sessionview.Node)
+		walk = func(nodes []sessionview.Node) {
+			for _, n := range nodes {
+				for _, name := range n.Flags {
+					if hidden[name] && (n.Text != "" || n.State != model.ContentOmitted) {
+						bad("view: step %s carries %s and is not withheld: text %q, state %q", n.ID, name, n.Text, n.State)
+						break
+					}
+				}
+				if len(n.ProviderBodies) > 0 {
+					bad("view: call %s lists %d provider bodies while something is withheld", n.ID, len(n.ProviderBodies))
+				}
+				walk(n.Children)
+			}
+		}
+		walk(doc.Talks)
+		walk(doc.Loose)
+	}
+	if want.Withheld != nil {
+		for name, n := range want.Withheld {
+			if doc.Summary.Withheld[name] != n {
+				bad("view.withheld.%s is %d, want %d", name, doc.Summary.Withheld[name], n)
+			}
+		}
+		for name, n := range doc.Summary.Withheld {
+			if _, listed := want.Withheld[name]; !listed {
+				bad("view.withheld.%s is %d, and the expectation lists nothing for it", name, n)
+			}
+		}
+	}
 	if want.State != "" && doc.Summary.State != want.State {
 		bad("view.state is %s (%v), want %s", doc.Summary.State, doc.Summary.Problems, want.State)
 	}

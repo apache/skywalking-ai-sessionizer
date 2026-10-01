@@ -416,7 +416,7 @@ func clip(t string) string {
 	return t[:cut]
 }
 
-func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64) {
+func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64, hide []string) {
 	c, err := s.Load(id)
 	if err != nil {
 		fail(w, err, http.StatusNotFound)
@@ -428,7 +428,9 @@ func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64) {
 		return
 	}
 	// The record as landed, and nothing around it: the renderer prints it
-	// whole and reads its dropped list off the top.
+	// whole and reads its dropped list off the top. A record this reader
+	// withholds keeps its envelope and loses its content.
+	withholdRecord(rec, hide)
 	writeJSON(w, rec)
 }
 
@@ -454,8 +456,16 @@ const maxFileBytes = 64 << 20
 //
 // A sequence with no landed file is left out rather than refused: the renderer
 // reports which files it did not get, and one missing file does not spoil the
-// rest.
-func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values) {
+// rest. A file of any other kind is refused: a transcript served whole would
+// carry what the document and the record endpoint withhold, and the Prompt
+// tab reads provider body files only. A reader that withholds anything is
+// served no file at all, since a request carries the system prompt and the
+// tool schemas again, and a body is served whole or not at all.
+func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide []string) {
+	if len(hide) > 0 {
+		fail(w, fmt.Errorf("view: the provider bodies are withheld with %s: a request carries what is withheld, and a body is served whole or not at all", strings.Join(hide, " and ")), http.StatusForbidden)
+		return
+	}
 	c, err := s.Load(id)
 	if err != nil {
 		fail(w, err, http.StatusNotFound)
@@ -505,6 +515,10 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values) {
 				continue
 			}
 			fail(w, rerr, http.StatusInternalServerError)
+			return
+		}
+		if kind := headerKind(body); kind != sessiondata.KindProviderBody {
+			fail(w, fmt.Errorf("view: sequence %d is a %s file; only provider body files are served whole", seq, kind), http.StatusBadRequest)
 			return
 		}
 		// A landed file may be large and the whole answer is held in memory to

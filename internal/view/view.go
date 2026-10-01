@@ -62,6 +62,10 @@ type Server struct {
 	// supplied by whoever wires the server, never imported from an adapter,
 	// so the side that reads never depends on the side that collects.
 	glossary *model.Glossary
+
+	// hide is what this instance withholds from every reader, by flag. See
+	// withhold.go.
+	hide []string
 }
 
 // New returns a server over a zone. Nothing refreshes it until a caller says
@@ -113,10 +117,12 @@ type Conversation struct {
 	paths     map[uint64]string
 	pathsScan time.Time
 
-	// built is the Conversation View, made once per fold. Forget drops the
-	// whole Conversation, and the view with it, when a round arrives.
+	// built is the Conversation View, made once per fold, under the names
+	// it withholds: "" is the whole document, and a reader that withholds
+	// has a copy of its own under its names. Forget drops the whole
+	// Conversation, and the views with it, when a round arrives.
 	builtMu sync.Mutex
-	built   *sessionview.Conversation
+	built   map[string]*sessionview.Conversation
 
 	// problems is what stopped the fold short of the chain's last file, in
 	// words, for the document to carry.

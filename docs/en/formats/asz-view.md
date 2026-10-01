@@ -16,7 +16,7 @@ things produce it from the same code:
 | --- | --- |
 | `asz conversation -json ID` | the document on standard output, indented |
 | `asz conversation -yaml ID` | the same document rendered as YAML, with the same keys in the same order |
-| `asz view`, at `/api/c/{id}/view` | the document as the page's own response, built once per fold |
+| `asz view`, at `/api/c/{id}/view` | the document as the page's own response, built once per fold, less what `hide` withholds; see [Withholding](#withholding) |
 
 A server that holds the same `.sd` and `.sf` files, such as the SkyWalking OAP, builds the same
 document and answers a conversation query with it. Every reader shares the shape, and a change to
@@ -78,7 +78,7 @@ producer of them.
 | `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
-| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known |
+| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known; and `withheld`, what the document withholds by name, `{}` when nothing is, see [Withholding](#withholding) |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
@@ -253,6 +253,40 @@ step; its file is still under `files`. Nothing is joined by position or by time.
 
 `summary.provider_bodies` counts the session's landed bodies as of the folded chain, joined or not, and
 `summary.captured_prompts` the calls that list a request.
+
+## Withholding
+
+A reader that serves a conversation to the people an agent served may need to keep from them what
+the runtime sent the model: the system prompt and the tool schemas. The record that carries each is
+named by its adapter with a flag, `system_prompt` or `tool_schemas`, as
+[Session Data](session-data.md#flags) lists, and a server withholds by those names, never by the
+text or the size of a part. asz knows nothing about who is reading. `asz view` withholds what its
+[configuration](../setup/configuration.md#view) says for every reader, and a `hide` parameter on
+`/api/c/{id}/view`, `/api/c/{id}/record/{seq}/{row}` and `/api/c/{id}/files` adds names for one
+request and never takes one away: `?hide=system_prompt,tool_schemas`, or the parameter given more
+than once. A name the page cannot withhold is refused with status 400. A host that serves the API
+through its own route decides per reader and adds the parameter. Two audiences are two instances
+over the same root, each behind the deployment's own authentication.
+
+A server that withholds, asz's own or one that mirrors the format, follows these rules, so a person
+sees the same conversation on every page:
+
+- A withheld step keeps its node: `id`, `kind`, `parent`, `ref`, `at`, `flags` and `bytes` stay. Its
+  `text` is absent and its `state` is `omitted`. It is never deleted, so every count, the round
+  chain and the verification state still hold.
+- `summary.withheld` counts what was withheld by name: the steps carrying each withheld flag, and
+  under `provider_bodies` the session's landed bodies. It is `{}` when nothing is withheld, so a
+  reader can tell a filtered document from a whole one.
+- No call lists a `provider_bodies` entry, `summary.captured_prompts` is `0`, and the files endpoint
+  answers 403. A request carries the system prompt and the tool schemas again, and a body rebuilds
+  to its digest or not at all, so a body is served whole or not at all. The response goes with the
+  request, because a landed file holds both.
+- The record endpoint returns a withheld record with its envelope and its `flags`. Every part keeps
+  its kind and its `bytes`, loses `text` and `data`, and has `state` `omitted`.
+- The files endpoint serves `provider_body` files only, whether or not anything is withheld. A
+  transcript served whole would carry what the document withholds.
+
+The scenario `prompt-snapshot-withheld` checks these.
 
 ## Rendering the whole conversation
 

@@ -375,10 +375,10 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 			// The runtime's object whole, as the adapter lands an attachment
 			// with no prose, and a flag for each thing it carries.
 			if e.SystemPrompt != "" {
-				r.Flags = append(r.Flags, "system_prompt")
+				r.Flags = append(r.Flags, sessiondata.FlagSystemPrompt)
 			}
 			if len(e.Tools) > 0 {
-				r.Flags = append(r.Flags, "tool_schemas")
+				r.Flags = append(r.Flags, sessiondata.FlagToolSchemas)
 			}
 			r.Parts = []sessiondata.Part{dataPart(promptSnapshot(e))}
 		}

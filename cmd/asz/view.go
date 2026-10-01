@@ -49,6 +49,9 @@ func cmdView(cfg *config.Config, _ []config.Adapter, _ bool) error {
 	}
 	zone := storage.NewZone(zoneRoot)
 	srv := view.NewWithGlossaries(zone, glossaries())
+	if err := srv.SetHide(cfg.View.Hide); err != nil {
+		return err
+	}
 	ids, err := srv.List()
 	if err != nil {
 		return err
@@ -145,6 +148,9 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	zone := storage.NewZone(zoneRoot)
 	srv := view.NewWithGlossaries(zone, glossaries())
+	if err := srv.SetHide(cfg.View.Hide); err != nil {
+		return err
+	}
 
 	ref, err := newRefresher(srv, zone, ads, cfg.Metrics, cfg.Parse.MaxRoundBytes, once)
 	if err != nil {

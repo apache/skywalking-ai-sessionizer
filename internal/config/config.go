@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // Config is the top-level configuration document.
@@ -37,6 +39,23 @@ type Config struct {
 	Parse    Parse     `yaml:"parse"`
 	Metrics  Metrics   `yaml:"metrics"`
 	Export   Export    `yaml:"export"`
+	View     View      `yaml:"view"`
+}
+
+// View configures what asz view and asz server serve.
+type View struct {
+	// Hide lists the flags whose steps the page withholds from every
+	// reader: system_prompt, the system prompt a runtime sent, and
+	// tool_schemas, the schemas of the tools it advertised. A withheld step
+	// keeps its place, its flags and its size, loses its text, and says so
+	// with the state omitted. The provider bodies go with it, since a
+	// request carries both again and a body is served whole or not at all.
+	// A host that serves the API through its own route withholds more for
+	// one reader with the hide parameter, never less. asz knows nothing
+	// about who is reading: one instance per audience, each behind the
+	// deployment's own authentication, is how two audiences are served.
+	// Empty hides nothing.
+	Hide []string `yaml:"hide"`
 }
 
 // Metrics configures what asz derives from the landed files. It is one
@@ -360,6 +379,7 @@ func Default() *Config {
 			Logs:       boolPtr(true),
 			Metrics:    boolPtr(true),
 		}},
+		View: View{Hide: []string{}},
 	}
 }
 
@@ -458,6 +478,9 @@ func Load(path string) (*Config, error) {
 	}
 	if o.Metrics != nil {
 		cfg.Export.OTLP.Metrics = o.Metrics
+	}
+	if len(loaded.View.Hide) > 0 {
+		cfg.View.Hide = loaded.View.Hide
 	}
 	return cfg, cfg.Validate()
 }
@@ -560,6 +583,11 @@ func (c *Config) Validate() error {
 	}
 	if _, err := c.Metrics.LookbackDuration(); err != nil {
 		return err
+	}
+	for _, name := range c.View.Hide {
+		if !sessiondata.IsWithholdable(name) {
+			return fmt.Errorf("config: view.hide names %q; the page can withhold %s", name, strings.Join(sessiondata.Withholdable(), " and "))
+		}
 	}
 	return nil
 }

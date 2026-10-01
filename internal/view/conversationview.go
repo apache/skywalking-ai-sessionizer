@@ -38,14 +38,15 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
-// apiView serves the whole conversation as one asz.view document.
-func (s *Server) apiView(w http.ResponseWriter, id string) {
+// apiView serves the whole conversation as one asz.view document, less what
+// this reader withholds.
+func (s *Server) apiView(w http.ResponseWriter, id string, hide []string) {
 	c, err := s.Load(id)
 	if err != nil {
 		fail(w, err, http.StatusNotFound)
 		return
 	}
-	v, err := c.Build()
+	v, err := c.BuildWithheld(hide)
 	if err != nil {
 		fail(w, err, http.StatusInternalServerError)
 		return
@@ -70,11 +71,46 @@ func (s *Server) apiView(w http.ResponseWriter, id string) {
 // each verified. It is made once per fold. The records every tree needs
 // are read in one pass per landed file rather than one per talk.
 func (c *Conversation) Build() (*sessionview.Conversation, error) {
+	return c.BuildWithheld(nil)
+}
+
+// BuildWithheld is Build with the steps carrying any of the named flags
+// withheld, as withhold.go says. The whole document is built once per fold
+// and shared; a reader that withholds gets a copy under its names, kept for
+// the next reader with the same names.
+func (c *Conversation) BuildWithheld(names []string) (*sessionview.Conversation, error) {
+	names = withheldNames(names)
+	key := strings.Join(names, ",")
 	c.builtMu.Lock()
 	defer c.builtMu.Unlock()
-	if c.built != nil {
-		return c.built, nil
+	if c.built == nil {
+		c.built = map[string]*sessionview.Conversation{}
 	}
+	if v, ok := c.built[key]; ok {
+		return v, nil
+	}
+	base, ok := c.built[""]
+	if !ok {
+		var err error
+		if base, err = c.build(); err != nil {
+			return nil, err
+		}
+		c.built[""] = base
+	}
+	if key == "" {
+		return base, nil
+	}
+	v, err := copyDocument(base)
+	if err != nil {
+		return nil, err
+	}
+	withhold(v, names)
+	c.built[key] = v
+	return v, nil
+}
+
+// build makes the whole document, withholding nothing.
+func (c *Conversation) build() (*sessionview.Conversation, error) {
 	o := c.overview()
 	v := &sessionview.Conversation{
 		Format: sessionview.Format, Version: sessionview.Version,
@@ -84,6 +120,7 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 		Summary: sessionview.Summary{
 			Title: o.title, Problems: []string{},
 			Kinds: o.kinds, RelationTypes: o.rels, Quality: o.quality,
+			Withheld: map[string]int{},
 		},
 		Streams: o.streams, Segments: o.segments,
 		Rounds: []sessionview.Round{}, Files: []sessionview.File{}, Talks: []sessionview.Node{}, Loose: []sessionview.Node{},
@@ -205,7 +242,6 @@ func (c *Conversation) Build() (*sessionview.Conversation, error) {
 			}
 		}
 	}
-	c.built = v
 	return v, nil
 }
 

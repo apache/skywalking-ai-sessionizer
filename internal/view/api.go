@@ -273,19 +273,27 @@ var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)
 // files by sequence. The renderer draws the document alone; the Evidence tab
 // asks for a record and the Prompt tab for the files a call's bodies are cut
 // across.
+//
+// Each takes the hide parameter: what this reader withholds beyond what the
+// instance withholds for everyone. See withhold.go.
 func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
+	hide, err := s.hideFor(r.URL.Query())
+	if err != nil {
+		fail(w, err, http.StatusBadRequest)
+		return
+	}
 	if m := recordPath.FindStringSubmatch(r.URL.Path); m != nil {
 		seq, _ := strconv.ParseUint(m[2], 10, 64)
 		row, _ := strconv.ParseUint(m[3], 10, 64)
-		s.apiRecord(w, m[1], seq, row)
+		s.apiRecord(w, m[1], seq, row, hide)
 		return
 	}
 	if m := viewPath.FindStringSubmatch(r.URL.Path); m != nil {
-		s.apiView(w, m[1])
+		s.apiView(w, m[1], hide)
 		return
 	}
 	if m := filesPath.FindStringSubmatch(r.URL.Path); m != nil {
-		s.apiFiles(w, m[1], r.URL.Query())
+		s.apiFiles(w, m[1], r.URL.Query(), hide)
 		return
 	}
 	fail(w, fmt.Errorf("not found"), http.StatusNotFound)

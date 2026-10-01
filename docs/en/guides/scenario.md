@@ -360,6 +360,7 @@ checkpoints:
     # with provider_bodies: the landed bodies, and the calls whose request is captured
     # view: {provider_bodies: 14, captured_prompts: 7, provider_files: 5}
     # view: {flags: {injected: 3, system_prompt: 2}}   # the document's steps by each flag they carry
+    # view: {hide: [system_prompt], withheld: {system_prompt: 2, provider_bodies: 2}}   # built as a view that withholds these; every such step must say omitted
     verify: {problems: 0}                 # what asz verify reports over the root
   helped:
     lose: [{stream: checker, kind: transcript}]   # deleted from the root after this checkpoint's parse

@@ -73,6 +73,22 @@
   used to show the step's text under every position. The renderer is Horizon's, now pinned at
   `c903e77`.
 
+## The page
+
+- A view can withhold the system prompt and the tool schemas. A reader that serves a conversation to
+  the people an agent served may need to keep from them what the runtime sent the model, while the
+  operator still sees it. asz knows nothing about who is reading, and withholds by the flags the
+  adapter set, never by the text or the size of a part. `view.hide` in the configuration lists the
+  flags `asz view` and `asz server` withhold from every reader, and a `hide` parameter on the
+  document, record and files endpoints adds names for one request and never takes one away, so a
+  host that serves the API through its own route decides per reader. A withheld step keeps its
+  node, its flags and its size, loses its text and says `omitted`; `summary.withheld` counts what
+  was withheld; no call lists a provider body and the files endpoint serves none, since a request
+  carries both again and a body is served whole or not at all. The rules are on the asz.view page,
+  so a server that mirrors the format withholds the same way.
+- The files endpoint serves provider body files only. It served any landed file whole by its
+  sequence, transcripts included, and the Prompt tab reads provider body files only.
+
 ## Metrics
 
 - Metrics are one section of the configuration, for the whole root. `metrics.enabled`, on by

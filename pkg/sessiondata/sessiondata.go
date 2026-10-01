@@ -309,6 +309,24 @@ type Usage struct {
 	CacheWrite int `json:"cache_write,omitempty"`
 }
 
+// The flags a reader may withhold. An adapter sets each on the record that
+// carries what it names: the system prompt the runtime sent, and the schemas
+// of the tools it advertised. A reader that serves a conversation to the
+// people an agent served withholds them by these names, never by the text or
+// the size of a part. The other flags are listed on the Session Data page.
+const (
+	FlagSystemPrompt = "system_prompt"
+	FlagToolSchemas  = "tool_schemas"
+)
+
+// Withholdable lists the flags a reader may withhold, in a fixed order.
+func Withholdable() []string { return []string{FlagSystemPrompt, FlagToolSchemas} }
+
+// IsWithholdable reports whether name is a flag a reader may withhold.
+func IsWithholdable(name string) bool {
+	return name == FlagSystemPrompt || name == FlagToolSchemas
+}
+
 // Drop is one thing the conversion left behind.
 type Drop struct {
 	What  string `json:"what"`
