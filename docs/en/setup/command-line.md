@@ -56,6 +56,9 @@ Serves the conversations at `ADDR`, `127.0.0.1:8787` by default, and changes not
 data collected elsewhere or by another process. The list is at `/`, and one conversation at
 `/c/{id}`. The Evidence tab shows the collected record behind a step, and the Prompt tab a model
 call's request and response, when [provider bodies](claude-code-provider-bodies.md) were collected.
+The page withholds from every reader what [`view.hide`](configuration.md#view) names, the system
+prompt and the tool schemas a runtime sent; `server` does the same, and `conversation` withholds
+nothing. See [Withholding](../formats/asz-view.md#withholding).
 
 ## push
 
