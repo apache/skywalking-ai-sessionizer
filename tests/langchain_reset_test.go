@@ -445,7 +445,7 @@ func TestAResetRecoversWhenOnlyItsBoundaryLanded(t *testing.T) {
 		}
 		text := recordAt(t, zone, session, *n.Ref).text()
 		if !strings.HasPrefix(text, "Here is a summary of the conversation to date:") ||
-			!strings.Contains(text, ": the clusters checked so far were healthy") {
+			!strings.Contains(text, ": the sites checked so far were all served") {
 			t.Errorf("the summary at %v reads %q", *n.Ref, text)
 		}
 	}

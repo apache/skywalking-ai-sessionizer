@@ -161,13 +161,15 @@ type Summary struct {
 	RelationTypes map[string]int `json:"relation_types"`
 	Quality       map[string]int `json:"quality"`
 
-	// Withheld counts what this document withholds, by name: the steps
-	// carrying each withheld flag, and under provider_bodies the session's
-	// landed bodies, which are served to no reader of a document that
-	// withholds anything, since a request carries the system prompt and
-	// the tool schemas again. Empty when nothing is withheld. A withheld
-	// step keeps its node, its flags and its size, loses its text, and
-	// has state omitted. It is never deleted, so every count still holds.
+	// Withheld counts what this document withholds, by name: the records
+	// carrying each withheld flag, each once however many steps stand on it,
+	// and under provider_bodies the session's landed bodies, which are served
+	// to no reader of a document that withholds anything, since a request
+	// carries the system prompt and the tool schemas again. Every name asked
+	// for is listed, a zero included, so a filter that matched nothing still
+	// shows it ran. It is empty only when nothing was asked to be withheld. A
+	// withheld step keeps its node, its flags and its size, loses its text,
+	// and has state omitted. It is never deleted, so every count still holds.
 	Withheld map[string]int `json:"withheld"`
 }
 
@@ -273,7 +275,8 @@ type Node struct {
 
 	// Usage, Flags and Dropped are what else the referenced record says,
 	// copied once: on an llm.call the token counts from the one record its
-	// usage_at names; the record's flags; and what the conversion left out.
+	// usage_at names; the record's flags, which on an llm.call are only those
+	// a reader may withhold; and what the conversion left out.
 	Usage   *sessiondata.Usage `json:"usage,omitempty"`
 	Flags   []string           `json:"flags,omitempty"`
 	Dropped []sessiondata.Drop `json:"dropped,omitempty"`

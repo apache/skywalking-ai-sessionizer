@@ -18,3 +18,10 @@
 checkpoints:
   final:
     kinds: {message.external: 2, context.injection: 3}
+    # No injection here is of a type that carries the system prompt or the
+    # tool schemas. Withholding them finds nothing, as it does over a root
+    # landed before those flags, and the summary says so with zeros rather
+    # than nothing.
+    view:
+      hide: [system_prompt, tool_schemas]
+      withheld: {system_prompt: 0, tool_schemas: 0, provider_bodies: 0}

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -277,7 +278,14 @@ var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)
 // Each takes the hide parameter: what this reader withholds beyond what the
 // instance withholds for everyone. See withhold.go.
 func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
-	hide, err := s.hideFor(r.URL.Query())
+	// A query that does not parse may hold a hide that cannot be read, so
+	// it is refused rather than read without it.
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		fail(w, fmt.Errorf("view: the query does not parse: %w", err), http.StatusBadRequest)
+		return
+	}
+	hide, err := s.hideFor(q)
 	if err != nil {
 		fail(w, err, http.StatusBadRequest)
 		return
@@ -293,7 +301,7 @@ func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if m := filesPath.FindStringSubmatch(r.URL.Path); m != nil {
-		s.apiFiles(w, m[1], r.URL.Query(), hide)
+		s.apiFiles(w, m[1], q, hide)
 		return
 	}
 	fail(w, fmt.Errorf("not found"), http.StatusNotFound)
@@ -319,6 +327,9 @@ type talkRow struct {
 	// which one can name the talk is only known once its text is read.
 	labelAt []*sessionflow.Ref
 	replyAt *sessionflow.Ref
+	// labelInjected says the candidates are injections, read only because
+	// the talk has no input of its own.
+	labelInjected bool
 }
 
 // overview is what the page's conversation summary and the Conversation
@@ -333,7 +344,7 @@ type overview struct {
 	open                 []map[string]string
 }
 
-func (c *Conversation) overview() *overview {
+func (c *Conversation) overview(hide []string) *overview {
 	var title string
 	kinds := map[string]int{}
 	for _, n := range c.View.Nodes {
@@ -391,8 +402,8 @@ func (c *Conversation) overview() *overview {
 			}
 		}
 		walk(t.ID)
-		if refs := c.labelRefs(t); len(refs) > 0 {
-			row.labelAt = refs
+		if refs, injected := c.labelRefs(t); len(refs) > 0 {
+			row.labelAt, row.labelInjected = refs, injected
 			labelRefs = append(labelRefs, refs...)
 		}
 		if ref := c.replyRef(t); ref != nil {
@@ -402,10 +413,20 @@ func (c *Conversation) overview() *overview {
 		talks = append(talks, row)
 	}
 	// One pass per landed file, not one per talk.
-	texts := c.texts(labelRefs)
+	texts, sent := c.texts(labelRefs, hide)
 	for i := range talks {
 		for _, r := range talks[i].labelAt {
-			text := texts[[2]uint64{r.Seq, r.Row}]
+			at := [2]uint64{r.Seq, r.Row}
+			// An injection that is what the runtime sent the model cannot
+			// name a talk. A talk with no input of its own would otherwise
+			// take a snapshot's prose as its name, and a reader that
+			// withholds it would see it as the title. A person's input
+			// names its talk whatever it carries, and is withheld only from
+			// a reader who asked for that.
+			if talks[i].labelInjected && sent[at] {
+				continue
+			}
+			text := texts[at]
 			// A tools-list delta says which tools appeared, not what the
 			// work is, so it cannot name a talk.
 			if strings.HasPrefix(strings.TrimSpace(text), `{"type":"deferred_tools_delta"`) {
@@ -568,14 +589,11 @@ func attrBool(n *sessionflow.Node, key string) bool {
 // delegated to a pool agent arrives outside its own records - is named by
 // what was first put into its context instead, so the first few injections
 // are offered as candidates and the caller, which reads the texts, picks
-// the first one that can serve as a name.
+// the first one that can serve as a name. It says which of the two it found.
 //
-// This returns positions rather than texts because resolving one position
-// means opening a landed file and reading forward to a row. Done per talk,
-// that is one file scan per talk - measured at six seconds for a
-// conversation with 922 of them. The positions are collected first and
-// read together instead.
-func (c *Conversation) labelRefs(t *sessionflow.Node) []*sessionflow.Ref {
+// The caller passes over an injection that is what the runtime sent the
+// model, so no talk is named by one.
+func (c *Conversation) labelRefs(t *sessionflow.Node) ([]*sessionflow.Ref, bool) {
 	var ext *sessionflow.Ref
 	var inj []*sessionflow.Ref
 	var walk func(string) bool
@@ -596,9 +614,9 @@ func (c *Conversation) labelRefs(t *sessionflow.Node) []*sessionflow.Ref {
 	}
 	walk(t.ID)
 	if ext != nil {
-		return []*sessionflow.Ref{ext}
+		return []*sessionflow.Ref{ext}, false
 	}
-	return inj
+	return inj, true
 }
 
 // replyRef finds where a talk's answer should be read from: the last thing the
@@ -661,47 +679,57 @@ func (c *Conversation) journalNames() map[string]string {
 			if rerr != nil {
 				break
 			}
-			if rec.Child == "" {
-				continue
-			}
 			if _, seen := names[rec.Child]; seen {
 				continue
 			}
-			for _, raw := range candidates(rec) {
-				var row struct {
-					Type   string `json:"type"`
-					Result struct {
-						Surface string `json:"surface"`
-						Summary string `json:"summary"`
-						Verdict string `json:"verdict"`
-						Refuted []struct {
-							Claim string `json:"claim"`
-						} `json:"refuted_claims"`
-					} `json:"result"`
-				}
-				if json.Unmarshal(raw, &row) != nil || row.Type != "result" {
-					continue
-				}
-				r := row.Result
-				name := r.Surface
-				if name == "" {
-					name = r.Summary
-				}
-				if name == "" && r.Verdict != "" {
-					name = r.Verdict
-					if len(r.Refuted) > 0 && r.Refuted[0].Claim != "" {
-						name += " · " + r.Refuted[0].Claim
-					}
-				}
-				if name = shortName(name); name != "" {
-					names[rec.Child] = name
-				}
-				break
+			if name := journalName(rec); name != "" {
+				names[rec.Child] = name
 			}
 		}
 		f.Close()
 	}
 	return names
+}
+
+// journalName is the name a run journal's record gives the child it names,
+// read from the first result row among its parts, or "" when it gives none.
+//
+// What the runtime sent the model never names a stream, as it never names a
+// talk. These names are made once for every reader, whatever each withholds,
+// so a record carrying such a flag gives none.
+func journalName(rec *sessiondata.Record) string {
+	if rec.Child == "" || withholdable(rec.Flags) {
+		return ""
+	}
+	for _, raw := range candidates(rec) {
+		var row struct {
+			Type   string `json:"type"`
+			Result struct {
+				Surface string `json:"surface"`
+				Summary string `json:"summary"`
+				Verdict string `json:"verdict"`
+				Refuted []struct {
+					Claim string `json:"claim"`
+				} `json:"refuted_claims"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(raw, &row) != nil || row.Type != "result" {
+			continue
+		}
+		r := row.Result
+		name := r.Surface
+		if name == "" {
+			name = r.Summary
+		}
+		if name == "" && r.Verdict != "" {
+			name = r.Verdict
+			if len(r.Refuted) > 0 && r.Refuted[0].Claim != "" {
+				name += " · " + r.Refuted[0].Claim
+			}
+		}
+		return shortName(name)
+	}
+	return ""
 }
 
 // shortName cuts a name to what a label can hold, on a rune boundary, and
@@ -724,46 +752,20 @@ func shortName(s string) string {
 // A landed file is a sequence of records with no row offsets, so a row is
 // reached by reading forward. Reading every wanted row of one file in a single
 // pass turns a scan per position into a scan per file.
-func (c *Conversation) texts(refs []*sessionflow.Ref) map[[2]uint64]string {
-	want := map[uint64]map[uint64]bool{}
-	for _, r := range refs {
-		if r == nil {
-			continue
-		}
-		if want[r.Seq] == nil {
-			want[r.Seq] = map[uint64]bool{}
-		}
-		want[r.Seq][r.Row] = true
-	}
+//
+// It also says which of them carry a flag a reader may withhold, so a caller
+// choosing among them can pass those over. A record carrying any of the hide
+// names is withheld as it is read, so its text is empty.
+func (c *Conversation) texts(refs []*sessionflow.Ref, hide []string) (map[[2]uint64]string, map[[2]uint64]bool) {
 	out := map[[2]uint64]string{}
-	for seq, rows := range want {
-		path, err := c.landedPath(seq)
-		if err != nil {
-			continue
+	sent := map[[2]uint64]bool{}
+	for at, rec := range c.records(refs, hide) {
+		out[at] = readable(rec)
+		if withholdable(rec.Flags) {
+			sent[at] = true
 		}
-		f, err := os.Open(path)
-		if err != nil {
-			continue
-		}
-		rd, err := sessiondata.NewReader(f)
-		if err != nil {
-			f.Close()
-			continue
-		}
-		left := len(rows)
-		for i := uint64(1); left > 0; i++ {
-			rec, rerr := rd.Next()
-			if rerr != nil {
-				break
-			}
-			if rows[i] {
-				out[[2]uint64{seq, i}] = readable(rec)
-				left--
-			}
-		}
-		f.Close()
 	}
-	return out
+	return out, sent
 }
 
 // talkOf walks up from a node to the talk that contains it.

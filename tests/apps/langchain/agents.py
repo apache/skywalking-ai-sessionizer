@@ -33,7 +33,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import create_react_agent
 
 BASE = "http://127.0.0.1:8931/v1"
-SYSTEM = "You are a troubleshooting assistant.\n" + ("Rule: never guess.\n" * 800)
+SYSTEM = "You are a site status assistant.\n" + ("Rule: never guess.\n" * 800)
 
 
 def model(behaviour):
@@ -42,29 +42,29 @@ def model(behaviour):
 
 
 @tool
-def lookup_status(cluster: str = "prod-1", question: str = "", text: str = "") -> str:
-    """Look up the health of a cluster."""
-    return "cluster %s: 3/3 pods ready" % cluster
+def lookup_status(site: str = "docs-1", question: str = "", text: str = "") -> str:
+    """Look up whether a site's pages are served."""
+    return "site %s: 3/3 pages served" % site
 
 
 @tool
-def failing_tool(cluster: str = "prod-1", question: str = "", text: str = "") -> str:
+def failing_tool(site: str = "docs-1", question: str = "", text: str = "") -> str:
     """A tool that fails."""
-    raise RuntimeError("the cluster API refused the request")
+    raise RuntimeError("the site API refused the request")
 
 
 @tool
-def slow_lookup(cluster: str = "prod-1", question: str = "", text: str = "") -> str:
+def slow_lookup(site: str = "docs-1", question: str = "", text: str = "") -> str:
     """A tool slow enough that its run is posted before it finishes."""
     time.sleep(float(os.environ.get("ASZ_SLOW_SECONDS", "12")))
-    return "cluster %s: 3/3 pods ready" % cluster
+    return "site %s: 3/3 pages served" % site
 
 
 @tool
-def run_command(command: str = "", timeout: int = 30, cluster: str = "",
+def run_command(command: str = "", timeout: int = 30, site: str = "",
                 question: str = "", text: str = "") -> str:
     """Run a command and return everything it printed."""
-    return "POD OUTPUT LINE\n" * 2000   # 32 KB, far past any attribute limit
+    return "ONE OUTPUT LINE\n" * 2000   # 32 KB, far past any attribute limit
 
 
 def ask(agent, text, thread=None, project=None):
@@ -77,13 +77,13 @@ def ask(agent, text, thread=None, project=None):
 def case_plain():
     """One turn, no tools: the smallest conversation there is."""
     agent = create_react_agent(model("plain"), [], checkpointer=InMemorySaver())
-    ask(agent, "Is prod-1 healthy?", "thread-plain")
+    ask(agent, "Is docs-1 served?", "thread-plain")
 
 
 def case_three_turns():
     """Three turns on one thread: one conversation, three traces."""
     agent = create_react_agent(model("tool"), [lookup_status], checkpointer=InMemorySaver())
-    for question in ("Is prod-1 healthy?", "And the pods?", "Summarise that."):
+    for question in ("Is docs-1 served?", "And the pages?", "Summarise that."):
         ask(agent, question, "thread-three-turns")
 
 
@@ -92,7 +92,7 @@ def case_tool_error():
     agent = create_react_agent(model("tool-error"), [failing_tool],
                                checkpointer=InMemorySaver())
     try:
-        ask(agent, "Check prod-1.", "thread-tool-error")
+        ask(agent, "Check docs-1.", "thread-tool-error")
     except Exception:
         pass
 
@@ -101,7 +101,7 @@ def case_parallel_tools():
     """Two tool calls in one model response, run in one graph step."""
     agent = create_react_agent(model("parallel"), [lookup_status],
                                checkpointer=InMemorySaver())
-    ask(agent, "Check both clusters.", "thread-parallel")
+    ask(agent, "Check both sites.", "thread-parallel")
 
 
 def case_loop():
@@ -113,7 +113,7 @@ def case_loop():
 def case_two_threads():
     """Two threads at once: one request carries parts of both."""
     agent = create_react_agent(model("tool"), [lookup_status], checkpointer=InMemorySaver())
-    threads = [threading.Thread(target=ask, args=(agent, "Is %s healthy?" % t, "thread-%s" % t))
+    threads = [threading.Thread(target=ask, args=(agent, "Is %s served?" % t, "thread-%s" % t))
                for t in ("a", "b")]
     for t in threads:
         t.start()
@@ -124,14 +124,14 @@ def case_two_threads():
 def case_slow_tool():
     """A slow tool: runs are posted open and completed later by a patch."""
     agent = create_react_agent(model("slow"), [slow_lookup], checkpointer=InMemorySaver())
-    ask(agent, "Check prod-1 slowly.", "thread-slow")
+    ask(agent, "Check docs-1 slowly.", "thread-slow")
 
 
 def case_large_content():
-    """A 20 KB command, a 200 KB result and a 15 KB system prompt."""
+    """A 46 KB command, a 32 KB result and a 15 KB system prompt."""
     agent = create_react_agent(model("large"), [run_command], checkpointer=InMemorySaver(),
                                prompt=SYSTEM)
-    ask(agent, "Which pods are unhealthy?", "thread-large")
+    ask(agent, "Which pages are not served?", "thread-large")
 
 
 def case_subagent():
@@ -139,20 +139,20 @@ def case_subagent():
     analyst = create_react_agent(model("tool"), [lookup_status], name="analyst")
 
     @tool
-    def delegate_to_analyst(question: str = "", cluster: str = "", text: str = "") -> str:
+    def delegate_to_analyst(question: str = "", site: str = "", text: str = "") -> str:
         """Hand the question to the analyst sub-agent."""
         return analyst.invoke(
             {"messages": [{"role": "user", "content": question}]})["messages"][-1].content
 
     @tool
-    def summarise(text: str = "", question: str = "", cluster: str = "") -> str:
+    def summarise(text: str = "", question: str = "", site: str = "") -> str:
         """Summarise some text with one model call. No loop, no agent."""
         return model("plain").invoke(
             [{"role": "user", "content": "Summarise this: " + text}]).content
 
     supervisor = create_react_agent(model("every-tool"), [delegate_to_analyst, summarise],
                                     checkpointer=InMemorySaver())
-    ask(supervisor, "Is prod-1 healthy?", "thread-subagent")
+    ask(supervisor, "Is docs-1 served?", "thread-subagent")
 
 
 def case_subagent_own_thread():
@@ -161,7 +161,7 @@ def case_subagent_own_thread():
                                  checkpointer=InMemorySaver())
 
     @tool
-    def delegate(question: str = "", cluster: str = "", text: str = "") -> str:
+    def delegate(question: str = "", site: str = "", text: str = "") -> str:
         """Hand the question to an analyst that keeps its own thread."""
         return analyst.invoke({"messages": [{"role": "user", "content": question}]},
                               config={"configurable": {"thread_id": "thread-analyst-own"}}
@@ -174,7 +174,7 @@ def case_subagent_own_thread():
 def case_no_thread_key():
     """No thread key at all: ownership is not supplied and must not be invented."""
     agent = create_react_agent(model("tool"), [lookup_status])
-    ask(agent, "Is prod-1 healthy?")
+    ask(agent, "Is docs-1 served?")
 
 
 def case_shared_thread_key():
@@ -217,8 +217,8 @@ def case_summarized():
                          middleware=[SummarizationMiddleware(model=model("summary"),
                                                              trigger=("messages", 6),
                                                              keep=("messages", 2))])
-    for cluster in ("prod-1", "prod-2", "prod-3", "prod-4"):
-        ask(agent, "Check %s." % cluster, "thread-summarized")
+    for site in ("docs-1", "docs-2", "docs-3", "docs-4"):
+        ask(agent, "Check %s." % site, "thread-summarized")
 
 
 def case_abandoned_run():
@@ -229,7 +229,7 @@ def case_abandoned_run():
     evidence asz has to read as unfinished rather than as absent.
     """
     agent = create_react_agent(model("slow"), [slow_lookup], checkpointer=InMemorySaver())
-    threading.Thread(target=ask, args=(agent, "Check prod-1.", "thread-abandoned"),
+    threading.Thread(target=ask, args=(agent, "Check docs-1.", "thread-abandoned"),
                      daemon=True).start()
     time.sleep(float(os.environ.get("ASZ_ABANDON_AFTER", "3")))
     os._exit(0)
@@ -240,15 +240,15 @@ def case_traceable_only():
     from langsmith import traceable
 
     @traceable(run_type="tool", name="lookup_status")
-    def lookup(cluster):
-        return "cluster %s: 3/3 ready" % cluster
+    def lookup(site):
+        return "site %s: 3/3 served" % site
 
-    @traceable(run_type="chain", name="troubleshoot",
+    @traceable(run_type="chain", name="investigate",
                metadata={"thread_id": "thread-traceable"})
-    def troubleshoot(question):
-        return "answer: " + lookup("prod-1")
+    def investigate(question):
+        return "answer: " + lookup("docs-1")
 
-    troubleshoot("is prod-1 ok?")
+    investigate("is docs-1 ok?")
 
 
 CASES = {

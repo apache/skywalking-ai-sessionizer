@@ -42,7 +42,7 @@ import (
 // It is landed as a provider body, cut against what the session already
 // holds by pkg/providerbody, the same way Claude Code's bodies are. Measured
 // on the captured corpus, with every call's inputs and outputs: over twenty
-// turns 217 KB on the wire lands as 86 KB, because each request shares its
+// turns 217 KB on the wire lands as 88 KB, because each request shares its
 // front with the one before; on a conversation of a few short calls it lands
 // as more than it was, because the manifest that says how to rebuild a body
 // costs more than a small body saves. Both are stated on the adapter page.

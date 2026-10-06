@@ -61,7 +61,7 @@ const (
 		`"kwargs":{"content":"Here is a summary of the conversation to date:\n\nall healthy",` +
 		`"additional_kwargs":{"lc_source":"summarization"},"type":"human","id":"sum-1"}}`
 	question = `{"lc":1,"type":"constructor","id":["langchain","schema","messages","HumanMessage"],` +
-		`"kwargs":{"content":"Check prod-3.","type":"human","id":"q-3"}}`
+		`"kwargs":{"content":"Check docs-3.","type":"human","id":"q-3"}}`
 )
 
 // TestAMarkedSummaryIsAReset: the boundary comes before the call, and the

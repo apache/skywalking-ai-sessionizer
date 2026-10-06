@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -335,6 +336,17 @@ func humanInput(base sessiondata.Record, d decoded) (sessiondata.Record, bool) {
 		return sessiondata.Record{}, false
 	}
 	base.Parts = []sessiondata.Part{dataPart(d.inputs)}
+	// A model call at the root of its trace, such as a completion asked for
+	// with a list of prompts, has the request it was sent as its arguments,
+	// system prompt and all, so the record is named for what it carries. A
+	// graph's or a decorated function's arguments are whatever the
+	// application passed, so they are named by their shape, as shapeFlags
+	// says.
+	if d.run.Type == "llm" || d.run.Type == "chat_model" {
+		base.Flags = append(base.Flags, requestFlagsOf(d.inputs, nil)...)
+	} else {
+		base.Flags = append(base.Flags, shapeFlags(d.inputs)...)
+	}
 	return base, true
 }
 
@@ -389,12 +401,256 @@ func modelCall(base sessiondata.Record, d decoded) sessiondata.Record {
 		base.Usage = usageOf(message)
 	} else {
 		base.Parts = []sessiondata.Part{dataPart(d.op.Envelope)}
+		base.Flags = append(base.Flags, requestFlags(d.op.Envelope)...)
 	}
 	if d.failure != "" {
 		base.Flags = append(base.Flags, "error")
 		base.Parts = append(base.Parts, textPart(d.failure))
 	}
 	return base
+}
+
+// requestFlags names what an unfinished call's envelope carries of the
+// request, since the envelope lands whole. Inputs of any shape are the
+// request the model was sent, which holds its system prompt, so they name the
+// record system_prompt. Tools or functions offered in the call's parameters,
+// or in its inputs, name it tool_schemas. A reader withholds by these names.
+//
+// The test is whether a value is there, never its shape. A client may send a
+// message list, a list of prompts or a system field of its own, and naming
+// only the shapes measured would land the others unnamed and show them to
+// every reader. A record named this way may hold more than the system prompt,
+// such as the person's message, which lands on its own record as well.
+//
+// Measured on the 72 model arrivals of the captured corpus: every one sent
+// its inputs out of band, and the 43 that offered tools sent them in an
+// out-of-band extra, so no landed envelope carried either. The envelope
+// carries a field only when the client did not split it out.
+func requestFlags(envelope json.RawMessage) []string {
+	var request struct {
+		Inputs json.RawMessage `json:"inputs"`
+		Extra  json.RawMessage `json:"extra"`
+	}
+	if json.Unmarshal(envelope, &request) != nil {
+		return nil
+	}
+	return requestFlagsOf(request.Inputs, request.Extra)
+}
+
+// requestFlagsOf names what a model call's inputs and extra carry of the
+// request, by the rule requestFlags gives. Tools nested deeper in the inputs
+// or the extra, in a configuration of the client's own, such as Bedrock's
+// toolConfig inside invocation_params, are found by their shape.
+func requestFlagsOf(inputs, extra json.RawMessage) []string {
+	var out []string
+	if sessiondata.HoldsValue(inputs) {
+		out = append(out, sessiondata.FlagSystemPrompt)
+	}
+	var offered struct {
+		Invocation struct {
+			Tools     json.RawMessage `json:"tools"`
+			Functions json.RawMessage `json:"functions"`
+		} `json:"invocation_params"`
+	}
+	var inline struct {
+		Tools     json.RawMessage `json:"tools"`
+		Functions json.RawMessage `json:"functions"`
+	}
+	_ = json.Unmarshal(extra, &offered)
+	_ = json.Unmarshal(inputs, &inline)
+	tools := slices.ContainsFunc([]json.RawMessage{offered.Invocation.Tools, offered.Invocation.Functions, inline.Tools, inline.Functions},
+		sessiondata.HoldsValue)
+	for _, raw := range []json.RawMessage{inputs, extra} {
+		var value any
+		if !tools && json.Unmarshal(raw, &value) == nil {
+			tools = shapeOf(value).tools
+		}
+	}
+	if tools {
+		out = append(out, sessiondata.FlagToolSchemas)
+	}
+	return out
+}
+
+// shapeFlags names a value that is not a request for what it holds of one,
+// by its shape, as shapeOf finds it. Such a value is the application's own,
+// so whether it holds anything says nothing. What it holds may be the very
+// messages and tools a model call is sent, since a function wrapping a call
+// is often handed them.
+func shapeFlags(raw json.RawMessage) []string {
+	var value any
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	found := shapeOf(value)
+	var out []string
+	if found.prompt {
+		out = append(out, sessiondata.FlagSystemPrompt)
+	}
+	if found.tools {
+		out = append(out, sessiondata.FlagToolSchemas)
+	}
+	return out
+}
+
+// promptKeys are the keys model clients take a system prompt under beside the
+// messages, compared without case, underscores or dashes: system in
+// Anthropic's, instructions in OpenAI's Responses, system_instruction in
+// Gemini's, instruction in Bedrock's agents and Google's agent kit, preamble
+// in Cohere's, system_message in AutoGen's, and system_prompt, systemPrompt
+// or system_instructions, the names an application or a JavaScript client
+// often gives the value it passes on.
+var promptKeys = []string{"system", "systemprompt", "systeminstruction", "systeminstructions", "systemmessage",
+	"instruction", "instructions", "preamble"}
+
+// toolListKeys are the keys a list of tools is offered under, compared the
+// same way: tools and functions, and Gemini's function declarations, or the
+// tool definitions and available tools an application keeps them as.
+var toolListKeys = []string{"tools", "functions", "functiondeclarations", "tooldefinitions", "availabletools"}
+
+// keyOf is a key as promptKeys and toolListKeys compare it.
+func keyOf(key string) string { return keyForm.Replace(strings.ToLower(key)) }
+
+var keyForm = strings.NewReplacer("_", "", "-", "")
+
+// requestShape is what a value holds of a request, found by its shape alone.
+type requestShape struct{ prompt, tools bool }
+
+// shapeOf walks a decoded value, at any depth, for what it holds of a
+// request. A system prompt is a message of the system or developer role, as
+// systemMessage and systemPairIn say, or a value under one of the promptKeys.
+// Tool schemas are tools offered under one of the toolListKeys, as
+// offersTools says. A client may nest them in a configuration of its own,
+// such as Bedrock's toolConfig or Gemini's config, so any depth counts. A
+// string is not read, whatever it holds.
+//
+// A value of the application's own that takes one of these shapes is named
+// too, since nothing tells the two apart, and it is safer to withhold it.
+// Each value is looked at once, so the walk costs about the size of what it
+// reads.
+func shapeOf(v any) requestShape {
+	var found requestShape
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			if systemMessage(t) {
+				found.prompt = true
+			}
+			for key, inner := range t {
+				switch k := keyOf(key); {
+				case slices.Contains(promptKeys, k) && holdsSomething(inner):
+					found.prompt = true
+				case slices.Contains(toolListKeys, k) && offersTools(inner):
+					found.tools = true
+				}
+				walk(inner)
+			}
+		case []any:
+			if systemPairIn(t) {
+				found.prompt = true
+			}
+			for _, inner := range t {
+				walk(inner)
+			}
+		}
+	}
+	walk(v)
+	return found
+}
+
+// systemPairIn reports whether a list is a list of messages with a system
+// message among them written as a pair of its role and its content,
+// LangChain's shorthand ("system", "..."), which a trace carries as a list of
+// two. The role is system or developer, in any case, and the content holds
+// something. Every item must be such a pair or an object, as in a message
+// list, so a list of two words of the application's own, such as tags or
+// roles, is not one.
+func systemPairIn(l []any) bool {
+	found := false
+	for _, item := range l {
+		switch m := item.(type) {
+		case map[string]any:
+		case []any:
+			if len(m) != 2 {
+				return false
+			}
+			role, isText := m[0].(string)
+			if !isText {
+				return false
+			}
+			if systemRole(role) && holdsSomething(m[1]) {
+				found = true
+			}
+		default:
+			return false
+		}
+	}
+	return found
+}
+
+// systemMessage reports whether an object is a message of the system or
+// developer role, the names providers give the instructions that come before
+// a conversation: its role or its type says so, in any case, beside content
+// with something in it. An event of the application's own with a type of
+// system and no content is not one.
+func systemMessage(m map[string]any) bool {
+	role, _ := m["role"].(string)
+	kind, _ := m["type"].(string)
+	return (systemRole(role) || systemRole(kind)) && holdsSomething(m["content"])
+}
+
+// systemRole reports whether a role or a type names the instructions that
+// come before a conversation: system, or developer as OpenAI calls them, in
+// any case.
+func systemRole(name string) bool {
+	return strings.EqualFold(name, "system") || strings.EqualFold(name, "developer")
+}
+
+// holdsSomething reports whether a decoded value is text, or a list or an
+// object that is not empty.
+func holdsSomething(v any) bool {
+	switch t := v.(type) {
+	case string:
+		return t != ""
+	case []any:
+		return len(t) > 0
+	case map[string]any:
+		return len(t) > 0
+	}
+	return false
+}
+
+// offersTools reports whether a decoded value lists tools, or keys them by
+// name: a list or an object with at least one object in it. A list of names
+// or a flag is not. An object of another kind under such a key counts, since
+// nothing tells it from a tool, and it is safer to withhold it.
+func offersTools(v any) bool {
+	var items []any
+	switch t := v.(type) {
+	case []any:
+		items = t
+	case map[string]any:
+		for _, item := range t {
+			items = append(items, item)
+		}
+	}
+	for _, item := range items {
+		if _, ok := item.(map[string]any); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// appendNew appends the names flags does not hold yet.
+func appendNew(flags []string, names ...string) []string {
+	for _, name := range names {
+		if !slices.Contains(flags, name) {
+			flags = append(flags, name)
+		}
+	}
+	return flags
 }
 
 // toolResult is what a tool returned.
@@ -491,7 +747,7 @@ func toolResult(base sessiondata.Record, d decoded, hinted string) sessiondata.R
 // run of a decorated trace carries ls_method and no run of a graph trace
 // does. Testing the shape of the fields instead does not work. The repeats
 // are not all message lists and they are not under one name - one capture
-// held 164 KB of the message list under "output" and another 104 KB of a
+// held 164 KB of the message list under "output" and another 93 KB of a
 // routing value that quoted a tool call - so every test on the content kept
 // something large that was already landed elsewhere.
 func framework(base sessiondata.Record, d decoded) sessiondata.Record {
@@ -547,6 +803,15 @@ func framework(base sessiondata.Record, d decoded) sessiondata.Record {
 		}
 	}
 	base.Parts = parts
+	// What a decorated function was given or returned is the application's
+	// own, not a request, so it is not named by whether it holds a value. It
+	// is named by what it holds: a decorated function that wraps a model call
+	// is often handed the very messages and tools the call is sent.
+	for _, p := range parts {
+		if p.Name == "inputs" || p.Name == "outputs" {
+			base.Flags = appendNew(base.Flags, shapeFlags(p.Data)...)
+		}
+	}
 	if dropped > 0 {
 		base.Dropped = []sessiondata.Drop{{
 			What: "inputs and outputs", Bytes: dropped,

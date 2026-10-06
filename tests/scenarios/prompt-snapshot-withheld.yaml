@@ -15,19 +15,44 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# The same session as prompt-snapshot, with its provider bodies, read by a
-# view that withholds the system prompt and the tool schemas: each snapshot
-# step keeps its place, its flags and its size, loses its text and says
-# omitted, no call lists a body, and the summary counts what was withheld.
+# The snapshots of prompt-snapshot, a deferred tools record, and a child
+# agent, with their provider bodies, read by a view that withholds the system
+# prompt and the tool schemas: each named step keeps its place, its flags and
+# its size, loses its text and says omitted, no call lists a body, and the
+# summary counts what was withheld.
+#
+# The child agent's talk has no input of its own, so it is named from what
+# was first put into its context. Its snapshot carries prose, as a later
+# version of the runtime could write it, and must not become the talk's name
+# in any document, withheld or whole.
 provider_bodies: true
 steps:
-  - input: is the service healthy
-  - inject: {type: prompt_snapshot, system_prompt: "You are an advisor. Investigate with the tools."}
+  - input: summarise what changed in the docs
+  - inject: {type: prompt_snapshot, system_prompt: "You are a helpful assistant. Use the tools when they help."}
   - inject: {type: todo_reminder, text: your todo list is empty}
   - inject:
       type: prompt_snapshot
-      system_prompt: "You are an advisor. Investigate with the tools."
+      system_prompt: "You are a helpful assistant. Use the tools when they help."
       tools:
         - {name: Read, description: Read a file.}
         - {name: Bash, description: Run a command.}
+  # The tools the runtime offers on demand, each with its schema.
+  - inject:
+      type: deferred_tools_record
+      tools:
+        - {name: WebFetch, description: Fetch a page.}
+  - call:
+      agent:
+        name: link-checker
+        prompt: check the links in the docs
+        steps:
+          - inject:
+              type: prompt_snapshot
+              system_prompt: "You check links."
+              # Ending in a line break, as prose often does: a talk's label is
+              # read trimmed, and an echo of this must still be found.
+              text: |
+                You check links. Report what you find, and nothing else.
+          - inject: {type: todo_reminder, text: check the links one by one}
+          - call: {text: The links all resolve.}
   - call: {text: Checking.}

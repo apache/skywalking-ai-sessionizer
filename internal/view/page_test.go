@@ -103,7 +103,29 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 	if c := view.HorizonCommit(); !regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(c) {
 		t.Fatalf("HORIZON_COMMIT names %q, not a commit", c)
 	}
+	// A hide in the page's address goes to the document, the record and the
+	// files alike, and stays in the address as the reader moves.
+	for _, call := range []string{`api + "/view" + hideQuery()`, `ref.row + hideQuery()`, `const q = withHidden(new URLSearchParams());
+      q.set("session"`, `const q = withHidden(new URLSearchParams());
+      for (const k of ["talk", "step", "stream"])`} {
+		if !strings.Contains(body, call) {
+			t.Fatalf("the page does not pass the address's hide on: %s", call)
+		}
+	}
+	if !strings.Contains(body, `for (const a of document.querySelectorAll('a[href="/"]')) a.href = "/" + hideQuery();`) {
+		t.Fatal("the page's links back to the list drop the address's hide")
+	}
+	// A key spelled another way is passed on too, so the server refuses it
+	// rather than the page dropping it.
+	for _, page := range []string{body, get("/").Body.String()} {
+		if !strings.Contains(page, `.filter(([k]) => k.toLowerCase().replace(/\P{L}/gu, "") === "hide")`) {
+			t.Fatal("a page passes on only the hide spelled exactly")
+		}
+	}
 	index := get("/").Body.String()
+	if !strings.Contains(index, `location.href = "/c/" + encodeURIComponent(id) + hideQuery();`) {
+		t.Fatal("the list's links into a conversation drop the address's hide")
+	}
 	if !strings.Contains(index, view.AssetPrefix+"host-shell/horizon-theme.css") || strings.Contains(index, "fonts.googleapis.com") {
 		t.Fatal("the list page does not use the host shell's theme")
 	}

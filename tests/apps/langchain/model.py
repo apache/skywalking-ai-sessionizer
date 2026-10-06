@@ -31,9 +31,9 @@ PORT = 8931
 
 # A command long enough to prove a tool's arguments are not truncated.
 BIG_COMMAND = (
-    "kubectl get pods -n istio-system -o jsonpath='{range .items[*]}"
-    "{.metadata.name}{\"\\t\"}{.status.phase}{\"\\n\"}{end}' | " * 400
-    + "grep -v Running  # the whole command, about 20 KB"
+    "curl -sS https://docs-1.example.org/pages -o pages.json && "
+    "jq -r '.items[] | [.name, .status] | @tsv' pages.json | " * 400
+    + "grep -v Serving  # the whole command, about 46 KB"
 )
 
 _calls = 0
@@ -47,7 +47,7 @@ def _tool_call(name, index, arguments=None):
         "function": {
             "name": name,
             "arguments": json.dumps(arguments if arguments is not None else {
-                "cluster": "prod-1", "question": "check prod-1", "text": "some findings",
+                "site": "docs-1", "question": "check docs-1", "text": "some findings",
             }),
         },
     }
@@ -56,7 +56,7 @@ def _tool_call(name, index, arguments=None):
 def _reply(behaviour, tools, tool_messages, index):
     """What the model says next, given the case and what it has been told."""
     if behaviour == "summary":
-        return None, "summary %d: the clusters checked so far were healthy" % index
+        return None, "summary %d: the sites checked so far were all served" % index
     if behaviour == "plain" or not tools:
         return None, "answer %d" % index
     if behaviour == "parallel" and tool_messages == 0:

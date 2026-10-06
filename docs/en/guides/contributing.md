@@ -3,7 +3,7 @@
 The project is a subproject of Apache SkyWalking. Discussion happens on the
 [dev mailing list](mailto:dev@skywalking.apache.org) and in the
 [SkyWalking issue tracker](https://github.com/apache/skywalking/issues), which the SkyWalking
-projects share; this repository has no issues of its own. Changes arrive as pull requests against
+projects share. This repository has no issues of its own. Changes arrive as pull requests against
 `main`.
 
 ## Build and test

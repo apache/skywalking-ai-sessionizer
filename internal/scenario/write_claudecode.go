@@ -290,9 +290,9 @@ func (w *ccWriter) event(e *Event) error {
 			"attachment": map[string]any{"type": "queued_command", "commandMode": e.Mode, "content": e.Text},
 		}, s))
 	case EvInject:
-		att := map[string]any{"type": e.Type, "content": e.Text}
-		if e.isSnapshot() {
-			att = promptSnapshot(e)
+		att := sentAttachment(e)
+		if att == nil {
+			att = map[string]any{"type": e.Type, "content": e.Text}
 		}
 		w.add(s, w.rec(map[string]any{
 			"type": "attachment", "uuid": e.ID, "parentUuid": parentOf(e.Parent), "timestamp": ccTime(e.At),

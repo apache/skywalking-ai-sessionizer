@@ -212,9 +212,9 @@ The page reads everything it shows from a JSON API on the same address:
 | --- | --- |
 | `/api/status` | the mode and the last refresh. See [server](#server) and below. |
 | `/api/conversations` | one row per conversation, for the list |
-| `/api/c/{id}/view` | the whole [asz.view](../formats/asz-view.md) document, which the renderer draws alone |
-| `/api/c/{id}/record/{seq}/{row}` | one landed record, whole. This is what the Evidence tab shows. |
-| `/api/c/{id}/files?session=&seq=` | landed files whole, by sequence, at most 32 a request, as base64 in a JSON array. This is what the Prompt tab reads to rebuild a call's provider bodies. A sequence with no landed file is left out rather than refused. |
+| `/api/c/{id}/view` | the [asz.view](../formats/asz-view.md) document, less what this reader withholds, which the renderer draws alone |
+| `/api/c/{id}/record/{seq}/{row}` | one landed record, whole unless withheld. This is what the Evidence tab shows. |
+| `/api/c/{id}/files?session=&seq=` | provider body files whole, by sequence, at most 32 a request, as base64 in a JSON array. This is what the Prompt tab reads to rebuild a call's provider bodies. A sequence with no landed file is left out rather than refused. Any other file is refused. |
 | `/api/glossary` | what the runtime calls each name the model uses, as [glossary](../setup/command-line.md#glossary) prints it |
 
 There is no endpoint per talk. Beyond the document, a conversation page asks the API for three
@@ -233,6 +233,14 @@ as it was landed, with its `dropped` list. `seq` names the landed file and `row`
 counting from 1. The record is read from disk on every request and never cached, because it is
 wanted only when someone opens it. The answer is 404 when the conversation, the sequence or the row
 does not exist.
+
+The three `/api/c/{id}` paths take `hide`, the flags this reader withholds beyond what the instance
+withholds for everyone, as [Withholding](../formats/asz-view.md#withholding) says. A record that
+carries one keeps its envelope and loses its content. A reader that withholds anything is served no
+provider body: the files endpoint and the record endpoint, for a record of a body file, answer 403.
+The answer is 400 for a name that cannot be withheld, for `hide` spelled another way, for a query
+that does not parse, and from the files endpoint for a file that is not a provider body or whose
+header does not read.
 
 `/api/glossary` takes an optional `dialect`, and without one answers in the vocabulary the root's
 own landed files were read in — a root of LangChain conversations is not described in Claude Code's
@@ -255,12 +263,12 @@ the note, and the dialect. For a field Session Data defines, it is the field's l
 The page has no switch to the runtime's words.
 
 The page folds a conversation when it is first asked for, and keeps the fold in memory until the
-head round on disk moves. The asz.view document is built once per fold. Nothing is written to disk.
-A read cache on disk would cost more than it saves. Measured on the largest session of a corpus of
-62 real sessions, 53,106 nodes and 922 talks, folding the whole chain took 302 milliseconds,
-building the talk list 1 millisecond, and walking one talk's subtree 13 microseconds at the 99th
-percentile.
-[asz.view](../formats/asz-view.md#reading-it) gives the size and build time of a whole document.
+head round on disk moves. The asz.view document is built once per fold for each set of names a
+reader withholds. Nothing is written to disk. A read cache on disk would cost more than it saves.
+Measured on the largest session of a corpus of 62 real sessions, 53,106 nodes and 922 talks, folding
+the whole chain took 302 milliseconds, building the talk list 1 millisecond, and walking one talk's
+subtree 13 microseconds at the 99th percentile. [asz.view](../formats/asz-view.md#reading-it) gives
+the size and build time of a whole document.
 
 Another process can write the root while the page reads it: an `asz collect` running beside it, or
 a receiver. Nothing needs a restart. Every request for a conversation lists its rounds directory,

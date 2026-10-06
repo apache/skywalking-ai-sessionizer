@@ -117,12 +117,17 @@ type Conversation struct {
 	paths     map[uint64]string
 	pathsScan time.Time
 
-	// built is the Conversation View, made once per fold, under the names
-	// it withholds: "" is the whole document, and a reader that withholds
-	// has a copy of its own under its names. Forget drops the whole
-	// Conversation, and the views with it, when a round arrives.
+	// built is the Conversation View, made once per fold for each set of
+	// names it withholds: "" is the whole document, and a reader that
+	// withholds has a document of its own under its names. Forget drops the
+	// whole Conversation, and the views with it, when a round arrives.
+	// builtMu is held while a document is made, so one is made at a time
+	// and a build that fails, or panics, keeps nothing.
 	builtMu sync.Mutex
 	built   map[string]*sessionview.Conversation
+	// shared is the part every document of this fold shares, whatever it
+	// withholds, made under builtMu by the first build that needs it.
+	shared *parts
 
 	// problems is what stopped the fold short of the chain's last file, in
 	// words, for the document to carry.

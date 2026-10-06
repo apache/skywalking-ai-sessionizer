@@ -36,7 +36,7 @@ import (
 // never mentions the files it wrote.
 func TestASessionFromAnotherRuntimeIsFound(t *testing.T) {
 	root := t.TempDir()
-	session := "ls-tsb-advisor-thread-files-1d45ca4f65bf"
+	session := "ls-demo-agent-thread-files-4743ce7f5e4d"
 	dir := filepath.Join(root, "asz-changes", "output", session)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -86,7 +86,7 @@ func TestASessionFromAnotherRuntimeIsFound(t *testing.T) {
 // it wrote.
 func TestADirectlyConfiguredDataDirectoryIsFound(t *testing.T) {
 	root := t.TempDir()
-	session := "ls-tsb-advisor-a-thread-1d45ca4f65bf"
+	session := "ls-demo-agent-a-thread-506cdbf8e791"
 	dir := filepath.Join(root, "output", session)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

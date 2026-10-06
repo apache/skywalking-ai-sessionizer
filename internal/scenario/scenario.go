@@ -143,10 +143,14 @@ type Queued struct {
 
 // Inject is material the harness put into model context, of a named type.
 //
-// A prompt snapshot is the one type with a shape of its own. SystemPrompt and
-// Tools are what the runtime sent the model outside the messages, and they
-// land with a flag for each, so a reader can withhold them by rule. A
-// snapshot carries no Text.
+// Two types carry what the runtime sent the model outside the messages, and
+// land named for it, so a reader can withhold them by rule. A prompt
+// snapshot carries the SystemPrompt and may carry the Tools. Text on a
+// snapshot is prose the attachment carries beside them, which no version
+// measured writes and a later one could. The adapter lands an attachment
+// with prose as its text alone, so that is what a reader is shown. A
+// deferred tools record carries the Tools the runtime offers on demand, and
+// no text.
 type Inject struct {
 	Type         string    `yaml:"type"`
 	Text         string    `yaml:"text"`
@@ -448,14 +452,19 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool, 
 		if n != 1 {
 			return fmt.Errorf("%s: a step is exactly one of input, queued, inject, call, result, error, reset, replay, system", at)
 		}
-		if s.Inject != nil && (s.Inject.SystemPrompt != "" || len(s.Inject.Tools) > 0) {
-			// The runtime carries these in one attachment type, and the
-			// adapter names them by that type, so a scenario says it.
-			if s.Inject.Type != "prompt_snapshot" {
-				return fmt.Errorf("%s: system_prompt and tools belong to an inject of type prompt_snapshot, the attachment the runtime carries them in", at)
+		if in := s.Inject; in != nil {
+			// The runtime carries these in two attachment types, and the
+			// adapter names them by the type, so a scenario says it.
+			switch {
+			case in.SystemPrompt != "" && in.Type != "prompt_snapshot":
+				return fmt.Errorf("%s: system_prompt belongs to an inject of type prompt_snapshot, the attachment the runtime carries it in", at)
+			case len(in.Tools) > 0 && in.Type != "prompt_snapshot" && in.Type != "deferred_tools_record":
+				return fmt.Errorf("%s: tools belong to an inject of type prompt_snapshot or deferred_tools_record, the attachments the runtime carries them in", at)
+			case len(in.Tools) > 0 && in.Type == "deferred_tools_record" && in.Text != "":
+				return fmt.Errorf("%s: a deferred_tools_record carries tools and no text", at)
 			}
-			if s.Inject.Text != "" {
-				return fmt.Errorf("%s: a prompt_snapshot carries system_prompt and tools, not text", at)
+			if err := validateTools(in.Tools, at+".inject.tools"); err != nil {
+				return err
 			}
 		}
 		if s.After < 0 {

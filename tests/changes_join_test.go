@@ -70,7 +70,7 @@ func TestAToolCallsChangesReachTheSameConversation(t *testing.T) {
 
 	// The session the receiver would land this conversation under, derived the
 	// way the shim derives it.
-	owner, ok := langsmith.DefaultOwnership().Owner("tsb-advisor",
+	owner, ok := langsmith.DefaultOwnership().Owner("demo-agent",
 		map[string]any{"thread_id": "the-conversation"})
 	if !ok {
 		t.Fatal("no owner")
@@ -86,7 +86,7 @@ func TestAToolCallsChangesReachTheSameConversation(t *testing.T) {
 		payload, _ := json.Marshal(map[string]any{
 			"hook_event_name": name, "session_id": session, "cwd": work,
 			"tool_name": tool, "tool_use_id": call,
-			"tool_input": map[string]any{"cluster": "prod-1"},
+			"tool_input": map[string]any{"site": "docs-1"},
 		})
 		return string(payload)
 	}
@@ -223,7 +223,7 @@ func TestThePythonShimNamesTheSessionTheReceiverDoes(t *testing.T) {
 	if err != nil {
 		t.Skip("python3 is not installed")
 	}
-	const project = "tsb-advisor"
+	const project = "demo-agent"
 	const thread = "the-conversation"
 
 	script := `
@@ -312,7 +312,7 @@ func TestTheChangesAndTheConversationMeetInOneParse(t *testing.T) {
 		payload, _ := json.Marshal(map[string]any{
 			"hook_event_name": name, "session_id": session, "cwd": work,
 			"tool_name": "write_report", "tool_use_id": call,
-			"tool_input": map[string]any{"cluster": "prod-1"},
+			"tool_input": map[string]any{"site": "docs-1"},
 		})
 		return string(payload)
 	}
@@ -368,7 +368,7 @@ func oneTurnWithATool(call string) string {
 	const trace = "55555555-5555-7555-8555-555555555555"
 	const llm = "55555555-5555-7555-8555-555555555556"
 	const tool = "55555555-5555-7555-8555-555555555557"
-	owner := `"session_name":"tsb-advisor","extra":{"metadata":{"thread_id":"the-conversation"}}`
+	owner := `"session_name":"demo-agent","extra":{"metadata":{"thread_id":"the-conversation"}}`
 	return `{"post":[` +
 		`{"id":"` + trace + `","trace_id":"` + trace + `",` +
 		`"dotted_order":"20260920T100000000000Z` + trace + `",` +
@@ -381,7 +381,7 @@ func oneTurnWithATool(call string) string {
 		`"run_type":"llm","name":"ChatOpenAI","start_time":"2026-09-20T10:00:01Z",` +
 		`"end_time":"2026-09-20T10:00:02Z",` + owner + `,` +
 		`"outputs":{"generations":[[{"message":{"kwargs":{"content":"",` +
-		`"tool_calls":[{"id":"` + call + `","name":"write_report","args":{"cluster":"prod-1"}}]}}}]]}},` +
+		`"tool_calls":[{"id":"` + call + `","name":"write_report","args":{"site":"docs-1"}}]}}}]]}},` +
 
 		`{"id":"` + tool + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
 		`"dotted_order":"20260920T100000000000Z` + trace + `.20260920T100002000000Z` + tool + `",` +

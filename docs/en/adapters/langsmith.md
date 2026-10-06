@@ -24,7 +24,7 @@ Everything below was measured against a running agent, and the captures are in t
 | Endpoint | `POST /runs/multipart`, preceded by `GET /info` every time |
 | Compression | none, unless `/info` advertises it — so this receiver does not |
 | Success | 202 |
-| Unfinished runs | 3 of 18 arrivals in one capture carried no end time; those runs completed 6.0 s later |
+| Unfinished runs | 3 of 18 arrivals in one capture carried no end time; those runs completed 12.0 s later |
 | A rejected batch | retried with the same bytes, 10 ms later |
 | Content | a 46,049-byte command and a 32,000-byte result arrived whole |
 
@@ -115,7 +115,7 @@ for ever.
 ### A graph's own runs land trimmed
 
 Most runs are the graph's own: nodes, prompts, branches. In one capture they were 30 of 39 runs and
-**74.4% of the bytes**, because each repeats content its model call already carries.
+**74.3% of the bytes**, because each repeats content its model call already carries.
 
 Landing them whole would nearly quadruple a conversation for content it already holds. Skipping
 them would lose the shape that says why an agent looped. So the envelope and the `langgraph_` and
@@ -124,13 +124,13 @@ bytes went with it.
 
 | What is kept | Share of the request |
 | --- | --- |
-| everything | 74.4% |
+| everything | 74.3% |
 | envelope and all metadata | 19.9% |
 | envelope and graph metadata only | 15.4% |
 
 The test is who made the run, not what the field holds. Testing the content does not work: the
 repeats are not all message lists and they are not under one name — one capture held 164 KB of the
-message list under `output`, and another 104 KB of a routing value that quoted a tool call. Every
+message list under `output`, and another 93 KB of a routing value that quoted a tool call. Every
 test on the shape kept something large that was already landed elsewhere.
 
 ### A decorated function is not the framework
@@ -157,11 +157,11 @@ what is missing is the model call that asked for it, when none did.
 ### What each call was sent
 
 Every model call carries the whole conversation again in its `inputs`. Measured over twenty turns:
-the first call's inputs were 210 bytes and the twenty-first's were 18,918, a factor of ninety, and
-the thread was 1.63 MB on the wire.
+the first call's inputs were 210 bytes and the twentieth's were 18,936, a factor of ninety, and
+the thread was 1.64 MB on the wire.
 
 A call's record keeps what the model said, so the conversation itself is **7 to 8% of what
-arrived** — 126 KB of the 1.63 MB above. What the model was told is landed beside it, as a
+arrived** — 126 KB of the 1.64 MB above. What the model was told is landed beside it, as a
 provider body, the way Claude Code's bodies are: cut against what the session already holds by
 `pkg/providerbody`, so a request shares its front with the request before it. A request is landed
 from the first arrival of a run that carries inputs, a response from the arrival that carries the
@@ -169,15 +169,15 @@ run's end, and a repeat is a repeat. Measured, with every call's inputs and outp
 
 | Capture | On the wire | Conversation | Bodies | Together |
 | --- | --- | --- | --- | --- |
-| long-conversation, 20 turns | 1.63 MB | 7.7% | 5.3% | 13.0% |
-| large-content | 1.34 MB | 7.2% | 7.9% | 15.2% |
-| subagent | 179 KB | 22.7% | 13.4% | 36.0% |
-| three-turns | 145 KB | 19.7% | 13.5% | 33.3% |
-| plain, one call | 20 KB | 31.5% | 16.1% | 47.6% |
-| all nine captures | 3.75 MB | 10.1% | 7.7% | 17.8% |
+| long-conversation, 20 turns | 1.64 MB | 7.7% | 5.3% | 13.1% |
+| large-content | 1.29 MB | 7.3% | 8.1% | 15.4% |
+| subagent | 179 KB | 22.6% | 13.6% | 36.2% |
+| three-turns | 146 KB | 19.7% | 13.6% | 33.4% |
+| plain, one call | 20 KB | 31.4% | 16.5% | 48.0% |
+| all nine captures | 3.70 MB | 10.2% | 7.7% | 17.9% |
 
 Two things to read off that. Cutting pays on a long conversation, where each request is mostly
-the one before: twenty turns of requests and responses, 217 KB on the wire, land as 87 KB. And it
+the one before: twenty turns of requests and responses, 217 KB on the wire, land as 88 KB. And it
 costs on a short one, where the note that says how to rebuild a body is larger than what a small
 body saves: three turns' bodies land at more than their size. Both are the price of the
 continuity check having something to run on. `provider_bodies: false` on the adapter turns it off.
@@ -195,6 +195,54 @@ the trace, so every stream of one trace does not share the trace as its prompt.
 On this wire a body is the framework's view of what it sent — the run's `inputs.messages`, in
 LangChain's serialized message form — and not the bytes the provider received. The manifest says
 which adapter it came from, and a reader must not take it for the wire.
+
+**Where the system prompt and the tools land.** The system message and the tools a model was offered
+reach asz only in a model call's `inputs` and `extra`. Measured on the 72 model arrivals of the
+captured corpus, every one sent its inputs out of band, and the 43 that offered tools sent them in
+an out-of-band `extra`. The system message lands in the provider bodies, as part of a request's
+inputs, and a reader that [withholds](../formats/asz-view.md#withholding) anything is served no
+body. The tools land nowhere: a request body is its inputs, and the `extra` they came in is not
+kept, so no reader is shown them, withheld or not.
+
+Two other records can hold the request itself. A model call that arrives before it has finished
+lands that arrival's whole run envelope, whether or not a later arrival finishes it. The envelope
+held neither on the corpus, but a client that put them inside it would land them there. A trace
+whose root is the model call itself, with no message list in its inputs, such as a completion asked
+with a list of prompts, lands those inputs whole as its first input. All 46 trace roots of the
+corpus are chain runs, so none landed this way. Each record is named `system_prompt` when it holds
+inputs of any shape, since they are the request the model was sent. It is named `tool_schemas` when
+tools or functions are offered in `extra.invocation_params` or at the top of the inputs, or as tools
+deeper in either, in a configuration of the client's own such as Bedrock's `toolConfig` or Gemini's
+`config`. Whether a value is there decides, not its shape, because a client may send a message list,
+a list of prompts or a system field of its own. Such a record may hold more than the system prompt,
+such as the person's question, and one string can carry both. A reader who withholds the system
+prompt does not see that question either.
+
+A decorated function's own arguments and result, and a graph's own first input, land as the
+application passed them. They are not a request, so they are named by what they hold, at any depth,
+rather than for holding anything. A function traced as a tool lands as a tool's result, and a tool's
+result is never named.
+
+- `system_prompt` names a message whose type or role is `system` or `developer`, in any case, with
+  content that holds something, and LangChain's pair of a role and its content in a list of
+  messages. A list of two words, or an event of the application's own with no content, is not a
+  message. It also names a value under a key a provider takes the prompt by: `system`,
+  `instructions`, `instruction`, `system_instruction`, `system_instructions`, `preamble`,
+  `system_message` or `system_prompt`, compared without case, underscores or dashes.
+- `tool_schemas` names a list of objects, or objects keyed by name, under a `tools`, `functions`,
+  `function_declarations`, `tool_definitions` or `available_tools` key. A list of names or a flag
+  is not a schema. An object of another kind there counts, since nothing tells it from a tool.
+- A string is not read, whatever it holds, so a request body a client writes as one string lands
+  unnamed.
+
+These are the shapes the adapter knows, and naming by shape finds them and no others. A value of
+another shape lands unnamed, so an application that passes its own system prompt under a key of
+its own is shown to every reader. A model call's own request does not depend on this: it lands in
+the provider bodies, which a reader that withholds anything is never served.
+
+A value of the application's own that takes one of these shapes is named too, since nothing tells
+the two apart, and it is safer to withhold it. No captured record matches either shape. A reader
+withholds such a record like any other, and the document counts it once, by its record.
 
 ### A conversation is named by what was asked
 

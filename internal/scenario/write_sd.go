@@ -371,16 +371,11 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 	case EvInject:
 		r.From, r.Flags = sessiondata.FromRuntime, []string{"injected"}
 		r.Parts = []sessiondata.Part{textPart(e.Text)}
-		if e.isSnapshot() {
-			// The runtime's object whole, as the adapter lands an attachment
-			// with no prose, and a flag for each thing it carries.
-			if e.SystemPrompt != "" {
-				r.Flags = append(r.Flags, sessiondata.FlagSystemPrompt)
-			}
-			if len(e.Tools) > 0 {
-				r.Flags = append(r.Flags, sessiondata.FlagToolSchemas)
-			}
-			r.Parts = []sessiondata.Part{dataPart(promptSnapshot(e))}
+		r.Flags = append(r.Flags, sentFlags(e)...)
+		// The runtime's object whole, as the adapter lands an attachment
+		// with no prose. One with prose lands as its text alone.
+		if att := sentAttachment(e); att != nil && e.Text == "" {
+			r.Parts = []sessiondata.Part{dataPart(att)}
 		}
 	case EvFragment:
 		r.From, r.Call, r.Model = sessiondata.FromAgent, e.Call, ccModel
@@ -610,4 +605,18 @@ func readAll(path string) (sessiondata.Header, []*sessiondata.Record, error) {
 	}
 	defer f.Close()
 	return sessiondata.All(f)
+}
+
+// sentFlags is what the adapter names an injection for: a snapshot by its
+// type, since every one measured held the prompt, and the tools by the key
+// that lists them.
+func sentFlags(e *Event) []string {
+	var out []string
+	if e.Type == "prompt_snapshot" {
+		out = append(out, sessiondata.FlagSystemPrompt)
+	}
+	if len(e.Tools) > 0 {
+		out = append(out, sessiondata.FlagToolSchemas)
+	}
+	return out
 }

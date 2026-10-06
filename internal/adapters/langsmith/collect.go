@@ -50,8 +50,8 @@ type Collector struct {
 	Zone      *storage.Zone
 	Ownership Ownership
 	// MaxDeltaBytes is the largest landed file a conversion writes. One
-	// request can carry more: a single turn with a 20 KB command and a 32 KB
-	// result measured 3 MB. A record larger than the budget lands alone,
+	// request can carry more: a single turn with a 46 KB command and a 32 KB
+	// result measured 1.29 MB. A record larger than the budget lands alone,
 	// because a file is cut by narrowing what goes in it and never by
 	// splitting a record.
 	MaxDeltaBytes int64

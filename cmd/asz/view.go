@@ -64,6 +64,7 @@ func cmdView(cfg *config.Config, _ []config.Adapter, _ bool) error {
 		return err
 	}
 	fmt.Printf("reading  : %s\nserving  : %d conversation(s)\n", zoneRoot, len(ids))
+	printWithholding(cfg)
 	fmt.Printf("\n   http://%s\n\n", ln.Addr())
 	fmt.Fprintln(os.Stderr, "ctrl-c to stop")
 	// Nothing here writes, but something else may: an asz collect running
@@ -185,6 +186,7 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	fmt.Printf("reading  : %s\n", zoneRoot)
 	printPipeline(ref, cfg)
 	fmt.Printf("serving  : %d conversation(s)\n", len(ids))
+	printWithholding(cfg)
 	fmt.Printf("\n   http://%s\n\n", ln.Addr())
 	fmt.Fprintln(os.Stderr, "ctrl-c to stop")
 
@@ -199,6 +201,20 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 		}
 	}()
 	return http.Serve(ln, srv.Handler())
+}
+
+// printWithholding says what the page withholds from every reader.
+//
+// A record is named for what it carries when it lands, and a root landed
+// before asz named these carries no such name. Withholding there finds
+// nothing, and the only sign is a zero in each document's summary, so the
+// operator is told here, once, before anyone reads.
+func printWithholding(cfg *config.Config) {
+	if len(cfg.View.Hide) == 0 {
+		return
+	}
+	fmt.Printf("withhold : %s, from every reader. A record landed before asz named these carries no name and is shown. Collect such a root again into a new one to withhold there.\n",
+		strings.Join(cfg.View.Hide, " and "))
 }
 
 // serveAddr listens on the address the command was given, or the default.

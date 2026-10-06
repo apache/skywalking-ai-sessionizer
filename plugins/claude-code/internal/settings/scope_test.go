@@ -64,8 +64,8 @@ func TestWhichToolsAreScanned(t *testing.T) {
 		name: "every tool, minus what reads",
 		file: "tools:\n  scope: [\"*\"]\n  exclude: [\"re:^(read|get|list)_\", search_docs]\n",
 		scanned: map[string]bool{
-			"write_report": true, "read_status": false, "get_pods": false,
-			"list_clusters": false, "search_docs": false, "Bash": true},
+			"write_report": true, "read_status": false, "get_pages": false,
+			"list_sites": false, "search_docs": false, "Bash": true},
 	}, {
 		name:    "an exclusion beats an exact scope entry",
 		file:    "tools:\n  scope: [write_report, read_status]\n  exclude: [read_status]\n",

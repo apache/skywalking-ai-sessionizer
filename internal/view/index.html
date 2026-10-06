@@ -179,6 +179,14 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
 
 <script>
 "use strict";
+// A hide in the list's address goes with the reader into each conversation
+// and back, so every page they move between withholds the same. It is not
+// access control: a host that withholds per reader adds hide to every request.
+// A key spelled another way goes too, so the server refuses it.
+const hidden = [...new URLSearchParams(location.search)].filter(([k]) => k.toLowerCase().replace(/\P{L}/gu, "") === "hide");
+const hideQuery = () => { const q = new URLSearchParams(); for (const [k, v] of hidden) q.append(k, v); return q.toString() ? "?" + q : ""; };
+for (const a of document.querySelectorAll('a[href="/"]')) a.href = "/" + hideQuery();
+
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
 // Dates and times render in English with a 24-hour clock for every reader.
@@ -297,7 +305,7 @@ function draw() {
     ? `<div class="empty">No conversation matches that filter.</div>`
     : `<div class="empty">Nothing assembled yet. Run <code>asz collect</code>, then <code>asz parse</code>.</div>`;
 
-  const open = id => { location.href = "/c/" + encodeURIComponent(id); };
+  const open = id => { location.href = "/c/" + encodeURIComponent(id) + hideQuery(); };
   $("rows").querySelectorAll("[data-id]").forEach(tr => {
     tr.onclick = () => open(tr.dataset.id);
     tr.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(tr.dataset.id); } };

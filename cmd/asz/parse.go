@@ -114,9 +114,11 @@ func parseToIndex(z *storage.Zone, id string, maxRound int64, rounds *int) (*par
 }
 
 // printDocument writes the conversation's asz.view document to standard
-// output, the same document asz view serves at /api/c/{id}/view, as JSON
-// or as YAML. The page stays the page; this is the document for a pipeline
-// or a diff.
+// output, as JSON or as YAML: the whole document asz view serves at
+// /api/c/{id}/view to a reader that withholds nothing. view.hide does not
+// apply. Whoever runs this reads the storage root itself, so withholding here
+// would keep nothing from them. The page stays the page, and this is the
+// document for a pipeline or a diff.
 func printDocument(zoneRoot, id, format string) error {
 	c, err := view.New(storage.NewZone(zoneRoot), nil).Load(id)
 	if err != nil {

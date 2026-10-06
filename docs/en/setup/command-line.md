@@ -57,7 +57,7 @@ data collected elsewhere or by another process. The list is at `/`, and one conv
 `/c/{id}`. The Evidence tab shows the collected record behind a step, and the Prompt tab a model
 call's request and response, when [provider bodies](claude-code-provider-bodies.md) were collected.
 The page withholds from every reader what [`view.hide`](configuration.md#view) names, the system
-prompt and the tool schemas a runtime sent; `server` does the same, and `conversation` withholds
+prompt and the tool schemas a runtime sent. `server` does the same. `conversation` withholds
 nothing. See [Withholding](../formats/asz-view.md#withholding).
 
 ## push

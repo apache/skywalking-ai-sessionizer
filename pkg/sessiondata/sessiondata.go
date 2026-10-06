@@ -31,9 +31,12 @@
 package sessiondata
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -311,7 +314,7 @@ type Usage struct {
 
 // The flags a reader may withhold. An adapter sets each on the record that
 // carries what it names: the system prompt the runtime sent, and the schemas
-// of the tools it advertised. A reader that serves a conversation to the
+// of the tools it advertised. A server that shows a conversation to the
 // people an agent served withholds them by these names, never by the text or
 // the size of a part. The other flags are listed on the Session Data page.
 const (
@@ -319,12 +322,48 @@ const (
 	FlagToolSchemas  = "tool_schemas"
 )
 
-// Withholdable lists the flags a reader may withhold, in a fixed order.
-func Withholdable() []string { return []string{FlagSystemPrompt, FlagToolSchemas} }
+// withholdable is every flag a reader may withhold, in a fixed order. It is
+// the one list: the configuration, the view and its hide parameter all check
+// against it.
+var withholdable = []string{FlagSystemPrompt, FlagToolSchemas}
+
+// HoldsValue reports whether raw is a JSON value with something in it: not
+// absent, not null, and not an empty string, list or object.
+//
+// An adapter that names a record by a field known to carry what a flag
+// names, such as the entries of a deferred tools record, asks whether the
+// field holds a value, not what shape it has. A runtime that changed such a
+// field from a list to a string or an object would otherwise land it unnamed,
+// and it would be shown to every reader. A value is not decoded to answer
+// this, since the tool schemas run to tens of kilobytes: its first and last
+// bytes say what it is. Bytes that are not a whole JSON value, such as a list
+// cut short, count as a value, for a caller that hands it a field it did not
+// decode. A record that does not decode at all never reaches this, and its
+// adapter decides.
+func HoldsValue(raw json.RawMessage) bool {
+	v := bytes.TrimSpace(raw)
+	switch {
+	case len(v) == 0, string(v) == "null", string(v) == `""`:
+		return false
+	case len(v) >= 2 && (v[0] == '[' && v[len(v)-1] == ']' || v[0] == '{' && v[len(v)-1] == '}'):
+		return len(bytes.TrimSpace(v[1:len(v)-1])) > 0
+	}
+	return true
+}
 
 // IsWithholdable reports whether name is a flag a reader may withhold.
-func IsWithholdable(name string) bool {
-	return name == FlagSystemPrompt || name == FlagToolSchemas
+func IsWithholdable(name string) bool { return slices.Contains(withholdable, name) }
+
+// CheckWithholdable reports the first name that is not a flag a reader may
+// withhold. A name is refused rather than ignored, because a reader that
+// asked to withhold something and was shown it would not know.
+func CheckWithholdable(names []string) error {
+	for _, name := range names {
+		if !IsWithholdable(name) {
+			return fmt.Errorf("%q is not a flag a reader may withhold. Those are %s", name, strings.Join(withholdable, " and "))
+		}
+	}
+	return nil
 }
 
 // Drop is one thing the conversion left behind.

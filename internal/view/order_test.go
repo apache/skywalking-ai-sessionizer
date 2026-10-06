@@ -196,7 +196,7 @@ func TestAStepsEdgesAreInTheOrderTheyHappened(t *testing.T) {
 		c.from[launch.ID] = append(c.from[launch.ID], rel)
 	}
 	var got []string
-	for _, e := range c.step(launch, 0, nil).Edges {
+	for _, e := range c.step(launch, 0, nil, nil).Edges {
 		got = append(got, e.Other)
 	}
 	if want := "stream/c2 stream/c3 stream/c1"; strings.Join(got, " ") != want {
@@ -219,7 +219,7 @@ func TestAStepsEdgesAreInTheOrderTheyHappened(t *testing.T) {
 		c.from[launch.ID] = append(c.from[launch.ID], rel)
 	}
 	got = nil
-	for _, e := range c.step(launch, 0, nil).Edges {
+	for _, e := range c.step(launch, 0, nil, nil).Edges {
 		got = append(got, e.Other)
 	}
 	if want := "stream/x stream/y"; strings.Join(got, " ") != want {

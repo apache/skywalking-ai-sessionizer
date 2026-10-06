@@ -30,6 +30,17 @@
   a real root, all 50 LangChain files were named apart from their header, by up to 99 milliseconds,
   and none of the 7,185 Claude Code files was. Files landed before this keep their names, because
   landed files are never rewritten.
+- On a LangChain conversation, the system message lands in the provider bodies, which a reader that
+  withholds anything is never served. The tools, sent in an out-of-band `extra`, land nowhere. Two
+  other records can hold the request: the whole run envelope a model call lands when it arrives
+  before it has finished, and the first input of a trace whose root is a model call with no message
+  list. Each is named `system_prompt` when it holds inputs of any shape, and `tool_schemas` when it
+  offers tools or functions, nested in the client's own configuration too. A decorated function's
+  own arguments and result, and a graph's first input, are the application's own, so they are named
+  only by their shape: a message of the `system` or `developer` role, a value under a key a provider
+  takes the prompt by, or a list of tools. The shapes are listed on the LangChain page. On the
+  captured corpus no record is named: the client sends both out of band, and all 46 trace roots are
+  chain runs.
 
 ## Claude Code
 
@@ -39,14 +50,17 @@
   is now external input that opens its talk. A session collected before this keeps the gap, because
   landed records are never rewritten.
 
-- A prompt snapshot is named for what it carries. A runtime built on the Claude Agent SDK writes
-  the system prompt and the tool schemas it sent into the transcript, as a `prompt_snapshot`
-  attachment, and asz landed it as an injection step with nothing saying so. Such a record now
-  carries the `system_prompt` flag when it holds the prompt and the `tool_schemas` flag when it
-  holds the schemas, beside `injected`, set from the attachment's type and keys and never from the
-  text, so a reader that serves a conversation to the people the agent served can withhold them by
-  rule. The page shows the flags on the step. A session collected before this keeps its records as
-  they are, because landed records are never rewritten; collecting it into a new root names them.
+- What the runtime sent the model is named. In Claude Code 2.1.259 to 2.1.286, the versions
+  measured, and in a runtime built on the Claude Agent SDK, the transcript holds the system prompt
+  and the tool schemas the runtime sent, in a `prompt_snapshot` attachment, and the schemas of the
+  tools it offers on demand, in a `deferred_tools_record`. asz landed both as injection steps with
+  nothing saying so. A snapshot now carries the `system_prompt` flag, and either attachment carries
+  `tool_schemas` when it holds tools, by its type and keys, never by the text. The rule is on the
+  [Claude Code page](../adapters/claude-code.md#step-mapping). An operator who serves a
+  conversation to the people the agent served can then withhold them by rule. Such a step never
+  names a talk. The page shows the flags on the step. A session collected before this keeps its
+  records as they are, because landed records are never rewritten. Collecting it into a new root
+  names them.
 
 ## MCP calls
 
@@ -75,19 +89,38 @@
 
 ## The page
 
-- A view can withhold the system prompt and the tool schemas. A reader that serves a conversation to
-  the people an agent served may need to keep from them what the runtime sent the model, while the
-  operator still sees it. asz knows nothing about who is reading, and withholds by the flags the
+- A view can withhold the system prompt and the tool schemas. An operator who serves a conversation
+  to the people an agent served may need to keep from them what the runtime sent the model, while
+  the operator still sees it. asz knows nothing about who is reading. It withholds by the flags the
   adapter set, never by the text or the size of a part. `view.hide` in the configuration lists the
-  flags `asz view` and `asz server` withhold from every reader, and a `hide` parameter on the
-  document, record and files endpoints adds names for one request and never takes one away, so a
-  host that serves the API through its own route decides per reader. A withheld step keeps its
-  node, its flags and its size, loses its text and says `omitted`; `summary.withheld` counts what
-  was withheld; no call lists a provider body and the files endpoint serves none, since a request
-  carries both again and a body is served whole or not at all. The rules are on the asz.view page,
-  so a server that mirrors the format withholds the same way.
+  flags that `asz view` and `asz server` withhold from every reader. A `hide` parameter on the
+  document, record and files endpoints adds names for one request and never takes one away. A host
+  that serves the API through its own route adds it to every request, and so decides per reader. The
+  page passes a `hide` in its own address on to its document, record and files calls.
+- A withheld step keeps its node, its flags and its size, loses its text and says `omitted`.
+  `summary.withheld` counts what was withheld, and lists every name asked for, a zero included. So
+  a filter over a root landed before the flags shows that it found nothing. For a reader that
+  withholds anything, no call lists a provider body, and neither the files nor the record endpoint
+  serves one. A request carries the system prompt and the tool schemas again, and a body is served
+  whole or not at all. The rules are on the asz.view page, so a server that mirrors the format
+  withholds the same way.
+- The `hide` parameter spelled another way, any key whose letters alone spell `hide` in any case,
+  such as `Hide`, `hide[]` or `hide[0]`, and a query that does not parse, are refused with status
+  400, as a name that is not a flag a reader may withhold is. Either would otherwise read as no
+  `hide` at all, and the reader would be shown everything.
 - The files endpoint serves provider body files only. It served any landed file whole by its
-  sequence, transcripts included, and the Prompt tab reads provider body files only.
+  sequence, transcripts included, and the Prompt tab reads provider body files only. Any other
+  file, and one whose header does not read, is refused with status 400.
+
+## Configuration
+
+- The `view` section is read strictly. A key it does not have is refused, where every other section
+  ignores one, because a misspelled key there would show everything to everyone. `hide` is read only
+  inside the `view` section. Written anywhere else, in any case, such as a top-level `view.hide` or
+  a `hide` under a misspelled `view`, a name it lists that is a flag a reader may withhold must be
+  one `view` withholds, or the file is refused. Only the first YAML document of a file is read, so a
+  file with a later one that holds anything is refused rather than read in part. The rule is on the
+  [configuration page](../setup/configuration.md#view).
 
 ## Metrics
 
@@ -208,3 +241,8 @@
 - The LangChain plugin's README, which is its page on PyPI, says the plugin needs `asz-changes` and
   a `tools.scope` naming the application's tools. It links the documentation of the released
   version.
+- The contributing guide and the docs index pointed to this repository's issues, which are turned
+  off. They now point to the SkyWalking issue tracker, which the SkyWalking projects share.
+- The Claude Code adapter page said the system prompt and the tool schemas are absent from
+  transcripts. That holds for the versions it was measured on, 2.1.220 to 2.1.251, and the page now
+  says so. Later versions write them in two attachments, which the adapter names.

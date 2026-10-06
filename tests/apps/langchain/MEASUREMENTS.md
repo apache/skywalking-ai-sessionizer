@@ -29,23 +29,23 @@ was still running.
 
 | case | requests | runs | post | patch | open | bytes | thread keys |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| abandoned-run | 1 | 9 | 9 | 0 | 3 | 30032 | `thread-abandoned` |
-| large-content | 1 | 15 | 15 | 0 | 0 | 1343153 | `thread-large` |
-| long-conversation | 3 | 128 | 120 | 8 | 8 | 1633772 | `thread-long` |
-| loop | 1 | 47 | 47 | 0 | 0 | 309640 | `thread-loop` |
-| no-thread-key | 1 | 15 | 15 | 0 | 0 | 60511 | `(none)` |
-| parallel-tools | 1 | 17 | 17 | 0 | 0 | 73148 | `thread-parallel` |
-| plain | 1 | 6 | 6 | 0 | 0 | 19922 | `thread-plain` |
-| shared-thread-key | 1 | 22 | 22 | 0 | 0 | 99795 | `123` |
-| slow-tool | 2 | 18 | 15 | 3 | 3 | 68419 | `thread-slow` |
-| subagent | 1 | 39 | 39 | 0 | 0 | 179285 | `thread-subagent` |
-| subagent-own-thread | 1 | 30 | 30 | 0 | 0 | 125135 | `thread-subagent-parent` |
-| summarized | 1 | 35 | 35 | 0 | 0 | 173969 | `thread-summarized` |
-| three-turns | 1 | 29 | 29 | 0 | 0 | 145441 | `thread-three-turns` |
-| tool-error | 1 | 9 | 9 | 0 | 0 | 42676 | `thread-tool-error` |
-| traceable-only | 1 | 2 | 2 | 0 | 0 | 3692 | `thread-traceable` |
-| two-threads | 1 | 30 | 30 | 0 | 0 | 121494 | `thread-a`, `thread-b` |
-| unsafe-thread-key | 1 | 24 | 24 | 0 | 0 | 79178 | `../outside`, `_hidden`, `team/customer`, `会话-1` |
+| abandoned-run | 1 | 9 | 9 | 0 | 3 | 30064 | `thread-abandoned` |
+| large-content | 1 | 15 | 15 | 0 | 0 | 1293685 | `thread-large` |
+| long-conversation | 3 | 128 | 120 | 8 | 8 | 1636932 | `thread-long` |
+| loop | 1 | 47 | 47 | 0 | 0 | 309357 | `thread-loop` |
+| no-thread-key | 1 | 15 | 15 | 0 | 0 | 60558 | `(none)` |
+| parallel-tools | 1 | 17 | 17 | 0 | 0 | 73087 | `thread-parallel` |
+| plain | 1 | 6 | 6 | 0 | 0 | 19964 | `thread-plain` |
+| shared-thread-key | 1 | 22 | 22 | 0 | 0 | 99890 | `123` |
+| slow-tool | 2 | 18 | 15 | 3 | 3 | 68470 | `thread-slow` |
+| subagent | 1 | 39 | 39 | 0 | 0 | 179370 | `thread-subagent` |
+| subagent-own-thread | 1 | 30 | 30 | 0 | 0 | 125255 | `thread-subagent-parent` |
+| summarized | 1 | 35 | 35 | 0 | 0 | 174152 | `thread-summarized` |
+| three-turns | 1 | 29 | 29 | 0 | 0 | 145549 | `thread-three-turns` |
+| tool-error | 1 | 9 | 9 | 0 | 0 | 42733 | `thread-tool-error` |
+| traceable-only | 1 | 2 | 2 | 0 | 0 | 3694 | `thread-traceable` |
+| two-threads | 1 | 30 | 30 | 0 | 0 | 121588 | `thread-a`, `thread-b` |
+| unsafe-thread-key | 1 | 24 | 24 | 0 | 0 | 79378 | `../outside`, `_hidden`, `team/customer`, `会话-1` |
 
 ## Where the bytes are
 
@@ -53,9 +53,9 @@ Counted across every case, by the kind of run that carried them.
 
 | run type | runs | bytes | share |
 | --- | --- | --- | --- |
-| chain | 377 | 3217032 | 79.2% |
-| llm | 72 | 719445 | 17.7% |
-| tool | 26 | 126525 | 3.1% |
+| chain | 377 | 3176868 | 79.1% |
+| llm | 72 | 716569 | 17.8% |
+| tool | 26 | 124148 | 3.1% |
 
 A graph's own `chain` runs carry the whole message list again in their inputs
 and outputs, which is why they hold most of the bytes while saying nothing the
@@ -66,7 +66,7 @@ conversation does not already have.
 | case | what it exercises |
 | --- | --- |
 | abandoned-run | A process that dies mid-turn: the open runs are all that ever arrive. |
-| large-content | A 20 KB command, a 200 KB result and a 15 KB system prompt. |
+| large-content | A 46 KB command, a 32 KB result and a 15 KB system prompt. |
 | long-conversation | Twenty turns on one thread: how the repeated history grows. |
 | loop | A graph that loops: the same node runs five times in one trace. |
 | no-thread-key | No thread key at all: ownership is not supplied and must not be invented. |

@@ -153,6 +153,6 @@ The repository carries a demo application that needs no API key and no network:
 make langchain-capture
 ```
 
-It runs sixteen shapes of conversation against a stand-in model and writes what
+It runs seventeen shapes of conversation against a stand-in model and writes what
 the client sent into `tests/apps/langchain/testdata`, with `MEASUREMENTS.md`
 beside it.

@@ -906,8 +906,8 @@ func TestATracedToolsCallIsNotInvented(t *testing.T) {
 		`{"id":"tool-1","trace_id":"tr","run_type":"tool","name":"lookup",` +
 			`"start_time":"2026-09-20T10:00:00Z","end_time":"2026-09-20T10:00:01Z"}`),
 		Fields: map[string]json.RawMessage{
-			"inputs":  json.RawMessage(`{"cluster":"prod-1"}`),
-			"outputs": json.RawMessage(`{"output":"prod-1: 3/3 ready"}`),
+			"inputs":  json.RawMessage(`{"site":"docs-1"}`),
+			"outputs": json.RawMessage(`{"output":"docs-1: 3/3 served"}`),
 			"extra":   json.RawMessage(`{"metadata":{"ls_method":"traceable"}}`)}}
 	records, err := Convert(op, false, Hints{SelfContained: map[string]bool{"tr": true}})
 	if err != nil {
@@ -924,7 +924,7 @@ func TestATracedToolsCallIsNotInvented(t *testing.T) {
 	var landed bool
 	for _, record := range records {
 		for _, part := range record.Parts {
-			if part.Kind == sessiondata.PartResult && strings.Contains(part.Text, "3/3 ready") {
+			if part.Kind == sessiondata.PartResult && strings.Contains(part.Text, "3/3 served") {
 				landed = true
 			}
 		}
@@ -1027,13 +1027,13 @@ func TestANameFromARunGivesWayToTheQuestion(t *testing.T) {
 	resp = send(t, base, "/runs/batch", "application/json", []byte(
 		`{"post":[{"id":"`+trace+`","trace_id":"`+trace+`","dotted_order":"`+root+`",`+
 			`"run_type":"chain","name":"LangGraph","start_time":"2026-09-20T10:00:00Z",`+owner+`,`+
-			`"inputs":{"messages":[{"role":"user","content":"Is prod-1 healthy?"}]}}]}`), "")
+			`"inputs":{"messages":[{"role":"user","content":"Is docs-1 served?"}]}}]}`), "")
 	resp.Body.Close()
 	if _, err := collector.Collect(); err != nil {
 		t.Fatal(err)
 	}
 	got := titlesOf(t, zone, session)
-	if len(got) == 0 || got[len(got)-1] != "Is prod-1 healthy?" {
+	if len(got) == 0 || got[len(got)-1] != "Is docs-1 served?" {
 		t.Fatalf("named %v, want the question last", got)
 	}
 }

@@ -17,10 +17,10 @@
 
 checkpoints:
   final:
-    kinds: {message.external: 1, context.injection: 3, llm.call: 1}
+    kinds: {message.external: 1, context.injection: 6, llm.call: 3}
     view:
       hide: [system_prompt, tool_schemas]
-      flags: {injected: 3, system_prompt: 2, tool_schemas: 1}
-      withheld: {system_prompt: 2, tool_schemas: 1, provider_bodies: 2}
-      provider_bodies: 2
+      flags: {injected: 6, system_prompt: 3, tool_schemas: 2}
+      withheld: {system_prompt: 3, tool_schemas: 2, provider_bodies: 6}
+      provider_bodies: 6
       captured_prompts: 0

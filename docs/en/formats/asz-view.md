@@ -14,9 +14,9 @@ things produce it from the same code:
 
 | How | What you get |
 | --- | --- |
-| `asz conversation -json ID` | the document on standard output, indented |
+| `asz conversation -json ID` | the document on standard output, indented, whole. `view.hide` applies to the page only, since whoever runs the command reads the storage root itself |
 | `asz conversation -yaml ID` | the same document rendered as YAML, with the same keys in the same order |
-| `asz view`, at `/api/c/{id}/view` | the document as the page's own response, built once per fold, less what `hide` withholds; see [Withholding](#withholding) |
+| `asz view`, at `/api/c/{id}/view` | the document as the page's own response, built once per fold for each set of names it withholds, less what `hide` withholds. See [Withholding](#withholding) |
 
 A server that holds the same `.sd` and `.sf` files, such as the SkyWalking OAP, builds the same
 document and answers a conversation query with it. Every reader shares the shape, and a change to
@@ -31,7 +31,7 @@ string the record holds. A time a
 round's header carries is null when the header has none, and 0 when its value is not a time as
 [Reading a record](session-data.md#reading-a-record) defines one. The same head
 round over the same files gives the same document, so one built by `asz view` and one built by
-another server compare equal as documents.
+another server compare equal as documents, when both withhold the same names.
 
 **A complete example.** [asz-view-example.yaml](asz-view-example.yaml) is the whole document for
 the fixture session of the format pages, three talks across a main stream and a child agent, a
@@ -78,7 +78,7 @@ producer of them.
 | `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
-| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known; and `withheld`, what the document withholds by name, `{}` when nothing is, see [Withholding](#withholding) |
+| `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known. `withheld` is what the document withholds by name, `{}` when nothing was asked to be withheld. See [Withholding](#withholding) |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
@@ -128,7 +128,7 @@ say.
 | `at` | when its record happened, from the record; `0` when nothing observed it |
 | `ref`, `refs` | the record it stands on and every record it covers, as `{seq, row, block}`, kept so a viewer can show the evidence |
 | `text`, `state`, `bytes` | the part the node stands on: its readable text, clipped to the longest prefix of whole characters within 2,000 bytes, whether the content is `available`, and its full size. For a `data` part the text is the record's readable text when it has one: its `text` parts, or the prompt inside a `queued_command` envelope, the form a message typed while the agent works arrives in. Otherwise it is the data exactly as the record holds it, which is compact JSON. Earlier writers put `\u003c`, `\u003e` and `\u0026` there for `<`, `>` and `&`, so their step text can differ (see [What data holds](session-data.md#what-data-holds)). A reader wanting the whole record reads it by address. |
-| `usage`, `flags`, `dropped` | what else the referenced record says, copied once: on an `llm.call`, the token counts `in`, `out`, `cache_read`, `cache_write` from the one record `usage_at` names, never a sum over fragments, a count of zero left out; the record's `flags`; and its `dropped` list, each entry its `what` and `bytes`, and `why` when there is one, so a viewer can say what was left out and why. A field the Session Data page does not list is not copied |
+| `usage`, `flags`, `dropped` | what else the referenced record says, copied once: on an `llm.call`, the token counts `in`, `out`, `cache_read`, `cache_write` from the one record `usage_at` names, never a sum over fragments, a count of zero left out; the record's `flags`, which on a model call are only those a reader may [withhold](#withholding); and its `dropped` list, each entry its `what` and `bytes`, and `why` when there is one, so a viewer can say what was left out and why. A field the Session Data page does not list is not copied |
 | a talk adds | `label` and `reply`, clipped the same way and described below, then `runs`, `steps`, `tools`, `from`, `to`, `child`, `segment` |
 | a tool or agent call adds | `name`, `failed`, `result`, `result_state`, `result_bytes`, `request_to_result_ms` and `request_to_result_join`, the time from the request record to the result record where the assembler joined them exactly; `changes` and `executions`, the records joined to it |
 | a call to an MCP server has in `attrs` | `mcp_server` and `mcp_tool`, the server and the tool the runtime's name for the call addresses, where the name splits exactly (see [Parts](session-data.md#parts)). They are the runtime's names; which server ran the call, by its configured name, is in the call's execution record |
@@ -152,13 +152,14 @@ comes from the first part that has it, the request's included.
 **A talk's label and reply.** A talk's `label` is the text of the first `message.external` step in
 it. A talk can have none. A talk opened by a command typed locally is one example, because the
 runtime records no origin for such a command. The label is then the first text that is not empty
-among the talk's first three `context.injection` steps, in record order. A text that starts with
+among the talk's first three `context.injection` steps, in record order. One that carries a flag a
+reader may [withhold](#withholding) is passed over. A text that starts with
 `{"type":"deferred_tools_delta"` is skipped. It is Claude Code's record of a change in the tools
-available, and it says nothing about the work. So a label is not always something a person typed.
-A talk's `reply` is the last `message.assistant` or `agent.output` step in it, in record order. The
-earlier messages are what the agent said between tool calls, as the
-[Unified Conversation Model](../concepts-and-designs/unified-conversation-model.md#hierarchy)
-explains. Either key is absent when no step gives it a text.
+available, and it says nothing about the work. So a label is not always something a person typed. A
+talk's `reply` is the last `message.assistant` or `agent.output` step in it, in record order. The
+earlier messages are what the agent said between tool calls, as the [Unified Conversation
+Model](../concepts-and-designs/unified-conversation-model.md#hierarchy) explains. Either key is
+absent when no step gives it a text.
 
 **Request to result is not tool time.** `request_to_result_ms` is the time between two records the
 runtime wrote, the request and its result, tied together by the tool-use id: the difference of
@@ -256,37 +257,82 @@ step; its file is still under `files`. Nothing is joined by position or by time.
 
 ## Withholding
 
-A reader that serves a conversation to the people an agent served may need to keep from them what
+An operator who serves a conversation to the people an agent served may need to keep from them what
 the runtime sent the model: the system prompt and the tool schemas. The record that carries each is
-named by its adapter with a flag, `system_prompt` or `tool_schemas`, as
-[Session Data](session-data.md#flags) lists, and a server withholds by those names, never by the
-text or the size of a part. asz knows nothing about who is reading. `asz view` withholds what its
+named by its adapter with a flag, `system_prompt` or `tool_schemas`, as [Session
+Data](session-data.md#flags) lists, and a server withholds by those names, never by the text or the
+size of a part. asz knows nothing about who is reading. `asz view` withholds what its
 [configuration](../setup/configuration.md#view) says for every reader, and a `hide` parameter on
 `/api/c/{id}/view`, `/api/c/{id}/record/{seq}/{row}` and `/api/c/{id}/files` adds names for one
 request and never takes one away: `?hide=system_prompt,tool_schemas`, or the parameter given more
-than once. A name the page cannot withhold is refused with status 400. A host that serves the API
-through its own route decides per reader and adds the parameter. Two audiences are two instances
-over the same root, each behind the deployment's own authentication.
+than once. A name that is not a flag a reader may withhold is refused with status 400. So is any
+other key whose letters alone spell `hide`, in any case, such as `Hide`, `hide[]` or `hide[0]`, and
+a query that does not parse, since either would otherwise read as no `hide` at all. A host that
+serves the API through its own route decides per reader, and adds the parameter to every request it
+serves for a reader who may not see the material: the document, every record and every file. asz's
+own page passes a `hide` in its address on to all three, so the Evidence tab never shows what the
+document withholds. Its links between the list and the conversations keep it too. That is not access
+control, because a reader can edit the address. Two audiences are two instances over the same root,
+each behind the deployment's own authentication.
+
+Which records carry the flags depends on the adapter. The Claude Code adapter names two
+attachments: the prompt snapshot that Claude Code and a runtime built on the Agent SDK write, and
+the deferred tools record, which lists the tools offered on demand with their schemas. See
+[Claude Code](../adapters/claude-code.md#step-mapping). The LangChain adapter lands the system
+message in the provider bodies, which a reader that withholds anything is never served. The tools
+arrive in the call's `extra`, which is not kept, so they land nowhere. It names the other records
+that could hold them: the envelope of a call that arrived before it finished and a root model
+call's first input by what they hold, and a decorated function's values and a graph's first input
+by their shape. See [LangChain](../adapters/langsmith.md#what-each-call-was-sent).
+
+Only these records are named. A tool's result is the tool's own and carries no name, even where it
+repeats part of a schema, as a validation error can. Other context the runtime injects, such as a
+reminder or an instruction file, carries none either.
 
 A server that withholds, asz's own or one that mirrors the format, follows these rules, so a person
-sees the same conversation on every page:
+sees the same conversation on every page. asz builds a withheld document from records withheld as
+they are read, not by clearing a whole document afterwards. Every field read from a record then
+follows the rules: a step's text, a tool's result, and a talk's label and reply.
 
+- A model call shows no content of its own, so it carries only the flags a reader may withhold from
+  its record. A call that arrived before it finished can land the request it was sent, and such a
+  call is withheld, and its record counted, like any other.
 - A withheld step keeps its node: `id`, `kind`, `parent`, `ref`, `at`, `flags` and `bytes` stay. Its
   `text` is absent and its `state` is `omitted`. It is never deleted, so every count, the round
-  chain and the verification state still hold.
-- `summary.withheld` counts what was withheld by name: the steps carrying each withheld flag, and
-  under `provider_bodies` the session's landed bodies. It is `{}` when nothing is withheld, so a
-  reader can tell a filtered document from a whole one.
+  chain and the verification state still hold. A step that names no single part of a record with
+  several has no `bytes` of its own. Once withheld, it takes the size of all the record's parts, so
+  it never says it withheld nothing.
+- A tool's result read from a record of its own follows that record's flags. A withheld result has
+  no `result`, and its `result_state` is `omitted`. The step's `flags` and `state` stay its own
+  record's, so a step whose `flags` hold a withheld name is one whose own `text` is withheld.
+- An injection that carries a flag a reader may withhold names no talk, in any document, withheld or
+  not. It is what the runtime sent the model, not what the work is. So a talk with no input of its
+  own never takes its text as `label`. A record that carries such a flag names no stream either. A
+  person's input names its talk whatever it carries, and a reader who withholds what it carries sees
+  no label.
+- `summary.withheld` counts what was withheld by name: the records carrying each withheld flag, and
+  under `provider_bodies` the session's landed bodies. It counts every record the document was built
+  from, a call's own and a tool's result included, at any depth. A record that two steps stand on,
+  such as a call and the error its failure became, counts once. Every name asked for is listed, a
+  zero included, so a filter that matched nothing still shows that it ran. That is the case on a
+  root landed before the adapter set these flags: its records carry none, and it has to be collected
+  again into a new root to be withheld. `withheld` is `{}` only when nothing was asked to be
+  withheld.
 - No call lists a `provider_bodies` entry, `summary.captured_prompts` is `0`, and the files endpoint
   answers 403. A request carries the system prompt and the tool schemas again, and a body rebuilds
   to its digest or not at all, so a body is served whole or not at all. The response goes with the
   request, because a landed file holds both.
 - The record endpoint returns a withheld record with its envelope and its `flags`. Every part keeps
-  its kind and its `bytes`, loses `text` and `data`, and has `state` `omitted`.
-- The files endpoint serves `provider_body` files only, whether or not anything is withheld. A
-  transcript served whole would carry what the document withholds.
+  its kind and its `bytes`, loses `text`, `data` and `encoding`, and has `state` `omitted`. It
+  answers 403 for a record of a `provider_body` file, as the files endpoint does for the file. A
+  body record carries no flag, and a request's record holds pieces of the system prompt and the
+  tool schemas.
+- The files endpoint serves `provider_body` files only, whether or not anything is withheld, and
+  answers 400 for any other. A transcript served whole would carry what the document withholds. A
+  file whose header does not read is refused with 400 too, since its kind is not known.
 
-The scenario `prompt-snapshot-withheld` checks these.
+The scenario `prompt-snapshot-withheld` checks the document's rules in both formats. A view test
+checks the parameter, the record endpoint and the files endpoint.
 
 ## Rendering the whole conversation
 
@@ -320,13 +366,13 @@ values as the JSON.
 
 ## Reading it
 
-`asz view` serves the document at `/api/c/{id}/view` and builds it once per fold, so a second reader
-pays nothing until a new round arrives. `asz conversation -json ID` prints the same document to
-standard output, and `-yaml` prints it as YAML, for a terminal or a diff. The page draws the same
-document with Horizon's conversation renderer, which asz embeds from a pinned Horizon commit, so a
-conversation looks the same in `asz view` and in the SkyWalking UI.
-The largest conversation measured, 357 talks and 16,121 steps, is 19 MB as one document and was
-built in 0.7 s.
+`asz view` serves the document at `/api/c/{id}/view` and builds it once per fold for each set of
+names it withholds, so a second reader of the same names pays nothing until a new round arrives.
+`asz conversation -json ID` prints the whole document, withholding nothing, to standard output, and
+`-yaml` prints it as YAML, for a terminal or a diff. The page draws the same document with Horizon's
+conversation renderer, which asz embeds from a pinned Horizon commit, so a conversation looks the
+same in `asz view` and in the SkyWalking UI. The largest conversation measured, 357 talks and 16,121
+steps, is 19 MB as one document and was built in 0.7 s.
 
 A running `asz view` notices new rounds without being told. On every read it lists the
 conversation's rounds directory and compares the newest round there with the round it folded. When

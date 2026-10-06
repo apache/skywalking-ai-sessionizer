@@ -78,8 +78,10 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 	var d indexRecord
 	if err := json.Unmarshal(payload, &d); err != nil {
 		// A record that will not parse is still evidence. Its position is known
-		// and its bytes are kept; nothing about it is guessed.
+		// and its bytes are kept. Nothing about it is guessed.
 		rec.Parts = []sessiondata.Part{rawPart(payload, "the record is not valid JSON")}
+		// Except what its bytes say of what the runtime sent the model.
+		rec.Flags = damagedFlags(payload)
 		return rec
 	}
 
@@ -98,7 +100,7 @@ func Convert(src Source, ord, off uint64, payload []byte) *sessiondata.Record {
 	}
 	rec.StartedBy = d.ParentAgentID
 	rec.Label = firstOf(d.AITitle, d.Description, d.WorkflowName)
-	rec.Flags = flagNames(flagsOf(&d, &tur, hasTUR, src))
+	rec.Flags = append(flagNames(flagsOf(&d, &tur, hasTUR, src)), sentFlags(&d, payload)...)
 	rec.From = producerOf(&d, src)
 	if u := d.Message.Usage; u != nil {
 		rec.Usage = &sessiondata.Usage{
@@ -422,8 +424,6 @@ var flagNames = func(f index.Flags) []string {
 		{index.FlagTurnDuration, "turn_duration"},
 		{index.FlagCommand, "command"},
 		{index.FlagNotice, "notice"},
-		{index.FlagSystemPrompt, sessiondata.FlagSystemPrompt},
-		{index.FlagToolSchemas, sessiondata.FlagToolSchemas},
 	} {
 		if f.Has(m.bit) {
 			out = append(out, m.name)

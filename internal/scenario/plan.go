@@ -700,30 +700,57 @@ func derivedSession(sc *Scenario) string {
 	return fmt.Sprintf("%s-%s-4%s-8%s-%s", x[0:8], x[8:12], x[13:16], x[17:20], x[20:32])
 }
 
-// isSnapshot reports whether an injection is a prompt snapshot rather than
-// text.
-func (e *Event) isSnapshot() bool { return e.SystemPrompt != "" || len(e.Tools) > 0 }
+// sentAttachment is the attachment an injection is written as when it
+// carries what the runtime sent the model outside the messages, or nil when
+// it is text. Validation keeps the system prompt to a snapshot and the tools
+// to a snapshot or a deferred tools record.
+func sentAttachment(e *Event) map[string]any {
+	switch {
+	case e.Type == "deferred_tools_record" && len(e.Tools) > 0:
+		return deferredToolsRecord(e)
+	case e.SystemPrompt != "" || len(e.Tools) > 0:
+		return promptSnapshot(e)
+	}
+	return nil
+}
 
-// promptSnapshot is the attachment a runtime built on the Agent SDK writes
-// for what it sent the model outside the messages, in the shape measured:
-// the prompt as a list of strings, and each tool's schema under "schema",
-// where a provider request says "input_schema". A key the event has nothing
-// for is left out; the first snapshot measured had no tools key.
+// promptSnapshot is the attachment the runtime writes for what it sent the
+// model outside the messages, in the shape measured: the prompt as a list of
+// strings, and each tool's schema under "schema", where a provider request
+// says "input_schema". A key the event has nothing for is left out. The first
+// snapshot measured had no tools key.
 func promptSnapshot(e *Event) map[string]any {
 	att := map[string]any{"type": e.Type, "reminderFold": false}
+	if e.Text != "" {
+		att["text"] = e.Text
+	}
 	if e.SystemPrompt != "" {
 		att["systemPrompt"] = []string{e.SystemPrompt}
 	}
 	if len(e.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(e.Tools))
 		for _, t := range e.Tools {
-			schema := t.InputSchema
-			if schema == nil {
-				schema = map[string]any{"type": "object", "properties": map[string]any{}}
-			}
-			tools = append(tools, map[string]any{"name": t.Name, "description": t.Description, "schema": schema})
+			tools = append(tools, map[string]any{"name": t.Name, "description": t.Description, "schema": toolSchema(t)})
 		}
 		att["tools"] = tools
 	}
 	return att
+}
+
+// deferredToolsRecord is the attachment the runtime writes for the tools it
+// offers on demand rather than up front, in the shape measured: each entry
+// with its name, its description and its schema under "input_schema".
+func deferredToolsRecord(e *Event) map[string]any {
+	entries := make([]map[string]any, 0, len(e.Tools))
+	for _, t := range e.Tools {
+		entries = append(entries, map[string]any{"name": t.Name, "description": t.Description, "input_schema": toolSchema(t)})
+	}
+	return map[string]any{"type": e.Type, "entries": entries}
+}
+
+func toolSchema(t ToolDef) map[string]any {
+	if t.InputSchema == nil {
+		return map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+	return t.InputSchema
 }

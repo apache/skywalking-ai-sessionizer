@@ -15,19 +15,19 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# A runtime built on the Agent SDK writes what it sent the model outside the
-# messages into its transcript, as prompt_snapshot attachments: first the
-# system prompt, then the prompt with the tool schemas. Each is an injection
+# Claude Code, and a runtime built on the Agent SDK, write what they sent the
+# model outside the messages into the transcript, as prompt_snapshot
+# attachments: first the system prompt, then the prompt with the tool schemas. Each is an injection
 # step named by a flag for what it carries, so a reader that serves the
 # conversation to the people the agent served can withhold it by rule. Any
 # other injection carries neither flag.
 steps:
-  - input: is the service healthy
-  - inject: {type: prompt_snapshot, system_prompt: "You are an advisor. Investigate with the tools."}
+  - input: summarise what changed in the docs
+  - inject: {type: prompt_snapshot, system_prompt: "You are a helpful assistant. Use the tools when they help."}
   - inject: {type: todo_reminder, text: your todo list is empty}
   - inject:
       type: prompt_snapshot
-      system_prompt: "You are an advisor. Investigate with the tools."
+      system_prompt: "You are a helpful assistant. Use the tools when they help."
       tools:
         - {name: Read, description: Read a file.}
         - {name: Bash, description: Run a command.}

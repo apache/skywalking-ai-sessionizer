@@ -493,10 +493,10 @@ func TestAStreamReturnsToTheCallThatStartedIt(t *testing.T) {
 // answered.
 func TestAConversationHasAName(t *testing.T) {
 	for _, tc := range []struct{ kase, want string }{
-		{"three-turns", "Is prod-1 healthy?"},
-		{"subagent", "Is prod-1 healthy?"},
+		{"three-turns", "Is docs-1 served?"},
+		{"subagent", "Is docs-1 served?"},
 		// No messages at all: a decorated function, called with arguments.
-		{"traceable-only", "troubleshoot"},
+		{"traceable-only", "investigate"},
 	} {
 		t.Run(tc.kase, func(t *testing.T) {
 			zone, sessions := land(t, tc.kase)

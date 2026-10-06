@@ -20,5 +20,6 @@ runtime owns, and builds the conversation structure as a chain of immutable, ver
   version.
 
 We're always looking for help improving our documentation and codebase, so please don't hesitate to
-[file an issue](https://github.com/apache/skywalking-ai-sessionizer/issues/new) if you see any problem.
-Or better yet, submit your own contribution to help make it better.
+file an issue in the [SkyWalking issue tracker](https://github.com/apache/skywalking/issues), which
+the SkyWalking projects share, if you see any problem. Or better yet, submit your own contribution
+to help make it better.

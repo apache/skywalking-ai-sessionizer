@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,11 @@ func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
 	var out []*sessionflow.Ref
 	var walk func(*sessionflow.Node)
 	walk = func(x *sessionflow.Node) {
+		// A call carries no content, but its own record may carry what a
+		// reader withholds, and is read for that alone.
+		if x.Kind == model.KindLLMCall && x.Ref != nil {
+			out = append(out, x.Ref)
+		}
 		if carriesContent(x.Kind) {
 			if x.Ref != nil {
 				out = append(out, x.Ref)
@@ -74,8 +80,10 @@ func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
 	return out
 }
 
-// records reads many landed positions with one pass per file.
-func (c *Conversation) records(refs []*sessionflow.Ref) map[[2]uint64]*sessiondata.Record {
+// records reads many landed positions with one pass per file. A record
+// carrying any of the hide names is withheld as it is read.
+func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]uint64]*sessiondata.Record {
+	hidden := hiddenSet(hide)
 	want := map[uint64]map[uint64]bool{}
 	for _, r := range refs {
 		if r == nil {
@@ -108,6 +116,7 @@ func (c *Conversation) records(refs []*sessionflow.Ref) map[[2]uint64]*sessionda
 				break
 			}
 			if rows[i] {
+				withholdRecord(rec, hidden)
 				out[[2]uint64{seq, i}] = rec
 				left--
 			}
@@ -145,7 +154,7 @@ func withoutProviderBodies(raw json.RawMessage) json.RawMessage {
 }
 
 // step renders one node and everything under it.
-func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*sessiondata.Record) step {
+func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*sessiondata.Record, hidden map[string]bool) step {
 	out := step{
 		ID: n.ID, Kind: n.Kind, Parent: n.Parent, Stream: n.Stream,
 		At: Millis(c.Time(n)), Ref: n.Ref, Refs: n.Refs, Attrs: withoutProviderBodies(n.Attrs),
@@ -178,6 +187,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 			// What else the record says, copied once so a viewer never
 			// opens a landed file: its flags and what the conversion left out.
 			out.Flags, out.Dropped = rec.Flags, rec.Dropped
+			markWithheld(&out, rec, hidden)
 		}
 		// A tool use is one step carrying request and result. The request is
 		// refs[0]; anything after it is what came back.
@@ -189,6 +199,17 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 		}
 		c.fillRequestToResult(&out, n)
 	}
+	// A call shows no content of its own, so it takes only the flags a reader
+	// may withhold. A model call that never finished can land the request it
+	// was sent, and a reader withholding that is told so.
+	if n.Ref != nil && n.Kind == model.KindLLMCall {
+		if rec := recs[[2]uint64{n.Ref.Seq, n.Ref.Row}]; rec != nil {
+			if flags := slices.DeleteFunc(slices.Clone(rec.Flags), func(f string) bool { return !sessiondata.IsWithholdable(f) }); len(flags) > 0 {
+				out.Flags = flags
+			}
+			markWithheld(&out, rec, hidden)
+		}
+	}
 	// A call's token counts come from the one record usage_at names. Never
 	// from summing fragments: a main transcript stamps usage on every one.
 	if r := usageAt(n); r != nil {
@@ -198,7 +219,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 	}
 	if depth < 12 {
 		for _, k := range c.View.Children(n.ID) {
-			out.Children = append(out.Children, c.step(k, depth+1, recs))
+			out.Children = append(out.Children, c.step(k, depth+1, recs, hidden))
 		}
 	}
 	return out
@@ -422,15 +443,22 @@ func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64, hi
 		fail(w, err, http.StatusNotFound)
 		return
 	}
-	rec, err := c.record(seq, row)
+	rec, kind, err := c.record(seq, row)
 	if err != nil {
 		fail(w, err, http.StatusNotFound)
+		return
+	}
+	// A body record carries no flag, and a request holds both things a
+	// reader may withhold, so it is refused here as the files endpoint
+	// refuses its file.
+	if kind == sessiondata.KindProviderBody && len(hide) > 0 {
+		fail(w, errBodiesWithheld(hide), http.StatusForbidden)
 		return
 	}
 	// The record as landed, and nothing around it: the renderer prints it
 	// whole and reads its dropped list off the top. A record this reader
 	// withholds keeps its envelope and loses its content.
-	withholdRecord(rec, hide)
+	withholdRecord(rec, hiddenSet(hide))
 	writeJSON(w, rec)
 }
 
@@ -443,10 +471,10 @@ const maxFileSeqs = 32
 // budget a handful of oversize files would be a way to exhaust this process.
 const maxFileBytes = 64 << 20
 
-// apiFiles serves landed files whole, by sequence: how the Prompt tab gets the
-// provider bodies a call points at. A body is cut across the files up to the
-// one it names, so a reader asks for a run of them at once rather than one by
-// one.
+// apiFiles serves provider body files whole, by sequence: how the Prompt tab
+// gets the provider bodies a call points at. A body is cut across the files
+// up to the one it names, so a reader asks for a run of them at once rather
+// than one by one.
 //
 // The bytes travel as base64 in a JSON array, not framed by length the way the
 // OAP's route frames them. That route serves a browser it does not own and a
@@ -462,13 +490,15 @@ const maxFileBytes = 64 << 20
 // served no file at all, since a request carries the system prompt and the
 // tool schemas again, and a body is served whole or not at all.
 func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide []string) {
-	if len(hide) > 0 {
-		fail(w, fmt.Errorf("view: the provider bodies are withheld with %s: a request carries what is withheld, and a body is served whole or not at all", strings.Join(hide, " and ")), http.StatusForbidden)
-		return
-	}
+	// A conversation that does not exist is not found for every reader, as
+	// the document and the record endpoints answer, before any is refused.
 	c, err := s.Load(id)
 	if err != nil {
 		fail(w, err, http.StatusNotFound)
+		return
+	}
+	if len(hide) > 0 {
+		fail(w, errBodiesWithheld(hide), http.StatusForbidden)
 		return
 	}
 	// The renderer names the session it is reading for. This viewer serves one
@@ -505,20 +535,27 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 		if lerr != nil {
 			continue
 		}
-		body, rerr := os.ReadFile(path)
+		body, kind, rerr := readProviderBody(path)
+		if rerr == nil && kind != sessiondata.KindProviderBody {
+			fail(w, fmt.Errorf("view: sequence %d is a %s file. Only provider body files are served whole", seq, kind), http.StatusBadRequest)
+			return
+		}
 		if rerr != nil {
 			// A file that is gone is left out, as an unknown sequence is: the
-			// renderer says which it did not get. Anything else -- a permission
-			// or an I/O failure -- is this server's problem and is reported, so
-			// a reader can ask again rather than being told the file is absent.
+			// renderer says which it did not get. A file whose header does
+			// not read is not known to be a body, so it is refused like any
+			// other file that is not one, and asking again will not change
+			// that. Anything else, a permission or an I/O failure, is this
+			// server's problem and is reported, so a reader can ask again
+			// rather than being told the file is absent.
 			if os.IsNotExist(rerr) {
 				continue
 			}
+			if errors.Is(rerr, errNoHeader) {
+				fail(w, fmt.Errorf("view: sequence %d: %w. Only provider body files are served whole", seq, rerr), http.StatusBadRequest)
+				return
+			}
 			fail(w, rerr, http.StatusInternalServerError)
-			return
-		}
-		if kind := headerKind(body); kind != sessiondata.KindProviderBody {
-			fail(w, fmt.Errorf("view: sequence %d is a %s file; only provider body files are served whole", seq, kind), http.StatusBadRequest)
 			return
 		}
 		// A landed file may be large and the whole answer is held in memory to
@@ -538,35 +575,67 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 	writeJSON(w, out)
 }
 
-// record reads one landed record whole.
-//
-// Nothing is cached: a record is read when a reader asks to see it, which is
-// the only time its bytes are wanted. The landed file is found by its sequence,
-// which is unique across every stream in a session.
-func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, error) {
-	path, err := c.landedPath(seq)
-	if err != nil {
-		return nil, err
-	}
+// errNoHeader says a landed file's header does not read, so what kind of file
+// it is cannot be known.
+var errNoHeader = errors.New("the file's header does not read")
+
+// readProviderBody reads a landed file whole when its header says it is a
+// provider body, and only its header otherwise, with the kind the header
+// names. A header that does not read is errNoHeader, so a file whose kind is
+// not known is never served: the files endpoint serves provider bodies and
+// nothing else.
+func readProviderBody(path string) ([]byte, sessiondata.Kind, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer f.Close()
 	r, err := sessiondata.NewReader(f)
 	if err != nil {
-		return nil, err
+		return nil, "", fmt.Errorf("%w: %w", errNoHeader, err)
 	}
+	kind := r.Header().Kind
+	if kind != sessiondata.KindProviderBody {
+		return nil, kind, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, kind, err
+	}
+	body, err := io.ReadAll(f)
+	return body, kind, err
+}
+
+// record reads one landed record whole, with the kind of the file it landed
+// in.
+//
+// Nothing is cached: a record is read when a reader asks to see it, which is
+// the only time its bytes are wanted. The landed file is found by its sequence,
+// which is unique across every stream in a session.
+func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, sessiondata.Kind, error) {
+	path, err := c.landedPath(seq)
+	if err != nil {
+		return nil, "", err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	defer f.Close()
+	r, err := sessiondata.NewReader(f)
+	if err != nil {
+		return nil, "", err
+	}
+	kind := r.Header().Kind
 	for i := uint64(1); ; i++ {
 		rec, rerr := r.Next()
 		if errors.Is(rerr, io.EOF) {
-			return nil, fmt.Errorf("view: no row %d in sequence %d", row, seq)
+			return nil, "", fmt.Errorf("view: no row %d in sequence %d", row, seq)
 		}
 		if rerr != nil {
-			return nil, rerr
+			return nil, "", rerr
 		}
 		if i == row {
-			return rec, nil
+			return rec, kind, nil
 		}
 	}
 }

@@ -53,7 +53,7 @@ func TestAnotherRuntimeCanDriveThis(t *testing.T) {
 		payload, _ := json.Marshal(map[string]any{
 			"hook_event_name": name, "session_id": "ls-a-thread", "cwd": work,
 			"tool_name": tool, "tool_use_id": "call_write_report_5",
-			"tool_input": map[string]any{"cluster": "prod-1"},
+			"tool_input": map[string]any{"site": "docs-1"},
 		})
 		return string(payload)
 	}

@@ -72,9 +72,9 @@ func TestWhatTheDocumentationClaims(t *testing.T) {
 	// The numbers above are what the adapter page states. A measurement that
 	// only prints would pass through a change that doubled what lands, so
 	// the whole corpus is held to a bound well above what it measures today
-	// (17.8%) and well below what landing bodies whole would give.
+	// (17.9%) and well below what landing bodies whole would give.
 	if share := 100 * float64(totalLanded) / float64(totalArrived); share > 25 {
-		t.Errorf("the corpus lands at %.1f%% of the wire; the page says 17.8%%, and above 25%% the trade the page describes is no longer the one being made", share)
+		t.Errorf("the corpus lands at %.1f%% of the wire. The page says 17.9%%, and above 25%% the trade the page describes is no longer the one being made", share)
 	}
 }
 

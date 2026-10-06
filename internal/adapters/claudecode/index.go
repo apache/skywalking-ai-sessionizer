@@ -18,10 +18,12 @@
 package claudecode
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // indexRecord is the subset of a Claude Code record the index needs.
@@ -93,11 +95,6 @@ type indexRecord struct {
 		Type        string `json:"type"`
 		CommandMode string `json:"commandMode"`
 		Origin      origin `json:"origin"`
-		// SystemPrompt and Tools are on a prompt_snapshot: the system
-		// prompt the runtime sent, and the schemas of the tools it
-		// advertised. Kept raw, because only their presence is read.
-		SystemPrompt json.RawMessage `json:"systemPrompt"`
-		Tools        json.RawMessage `json:"tools"`
 	} `json:"attachment"`
 }
 
@@ -286,21 +283,6 @@ func flagsOf(d *indexRecord, tur *toolResult, hasTUR bool, src Source) index.Fla
 		} else {
 			f |= index.FlagInjection
 		}
-		// A prompt_snapshot is what a runtime built on the Agent SDK writes
-		// for what it sent the model outside the messages. It is named by
-		// the attachment's type and the keys it holds, never by its text or
-		// size, so a reader can withhold it by rule. Measured on 31
-		// conversations of such a runtime: 68 of these records, 34 with the
-		// prompt alone and 34 with the prompt and the tool schemas. The
-		// roster delta is a type of its own and carries neither.
-		if d.Attachment.Type == "prompt_snapshot" {
-			if nonEmptyList(d.Attachment.SystemPrompt) {
-				f |= index.FlagSystemPrompt
-			}
-			if nonEmptyList(d.Attachment.Tools) {
-				f |= index.FlagToolSchemas
-			}
-		}
 	}
 	if d.Type == "user" && (d.Origin.Kind == "human" || sdkPrompt(d)) && !d.IsMeta {
 		f |= index.FlagExternalInput
@@ -432,8 +414,109 @@ func between(s, openTag, closeTag string) string {
 	return strings.TrimSpace(rest[:j])
 }
 
-// nonEmptyList reports whether raw is a JSON list holding at least one value.
-func nonEmptyList(raw json.RawMessage) bool {
-	var items []json.RawMessage
-	return json.Unmarshal(raw, &items) == nil && len(items) > 0
+// sentFlags names what an attachment carries of what the runtime sent the
+// model outside the messages, for the landed record.
+//
+// Two attachment types carry it. A prompt_snapshot is the runtime's record of
+// the system prompt it sent, and of the tool schemas with it. A
+// deferred_tools_record lists the tools the runtime offers on demand rather
+// than up front, each with its name, its description and its input schema.
+// Each is named by its type and the keys it holds, never by its text or size,
+// so a reader can withhold it by rule.
+//
+// A snapshot is named system_prompt by its type alone. Every one measured
+// held the prompt, and one that moved it under another key would otherwise
+// land unnamed and be shown to everyone. It is named tool_schemas when a key
+// whose name says tool holds text, a list or an object with something in it,
+// as snapshotTools says, so a renamed tools key is still found. A deferred
+// tools record is named only when a key other than its type and
+// toolInputCopies holds a list or an object with something in it, as
+// deferredTools says, since most hold nothing there.
+//
+// Measured on two corpora, with the counts on the Claude Code page: every
+// snapshot held the prompt as a list under systemPrompt, often its first
+// line as a string under cliPrefix, and half of them the tools as a list
+// under tools. The rest of their keys were settings, each a flag or one
+// word. A deferred tools record held entries, most of them empty, beside
+// toolInputCopies. The tools delta held tool names only.
+//
+// The names go onto the record and nowhere else. Assembly has no use for
+// them, so they take no bit of the index.
+func sentFlags(d *indexRecord, payload []byte) []string {
+	if d.Type != "attachment" {
+		return nil
+	}
+	switch d.Attachment.Type {
+	case "prompt_snapshot":
+		if snapshotTools(payload) {
+			return []string{sessiondata.FlagSystemPrompt, sessiondata.FlagToolSchemas}
+		}
+		return []string{sessiondata.FlagSystemPrompt}
+	case "deferred_tools_record":
+		if deferredTools(payload) {
+			return []string{sessiondata.FlagToolSchemas}
+		}
+	}
+	return nil
+}
+
+// snapshotTools reports whether a prompt snapshot holds tools: a key whose
+// name says tool, in any case, holding text, a list or an object with
+// something in it. The key measured is tools, a list. A version that wrote
+// them as one string would otherwise land them unnamed. The settings whose
+// names say tool, inlineTools, echoWireToolInputs and toolChangeHeader as
+// measured, each hold a flag, so they do not count. A snapshot's line, and a
+// deferred tools record's, is read a second time for this and for
+// deferredTools: 736 and 10,209 of the 299,307 records in the history
+// measured.
+func snapshotTools(payload []byte) bool {
+	for key, raw := range attachmentKeys(payload) {
+		raw = bytes.TrimSpace(raw)
+		if strings.Contains(strings.ToLower(key), "tool") && len(raw) > 0 && (raw[0] == '[' || raw[0] == '{' || raw[0] == '"') &&
+			sessiondata.HoldsValue(raw) {
+			return true
+		}
+	}
+	return false
+}
+
+// deferredTools reports whether a deferred tools record holds tools: a key
+// other than its type and toolInputCopies holding a list or an object with
+// something in it. The key measured is entries. toolInputCopies holds short
+// pairs of an id and a copy, and no schema. A renamed entries is still
+// found. A setting a version added, a flag or one word, does not count,
+// since most of these records hold no tools and every one would otherwise
+// be named for them.
+func deferredTools(payload []byte) bool {
+	for key, raw := range attachmentKeys(payload) {
+		raw = bytes.TrimSpace(raw)
+		if key != "type" && key != "toolInputCopies" && len(raw) > 0 && (raw[0] == '[' || raw[0] == '{') &&
+			sessiondata.HoldsValue(raw) {
+			return true
+		}
+	}
+	return false
+}
+
+// attachmentKeys is an attachment's keys, each with its value as written.
+func attachmentKeys(payload []byte) map[string]json.RawMessage {
+	var rec struct {
+		Attachment map[string]json.RawMessage `json:"attachment"`
+	}
+	_ = json.Unmarshal(payload, &rec)
+	return rec.Attachment
+}
+
+// damagedFlags names a line that does not decode for everything the
+// attachment type its bytes name could carry. Its fields cannot be read, so
+// which it carries is not known, and a reader withholding either is kept from
+// bytes that may hold it rather than shown them.
+func damagedFlags(payload []byte) []string {
+	switch {
+	case bytes.Contains(payload, []byte(`"prompt_snapshot"`)):
+		return []string{sessiondata.FlagSystemPrompt, sessiondata.FlagToolSchemas}
+	case bytes.Contains(payload, []byte(`"deferred_tools_record"`)):
+		return []string{sessiondata.FlagToolSchemas}
+	}
+	return nil
 }

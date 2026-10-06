@@ -105,10 +105,25 @@ fetch("/assets/conversation-view/host-shell/themes.json").then(r => r.json()).th
   };
 }).catch(() => { themeSelect.parentElement.hidden = true; });
 
+// ---- what the address asks to withhold, passed to every call ----
+// The document, a record and the files are asked with the same hide, so the
+// Evidence tab never shows what the document withholds. This is not access
+// control: a reader can edit the address. A host that withholds per reader
+// adds hide to every API request it serves. Every key whose letters alone
+// spell hide, in any case, is passed on as it is spelled, the rule the server
+// reads keys by, so a misspelled one reaches the server, which refuses it,
+// rather than being dropped here and withholding nothing.
+const hidden = [...new URLSearchParams(location.search)].filter(([k]) => k.toLowerCase().replace(/\P{L}/gu, "") === "hide");
+const withHidden = q => { for (const [k, v] of hidden) q.append(k, v); return q; };
+const hideQuery = () => { const q = withHidden(new URLSearchParams()).toString(); return q ? "?" + q : ""; };
+// The links back to the list keep it too, so a reader moving between
+// conversations is shown the same on each.
+for (const a of document.querySelectorAll('a[href="/"]')) a.href = "/" + hideQuery();
+
 // ---- the document, with the download shown against its size ----
 const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + " MB";
 async function load() {
-  const r = await fetch(api + "/view");
+  const r = await fetch(api + "/view" + hideQuery());
   if (!r.ok) {
     let msg = r.status + " " + r.statusText;
     try { msg = (await r.json()).error || msg; } catch (e) {}
@@ -166,7 +181,7 @@ try {
     formatter: makeFormatter(navigator.language),
     glossary: gl,
     // The landed record behind a step, by address: only asz has the files.
-    loadRecord: ref => fetch(api + "/record/" + ref.seq + "/" + ref.row).then(res => {
+    loadRecord: ref => fetch(api + "/record/" + ref.seq + "/" + ref.row + hideQuery()).then(res => {
       if (!res.ok) throw new Error("record " + ref.seq + "/" + ref.row + ": " + res.status);
       return res.json();
     }),
@@ -174,7 +189,7 @@ try {
     // the Prompt tab is not offered at all, so the page beside the storage
     // root would show less than the SkyWalking UI does.
     loadFiles: (req, onFile) => {
-      const q = new URLSearchParams();
+      const q = withHidden(new URLSearchParams());
       q.set("session", req.session);
       for (const seq of req.seqs) q.append("seq", seq);
       return fetch(api + "/files?" + q, { signal: req.signal }).then(res => {
@@ -194,7 +209,7 @@ try {
     state: stateFromURL(),
     onStateChange: s => {
       if (same(s, stateFromURL())) return;
-      const q = new URLSearchParams();
+      const q = withHidden(new URLSearchParams());
       for (const k of ["talk", "step", "stream"]) if (s[k]) q.set(k, s[k]);
       history.replaceState(null, "", q.toString() ? "?" + q : location.pathname);
     },

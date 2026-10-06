@@ -1,61 +1,61 @@
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-308c-7382-80da-87fd5c3ebe18"
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d0b5-7282-a7f6-f9f20b45409a"
 Content-Type: application/json
-Content-Length: 345
+Content-Length: 344
 
-{"id":"01a0be6d-308c-7382-80da-87fd5c3ebe18","start_time":"2026-09-20T10:47:02.028681+00:00","tags":[],"dotted_order":"20260920T104702028681Z01a0be6d-308c-7382-80da-87fd5c3ebe18","trace_id":"01a0be6d-308c-7382-80da-87fd5c3ebe18","session_name":"asz-harness","name":"troubleshoot","run_type":"chain","end_time":"2026-09-20T10:47:02.046931+00:00"}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-308c-7382-80da-87fd5c3ebe18.inputs"
+{"id":"01a0fb7a-d0b5-7282-a7f6-f9f20b45409a","start_time":"2026-10-02T07:18:45.173398+00:00","tags":[],"dotted_order":"20261002T071845173398Z01a0fb7a-d0b5-7282-a7f6-f9f20b45409a","trace_id":"01a0fb7a-d0b5-7282-a7f6-f9f20b45409a","session_name":"asz-harness","name":"investigate","run_type":"chain","end_time":"2026-10-02T07:18:45.252937+00:00"}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d0b5-7282-a7f6-f9f20b45409a.inputs"
 Content-Type: application/json
 Content-Length: 28
 
-{"question":"is prod-1 ok?"}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-308c-7382-80da-87fd5c3ebe18.outputs"
+{"question":"is docs-1 ok?"}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d0b5-7282-a7f6-f9f20b45409a.outputs"
 Content-Type: application/json
-Content-Length: 46
+Content-Length: 44
 
-{"output":"answer: cluster prod-1: 3/3 ready"}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-308c-7382-80da-87fd5c3ebe18.events"
+{"output":"answer: site docs-1: 3/3 served"}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d0b5-7282-a7f6-f9f20b45409a.events"
 Content-Type: application/json
 Content-Length: 2
 
 []
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-308c-7382-80da-87fd5c3ebe18.extra"
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d0b5-7282-a7f6-f9f20b45409a.extra"
 Content-Type: application/json
-Content-Length: 458
+Content-Length: 463
 
-{"metadata":{"thread_id":"thread-traceable","ls_method":"traceable","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langsmith","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3"}}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-309e-7653-b443-f3a8131d0c75"
+{"metadata":{"thread_id":"thread-traceable","ls_method":"traceable","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"1202b73-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langsmith","platform":"macOS-26.6.2-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":"1.4.2","langchain_core_version":"1.6.3"}}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d103-7a31-b6fe-b086249971e9"
 Content-Type: application/json
 Content-Length: 459
 
-{"id":"01a0be6d-309e-7653-b443-f3a8131d0c75","start_time":"2026-09-20T10:47:02.046703+00:00","parent_run_id":"01a0be6d-308c-7382-80da-87fd5c3ebe18","tags":[],"dotted_order":"20260920T104702028681Z01a0be6d-308c-7382-80da-87fd5c3ebe18.20260920T104702046703Z01a0be6d-309e-7653-b443-f3a8131d0c75","trace_id":"01a0be6d-308c-7382-80da-87fd5c3ebe18","session_name":"asz-harness","name":"lookup_status","run_type":"tool","end_time":"2026-09-20T10:47:02.046871+00:00"}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-309e-7653-b443-f3a8131d0c75.inputs"
+{"id":"01a0fb7a-d103-7a31-b6fe-b086249971e9","start_time":"2026-10-02T07:18:45.251819+00:00","parent_run_id":"01a0fb7a-d0b5-7282-a7f6-f9f20b45409a","tags":[],"dotted_order":"20261002T071845173398Z01a0fb7a-d0b5-7282-a7f6-f9f20b45409a.20261002T071845251819Z01a0fb7a-d103-7a31-b6fe-b086249971e9","trace_id":"01a0fb7a-d0b5-7282-a7f6-f9f20b45409a","session_name":"asz-harness","name":"lookup_status","run_type":"tool","end_time":"2026-10-02T07:18:45.252785+00:00"}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d103-7a31-b6fe-b086249971e9.inputs"
 Content-Type: application/json
-Content-Length: 20
+Content-Length: 17
 
-{"cluster":"prod-1"}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-309e-7653-b443-f3a8131d0c75.outputs"
+{"site":"docs-1"}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d103-7a31-b6fe-b086249971e9.outputs"
 Content-Type: application/json
-Content-Length: 38
+Content-Length: 36
 
-{"output":"cluster prod-1: 3/3 ready"}
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-309e-7653-b443-f3a8131d0c75.events"
+{"output":"site docs-1: 3/3 served"}
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d103-7a31-b6fe-b086249971e9.events"
 Content-Type: application/json
 Content-Length: 2
 
 []
---bbe7dd8734464cad9e7642ae7e3d46e3
-Content-Disposition: form-data; name="post.01a0be6d-309e-7653-b443-f3a8131d0c75.extra"
+--8bcdb7119aaf45ef95f66d6f0ce45403
+Content-Disposition: form-data; name="post.01a0fb7a-d103-7a31-b6fe-b086249971e9.extra"
 Content-Type: application/json
-Content-Length: 458
+Content-Length: 463
 
-{"metadata":{"thread_id":"thread-traceable","ls_method":"traceable","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"02a1ff1-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langsmith","platform":"macOS-27.0-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":null,"langchain_core_version":"1.6.3"}}
---bbe7dd8734464cad9e7642ae7e3d46e3--
+{"metadata":{"thread_id":"thread-traceable","ls_method":"traceable","LANGSMITH_TRACING":"true","LANGSMITH_ENDPOINT":"http://127.0.0.1:8930","LANGSMITH_PROJECT":"asz-harness","revision_id":"1202b73-dirty"},"runtime":{"sdk":"langsmith-py","sdk_version":"0.13.0","library":"langsmith","platform":"macOS-26.6.2-arm64-arm-64bit","runtime":"python","py_implementation":"CPython","runtime_version":"3.12.13","langchain_version":"1.4.2","langchain_core_version":"1.6.3"}}
+--8bcdb7119aaf45ef95f66d6f0ce45403--

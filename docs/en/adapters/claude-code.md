@@ -5,7 +5,8 @@ Claude Code. Every mapping below is stated with the evidence that supports it an
 cannot be supplied, said to be unavailable rather than approximated.
 
 **Verified against** Claude Code 2.1.220 – 2.1.251. No earlier version was available for measurement,
-so nothing here is confirmed below 2.1.220.
+so nothing here is confirmed below 2.1.220. The attachments that carry what the runtime sent the
+model were measured on 2.1.259 – 2.1.286, as [Step mapping](#step-mapping) says.
 
 **Measured on** one development machine's Claude Code history. It was live and grew while it was
 measured: about 2,920 files and 1.2 GB in the first pass, 2,970 files, 1.09 GB and 365,825 records
@@ -318,20 +319,52 @@ appear nowhere in the corpus. The first pass counted about 21,000 attachment rec
 `user` record with `isMeta:true` is text the harness wrote in the user role, so it is injected
 context too, not something a person said.
 
-**A prompt snapshot is named for what it carries.** A runtime built on the Claude Agent SDK writes
-what it sent the model outside the messages into the transcript, as a `prompt_snapshot` attachment:
-`systemPrompt`, the system prompt as a list of strings, and `tools`, each tool's `name`,
-`description` and `schema`. Such a record lands with the `system_prompt` flag when `systemPrompt`
-holds a value and the `tool_schemas` flag when `tools` does, beside `injected`. The type and the
-keys decide, never the text or the size. Measured on 31 conversations of one such runtime: 68
-snapshots among 589 injection steps, 34 with the prompt alone and 34 with the prompt and the tool
-schemas. In 27 of the 31, exactly two, one of each; three held four or six in the same ratio, and
-one held none. The roster delta, `agent_listing_delta`, is a type of its own and carries neither.
-The command-line corpus measured on this page held no `"tools":[`, so no snapshot with schemas;
-whether the command line writes one with the prompt alone is `unavailable`, because that corpus was
-searched for `"tools":[` only. The flags exist so a reader that serves a conversation to the people
-an agent served can withhold these steps by rule; [Session Data](../formats/session-data.md#flags)
-lists every flag.
+**What the runtime sent the model is named.** In Claude Code 2.1.259 to 2.1.286, the versions
+measured, and in a runtime built on the Claude Agent SDK, the transcript holds what the runtime sent
+the model outside the messages, in two attachment types. A `prompt_snapshot` holds `systemPrompt`,
+the system prompt as a list of strings, often `cliPrefix`, its first line, and sometimes `tools`,
+each tool's `name`, `description` and `schema`. A `deferred_tools_record` lists in `entries` the
+tools the runtime offers on demand rather than up front, each with its `name`, `description` and
+`input_schema`.
+
+Beside `injected`, a snapshot lands with the `system_prompt` flag, and with `tool_schemas` when a
+key whose name says tool, `tools` as measured, holds text, a list or an object with something in
+it. The settings whose names say tool each hold a flag, so they do not count. A deferred tools
+record lands with `tool_schemas` when a key other than its `type` and `toolInputCopies` holds a
+list or an object with something in it, `entries` as measured. The type and the keys decide, never
+the text or the size. A snapshot is named for the prompt by its type alone, because every one
+measured held the prompt. A version that moved it under another key would otherwise land unnamed
+and be shown to everyone. The flags go onto the landed record only. Assembly has no use for them,
+so they take no bit of the index.
+
+Measured on two corpora. One machine's Claude Code history, from the VS Code extension, copied once
+on 2026-10-01, holds 44 sessions. It held 736 snapshots in 42 of them, from 2.1.259 to 2.1.286.
+Every one held `systemPrompt` as a list, 369 held `tools` as a list, and 287 held `cliPrefix` as a
+string. Their other keys are settings, each a flag or one word. The same history held 10,209
+deferred tools records, 244 of them with entries, 667 tools in all, in 30 sessions. The tools delta,
+`deferred_tools_delta`, held tool names only: 9,989 of the 9,989 entries in its `addedLines` were a
+bare tool name. The history's records before 2.1.259, 56,505 of them from 2.1.220 to 2.1.252, held
+no snapshot. Whether 2.1.253 to 2.1.258 write these attachments is `unavailable`, because the
+history held no records from them. On 31 conversations of a runtime built on the Agent SDK there
+were 68 snapshots among 589 injection steps, 34 with the prompt alone and 34 with the tool schemas
+too. `cliPrefix` was on the 34 with schemas, always beside `systemPrompt`. In 27 of the 31
+conversations there were exactly two snapshots, one of each kind. Three held four or six in the same
+ratio, and one held none. The roster delta, `agent_listing_delta`, is a type of its own and carries
+neither. Whether the command line writes these from 2.1.259 is `unavailable`, because the history
+measured came from the VS Code extension alone.
+
+A line that does not decode as JSON lands whole in one unknown part, as every such line does. Its
+fields cannot be read, so when its bytes hold the quoted name of either type, it is named for
+everything that type could carry: a snapshot for both flags, a deferred tools record for
+`tool_schemas`. A damaged line of another type whose bytes quote that name, such as a tool's input,
+is named too. A reader withholding a name it carries is kept from it. No snapshot measured carried
+prose in `text` or `content`. A snapshot that did would land as that text. It would still never name
+a talk, because a step that carries what a reader may withhold is what the runtime sent the model,
+not what the work is. Read with both names withheld, 8 of the 44 documents held phrases of a named
+record: in three a tool's result, a validation error or a command's output, and in six a reminder a
+subagent's first message carried. Neither is named. The flags exist so an operator who serves a
+conversation to the people an agent served can withhold these steps by rule.
+[Session Data](../formats/session-data.md#flags) lists every flag.
 
 **One attachment is a person's input.** A `queued_command` with `commandMode:"prompt"` is a message
 typed while the agent was working. It becomes `message.external`, and any other mode stays
@@ -823,7 +856,7 @@ fed one turn at a time:
 | | Why |
 | --- | --- |
 | **Reasoning text** | Claude Code asks the provider not to return it, so most thinking blocks carry only a signature. `unavailable` where the runtime wrote none. See below. |
-| **Serialized request** | system prompt, tool schemas and cache annotations are absent from transcripts: 0 files contain `"tools":[`, and `compactMetadata.preservedMessages.allUuids` names 5 ids that exist nowhere on disk. asz produces no input manifest and no `input_of` relation, and reports model-context coverage as `unavailable`, as the model's [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) requires. Claude Code writes each request and response itself when told to, and the `claude-code-provider` adapter lands them beside the transcripts, joined to their calls in the view; see [Provider bodies](#provider-bodies). The fold is unchanged by them. A runtime built on the Agent SDK writes both into the transcript as a `prompt_snapshot` attachment, landed with a flag for each; see [Step mapping](#step-mapping). |
+| **Serialized request** | in the corpus this page was measured on, 2.1.220 – 2.1.251, the system prompt, tool schemas and cache annotations are absent from transcripts: 0 files contain `"tools":[`, and `compactMetadata.preservedMessages.allUuids` names 5 ids that exist nowhere on disk. asz produces no input manifest and no `input_of` relation, and reports model-context coverage as `unavailable`, as the model's [adapter contract](../concepts-and-designs/unified-conversation-model.md#adapter-contract) requires. Claude Code writes each request and response itself when told to, and the `claude-code-provider` adapter lands them beside the transcripts, joined to their calls in the view; see [Provider bodies](#provider-bodies). The fold is unchanged by them. In 2.1.259 to 2.1.286, the versions measured, and in a runtime built on the Agent SDK, the transcript holds the system prompt and the tool schemas in `prompt_snapshot` and `deferred_tools_record` attachments, landed with a flag for each, and still no serialized request. See [Step mapping](#step-mapping). |
 | **Injected preamble** | the instruction block prepended to the first user message has no transcript record. Its *data* survives as `attachment` records; its rendered form does not. |
 | **Per-call duration and cost** | not written to transcripts. Available via OTLP. |
 | **`tool.execution`** | no local record; the call and result are observable, the execution is not. |
