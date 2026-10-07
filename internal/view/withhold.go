@@ -146,15 +146,16 @@ func withhold(v *sessionview.Conversation, counts map[string]int) {
 
 // markWithheld applies the rule to one step read from a withheld record: no
 // text, the state omitted, and a size. A step that names one part already has
-// that part's size. One that names no single part of a record with several
-// has none of its own, and takes the size of all the parts, so a withheld
-// step never says it withheld nothing.
-func markWithheld(s *step, rec *sessiondata.Record, hidden map[string]bool) {
+// that part's size, a zero kept as zero. One that names no single part of a
+// record with several has none of its own, and takes the size of all the
+// parts, so a withheld step never says it withheld nothing. noPart says which
+// the step is.
+func markWithheld(s *step, rec *sessiondata.Record, hidden map[string]bool, noPart bool) {
 	if !carriesAny(rec.Flags, hidden) {
 		return
 	}
 	s.Text, s.State = "", model.ContentOmitted
-	if s.Bytes == 0 {
+	if noPart && s.Bytes == 0 {
 		for _, p := range rec.Parts {
 			s.Bytes += p.Bytes
 		}

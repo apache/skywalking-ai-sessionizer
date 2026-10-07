@@ -187,7 +187,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 			// What else the record says, copied once so a viewer never
 			// opens a landed file: its flags and what the conversion left out.
 			out.Flags, out.Dropped = rec.Flags, rec.Dropped
-			markWithheld(&out, rec, hidden)
+			markWithheld(&out, rec, hidden, partOf(rec, n.Ref.Block) == nil)
 		}
 		// A tool use is one step carrying request and result. The request is
 		// refs[0]; anything after it is what came back.
@@ -207,7 +207,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 			if flags := slices.DeleteFunc(slices.Clone(rec.Flags), func(f string) bool { return !sessiondata.IsWithholdable(f) }); len(flags) > 0 {
 				out.Flags = flags
 			}
-			markWithheld(&out, rec, hidden)
+			markWithheld(&out, rec, hidden, true)
 		}
 	}
 	// A call's token counts come from the one record usage_at names. Never
@@ -242,12 +242,7 @@ func usageAt(n *sessionflow.Node) *sessionflow.Ref {
 
 // fill takes a step's readable content from the record it points at.
 func fill(s *step, rec *sessiondata.Record, block *int) {
-	var p *sessiondata.Part
-	if block != nil && *block < len(rec.Parts) {
-		p = &rec.Parts[*block]
-	} else if len(rec.Parts) == 1 {
-		p = &rec.Parts[0]
-	}
+	p := partOf(rec, block)
 	if p == nil {
 		s.Text = clip(readable(rec))
 		return
@@ -295,6 +290,18 @@ func (c *Conversation) fillRequestToResult(out *step, n *sessionflow.Node) {
 	}
 	out.RequestToResultMS = durationMillis(to - from)
 	out.RequestToResultBy = a.Join
+}
+
+// partOf is the one part a step reads: the part its reference names, or
+// the only part when it names none; nil when it names none of several.
+func partOf(rec *sessiondata.Record, block *int) *sessiondata.Part {
+	if block != nil && *block < len(rec.Parts) {
+		return &rec.Parts[*block]
+	}
+	if len(rec.Parts) == 1 {
+		return &rec.Parts[0]
+	}
+	return nil
 }
 
 // fillResult takes what a tool sent back from the record it points at.

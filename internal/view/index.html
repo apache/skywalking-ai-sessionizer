@@ -183,6 +183,12 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
 // and back, so every page they move between withholds the same. It is not
 // access control: a host that withholds per reader adds hide to every request.
 // A key spelled another way goes too, so the server refuses it.
+// A `;` in the address is not a separator the API accepts, and a hide written
+// after one would be read as part of another value and dropped here, so the page
+// would ask for the whole conversation. The API refuses such a query, and so does
+// the page, before it asks for anything.
+const unparsed = location.search.includes(";") ? "The address does not parse: ';' is not a separator. Write the parameters with '&'." : "";
+if (unparsed) { document.body.innerHTML = '<div class="empty"></div>'; document.body.firstChild.textContent = unparsed; throw new Error(unparsed); }
 const hidden = [...new URLSearchParams(location.search)].filter(([k]) => k.toLowerCase().replace(/\P{L}/gu, "") === "hide");
 const hideQuery = () => { const q = new URLSearchParams(); for (const [k, v] of hidden) q.append(k, v); return q.toString() ? "?" + q : ""; };
 for (const a of document.querySelectorAll('a[href="/"]')) a.href = "/" + hideQuery();

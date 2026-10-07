@@ -265,7 +265,8 @@ size of a part. asz knows nothing about who is reading. `asz view` withholds wha
 [configuration](../setup/configuration.md#view) says for every reader, and a `hide` parameter on
 `/api/c/{id}/view`, `/api/c/{id}/record/{seq}/{row}` and `/api/c/{id}/files` adds names for one
 request and never takes one away: `?hide=system_prompt,tool_schemas`, or the parameter given more
-than once. A name that is not a flag a reader may withhold is refused with status 400. So is any
+than once. Spaces around a name and empty entries are ignored, and a repeated name counts once. A
+name that is not a flag a reader may withhold is refused with status 400. So is any
 other key whose letters alone spell `hide`, in any case, such as `Hide`, `hide[]` or `hide[0]`, and
 a query that does not parse, since either would otherwise read as no `hide` at all. A host that
 serves the API through its own route decides per reader, and adds the parameter to every request it
@@ -307,11 +308,13 @@ follows the rules: a step's text, a tool's result, and a talk's label and reply.
   record's, so a step whose `flags` hold a withheld name is one whose own `text` is withheld.
 - An injection that carries a flag a reader may withhold names no talk, in any document, withheld or
   not. It is what the runtime sent the model, not what the work is. So a talk with no input of its
-  own never takes its text as `label`. A record that carries such a flag names no stream either. A
-  person's input names its talk whatever it carries, and a reader who withholds what it carries sees
-  no label.
+  own never takes its text as `label`. A run journal's record that carries such a flag names no
+  stream either; a stream's own label, which the assembler reads from the runtime's description of
+  the work, is not read from such a record. A person's input names its talk whatever it carries,
+  and a reader who withholds what it carries sees no label.
 - `summary.withheld` counts what was withheld by name: the records in the session's landed files
-  carrying each withheld flag, and under `provider_bodies` the session's landed bodies. A record is
+  carrying each withheld flag, as the view last loaded the conversation, which it does again at each
+  new round, and under `provider_bodies` the session's landed bodies. A record is
   counted whether or not a step is drawn for it, since the record endpoint withholds it either way.
   It is counted once by its id, so a record the runtime wrote again, such as one it replays before a
   reset, counts once, as the conversation holds it once. A record with no id counts by its position.
