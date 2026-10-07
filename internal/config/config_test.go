@@ -385,6 +385,7 @@ func TestKeysOutsideViewAreReadAsBefore(t *testing.T) {
 		{"a key the configuration does not have", "version: 1\nstorage: {root: /a}\n", func(c *Config) bool { return c.Storage.Root == "/a" }},
 		{"a section spelled in capitals", "Storage:\n  root: /elsewhere\n", func(c *Config) bool { return c.Storage.Root == Default().Storage.Root }},
 		{"a section merged from an anchor", "base: &b\n  root: /b\nstorage:\n  <<: *b\n", func(c *Config) bool { return c.Storage.Root == "/b" }},
+		{"an anchor holding itself", "junk: &j [*j]\n", nil},
 		{"headers named for hide", "export:\n  otlp:\n    headers:\n      hide: \"yes\"\n      x-hide-token: abc\n",
 			func(c *Config) bool {
 				return c.Export.OTLP.Headers["hide"] == "yes" && c.Export.OTLP.Headers["x-hide-token"] == "abc"

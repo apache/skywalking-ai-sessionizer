@@ -161,10 +161,10 @@ type Summary struct {
 	RelationTypes map[string]int `json:"relation_types"`
 	Quality       map[string]int `json:"quality"`
 
-	// Withheld counts what this document withholds, by name: every record in
-	// the session's landed files carrying each withheld flag, whether or not
-	// a step is drawn for it, each once however many steps stand on it, and
-	// under provider_bodies the session's landed bodies, which are served
+	// Withheld counts what this document withholds, by name: the records in
+	// the session's landed files carrying each withheld flag, once per record
+	// id, whether or not a step is drawn for one, and under provider_bodies
+	// the session's landed bodies, which are served
 	// to no reader of a document that withholds anything, since a request
 	// carries the system prompt and the tool schemas again. Every name asked
 	// for is listed, a zero included, so a filter that matched nothing still

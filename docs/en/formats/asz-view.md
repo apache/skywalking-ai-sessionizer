@@ -310,15 +310,15 @@ follows the rules: a step's text, a tool's result, and a talk's label and reply.
   own never takes its text as `label`. A record that carries such a flag names no stream either. A
   person's input names its talk whatever it carries, and a reader who withholds what it carries sees
   no label.
-- `summary.withheld` counts what was withheld by name: every record in the session's landed files
+- `summary.withheld` counts what was withheld by name: the records in the session's landed files
   carrying each withheld flag, and under `provider_bodies` the session's landed bodies. A record is
-  counted whether or not a step is drawn for it, since the record endpoint withholds it either way:
-  a run's own record, which no step stands on, counts like a step's. A record that two steps stand
-  on, such as a call and the error its failure became, counts once. Every name asked for is listed,
-  a zero included, so a filter that matched nothing still shows that it ran. That is the case on a
-  root landed before the adapter set these flags: its records carry none, and it has to be collected
-  again into a new root to be withheld. `withheld` is `{}` only when nothing was asked to be
-  withheld.
+  counted whether or not a step is drawn for it, since the record endpoint withholds it either way.
+  It is counted once by its id, so a record the runtime wrote again, such as one it replays before a
+  reset, counts once, as the conversation holds it once. A record with no id counts by its position.
+  Every name asked for is listed, a zero included, so a filter that matched nothing still shows that
+  it ran. That is the case on a root landed before the adapter set these flags: its records carry
+  none, and it has to be collected again into a new root to be withheld. `withheld` is `{}` only
+  when nothing was asked to be withheld.
 - No call lists a `provider_bodies` entry, `summary.captured_prompts` is `0`, and the files endpoint
   answers 403. A request carries the system prompt and the tool schemas again, and a body rebuilds
   to its digest or not at all, so a body is served whole or not at all. The response goes with the

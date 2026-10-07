@@ -100,9 +100,10 @@ type Conversation struct {
 	// inside one lane.
 	lanes map[uint64]string
 	// named counts the session's landed records by each flag a reader may
-	// withhold, read in the same pass as at. It is what summary.withheld
-	// reports: every landed record carrying the name, whether or not a step
-	// is drawn for it, which is what the record endpoint withholds.
+	// withhold, read in the same pass as at, once per record id. It is what
+	// summary.withheld reports: every record carrying the name, whether or
+	// not a step is drawn for it, which is what the record endpoint
+	// withholds.
 	named map[string]int
 	// from and to index relations by the node they touch, so an inspector does
 	// not scan every edge for every step.
@@ -358,6 +359,13 @@ func durationMillis(ns int64) int64 {
 // files, keyed by landed position, lanes with the lane of every file, and
 // named with how many records carry each flag a reader may withhold.
 //
+// A record is counted once by its id. The runtime writes some records again
+// under the same id, such as the ones it replays before a reset, and the
+// conversation holds each once. Counted by position, one replayed snapshot
+// was two withheld records, and on 45 Claude Code sessions 181 copies were
+// counted that no step stands on. A record with no id counts by its
+// position.
+//
 // Each record is decoded, so the times and the counts end where the reader
 // stops: at a line that does not decode, as Session Data defines it, no
 // record after it has a time. A file that fails to read contributes no times
@@ -369,6 +377,11 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 	if err != nil {
 		return err
 	}
+	type counted struct {
+		flag, id string
+		seq, row uint64
+	}
+	seen := map[counted]bool{}
 	for _, lf := range files {
 		switch {
 		case lf.Stream != "":
@@ -394,7 +407,15 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 				at[[2]uint64{lf.Seq, row}] = t.UnixNano()
 			}
 			for _, flag := range rec.Flags {
-				if sessiondata.IsWithholdable(flag) {
+				if !sessiondata.IsWithholdable(flag) {
+					continue
+				}
+				k := counted{flag: flag, id: rec.ID}
+				if rec.ID == "" {
+					k.seq, k.row = lf.Seq, row
+				}
+				if !seen[k] {
+					seen[k] = true
 					named[flag]++
 				}
 			}

@@ -204,12 +204,12 @@ func TestAWithheldStepKeepsItsSize(t *testing.T) {
 	}
 }
 
-// A name counts what the load counted over the landed files, whether or not
-// a step is drawn for the record; the LangChain tests check that on records
-// no step stands on, and on a call and the error it became, which share one
-// record and count once. Here: a name nothing carries counts zero, a flag not
-// asked for is not listed, and the provider bodies are counted beside the
-// names.
+// A name counts what the load counted over the landed files. The scenario
+// prompt-snapshot-withheld checks that a replayed record counts once, and
+// the LangChain tests check records no step stands on, and a call and the
+// error it became, which share one record. Here: a name nothing carries
+// counts zero, a flag not asked for is not listed, and the provider bodies
+// are counted beside the names.
 func TestWithheldRecordsAreCounted(t *testing.T) {
 	named := map[string]int{sessiondata.FlagSystemPrompt: 2, "injected": 5}
 	got := withheldCounts(named, []string{sessiondata.FlagSystemPrompt, sessiondata.FlagToolSchemas})

@@ -107,12 +107,12 @@ func withheldNames(names []string) []string {
 	return slices.Compact(out)
 }
 
-// withheldCounts is what a document withholds by name: every landed record of
-// the session carrying the name, as the load counted them, whether or not a
-// step is drawn for it. Counting only the records a build read missed a run's
-// own record, which no step stands on and which the record endpoint withholds
-// all the same: on a prompt run under a decorated function, the document said
-// 0 where 2 records were withheld.
+// withheldCounts is what a document withholds by name: the session's records
+// carrying the name, as the load counted them, whether or not a step is drawn
+// for one. Counting only the records a build read missed a record no step
+// stands on, which the record endpoint withholds all the same: in a LangChain
+// trace whose prompt a decorated function builds, the document said 0 where 2
+// records were withheld.
 //
 // Every withheld name is counted, a zero included. A root landed before the
 // adapter set these flags carries none, so withholding there finds nothing. A
