@@ -210,7 +210,8 @@ held neither on the corpus, but a client that put them inside it would land them
 whose root is the model call itself, with no message list in its inputs, such as a completion asked
 with a list of prompts, lands those inputs whole as its first input. All 46 trace roots of the
 corpus are chain runs, so none landed this way. Each record is named `system_prompt` when it holds
-inputs of any shape, since they are the request the model was sent. It is named `tool_schemas` when
+inputs of any shape, since they are the request the model was sent, and the envelope also when its
+`extra` holds a prompt by shape, under a key a provider takes it by. It is named `tool_schemas` when
 tools or functions are offered in `extra.invocation_params` or at the top of the inputs, or as tools
 deeper in either, in a configuration of the client's own such as Bedrock's `toolConfig` or Gemini's
 `config`. Whether a value is there decides, not its shape, because a client may send a message list,

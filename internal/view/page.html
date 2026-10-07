@@ -113,16 +113,24 @@ fetch("/assets/conversation-view/host-shell/themes.json").then(r => r.json()).th
 // spell hide, in any case, is passed on as it is spelled, the rule the server
 // reads keys by, so a misspelled one reaches the server, which refuses it,
 // rather than being dropped here and withholding nothing.
+// A `;` in the address is not a separator the API accepts, and a hide written
+// after one would be read as part of another value and dropped here, so the page
+// would ask for the whole conversation. The API refuses such a query, and so does
+// the page, before it asks for anything.
+const unparsed = location.search.includes(";") ? "The address does not parse: ';' is not a separator. Write the parameters with '&'." : "";
 const hidden = [...new URLSearchParams(location.search)].filter(([k]) => k.toLowerCase().replace(/\P{L}/gu, "") === "hide");
 const withHidden = q => { for (const [k, v] of hidden) q.append(k, v); return q; };
-const hideQuery = () => { const q = withHidden(new URLSearchParams()).toString(); return q ? "?" + q : ""; };
+const hideQuery = () => { if (unparsed) return location.search; const q = withHidden(new URLSearchParams()).toString(); return q ? "?" + q : ""; };
 // The links back to the list keep it too, so a reader moving between
-// conversations is shown the same on each.
+// conversations is shown the same on each. An address that does not parse
+// goes with them as it is, so the list page refuses it the same way rather
+// than offering conversations without the hide it meant to carry.
 for (const a of document.querySelectorAll('a[href="/"]')) a.href = "/" + hideQuery();
 
 // ---- the document, with the download shown against its size ----
 const mb = n => (n / 1048576).toFixed(n < 10485760 ? 1 : 0) + " MB";
 async function load() {
+  if (unparsed) throw new Error(unparsed);
   const r = await fetch(api + "/view" + hideQuery());
   if (!r.ok) {
     let msg = r.status + " " + r.statusText;

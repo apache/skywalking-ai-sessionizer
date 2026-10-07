@@ -191,14 +191,21 @@ func TestAWithheldStepKeepsItsSize(t *testing.T) {
 	rec := &sessiondata.Record{Flags: []string{"injected", sessiondata.FlagSystemPrompt},
 		Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Bytes: 25}, {Kind: sessiondata.PartData, Bytes: 15}}}
 	one := step{Text: "a prompt", Bytes: 8}
-	markWithheld(&one, rec, hidden)
+	markWithheld(&one, rec, hidden, false)
 	several := step{Text: "a prompt and more"}
-	markWithheld(&several, rec, hidden)
+	markWithheld(&several, rec, hidden, true)
 	if one.Bytes != 8 || several.Bytes != 40 || one.Text != "" || several.Text != "" || several.State != "omitted" {
 		t.Fatalf("sizes after withholding: %+v %+v", one, several)
 	}
+	// a step that names an empty part keeps its zero: only one that names
+	// no single part takes the size of all of them
+	empty := step{Text: ""}
+	markWithheld(&empty, rec, hidden, false)
+	if empty.Bytes != 0 || empty.State != "omitted" {
+		t.Fatalf("an empty part after withholding: %+v", empty)
+	}
 	other := step{Text: "kept", Bytes: 4}
-	markWithheld(&other, &sessiondata.Record{Flags: []string{"injected"}}, hidden)
+	markWithheld(&other, &sessiondata.Record{Flags: []string{"injected"}}, hidden, true)
 	if other.Text != "kept" || other.State != "" {
 		t.Fatalf("a step carrying no withheld flag changed: %+v", other)
 	}

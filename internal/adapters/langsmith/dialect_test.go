@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -223,6 +224,7 @@ func TestAnUnfinishedCallIsNamedForTheRequestItCarries(t *testing.T) {
 		{"tools in Bedrock's configuration among the parameters", `{` + run + `,"extra":{"invocation_params":{"toolConfig":{"tools":[{"toolSpec":{"name":"read"}}]}}}}`, false, true},
 		{"tools among a client's options", `{` + run + `,"extra":{"options":{"tools":[{"name":"read"}]}}}`, false, true},
 		{"empty inputs and no tools offered", `{` + run + `,"inputs":{},"extra":{"invocation_params":{"tools":[]}}}`, false, false},
+		{"a prompt among the parameters, the inputs out of band", `{` + run + `,"extra":{"invocation_params":{"system":"You are a helpful assistant."}}}`, true, false},
 	} {
 		flags := flagsOf(tc.envelope)
 		if got := slices.Contains(flags, sessiondata.FlagSystemPrompt); got != tc.prompt {
@@ -349,6 +351,10 @@ func TestADecoratedFunctionIsNamedForWhatItHolds(t *testing.T) {
 		{"an event of the application's own", false, `{"events":[{"type":"system","message":"Alice joined"}]}`, false, false},
 		{"a root function handed a system message with nothing in it", true, `{"prompt":[{"type":"system","content":""}],"question":"hi"}`, false, false},
 		{"one pair alone in a message list", false, `{"messages":[["developer","You are a helpful assistant."]]}`, true, false},
+		// the person's message is lifted into the first input, and its content, an object of the application's
+		// own, takes a request's shape: the first input itself is named, not only the function's record
+		{"a root function handed a message whose content takes a request's shape", true, `{"messages":[{"role":"user","content":{"system":"You are a helpful assistant."}}]}`, true, false},
+		{"a root function handed a message whose content holds a pair of a role and its content", true, `{"messages":[{"role":"user","content":[["system","You are a helpful assistant."]]}]}`, true, false},
 	} {
 		parent := `,"parent_run_id":"p1"`
 		if tc.root {
@@ -359,8 +365,15 @@ func TestADecoratedFunctionIsNamedForWhatItHolds(t *testing.T) {
 		if err != nil || len(records) == 0 {
 			t.Fatalf("%s: %v %v", tc.name, records, err)
 		}
+		// A root run lands its first input as a record of its own, beside the function's. The flags checked are
+		// that record's where there is one, so the naming of the first input is proven on its own, and the
+		// function's record cannot stand in for it.
 		var flags []string
 		for _, r := range records {
+			if strings.HasSuffix(r.ID, ":input") {
+				flags = r.Flags
+				break
+			}
 			flags = append(flags, r.Flags...)
 		}
 		if got := slices.Contains(flags, sessiondata.FlagSystemPrompt); got != tc.prompt {

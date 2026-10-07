@@ -311,8 +311,18 @@ func humanInput(base sessiondata.Record, d decoded) (sessiondata.Record, bool) {
 			first--
 		}
 		var parts []sessiondata.Part
+		var shaped []string
 		for _, m := range list[first:] {
-			parts = append(parts, contentParts(rawField(m, "content"))...)
+			content := rawField(m, "content")
+			parts = append(parts, contentParts(content)...)
+			// What is lifted is the person's own words, but a message's
+			// content can be of any shape, and one that takes the shape of
+			// a request is named, as shapeFlags says: nothing tells it from
+			// one, and it is safer to withhold it. The content is read
+			// whole, since a pair of a role and its content is one only in
+			// the list that holds it. The history that is not landed is not
+			// read, so a system message among it names nothing here.
+			shaped = appendNew(shaped, shapeFlags(content)...)
 		}
 		if len(parts) == 0 {
 			return sessiondata.Record{}, false
@@ -327,6 +337,7 @@ func humanInput(base sessiondata.Record, d decoded) (sessiondata.Record, bool) {
 			}}
 		}
 		base.Parts = parts
+		base.Flags = appendNew(base.Flags, shaped...)
 		return base, true
 	}
 
@@ -440,10 +451,21 @@ func requestFlags(envelope json.RawMessage) []string {
 // requestFlagsOf names what a model call's inputs and extra carry of the
 // request, by the rule requestFlags gives. Tools nested deeper in the inputs
 // or the extra, in a configuration of the client's own, such as Bedrock's
-// toolConfig inside invocation_params, are found by their shape.
+// toolConfig inside invocation_params, are found by their shape. So is a
+// prompt a client put among its parameters rather than in the inputs, under
+// a key a provider takes it by, as shapeOf finds one: the extra lands whole
+// with the envelope, so what it holds of the prompt would otherwise be
+// shown to a reader who withholds it.
 func requestFlagsOf(inputs, extra json.RawMessage) []string {
 	var out []string
-	if sessiondata.HoldsValue(inputs) {
+	prompt := sessiondata.HoldsValue(inputs)
+	if !prompt {
+		var value any
+		if json.Unmarshal(extra, &value) == nil {
+			prompt = shapeOf(value).prompt
+		}
+	}
+	if prompt {
 		out = append(out, sessiondata.FlagSystemPrompt)
 	}
 	var offered struct {

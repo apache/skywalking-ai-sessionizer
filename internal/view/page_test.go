@@ -122,6 +122,16 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 			t.Fatal("a page passes on only the hide spelled exactly")
 		}
 	}
+	// An address holding `;` is refused by both pages before anything is asked
+	// for, and the conversation page's links carry it back as it is.
+	for _, page := range []string{body, get("/").Body.String()} {
+		if !strings.Contains(page, `location.search.includes(";")`) {
+			t.Fatal("a page does not refuse an address that does not parse")
+		}
+	}
+	if !strings.Contains(body, `if (unparsed) throw new Error(unparsed);`) || !strings.Contains(body, `if (unparsed) return location.search;`) {
+		t.Fatal("the conversation page asks for a document, or links back, under an address that does not parse")
+	}
 	index := get("/").Body.String()
 	if !strings.Contains(index, `location.href = "/c/" + encodeURIComponent(id) + hideQuery();`) {
 		t.Fatal("the list's links into a conversation drop the address's hide")

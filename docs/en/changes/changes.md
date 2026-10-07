@@ -4,6 +4,12 @@
 
 ## LangChain and LangGraph
 
+- Two records that could carry a system prompt unnamed are named. An unfinished model call whose
+  client put the prompt among its parameters, in the `extra` that lands whole with the envelope, is
+  named `system_prompt` by that shape, as its tools already were. A graph's first input whose
+  person's message carries, as its content, an object that takes a request's shape is named by that
+  shape, as the LangChain page says a graph's first input is. The test of a root function's first
+  input checks that record's own flags, where it checked every record's together.
 - A summary `SummarizationMiddleware` wrote now resets the context, as a Claude Code compaction
   does. The middleware marks its summary message with `additional_kwargs.lc_source` set to
   `summarization`. A model call sent that message starts a new epoch in its stream, with an
@@ -89,6 +95,12 @@
 
 ## The page
 
+- A withheld step that names one empty part keeps its size of zero. It took the size of all the
+  record's parts, which the asz.view page reserves for a step that names no single part.
+- The page refuses an address holding `;`, where it dropped a `hide` written after one and asked for
+  the whole conversation. The API refuses such a query, and now the page does before asking.
+- The asz.view page says that `hide` ignores spaces around a name and empty entries, that a run
+  journal's record is what names no stream, and that the withheld count is as of the last load.
 - A view can withhold the system prompt and the tool schemas. An operator who serves a conversation
   to the people an agent served may need to keep from them what the runtime sent the model, while
   the operator still sees it. asz knows nothing about who is reading. It withholds by the flags the
