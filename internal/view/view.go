@@ -99,6 +99,11 @@ type Conversation struct {
 	// a workflow run, or the session itself. A position orders records only
 	// inside one lane.
 	lanes map[uint64]string
+	// named counts the session's landed records by each flag a reader may
+	// withhold, read in the same pass as at. It is what summary.withheld
+	// reports: every landed record carrying the name, whether or not a step
+	// is drawn for it, which is what the record endpoint withholds.
+	named map[string]int
 	// from and to index relations by the node they touch, so an inspector does
 	// not scan every edge for every step.
 	from map[string][]*sessionflow.Relation
@@ -180,6 +185,7 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems, head: v.Round,
 		at:    map[[2]uint64]int64{},
 		lanes: map[uint64]string{},
+		named: map[string]int{},
 		from:  map[string][]*sessionflow.Relation{},
 		to:    map[string][]*sessionflow.Relation{},
 	}
@@ -187,7 +193,7 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	// carries {seq, row}; this is what turns that into a moment. The page reads
 	// Session Data and Session Flow and nothing else: the index is assembly's
 	// accelerator, and a root that arrives without one still shows its times.
-	if err := timesOf(s.zone, v.Session, c.at, c.lanes); err != nil {
+	if err := timesOf(s.zone, v.Session, c.at, c.lanes, c.named); err != nil {
 		return nil, err
 	}
 	for _, r := range v.Relations {
@@ -349,14 +355,16 @@ func durationMillis(ns int64) int64 {
 }
 
 // timesOf fills at with the time of every record in the session's landed
-// files, keyed by landed position, and lanes with the lane of every file.
+// files, keyed by landed position, lanes with the lane of every file, and
+// named with how many records carry each flag a reader may withhold.
 //
-// Each record is decoded, so the times end where the reader stops: at a line
-// that does not decode, as Session Data defines it, no record after it has a
-// time. A file that fails to read contributes no times rather than failing
-// the page; its records still render, without a moment. A time of exactly
-// 1970-01-01T00:00:00Z is kept as none, because 0 is what none reads as.
-func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[uint64]string) error {
+// Each record is decoded, so the times and the counts end where the reader
+// stops: at a line that does not decode, as Session Data defines it, no
+// record after it has a time. A file that fails to read contributes no times
+// rather than failing the page; its records still render, without a moment.
+// A time of exactly 1970-01-01T00:00:00Z is kept as none, because 0 is what
+// none reads as.
+func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[uint64]string, named map[string]int) error {
 	files, err := storage.LandedFiles(z, session)
 	if err != nil {
 		return err
@@ -384,6 +392,11 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 			}
 			if t, err := time.Parse(time.RFC3339Nano, rec.Time); err == nil && t.UnixNano() != 0 {
 				at[[2]uint64{lf.Seq, row}] = t.UnixNano()
+			}
+			for _, flag := range rec.Flags {
+				if sessiondata.IsWithholdable(flag) {
+					named[flag]++
+				}
 			}
 		}
 		f.Close()

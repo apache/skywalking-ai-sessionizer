@@ -29,7 +29,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -502,10 +501,6 @@ func Load(path string) (*Config, error) {
 // merge keys here as it does for the whole configuration, so view reads the
 // same in both.
 //
-// hide is read only inside the view section. Written anywhere else it
-// withholds nothing, so a name any other hide lists that is a flag a reader
-// may withhold must be one view withholds, as checkHides says.
-//
 // Only the first YAML document of a file is read, so a later one that holds
 // anything is refused rather than ignored.
 func checkKeys(data []byte) error {
@@ -538,102 +533,7 @@ func checkKeys(data []byte) error {
 				"Write the configuration as one document")
 		}
 	}
-	// A name view cannot withhold is the mistake to report, not another
-	// hide that names what view meant to.
-	if err := sessiondata.CheckWithholdable(top.View.Hide); err != nil {
-		return fmt.Errorf("view.hide: %w", err)
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return err
-	}
-	return checkHides(&doc, top.View.Hide)
-}
-
-// checkHides refuses a hide written anywhere but the view section's own that
-// names something view does not withhold.
-//
-// The file is walked as written, aliases not followed, so each hide is found
-// once wherever it sits: at the top level, under a section or an adapter,
-// under a misspelled view, or under a view indented into another section. A
-// list kept elsewhere for an alias to bring into view passes, since its
-// names are withheld. One rule holds at every depth: a name that is a flag a
-// reader may withhold must be one view withholds. Any other value is some
-// other key's, such as an export header named hide, and is left alone.
-func checkHides(doc *yaml.Node, withheld []string) error {
-	var walk func(n *yaml.Node, depth int, inView bool) error
-	walk = func(n *yaml.Node, depth int, inView bool) error {
-		switch n.Kind {
-		case yaml.DocumentNode, yaml.SequenceNode:
-			for _, v := range n.Content {
-				if err := walk(v, depth+1, false); err != nil {
-					return err
-				}
-			}
-		case yaml.MappingNode:
-			for i := 0; i+1 < len(n.Content); i += 2 {
-				k, v := n.Content[i], n.Content[i+1]
-				// The view section's own hide is what is withheld.
-				if (!inView || k.Value != "hide") && readsAsHide(k.Value) {
-					if err := checkHide(k, v, withheld); err != nil {
-						return err
-					}
-				}
-				if err := walk(v, depth+1, depth == 1 && k.Value == "view"); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	return walk(doc, 0, false)
-}
-
-// readsAsHide reports whether a key is hide however it was spelled: in any
-// case, with marks around it, or as one key with its section, such as Hide,
-// hide[] or a top-level view.hide. Whoever wrote it meant it to withhold.
-// Only its letters are compared, so a key that holds the four letters inside
-// a word, such as pushIdentity, is not one.
-func readsAsHide(key string) bool {
-	letters := strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) {
-			return unicode.ToLower(r)
-		}
-		return -1
-	}, key)
-	return letters == "hide" || letters == "viewhide" || letters == "viewshide"
-}
-
-// checkHide refuses one hide outside the view section, at the line of its
-// key, when a name it lists is a flag a reader may withhold that view does
-// not withhold. The names are the items of a list, lists inside it included,
-// or a single value, split at commas as the hide parameter is. A mapping
-// lists none, and an alias is not followed.
-func checkHide(key, value *yaml.Node, withheld []string) error {
-	var names func(n *yaml.Node) error
-	names = func(n *yaml.Node) error {
-		switch n.Kind {
-		case yaml.ScalarNode:
-			if n.ShortTag() == "!!null" {
-				return nil
-			}
-			for name := range strings.SplitSeq(n.Value, ",") {
-				name = strings.TrimSpace(name)
-				if sessiondata.IsWithholdable(name) && !slices.Contains(withheld, name) {
-					return fmt.Errorf("line %d: %s names %q, which nothing withholds: hide is read only inside the view section, "+
-						"written as view: and hide: under it", key.Line, key.Value, name)
-				}
-			}
-		case yaml.SequenceNode:
-			for _, item := range n.Content {
-				if err := names(item); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	return names(value)
+	return nil
 }
 
 // holdsAnything reports whether a YAML document holds a value. A document

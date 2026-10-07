@@ -116,11 +116,9 @@
 
 - The `view` section is read strictly. A key it does not have is refused, where every other section
   ignores one, because a misspelled key there would show everything to everyone. `hide` is read only
-  inside the `view` section. Written anywhere else, in any case, such as a top-level `view.hide` or
-  a `hide` under a misspelled `view`, a name it lists that is a flag a reader may withhold must be
-  one `view` withholds, or the file is refused. Only the first YAML document of a file is read, so a
-  file with a later one that holds anything is refused rather than read in part. The rule is on the
-  [configuration page](../setup/configuration.md#view).
+  inside the `view` section, and written anywhere else it is ignored and withholds nothing. Only the
+  first YAML document of a file is read, so a file with a later one that holds anything is refused
+  rather than read in part. The rule is on the [configuration page](../setup/configuration.md#view).
 
 ## Metrics
 

@@ -68,7 +68,7 @@ func TestRecordTimesEndWhereTheReaderStops(t *testing.T) {
 	}
 
 	at, lanes := map[[2]uint64]int64{}, map[uint64]string{}
-	if err := timesOf(z, session, at, lanes); err != nil {
+	if err := timesOf(z, session, at, lanes, map[string]int{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(at) != 2 {

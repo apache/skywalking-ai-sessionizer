@@ -30,6 +30,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -302,4 +303,106 @@ func inlineUnfinished(t *testing.T, body []byte, contentType string) ([]byte, st
 		t.Fatal(err)
 	}
 	return out.Bytes(), writer.FormDataContentType(), inlined
+}
+
+// TestARunsOwnRecordIsCountedWhenWithheld lands a prompt run under a
+// decorated function with no model call in the trace, as a function that
+// builds its own messages is traced. The function's record and the prompt's
+// are named for the system message they hold, and no step stands on either:
+// the fold draws nothing for a run's own record. The record endpoint
+// withholds them all the same, so the document counts them, where a zero
+// would say the filter found nothing.
+func TestARunsOwnRecordIsCountedWhenWithheld(t *testing.T) {
+	zone, post, collect := receiveInto(t)
+	const trace = "31313131-3131-7131-8131-313131313130"
+	const prompt = "31313131-3131-7131-8131-313131313131"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-prompt","ls_method":"traceable"}}`
+	root := "20260920T100000000000Z" + trace
+	messages := `[{"role":"system","content":"You are a careful assistant."},{"role":"user","content":"what is the status"}]`
+	post(`{"post":[{"id":"` + trace + `","trace_id":"` + trace + `",` +
+		`"dotted_order":"` + root + `","run_type":"chain","name":"build_prompt",` +
+		`"start_time":"2026-09-20T10:00:00Z","end_time":"2026-09-20T10:00:10Z",` + owner + `,` +
+		`"inputs":{"question":"what is the status"},"outputs":{"output":{"messages":` + messages + `}}},` +
+		`{"id":"` + prompt + `","trace_id":"` + trace + `","parent_run_id":"` + trace + `",` +
+		`"dotted_order":"` + root + `.20260920T100001000000Z` + prompt + `","run_type":"prompt","name":"ChatPromptTemplate",` +
+		`"start_time":"2026-09-20T10:00:01Z","end_time":"2026-09-20T10:00:01Z",` + owner + `,` +
+		`"inputs":{"question":"what is the status"},` +
+		`"outputs":{"output":{"messages":` + messages + `}}}]}`)
+	session := collect().Sessions[0]
+	if _, err := parse.Session(zone, parse.Options{Conversation: session, Session: session, Reindex: index.Rebuild}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	// The named records, by position, read from the landed files.
+	named := map[[2]uint64]bool{}
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lf := range files {
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rd, err := sessiondata.NewReader(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for row := uint64(1); ; row++ {
+			rec, rerr := rd.Next()
+			if rerr != nil {
+				break
+			}
+			if slices.Contains(rec.Flags, sessiondata.FlagSystemPrompt) {
+				named[[2]uint64{lf.Seq, row}] = true
+			}
+		}
+		f.Close()
+	}
+	if len(named) != 2 {
+		t.Fatalf("%d records are named system_prompt, want the function's and the prompt's", len(named))
+	}
+	c, err := view_.New(zone, nil).Load(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := c.BuildWithheld([]string{sessiondata.FlagSystemPrompt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.Summary.Withheld[sessiondata.FlagSystemPrompt]; got != len(named) {
+		t.Fatalf("withheld %v, want %d under system_prompt", doc.Summary.Withheld, len(named))
+	}
+	var walk func([]sessionview.Node)
+	walk = func(nodes []sessionview.Node) {
+		for i := range nodes {
+			if ref := nodes[i].Ref; ref != nil && named[[2]uint64{ref.Seq, ref.Row}] {
+				t.Fatalf("step %s stands on a named record, so this test no longer checks a record with no step", nodes[i].ID)
+			}
+			walk(nodes[i].Children)
+		}
+	}
+	walk(doc.Talks)
+	walk(doc.Loose)
+	h := view_.New(zone, nil).Handler()
+	get := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRecorder()
+		h.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
+		return r
+	}
+	for pos := range named {
+		address := fmt.Sprintf("/api/c/%s/record/%d/%d", session, pos[0], pos[1])
+		if r := get(address); r.Code != http.StatusOK || !strings.Contains(r.Body.String(), "careful assistant") {
+			t.Fatalf("the whole record %v does not show the system message: %d %.300s", pos, r.Code, r.Body.String())
+		}
+		var rec sessiondata.Record
+		r := get(address + "?hide=system_prompt")
+		if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &rec) != nil || len(rec.Parts) == 0 {
+			t.Fatalf("the withheld record %v: %d %.300s", pos, r.Code, r.Body.String())
+		}
+		for _, p := range rec.Parts {
+			if len(p.Data) != 0 || p.Text != "" || p.State != "omitted" {
+				t.Fatalf("the withheld record %v kept content: %+v", pos, p)
+			}
+		}
+	}
 }

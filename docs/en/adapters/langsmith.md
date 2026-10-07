@@ -242,7 +242,8 @@ the provider bodies, which a reader that withholds anything is never served.
 
 A value of the application's own that takes one of these shapes is named too, since nothing tells
 the two apart, and it is safer to withhold it. No captured record matches either shape. A reader
-withholds such a record like any other, and the document counts it once, by its record.
+withholds such a record like any other, and the document counts it, although no step stands on a
+run's own record.
 
 ### A conversation is named by what was asked
 

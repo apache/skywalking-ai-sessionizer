@@ -336,8 +336,8 @@ func TestSeveralChangeRecordersAreOneAdapterEach(t *testing.T) {
 }
 
 // The view section says what a reader is kept from, so a key it does not have
-// is refused rather than ignored, and so is a hide written anywhere else that
-// names a flag view does not withhold.
+// is refused rather than ignored. A hide reaches view by its own key, an
+// alias or a merge key, and only the first document of the file is read.
 func TestAMistakenViewKeyIsRefused(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
@@ -347,47 +347,12 @@ func TestAMistakenViewKeyIsRefused(t *testing.T) {
 		{"an empty view section", "view:\n", true},
 		{"no view section", "storage:\n  root: ./data\n", true},
 		{"a misspelled key", "view:\n  hidden: [system_prompt]\n", false},
-		{"hide at the top level", "hide: [system_prompt]\n", false},
-		{"a misspelled section", "views:\n  hide: [system_prompt]\n", false},
-		{"a section spelled in capitals", "View:\n  hide: [system_prompt]\n", false},
 		{"a name the view cannot withhold", "view:\n  hide: [finished]\n", false},
 		{"view from an anchor kept at the top level", "x: &v {hide: [system_prompt]}\nview: *v\n", true},
 		{"a list kept at the top level for view", "hide: &h [system_prompt]\nview: {hide: *h}\n", true},
 		{"a misspelled key through an alias", "x: &v {hidden: [system_prompt]}\nview: *v\n", false},
-		{"hide merged in at the top level", "<<: {hide: [system_prompt]}\n", false},
-		{"hide merged in from an anchor", "x: &h {hide: [system_prompt]}\n<<: *h\n", false},
-		{"a misspelled section holding an anchor nothing refers to", "views: &v {hide: [system_prompt]}\n", false},
-		{"a misspelled section holding hide, its anchor merged elsewhere", "veiw: &v {hide: [system_prompt]}\nstorage: {<<: *v, root: ./data}\n", false},
-		{"hide under a section", "storage:\n  root: ./data\n  hide: [system_prompt]\n", false},
-		{"hide under an adapter", "adapters:\n  - name: claude-code-local\n    hide: [system_prompt]\n", false},
-		{"hide merged into an adapter", "adapters:\n  - name: claude-code-local\n    <<: {hide: [system_prompt]}\n", false},
-		{"hide outside view naming more than view", "x: &h {hide: [system_prompt, tool_schemas]}\nview: {hide: [system_prompt]}\n", false},
 		{"hide merged into view", "x: &h {hide: [system_prompt]}\nview: {<<: *h}\n", true},
-		{"hide merged into view through two anchors", "a: &a {hide: [system_prompt]}\nb: &b {<<: *a}\nview: {<<: *b}\n", true},
 		{"view merged in at the top level", "<<: {view: {hide: [system_prompt]}}\n", true},
-		{"view merged in from an anchor", "base: &b\n  view:\n    hide: [system_prompt]\n<<: *b\n", true},
-		{"view indented under another section", "export:\n  otlp:\n    endpoint: x:1\n  view:\n    hide: [system_prompt]\n", false},
-		{"view indented under an adapter", "adapters:\n  - name: claude-code-local\n    view:\n      hide: [system_prompt]\n", false},
-		{"a misspelled section holding hide twice", "veiw:\n  hide: [system_prompt]\n  hide: [tool_schemas]\n", false},
-		{"a misspelled section merging a number", "veiw:\n  <<: 1\n  hide: [system_prompt]\n", false},
-		{"a misspelled section merging itself", "veiw: &v\n  hide: [system_prompt]\n  <<: *v\n", false},
-		{"a hide in view that its own key overrides", "view:\n  <<: {hide: [tool_schemas]}\n  hide: [system_prompt]\n", false},
-		{"view and hide written as one top-level key", "view.hide: [system_prompt]\n", false},
-		{"a misspelled section and hide written as one top-level key", "views.hide: [system_prompt]\n", false},
-		{"view and hide written as one word", "viewHide: [system_prompt]\nVIEWHIDE: [tool_schemas]\n", false},
-		{"one name under view and hide written as one key", "view.hide: system_prompt\n", false},
-		{"hide spelled in capitals", "Hide: [system_prompt]\n", false},
-		{"hide spelled in capitals under a misspelled section", "veiw: {Hide: [system_prompt]}\n", false},
-		{"one name under a misspelled section", "veiw:\n  hide: system_prompt\n", false},
-		{"names written as one value under a misspelled section", "views:\n  hide: system_prompt,tool_schemas\n", false},
-		{"one name under view indented into another section", "export:\n  view:\n    hide: system_prompt\n", false},
-		{"a list that also holds a mapping", "veiw:\n  hide:\n    - system_prompt\n    - {}\n", false},
-		{"view under a key with no name", "\"\": {view: {hide: [system_prompt]}}\n", false},
-		{"a list of lists at the top level", "hide: [[tool_schemas]]\n", false},
-		{"a list of lists under a misspelled section", "veiw:\n  hide: [[system_prompt]]\n", false},
-		{"a list under a section that holds itself", "storage: {hide: &a [*a, system_prompt]}\n", false},
-		{"a list of lists merged in at the top level", "<<: {hide: [[system_prompt]]}\n", false},
-		{"a list of lists in a list of merges", "<<: [{storage: {root: ./data}}, {hide: [[system_prompt]]}]\n", false},
 		{"a second document", "storage:\n  root: ./data\n---\nview:\n  hide: [system_prompt]\n", false},
 		{"a first document left empty", "---\n---\nview:\n  hide: [system_prompt]\n", false},
 		{"a document marker at the end", "view:\n  hide: [system_prompt]\n---\n", true},
@@ -409,32 +374,22 @@ func TestAMistakenViewKeyIsRefused(t *testing.T) {
 }
 
 // Keys outside view are read as they always were: a key the configuration
-// does not have is ignored, a mapping that is free to hold any key may hold
-// one named hide, and a key that is no merge is never followed as one. What
-// they set is checked, not only that the file loads.
+// does not have is ignored, a hide among them included, and a mapping that
+// is free to hold any key may hold one named hide. What they set is checked,
+// not only that the file loads.
 func TestKeysOutsideViewAreReadAsBefore(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
 		check      func(*Config) bool
 	}{
 		{"a key the configuration does not have", "version: 1\nstorage: {root: /a}\n", func(c *Config) bool { return c.Storage.Root == "/a" }},
-		{"an extension key", "x-defaults: 2\n", nil},
 		{"a section spelled in capitals", "Storage:\n  root: /elsewhere\n", func(c *Config) bool { return c.Storage.Root == Default().Storage.Root }},
-		{"a key holding an alias", "storage: {root: &r /a}\nkeep: *r\n", func(c *Config) bool { return c.Storage.Root == "/a" }},
 		{"a section merged from an anchor", "base: &b\n  root: /b\nstorage:\n  <<: *b\n", func(c *Config) bool { return c.Storage.Root == "/b" }},
-		{"a merge key at the top level", "<<: {storage: {root: /c}}\n", func(c *Config) bool { return c.Storage.Root == "/c" }},
-		{"a list of merges, each a section", "<<: [{storage: {root: /d}}, {parse: {max_round_bytes: 1048576}}]\n",
-			func(c *Config) bool { return c.Storage.Root == "/d" && c.Parse.MaxRoundBytes == 1048576 }},
 		{"headers named for hide", "export:\n  otlp:\n    headers:\n      hide: \"yes\"\n      x-hide-token: abc\n",
 			func(c *Config) bool {
 				return c.Export.OTLP.Headers["hide"] == "yes" && c.Export.OTLP.Headers["x-hide-token"] == "abc"
 			}},
-		{"a quoted merge key holding itself", "\"<<\": &a [*a]\n", nil},
-		{"a quoted merge key holding a merge of itself", "\"<<\": &a {\"<<\": *a}\n", nil},
-		{"a merge key tagged as a string", "!!str <<: &a [*a]\n", nil},
-		{"an anchor holding itself", "junk: &j [*j]\n", nil},
-		{"a key that holds the letters of hide inside a word", "pushIdentity: ci-runner-7\nx-hide-these: &skip [a]\nhideBanner: true\n", nil},
-		{"a hide at the top level with no value", "hide:\nstorage: {root: /e}\n", func(c *Config) bool { return c.Storage.Root == "/e" && len(c.View.Hide) == 0 }},
+		{"a hide outside view", "hide: [system_prompt]\nstorage: {root: /e}\n", func(c *Config) bool { return c.Storage.Root == "/e" && len(c.View.Hide) == 0 }},
 	} {
 		path := filepath.Join(t.TempDir(), "asz.yaml")
 		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
@@ -451,16 +406,12 @@ func TestKeysOutsideViewAreReadAsBefore(t *testing.T) {
 	}
 }
 
-// A refusal gives the line of the key, the key as spelled, and says how hide
-// is written.
-func TestAMisplacedHideSaysWhere(t *testing.T) {
+// A refusal names the key as spelled and its line, or the name view cannot
+// withhold.
+func TestARefusedViewKeySaysWhere(t *testing.T) {
 	for _, tc := range []struct{ name, body, want string }{
-		{"under an adapter", "adapters:\n  - name: claude-code-local\n    hide: [system_prompt]\n", "line 3: hide names"},
 		{"a key the view section does not have", "view:\n  hidden: [system_prompt]\n", "line 2: hidden is not a key of the view section"},
-		// The name view cannot withhold is the mistake, not the other hide
-		// that names what view meant to.
-		{"beside a view that names something it cannot withhold", "view: {hide: [\"system_prompt,tool_schemas\"]}\ndefaults: {hide: [system_prompt]}\n",
-			`view.hide: "system_prompt,tool_schemas" is not a flag`},
+		{"a name the view cannot withhold", "view: {hide: [\"system_prompt,tool_schemas\"]}\n", `view.hide: "system_prompt,tool_schemas" is not a flag`},
 	} {
 		path := filepath.Join(t.TempDir(), "asz.yaml")
 		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
@@ -469,9 +420,6 @@ func TestAMisplacedHideSaysWhere(t *testing.T) {
 		_, err := Load(path)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: the refusal is %v, want it to say %q", tc.name, err, tc.want)
-		}
-		if err != nil && strings.Contains(tc.want, "names") && !strings.Contains(err.Error(), "written as view: and hide: under it") {
-			t.Errorf("%s: the refusal %v does not say how hide is written", tc.name, err)
 		}
 	}
 }

@@ -204,19 +204,15 @@ func TestAWithheldStepKeepsItsSize(t *testing.T) {
 	}
 }
 
-// A name counts the records read. Those are keyed by their position, so a
-// record two steps stand on is one entry and counts once, and the LangChain
-// test checks that on a call and the error it became. Here: a record with no
-// withheld name is not counted, a name nothing carries counts zero, and the
-// provider bodies are counted beside the names.
+// A name counts what the load counted over the landed files, whether or not
+// a step is drawn for the record; the LangChain tests check that on records
+// no step stands on, and on a call and the error it became, which share one
+// record and count once. Here: a name nothing carries counts zero, a flag not
+// asked for is not listed, and the provider bodies are counted beside the
+// names.
 func TestWithheldRecordsAreCounted(t *testing.T) {
-	flagged := &sessiondata.Record{Flags: []string{"injected", sessiondata.FlagSystemPrompt}}
-	recs := map[[2]uint64]*sessiondata.Record{
-		{4, 2}: flagged,
-		{4, 3}: {Flags: []string{sessiondata.FlagSystemPrompt}},
-		{4, 4}: {Flags: []string{"finished"}},
-	}
-	got := withheldCounts(recs, []string{sessiondata.FlagSystemPrompt, sessiondata.FlagToolSchemas})
+	named := map[string]int{sessiondata.FlagSystemPrompt: 2, "injected": 5}
+	got := withheldCounts(named, []string{sessiondata.FlagSystemPrompt, sessiondata.FlagToolSchemas})
 	if got[sessiondata.FlagSystemPrompt] != 2 || got[sessiondata.FlagToolSchemas] != 0 || len(got) != 2 {
 		t.Fatalf("withheld %v, want two records under system_prompt and a zero under tool_schemas", got)
 	}

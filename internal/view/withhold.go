@@ -107,26 +107,21 @@ func withheldNames(names []string) []string {
 	return slices.Compact(out)
 }
 
-// withheldCounts counts the records a build withheld, by name, from every
-// record it read: each step's own, a call's, a tool's result, at any depth,
-// whether or not a step is drawn for it. A record is one position, so two
-// steps standing on it count it once.
+// withheldCounts is what a document withholds by name: every landed record of
+// the session carrying the name, as the load counted them, whether or not a
+// step is drawn for it. Counting only the records a build read missed a run's
+// own record, which no step stands on and which the record endpoint withholds
+// all the same: on a prompt run under a decorated function, the document said
+// 0 where 2 records were withheld.
 //
 // Every withheld name is counted, a zero included. A root landed before the
 // adapter set these flags carries none, so withholding there finds nothing. A
 // zero says the filter ran and matched nothing, where an empty count would
 // read as a document nobody filtered.
-func withheldCounts(recs map[[2]uint64]*sessiondata.Record, names []string) map[string]int {
-	counts := map[string]int{}
+func withheldCounts(named map[string]int, names []string) map[string]int {
+	counts := make(map[string]int, len(names))
 	for _, name := range names {
-		counts[name] = 0
-	}
-	for _, rec := range recs {
-		for _, name := range rec.Flags {
-			if _, asked := counts[name]; asked {
-				counts[name]++
-			}
-		}
+		counts[name] = named[name]
 	}
 	return counts
 }

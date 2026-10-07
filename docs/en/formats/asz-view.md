@@ -310,11 +310,12 @@ follows the rules: a step's text, a tool's result, and a talk's label and reply.
   own never takes its text as `label`. A record that carries such a flag names no stream either. A
   person's input names its talk whatever it carries, and a reader who withholds what it carries sees
   no label.
-- `summary.withheld` counts what was withheld by name: the records carrying each withheld flag, and
-  under `provider_bodies` the session's landed bodies. It counts every record the document was built
-  from, a call's own and a tool's result included, at any depth. A record that two steps stand on,
-  such as a call and the error its failure became, counts once. Every name asked for is listed, a
-  zero included, so a filter that matched nothing still shows that it ran. That is the case on a
+- `summary.withheld` counts what was withheld by name: every record in the session's landed files
+  carrying each withheld flag, and under `provider_bodies` the session's landed bodies. A record is
+  counted whether or not a step is drawn for it, since the record endpoint withholds it either way:
+  a run's own record, which no step stands on, counts like a step's. A record that two steps stand
+  on, such as a call and the error its failure became, counts once. Every name asked for is listed,
+  a zero included, so a filter that matched nothing still shows that it ran. That is the case on a
   root landed before the adapter set these flags: its records carry none, and it has to be collected
   again into a new root to be withheld. `withheld` is `{}` only when nothing was asked to be
   withheld.

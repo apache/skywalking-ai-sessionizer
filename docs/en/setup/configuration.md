@@ -145,21 +145,9 @@ A key this section does not have is refused, and the refusal names the key and i
 other section is read loosely, as it always was. This one says what a reader is kept from, so a
 misspelled key here would otherwise show everything to everyone.
 
-For the same reason `hide` is read only inside `view`, written there or reached by an alias or a
-merge key. A `hide` written anywhere else withholds nothing, so a name it lists that is a flag a
-reader may withhold must be one `view` withholds, or the file is refused. That covers:
-
-- a key spelled as `hide` in another case or with marks around it, such as `Hide`, or as one key
-  with its section, such as a top-level `view.hide` or `views.hide`
-- a `hide` at the top level, under another section or an adapter, or under a misspelled `view`
-- a `view` indented into another section
-- a `hide` brought into `view` by a merge that `view`'s own `hide` overrides
-
-Only a key's letters are compared, so a key that holds the four letters inside a word, such as
-`pushIdentity`, is read as before. Any other value under such a key is some other key's, so a
-mapping free to hold any key, such as the export headers, may hold one named `hide`. A list kept
-elsewhere for an alias to bring into `view` passes, since its names are withheld. A refusal gives
-the line of the key.
+`hide` is read only inside `view`, written there or reached by an alias or a merge key. Written
+anywhere else, such as at the top level or under a misspelled `view`, it is one more key the
+configuration does not have: ignored, and withholding nothing.
 
 Only the first YAML document of a file is read, so a file with a later document that holds anything
 is refused. `view` is read from 0.6.0. An older asz ignores it, and withholds nothing.

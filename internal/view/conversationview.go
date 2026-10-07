@@ -152,7 +152,7 @@ func (c *Conversation) build(hide []string) (*sessionview.Conversation, error) {
 	}
 	recs := c.records(refs, hide)
 	hidden := hiddenSet(hide)
-	withheld := withheldCounts(recs, hide)
+	withheld := withheldCounts(c.named, hide)
 	rows := map[string]talkRow{}
 	for _, row := range o.talks {
 		rows[row.ID] = row
