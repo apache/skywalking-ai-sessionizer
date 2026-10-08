@@ -30,6 +30,8 @@ was still running.
 | case | requests | runs | post | patch | open | bytes | thread keys |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | abandoned-run | 1 | 9 | 9 | 0 | 3 | 30064 | `thread-abandoned` |
+| js-graph | 1 | 10 | 10 | 0 | 0 | 34411 | `js-graph-thread-1` |
+| js-traceable | 1 | 2 | 2 | 0 | 0 | 4922 | `(none)`, `js-thread-1` |
 | large-content | 1 | 15 | 15 | 0 | 0 | 1293685 | `thread-large` |
 | long-conversation | 3 | 128 | 120 | 8 | 8 | 1636932 | `thread-long` |
 | loop | 1 | 47 | 47 | 0 | 0 | 309357 | `thread-loop` |
@@ -53,9 +55,9 @@ Counted across every case, by the kind of run that carried them.
 
 | run type | runs | bytes | share |
 | --- | --- | --- | --- |
-| chain | 377 | 3176868 | 79.1% |
-| llm | 72 | 716569 | 17.8% |
-| tool | 26 | 124148 | 3.1% |
+| chain | 385 | 3195023 | 79.0% |
+| llm | 75 | 723377 | 17.9% |
+| tool | 27 | 125734 | 3.1% |
 
 A graph's own `chain` runs carry the whole message list again in their inputs
 and outputs, which is why they hold most of the bytes while saying nothing the
@@ -66,6 +68,8 @@ conversation does not already have.
 | case | what it exercises |
 | --- | --- |
 | abandoned-run | A process that dies mid-turn: the open runs are all that ever arrive. |
+| js-graph | LangGraph JS: a graph with one tool on a thread, every message serialized as a constructor. |
+| js-traceable | LangSmith JS's traceable around a chat model: no ls_method, and no thread for the runs inside. |
 | large-content | A 46 KB command, a 32 KB result and a 15 KB system prompt. |
 | long-conversation | Twenty turns on one thread: how the repeated history grows. |
 | loop | A graph that loops: the same node runs five times in one trace. |

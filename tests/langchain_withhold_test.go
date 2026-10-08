@@ -270,10 +270,12 @@ func inlineUnfinished(t *testing.T, body []byte, contentType string) ([]byte, st
 		if json.Unmarshal(p.data, &envelope) != nil {
 			continue
 		}
-		var kind, end string
+		var kind string
 		_ = json.Unmarshal(envelope["run_type"], &kind)
-		_ = json.Unmarshal(envelope["end_time"], &end)
-		if (kind != "llm" && kind != "chat_model") || end != "" {
+		// Finished whenever an end time is there, as text or, from LangSmith
+		// JS, as milliseconds.
+		end := envelope["end_time"]
+		if (kind != "llm" && kind != "chat_model") || len(end) > 0 && string(end) != "null" {
 			continue
 		}
 		for _, field := range []string{"inputs", "extra"} {

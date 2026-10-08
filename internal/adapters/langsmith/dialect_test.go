@@ -243,6 +243,11 @@ func TestAnUnfinishedCallIsNamedForTheRequestItCarries(t *testing.T) {
 			continue
 		}
 		for _, r := range convertCase(t, c.Name()) {
+			// A model call's own record; a decorated function's arguments are
+			// the application's, and named by their shape.
+			if r.Call == "" {
+				continue
+			}
 			if slices.Contains(r.Flags, sessiondata.FlagSystemPrompt) || slices.Contains(r.Flags, sessiondata.FlagToolSchemas) {
 				t.Errorf("%s: %s is named %v, and the corpus carries the request out of band", c.Name(), r.ID, r.Flags)
 			}
@@ -351,6 +356,17 @@ func TestADecoratedFunctionIsNamedForWhatItHolds(t *testing.T) {
 		{"an event of the application's own", false, `{"events":[{"type":"system","message":"Alice joined"}]}`, false, false},
 		{"a root function handed a system message with nothing in it", true, `{"prompt":[{"type":"system","content":""}],"question":"hi"}`, false, false},
 		{"one pair alone in a message list", false, `{"messages":[["developer","You are a helpful assistant."]]}`, true, false},
+		// LangChain serializes a message as a constructor. Python writes its role as the type in its kwargs;
+		// LangChain JS writes only the fields it was built with, so the role is only the class that ends its id.
+		// A field of nothing but messages is a repeat of the model call's and is not landed here, in either form, so
+		// each is beside a value of the function's own.
+		{"a system message as LangChain serializes it, beside a value of the function's own", true, `{"messages":[[{"lc":1,"type":"constructor","id":["langchain","schema","messages","SystemMessage"],"kwargs":{"content":"You are a helpful assistant.","type":"system"}}]],"limit":3}`, true, false},
+		{"a system message as LangChain JS serializes it, beside a value of the function's own", true, `{"messages":[[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a helpful assistant.","additional_kwargs":{},"response_metadata":{}}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"hi"}}]],"limit":3}`, true, false},
+		{"a system message chunk as LangChain JS serializes it, beside a value of the function's own", false, `{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessageChunk"],"kwargs":{"content":"You are a helpful assistant."}}],"limit":3}`, true, false},
+		{"LangChain JS's messages alone, a repeat of the model call's", false, `{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a helpful assistant."}}]}`, false, false},
+		{"a person's message as LangChain JS serializes it, lifted as the first input", true, `{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"hi"}}]}`, false, false},
+		{"a system message LangChain JS serialized with nothing in it, beside a value of the function's own", false, `{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":""}}],"limit":3}`, false, false},
+		{"an id of the application's own that ends with the class's name", false, `{"record":{"id":["inbox","SystemMessage"],"body":"hi"}}`, false, false},
 		// the person's message is lifted into the first input, and its content, an object of the application's
 		// own, takes a request's shape: the first input itself is named, not only the function's record
 		{"a root function handed a message whose content takes a request's shape", true, `{"messages":[{"role":"user","content":{"system":"You are a helpful assistant."}}]}`, true, false},
@@ -381,6 +397,32 @@ func TestADecoratedFunctionIsNamedForWhatItHolds(t *testing.T) {
 		}
 		if got := slices.Contains(flags, sessiondata.FlagToolSchemas); got != tc.tools {
 			t.Errorf("%s: tool_schemas %v, want %v (%v)", tc.name, got, tc.tools, flags)
+		}
+	}
+}
+
+// TestARunTimeIsReadAsEitherClientWritesIt. The Python client writes both times
+// as RFC 3339 text. LangSmith JS writes end_time as the milliseconds since the
+// epoch, and a run read as text alone was refused whole, so nothing a
+// LangChain JS application sent landed.
+func TestARunTimeIsReadAsEitherClientWritesIt(t *testing.T) {
+	for _, tc := range []struct {
+		name, envelope, start, end string
+		refused                    bool
+	}{
+		{"both as text", `{"start_time":"2026-10-08T08:30:39.102Z","end_time":"2026-10-08T08:30:39.118Z"}`, "2026-10-08T08:30:39.102Z", "2026-10-08T08:30:39.118Z", false},
+		{"the end as milliseconds", `{"start_time":"2026-10-08T08:30:39.102Z","end_time":1791448151039}`, "2026-10-08T08:30:39.102Z", "2026-10-08T08:29:11.039Z", false},
+		{"no end yet", `{"start_time":"2026-10-08T08:30:39.102Z","end_time":null}`, "2026-10-08T08:30:39.102Z", "", false},
+		{"a time that is neither", `{"start_time":"2026-10-08T08:30:39.102Z","end_time":true}`, "", "", true},
+	} {
+		var run Run
+		err := json.Unmarshal([]byte(tc.envelope), &run)
+		if (err != nil) != tc.refused {
+			t.Errorf("%s: error %v, refused %v", tc.name, err, tc.refused)
+			continue
+		}
+		if !tc.refused && (run.Start != tc.start || run.End != tc.end) {
+			t.Errorf("%s: start %q end %q, want %q %q", tc.name, run.Start, run.End, tc.start, tc.end)
 		}
 	}
 }

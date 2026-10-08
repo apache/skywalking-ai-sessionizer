@@ -10,6 +10,19 @@
   person's message carries, as its content, an object that takes a request's shape is named by that
   shape, as the LangChain page says a graph's first input is. The test of a root function's first
   input checks that record's own flags, where it checked every record's together.
+- A LangChain JS or LangGraph JS application lands as a Python one does. Its client, LangSmith JS,
+  writes a run's end time as the milliseconds since the epoch, so every run it sent was refused
+  and nothing landed; the receiver now reads either time. It serializes every message as a
+  constructor whose kind is named only by the class that ends its `id`, with its fields under
+  `kwargs`, so a LangGraph JS conversation had no question opening it, a tool's result landed as the
+  serialized message, and a system message in a decorated function's arguments landed unnamed; each
+  of these now reads the message by its class. A decorated function carries no `ls_method` from it,
+  and is known by the library that made the run, which both clients write. A model call inside
+  a decorated function supplies no thread, because LangSmith JS passes the function's metadata to
+  none of the runs inside it, and lands under its trace. Measured with LangSmith JS 0.10.8 on a
+  LangGraph JS agent and a traced function, the two applications under `tests/apps/langchain-js`.
+  Their captures sit beside the Python ones under `tests/apps/langchain/testdata`, and the recorder
+  reads the chunked body that client sends.
 - A summary `SummarizationMiddleware` wrote now resets the context, as a Claude Code compaction
   does. The middleware marks its summary message with `additional_kwargs.lc_source` set to
   `summarization`. A model call sent that message starts a new epoch in its stream, with an
@@ -45,8 +58,9 @@
   own arguments and result, and a graph's first input, are the application's own, so they are named
   only by their shape: a message of the `system` or `developer` role, a value under a key a provider
   takes the prompt by, or a list of tools. The shapes are listed on the LangChain page. On the
-  captured corpus no record is named: the client sends both out of band, and all 46 trace roots are
-  chain runs.
+  captured corpus the client sends both out of band, and all 48 trace roots are chain runs, so the
+  one record named is the arguments of the LangChain JS traced function, which hold its system
+  message.
 
 ## Claude Code
 

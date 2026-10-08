@@ -56,6 +56,8 @@ header:
     # that lists the plugin, as plain JSON, which has no comment to carry a header in.
     - 'plugins/claude-code/**/*.json'
     - '.claude-plugin/marketplace.json'
+    # npm reads the LangChain JS harness's manifest as plain JSON.
+    - 'tests/apps/langchain-js/package.json'
     - '**/testdata/**'
     # The complete example document on the asz.view format page is what
     # the command prints, byte for byte, and a test holds it to that.
