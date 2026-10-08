@@ -275,8 +275,8 @@ var recordPath = regexp.MustCompile(`^/api/c/([^/]+)/record/(\d+)/(\d+)$`)
 // asks for a record and the Prompt tab for the files a call's bodies are cut
 // across.
 //
-// Each takes the hide parameter: what this reader withholds beyond what the
-// instance withholds for everyone. See withhold.go.
+// Each takes the hide parameter, when the instance lets a request replace
+// what it withholds. See withhold.go.
 func (s *Server) apiConversation(w http.ResponseWriter, r *http.Request) {
 	// A query that does not parse may hold a hide that cannot be read, so
 	// it is refused rather than read without it.

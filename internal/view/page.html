@@ -107,9 +107,11 @@ fetch("/assets/conversation-view/host-shell/themes.json").then(r => r.json()).th
 
 // ---- what the address asks to withhold, passed to every call ----
 // The document, a record and the files are asked with the same hide, so the
-// Evidence tab never shows what the document withholds. This is not access
-// control: a reader can edit the address. A host that withholds per reader
-// adds hide to every API request it serves. Every key whose letters alone
+// Evidence tab never shows what the document withholds. The server takes hide
+// only when view.hide_override is on, and its refusal otherwise is shown as
+// the page's error. This is not access control: a reader can edit the
+// address. A host that withholds per reader sets hide on every API request it
+// serves. Every key whose letters alone
 // spell hide, in any case, is passed on as it is spelled, the rule the server
 // reads keys by, so a misspelled one reaches the server, which refuses it,
 // rather than being dropped here and withholding nothing.

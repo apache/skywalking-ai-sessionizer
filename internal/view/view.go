@@ -63,9 +63,10 @@ type Server struct {
 	// so the side that reads never depends on the side that collects.
 	glossary *model.Glossary
 
-	// hide is what this instance withholds from every reader, by flag. See
-	// withhold.go.
-	hide []string
+	// hide is what this instance withholds, by flag, and hideOverride
+	// whether a request's hide parameter replaces it. See withhold.go.
+	hide         []string
+	hideOverride bool
 }
 
 // New returns a server over a zone. Nothing refreshes it until a caller says

@@ -234,13 +234,14 @@ counting from 1. The record is read from disk on every request and never cached,
 wanted only when someone opens it. The answer is 404 when the conversation, the sequence or the row
 does not exist.
 
-The three `/api/c/{id}` paths take `hide`, the flags this reader withholds beyond what the instance
-withholds for everyone, as [Withholding](../formats/asz-view.md#withholding) says. A record that
-carries one keeps its envelope and loses its content. A reader that withholds anything is served no
-provider body: the files endpoint and the record endpoint, for a record of a body file, answer 403.
-The answer is 400 for a name that cannot be withheld, for `hide` spelled another way, for a query
-that does not parse, and from the files endpoint for a file that is not a provider body or whose
-header does not read.
+The three `/api/c/{id}` paths withhold what `view.hide` names. With `view.hide_override` on they
+take `hide`, the flags this request withholds in place of `view.hide`, as
+[Withholding](../formats/asz-view.md#withholding) says. A record that carries one keeps its envelope
+and loses its content. A reader that withholds anything is served no provider body: the files
+endpoint and the record endpoint, for a record of a body file, answer 403. The answer is 400 for
+`hide` on an instance with `view.hide_override` off, for a name that cannot be withheld, for `hide`
+spelled another way, for a query that does not parse, and from the files endpoint for a file that is
+not a provider body or whose header does not read.
 
 `/api/glossary` takes an optional `dialect`, and without one answers in the vocabulary the root's
 own landed files were read in — a root of LangChain conversations is not described in Claude Code's

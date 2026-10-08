@@ -53,12 +53,17 @@ type View struct {
 	// keeps its place, its flags and its size, loses its text, and says so
 	// with the state omitted. The provider bodies go with it, since a
 	// request carries both again and a body is served whole or not at all.
-	// A host that serves the API through its own route withholds more for
-	// one reader with the hide parameter, never less. asz knows nothing
-	// about who is reading: one instance per audience, each behind the
-	// deployment's own authentication, is how two audiences are served.
+	// asz knows nothing about who is reading: one instance per audience,
+	// each behind the deployment's own authentication, is how two audiences
+	// are served, unless HideOverride lets a host decide per reader.
 	// Empty hides nothing.
 	Hide []string `yaml:"hide"`
+	// HideOverride lets a request's hide parameter replace Hide for that
+	// request, so a host that serves the API through its own route decides
+	// what each reader is kept from. It is off by default: Hide is then the
+	// whole answer, and a request that carries the parameter is refused,
+	// since serving it anything else would not be what it asked for.
+	HideOverride bool `yaml:"hide_override"`
 }
 
 // Metrics configures what asz derives from the landed files. It is one
@@ -489,6 +494,7 @@ func Load(path string) (*Config, error) {
 		// hide is a set, and a name written twice is withheld once.
 		cfg.View.Hide = slices.Compact(slices.Sorted(slices.Values(loaded.View.Hide)))
 	}
+	cfg.View.HideOverride = loaded.View.HideOverride
 	return cfg, cfg.Validate()
 }
 

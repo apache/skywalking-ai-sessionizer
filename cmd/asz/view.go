@@ -49,7 +49,7 @@ func cmdView(cfg *config.Config, _ []config.Adapter, _ bool) error {
 	}
 	zone := storage.NewZone(zoneRoot)
 	srv := view.NewWithGlossaries(zone, glossaries())
-	if err := srv.SetHide(cfg.View.Hide); err != nil {
+	if err := srv.SetHide(cfg.View.Hide, cfg.View.HideOverride); err != nil {
 		return err
 	}
 	ids, err := srv.List()
@@ -149,7 +149,7 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	zone := storage.NewZone(zoneRoot)
 	srv := view.NewWithGlossaries(zone, glossaries())
-	if err := srv.SetHide(cfg.View.Hide); err != nil {
+	if err := srv.SetHide(cfg.View.Hide, cfg.View.HideOverride); err != nil {
 		return err
 	}
 
@@ -203,18 +203,24 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	return http.Serve(ln, srv.Handler())
 }
 
-// printWithholding says what the page withholds from every reader.
+// printWithholding says what the page withholds, and whether a request may
+// say otherwise.
 //
 // A record is named for what it carries when it lands, and a root landed
 // before asz named these carries no such name. Withholding there finds
 // nothing, and the only sign is a zero in each document's summary, so the
 // operator is told here, once, before anyone reads.
 func printWithholding(cfg *config.Config) {
-	if len(cfg.View.Hide) == 0 {
-		return
+	const landedBefore = " A record landed before asz named these carries no name and is shown. Collect such a root again into a new one to withhold there."
+	names := strings.Join(cfg.View.Hide, " and ")
+	switch {
+	case cfg.View.HideOverride && names == "":
+		fmt.Println("withhold : nothing, unless a request's hide parameter names what to withhold (view.hide_override is on)." + landedBefore)
+	case cfg.View.HideOverride:
+		fmt.Printf("withhold : %s, unless a request's hide parameter names another set (view.hide_override is on).%s\n", names, landedBefore)
+	case names != "":
+		fmt.Printf("withhold : %s, from every reader.%s\n", names, landedBefore)
 	}
-	fmt.Printf("withhold : %s, from every reader. A record landed before asz named these carries no name and is shown. Collect such a root again into a new one to withhold there.\n",
-		strings.Join(cfg.View.Hide, " and "))
 }
 
 // serveAddr listens on the address the command was given, or the default.

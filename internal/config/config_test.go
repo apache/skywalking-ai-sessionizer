@@ -356,6 +356,8 @@ func TestAMistakenViewKeyIsRefused(t *testing.T) {
 		{"a second document", "storage:\n  root: ./data\n---\nview:\n  hide: [system_prompt]\n", false},
 		{"a first document left empty", "---\n---\nview:\n  hide: [system_prompt]\n", false},
 		{"a document marker at the end", "view:\n  hide: [system_prompt]\n---\n", true},
+		{"hide_override in the view section", "view:\n  hide: [system_prompt]\n  hide_override: true\n", true},
+		{"a misspelled hide_override", "view:\n  hide_overide: true\n", false},
 	} {
 		path := filepath.Join(t.TempDir(), "asz.yaml")
 		if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
@@ -366,9 +368,13 @@ func TestAMistakenViewKeyIsRefused(t *testing.T) {
 			t.Errorf("%s: error %v, want ok %v", tc.name, err, tc.ok)
 			continue
 		}
-		// Every file that loads with a hide withholds what it says.
+		// Every file that loads with a hide withholds what it says, and lets
+		// a request replace it only when it says so.
 		if err == nil && strings.Contains(tc.body, "system_prompt") && !slices.Contains(cfg.View.Hide, "system_prompt") {
 			t.Errorf("%s: loaded with hide %v, want system_prompt withheld", tc.name, cfg.View.Hide)
+		}
+		if err == nil && cfg.View.HideOverride != strings.Contains(tc.body, "hide_override: true") {
+			t.Errorf("%s: loaded with hide_override %v", tc.name, cfg.View.HideOverride)
 		}
 	}
 }

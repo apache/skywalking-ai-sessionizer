@@ -285,16 +285,21 @@ export:
     metrics: true
 
 # What asz view and asz server serve. asz knows nothing about who is
-# reading: these settings apply to every reader of this instance, and two
+# reading: these settings apply to every reader of this instance. Two
 # audiences are two instances over the same root, each behind the
-# deployment's own authentication.
+# deployment's own authentication, or one instance with hide_override on
+# behind a host that sets hide for each reader.
 view:
   # The flags whose steps the page withholds from every reader:
   # system_prompt, the system prompt a runtime sent, and tool_schemas, the
   # schemas of the tools it advertised. A withheld step keeps its place,
   # its flags and its size, loses its text, and says so with the state
   # omitted. The provider bodies go with it, since a request carries both
-  # again and a body is served whole or not at all. A host that serves the
-  # API through its own route withholds more for one reader with the hide
-  # parameter, never less. Empty hides nothing.
+  # again and a body is served whole or not at all. Empty hides nothing.
   hide: []
+  # Whether a request's hide parameter replaces hide above for that
+  # request. On, a host that serves the API through its own route decides
+  # what each reader is kept from, and hide above applies to a request that
+  # sets no hide. Off, hide above is the whole answer, and a request that
+  # carries the parameter is refused.
+  hide_override: false

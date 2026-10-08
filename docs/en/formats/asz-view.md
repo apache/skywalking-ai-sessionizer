@@ -261,20 +261,23 @@ An operator who serves a conversation to the people an agent served may need to 
 the runtime sent the model: the system prompt and the tool schemas. The record that carries each is
 named by its adapter with a flag, `system_prompt` or `tool_schemas`, as [Session
 Data](session-data.md#flags) lists, and a server withholds by those names, never by the text or the
-size of a part. asz knows nothing about who is reading. `asz view` withholds what its
-[configuration](../setup/configuration.md#view) says for every reader, and a `hide` parameter on
-`/api/c/{id}/view`, `/api/c/{id}/record/{seq}/{row}` and `/api/c/{id}/files` adds names for one
-request and never takes one away: `?hide=system_prompt,tool_schemas`, or the parameter given more
-than once. Spaces around a name and empty entries are ignored, and a repeated name counts once. A
-name that is not a flag a reader may withhold is refused with status 400. So is any
-other key whose letters alone spell `hide`, in any case, such as `Hide`, `hide[]` or `hide[0]`, and
-a query that does not parse, since either would otherwise read as no `hide` at all. A host that
-serves the API through its own route decides per reader, and adds the parameter to every request it
-serves for a reader who may not see the material: the document, every record and every file. asz's
-own page passes a `hide` in its address on to all three, so the Evidence tab never shows what the
-document withholds. Its links between the list and the conversations keep it too. That is not access
-control, because a reader can edit the address. Two audiences are two instances over the same root,
-each behind the deployment's own authentication.
+size of a part. asz knows nothing about who is reading. `asz view` withholds what `view.hide` in
+its [configuration](../setup/configuration.md#view) says, and by default that is the whole answer: a
+request that carries a `hide` parameter is refused with status 400. With `view.hide_override` on, a
+`hide` parameter on `/api/c/{id}/view`, `/api/c/{id}/record/{seq}/{row}` and `/api/c/{id}/files`
+replaces `view.hide` for that request: `?hide=system_prompt,tool_schemas`, or the parameter given
+more than once, and `?hide=` with no name withholds nothing. A request that sets no `hide` is served
+what `view.hide` says. Spaces around a name and empty entries are ignored, and a repeated name counts
+once. A name that is not a flag a reader may withhold is refused with status 400. So is any other key
+whose letters alone spell `hide`, in any case, such as `Hide`, `hide[]` or `hide[0]`, and a query
+that does not parse, since either would otherwise read as no `hide` at all. A host that serves the API
+through its own route, on an instance with `view.hide_override` on, decides per reader, and sets the
+parameter on every request it serves: the document, every record and every file. asz's own page
+passes a `hide` in its address on to all three, so the Evidence tab never shows what the document
+withholds, and shows the refusal of an instance that does not take the parameter. Its links between
+the list and the conversations keep it too. That is not access control, because a reader can edit
+the address. Two audiences are two instances over the same root, each behind the deployment's own
+authentication, or one such host.
 
 Which records carry the flags depends on the adapter. The Claude Code adapter names two
 attachments: the prompt snapshot that Claude Code and a runtime built on the Agent SDK write, and
