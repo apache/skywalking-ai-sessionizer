@@ -1,0 +1,120 @@
+{
+  "at": 1.42,
+  "body_bytes": 4922,
+  "encoding": "none",
+  "headers": {
+    "Content-Type": "multipart/form-data; boundary=----LangSmithFormBoundary8mxiv6dz1cq",
+    "User-Agent": "langsmith-js/0.10.8",
+    "accept": "*/*",
+    "accept-encoding": "gzip, deflate",
+    "accept-language": "*",
+    "connection": "keep-alive",
+    "host": "127.0.0.1:8930",
+    "sec-fetch-mode": "cors",
+    "transfer-encoding": "chunked",
+    "x-api-key": "asz-harness"
+  },
+  "method": "POST",
+  "n": 1,
+  "parts": [
+    {
+      "bytes": 330,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7d9-7000-8000-03feb0488720\"",
+        "Content-Type": "application/json; length=330"
+      },
+      "name": "post.01a11ab3-a7d9-7000-8000-03feb0488720"
+    },
+    {
+      "bytes": 376,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7d9-7000-8000-03feb0488720.inputs\"",
+        "Content-Type": "application/json; length=376"
+      },
+      "name": "post.01a11ab3-a7d9-7000-8000-03feb0488720.inputs"
+    },
+    {
+      "bytes": 68,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7d9-7000-8000-03feb0488720.outputs\"",
+        "Content-Type": "application/json; length=68"
+      },
+      "name": "post.01a11ab3-a7d9-7000-8000-03feb0488720.outputs"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7d9-7000-8000-03feb0488720.events\"",
+        "Content-Type": "application/json; length=2"
+      },
+      "name": "post.01a11ab3-a7d9-7000-8000-03feb0488720.events"
+    },
+    {
+      "bytes": 162,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7d9-7000-8000-03feb0488720.extra\"",
+        "Content-Type": "application/json; length=162"
+      },
+      "name": "post.01a11ab3-a7d9-7000-8000-03feb0488720.extra"
+    },
+    {
+      "bytes": 2,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7d9-7000-8000-03feb0488720.serialized\"",
+        "Content-Type": "application/json; length=2"
+      },
+      "name": "post.01a11ab3-a7d9-7000-8000-03feb0488720.serialized"
+    },
+    {
+      "bytes": 453,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7e4-756a-b3e8-3ac240402858\"",
+        "Content-Type": "application/json; length=453"
+      },
+      "name": "post.01a11ab3-a7e4-756a-b3e8-3ac240402858"
+    },
+    {
+      "bytes": 368,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7e4-756a-b3e8-3ac240402858.inputs\"",
+        "Content-Type": "application/json; length=368"
+      },
+      "name": "post.01a11ab3-a7e4-756a-b3e8-3ac240402858.inputs"
+    },
+    {
+      "bytes": 401,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7e4-756a-b3e8-3ac240402858.outputs\"",
+        "Content-Type": "application/json; length=401"
+      },
+      "name": "post.01a11ab3-a7e4-756a-b3e8-3ac240402858.outputs"
+    },
+    {
+      "bytes": 101,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7e4-756a-b3e8-3ac240402858.events\"",
+        "Content-Type": "application/json; length=101"
+      },
+      "name": "post.01a11ab3-a7e4-756a-b3e8-3ac240402858.events"
+    },
+    {
+      "bytes": 327,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7e4-756a-b3e8-3ac240402858.extra\"",
+        "Content-Type": "application/json; length=327"
+      },
+      "name": "post.01a11ab3-a7e4-756a-b3e8-3ac240402858.extra"
+    },
+    {
+      "bytes": 177,
+      "headers": {
+        "Content-Disposition": "form-data; name=\"post.01a11ab3-a7e4-756a-b3e8-3ac240402858.serialized\"",
+        "Content-Type": "application/json; length=177"
+      },
+      "name": "post.01a11ab3-a7e4-756a-b3e8-3ac240402858.serialized"
+    }
+  ],
+  "path": "/runs/multipart",
+  "redacted": true,
+  "wire_bytes": 4922
+}

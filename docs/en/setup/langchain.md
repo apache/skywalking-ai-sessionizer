@@ -37,6 +37,9 @@ export LANGSMITH_PROJECT=my-agent
 `LANGSMITH_API_KEY` must be set because the client insists on sending one. Its
 value does not matter unless the receiver is configured with a `token`.
 
+A LangChain JS or LangGraph JS application takes the same four variables: its
+client, the `langsmith` package, reads them too.
+
 Run the application. Within one collector period its conversations are in the
 storage root:
 
@@ -105,11 +108,11 @@ export LANGSMITH_API_KEY=a-shared-secret
 ## What arrives, and when
 
 The client sends in the background, in batches. A run is sent when it starts
-and again when it finishes, so asz sees work while it is still running: a turn
-with a slow tool appears before the tool returns, and a process that dies
-mid-turn still leaves what it had reported. That evidence lands as it arrived,
-and the conversation says the work was unfinished rather than pretending it
-never happened.
+and again when it finishes, or once when both fall in one batch, so asz sees a
+slow step while it is still running: a turn with a slow tool appears before the
+tool returns, and a process that dies mid-turn still leaves what it had
+reported. That evidence lands as it arrived, and the conversation says the work
+was unfinished rather than pretending it never happened.
 
 The prompt that opens a turn, a tool command and a tool result are landed whole,
 as they were sent. Nothing is sampled and nothing is redacted, which is the same

@@ -22,10 +22,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -46,6 +49,52 @@ type Run struct {
 	Session  string          `json:"session_name"`
 	Tags     []string        `json:"tags"`
 	Error    json.RawMessage `json:"error"`
+}
+
+// UnmarshalJSON reads a run's times as either client writes them. The Python
+// client writes both as RFC 3339 text. LangSmith JS writes start_time as text
+// and end_time as a number, the milliseconds since the epoch, and a run read
+// as text alone was refused whole, so nothing a LangChain JS application
+// sent landed. A number is kept as the same RFC 3339 text, in UTC, which is
+// what everything after this reads.
+func (r *Run) UnmarshalJSON(b []byte) error {
+	type plain Run
+	var wire struct {
+		plain
+		Start json.RawMessage `json:"start_time"`
+		End   json.RawMessage `json:"end_time"`
+	}
+	if err := json.Unmarshal(b, &wire); err != nil {
+		return err
+	}
+	start, err := runTime(wire.Start)
+	if err != nil {
+		return fmt.Errorf("start_time: %w", err)
+	}
+	end, err := runTime(wire.End)
+	if err != nil {
+		return fmt.Errorf("end_time: %w", err)
+	}
+	*r = Run(wire.plain)
+	r.Start, r.End = start, end
+	return nil
+}
+
+// runTime is a run time as RFC 3339 text: text as it arrived, a number of
+// milliseconds since the epoch in UTC, and nothing for a time not sent.
+func runTime(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text, nil
+	}
+	var millis int64
+	if err := json.Unmarshal(raw, &millis); err != nil {
+		return "", errors.New("neither RFC 3339 text nor milliseconds since the epoch")
+	}
+	return time.UnixMilli(millis).UTC().Format(time.RFC3339Nano), nil
 }
 
 // Finished reports whether this arrival carries the run's end.
@@ -313,7 +362,7 @@ func humanInput(base sessiondata.Record, d decoded) (sessiondata.Record, bool) {
 		var parts []sessiondata.Part
 		var shaped []string
 		for _, m := range list[first:] {
-			content := rawField(m, "content")
+			content := rawField(messageFields(m), "content")
 			parts = append(parts, contentParts(content)...)
 			// What is lifted is the person's own words, but a message's
 			// content can be of any shape, and one that takes the shape of
@@ -370,8 +419,18 @@ func humanInput(base sessiondata.Record, d decoded) (sessiondata.Record, bool) {
 // landed evidence, and here the surrounding function did and nothing else
 // records it.
 func tracedDirectly(d decoded) bool {
-	method, _ := d.metadata["ls_method"].(string)
-	return method == "traceable"
+	if method, _ := d.metadata["ls_method"].(string); method == "traceable" {
+		return true
+	}
+	// LangSmith JS writes no ls_method. What it writes, as the Python client
+	// does, is which library made the run: the LangSmith client itself for a
+	// decorated function, LangChain for everything a graph or a model call
+	// made. Measured: in the Python corpus the two runs with ls_method are the
+	// two whose library is langsmith, and in a LangGraph JS capture all ten
+	// runs say langchain-js.
+	runtime, _ := d.extra["runtime"].(map[string]any)
+	library, _ := runtime["library"].(string)
+	return library == "langsmith"
 }
 
 // speakerIsHuman reads whichever of the two fields names the speaker.
@@ -380,6 +439,9 @@ func tracedDirectly(d decoded) bool {
 // graph's state says type and has no role. Checking only one of them loses
 // every turn of a conversation whose client serialises its messages.
 func speakerIsHuman(message json.RawMessage) bool {
+	if _, kind, ok := serializedMessage(message); ok {
+		return kind == "human"
+	}
 	var m struct {
 		Role string `json:"role"`
 		Type string `json:"type"`
@@ -616,10 +678,85 @@ func systemPairIn(l []any) bool {
 // a conversation: its role or its type says so, in any case, beside content
 // with something in it. An event of the application's own with a type of
 // system and no content is not one.
+//
+// LangChain serializes a message as a constructor: Python writes the role as
+// the type in its kwargs, which the walk reaches as an object of its own, but
+// LangChain JS writes only the fields the message was built with, so its role
+// is only the class that ends the id. That form is read here.
 func systemMessage(m map[string]any) bool {
 	role, _ := m["role"].(string)
 	kind, _ := m["type"].(string)
-	return (systemRole(role) || systemRole(kind)) && holdsSomething(m["content"])
+	if (systemRole(role) || systemRole(kind)) && holdsSomething(m["content"]) {
+		return true
+	}
+	kwargs, _ := m["kwargs"].(map[string]any)
+	return serializedSystem(m["id"]) && kwargs != nil && holdsSomething(kwargs["content"])
+}
+
+// serializedSystem reports whether a LangChain constructor's id names a
+// system message: its last entry is the class SystemMessage, or the
+// SystemMessageChunk a stream builds.
+func serializedSystem(id any) bool {
+	return classOf(id) == "system"
+}
+
+// messageClasses are the classes LangChain builds a message from, by the
+// type each one is. LangChain JS writes no type in a serialized message's
+// kwargs, so the class that ends its id is the only thing that says which
+// kind of message it is.
+var messageClasses = map[string]string{
+	"HumanMessage": "human", "HumanMessageChunk": "human",
+	"AIMessage": "ai", "AIMessageChunk": "ai",
+	"SystemMessage": "system", "SystemMessageChunk": "system",
+	"ToolMessage": "tool", "ToolMessageChunk": "tool",
+	"FunctionMessage": "function", "FunctionMessageChunk": "function",
+	"ChatMessage": "chat", "ChatMessageChunk": "chat",
+}
+
+// classOf is the type a LangChain constructor's id names, or nothing when its
+// last entry is not a message class.
+func classOf(id any) string {
+	path, _ := id.([]any)
+	if len(path) == 0 {
+		return ""
+	}
+	class, _ := path[len(path)-1].(string)
+	return messageClasses[class]
+}
+
+// serializedMessage reads a message LangChain serialized as a constructor:
+// the fields it was built with, and the type it is, which Python writes in
+// those fields and LangChain JS names only by the class that ends its id.
+// The third return is false for a value that is not one.
+func serializedMessage(raw json.RawMessage) (json.RawMessage, string, bool) {
+	var c struct {
+		Type   string          `json:"type"`
+		ID     []any           `json:"id"`
+		Kwargs json.RawMessage `json:"kwargs"`
+	}
+	if json.Unmarshal(raw, &c) != nil || c.Type != "constructor" || len(c.Kwargs) == 0 {
+		return nil, "", false
+	}
+	kind := classOf(c.ID)
+	if kind == "" {
+		return nil, "", false
+	}
+	var written struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(c.Kwargs, &written) == nil && written.Type != "" {
+		kind = written.Type
+	}
+	return c.Kwargs, kind, true
+}
+
+// messageFields is a message's own fields: those of a serialized message,
+// and the value itself otherwise.
+func messageFields(raw json.RawMessage) json.RawMessage {
+	if fields, _, ok := serializedMessage(raw); ok {
+		return fields
+	}
+	return raw
 }
 
 // systemRole reports whether a role or a type names the instructions that
@@ -699,6 +836,9 @@ func toolResult(base sessiondata.Record, d decoded, hinted string) sessiondata.R
 	if len(message) == 0 {
 		message = d.outputs
 	}
+	// LangChain JS returns the tool message serialized, its fields under
+	// kwargs, where the result was kept whole as the serialized object.
+	message = messageFields(message)
 	var out struct {
 		CallID string `json:"tool_call_id"`
 		Status string `json:"status"`
@@ -766,8 +906,10 @@ func toolResult(base sessiondata.Record, d decoded, hinted string) sessiondata.R
 // conversation. Dropping those landed such traces with no content at all.
 //
 // The runtime says which it is, on every arrival, and that is measured: every
-// run of a decorated trace carries ls_method and no run of a graph trace
-// does. Testing the shape of the fields instead does not work. The repeats
+// run of a Python decorated trace carries ls_method and no run of a graph
+// trace does; LangSmith JS writes no ls_method, and says instead that the
+// LangSmith client made the run, as tracedDirectly reads. Testing the shape
+// of the fields instead does not work. The repeats
 // are not all message lists and they are not under one name - one capture
 // held 164 KB of the message list under "output" and another 93 KB of a
 // routing value that quoted a tool call - so every test on the content kept
@@ -905,6 +1047,12 @@ func repeatsMessages(raw json.RawMessage) bool {
 					if kind, ok := t[named].(string); ok && messageKinds[kind] {
 						return true
 					}
+				}
+			}
+			// A message LangChain JS serialized names its kind only by its class.
+			if kwargs, ok := t["kwargs"].(map[string]any); ok && classOf(t["id"]) != "" {
+				if _, ok := kwargs["content"]; ok {
+					return true
 				}
 			}
 			for _, inner := range t {

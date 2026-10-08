@@ -32,6 +32,29 @@ Two of those decide the design. Runs arrive more than once, so a run is a thing 
 rather than a thing that is *reported*. And a rejected batch comes back identical, so delivery is
 at-least-once and the receiver deduplicates.
 
+LangSmith JS, the client a LangChain JS or LangGraph JS application carries, is pointed at the
+receiver the same way and differs in what it sends. Measured with LangSmith JS 0.10.8,
+`@langchain/core` 1.2.17 and `@langchain/langgraph` 1.4.21, on the two cases under
+`tests/apps/langchain-js`:
+
+| Measured | LangSmith JS |
+| --- | --- |
+| Body | sent in chunks, with no length |
+| Run times | `start_time` as RFC 3339 text, `end_time` as the milliseconds since the epoch |
+| Updates | as the Python client: a run is sent when it starts and when it ends, as one post of the finished run when both fall in one batch. Every run of both captures was: 12 posts, no patch |
+| A message | a constructor whose kind is named only by the class that ends its `id`, its fields under `kwargs` with no `type` |
+| A decorated function | no `ls_method`; `extra.runtime.library` is `langsmith`, where LangChain's runs say `langchain-js` |
+| Metadata | a decorated function's is not passed to the runs inside it |
+
+The receiver reads either time, and a message by its class as by its type, so a JS conversation
+lands as the Python one does: the person's question opens the turn, a tool's result is what the
+tool said, and a decorated function keeps its arguments. Read as the Python client writes them,
+every JS run was refused for its end time, and, with that read, no question opened a LangGraph JS
+conversation and a tool's result landed as the serialized message. Because the metadata is not
+passed down, a model call made inside a decorated function supplies no thread of its own, and
+lands under its trace as any run that supplied none does; a LangGraph JS graph puts the thread on
+every run, so its conversation is whole.
+
 An update carries only what changed. `update_run(id, outputs=...)` sends the id and the outputs,
 with the trace, the project, the kind of run and the dotted order all null — read on its own,
 a run belonging to no conversation and of no kind. So the runs that have started and not ended
@@ -54,8 +77,10 @@ every field comes from an earlier arrival about the same run.
 
 ### A record is an arrival, not a run
 
-A run is posted when it starts and patched when it ends, so the same run reaches asz more than
-once. Each arrival is its own record, with the run as its `call`.
+A run is posted when it starts and patched when it ends, so the same run can reach asz more than
+once. Both clients send the two as one post of the finished run when they fall in one batch, as
+most runs do: in the captured corpus 462 of 476 posts carried their run's end. Each arrival is its
+own record, with the run as its `call`.
 
 They cannot share one record id. The index keeps the first entry for an id, and in the streaming
 capture a tool's result exists only in the patch — one id would have hidden it, and the
@@ -139,8 +164,10 @@ A `@traceable` function has no graph and may have no model call at all. Its argu
 return value live nowhere else, so for those runs the fields are kept — dropping them landed such
 traces with no content in them at all.
 
-The runtime says which is which on every arrival, and that is measured: every run of a decorated
-trace carries `ls_method`, and no run of a graph trace does. A field that is a message list and
+The runtime says which is which on every arrival, and that is measured: every run of a Python
+decorated trace carries `ls_method`, and no run of a graph trace does. LangSmith JS writes no
+`ls_method`; both clients write which library made the run, `langsmith` for a decorated function
+and a LangChain library for everything else, and that is read too. A field that is a message list and
 nothing else is still a repeat and is dropped; a field carrying anything beside it is kept whole,
 because what is beside it is the function's own and is recorded nowhere else.
 
@@ -197,7 +224,8 @@ LangChain's serialized message form — and not the bytes the provider received.
 which adapter it came from, and a reader must not take it for the wire.
 
 **Where the system prompt and the tools land.** The system message and the tools a model was offered
-reach asz only in a model call's `inputs` and `extra`. Measured on the 72 model arrivals of the
+reach asz in a model call's `inputs` and `extra`, and in any run the application hands them to, such
+as a decorated function, which the paragraphs below cover. Measured on the 75 model arrivals of the
 captured corpus, every one sent its inputs out of band, and the 43 that offered tools sent them in
 an out-of-band `extra`. The system message lands in the provider bodies, as part of a request's
 inputs, and a reader that [withholds](../formats/asz-view.md#withholding) anything is served no
@@ -208,7 +236,7 @@ Two other records can hold the request itself. A model call that arrives before 
 lands that arrival's whole run envelope, whether or not a later arrival finishes it. The envelope
 held neither on the corpus, but a client that put them inside it would land them there. A trace
 whose root is the model call itself, with no message list in its inputs, such as a completion asked
-with a list of prompts, lands those inputs whole as its first input. All 46 trace roots of the
+with a list of prompts, lands those inputs whole as its first input. All 48 trace roots of the
 corpus are chain runs, so none landed this way. Each record is named `system_prompt` when it holds
 inputs of any shape, since they are the request the model was sent, and the envelope also when its
 `extra` holds a prompt by shape, under a key a provider takes it by. It is named `tool_schemas` when
@@ -226,10 +254,13 @@ result is never named.
 
 - `system_prompt` names a message whose type or role is `system` or `developer`, in any case, with
   content that holds something, and LangChain's pair of a role and its content in a list of
-  messages. A list of two words, or an event of the application's own with no content, is not a
-  message. It also names a value under a key a provider takes the prompt by: `system`,
-  `instructions`, `instruction`, `system_instruction`, `system_instructions`, `preamble`,
-  `system_message` or `system_prompt`, compared without case, underscores or dashes.
+  messages. A message LangChain serializes is a constructor: Python writes its role as the type in
+  its `kwargs`, and LangChain JS writes only the fields the message was built with, so its role is
+  only the class that ends its `id`, `SystemMessage` or `SystemMessageChunk`, which names it too. A
+  list of two words, or an event of the application's own with no content, is not a message. It
+  also names a value under a key a provider takes the prompt by: `system`, `instructions`,
+  `instruction`, `system_instruction`, `system_instructions`, `preamble`, `system_message` or
+  `system_prompt`, compared without case, underscores or dashes.
 - `tool_schemas` names a list of objects, or objects keyed by name, under a `tools`, `functions`,
   `function_declarations`, `tool_definitions` or `available_tools` key. A list of names or a flag
   is not a schema. An object of another kind there counts, since nothing tells it from a tool.
@@ -242,9 +273,10 @@ its own is shown to every reader. A model call's own request does not depend on 
 the provider bodies, which a reader that withholds anything is never served.
 
 A value of the application's own that takes one of these shapes is named too, since nothing tells
-the two apart, and it is safer to withhold it. No captured record matches either shape. A reader
-withholds such a record like any other, and the document counts it, although no step stands on a
-run's own record.
+the two apart, and it is safer to withhold it. On the captured corpus one record is named by shape:
+the arguments of the LangChain JS traced function, which hold the system message it passes to its
+model call. A reader withholds such a record like any other, and the document counts it, although
+no step stands on a run's own record.
 
 ### A conversation is named by what was asked
 
@@ -295,7 +327,7 @@ supplied, and nothing merges it with anything else.
   - The middleware summarises inside a turn, so the talk it happens in stays in the epoch where the
     turn began, as it does for a Claude Code compaction in the middle of a turn.
   - The reset lands with the arrival that carries the request. In the captured corpus every model
-    call's first arrival carried its request, 71 of 71. A request that arrives after its call has
+    call's first arrival carried its request, 74 of 74. A request that arrives after its call has
     begun puts that one call in the old epoch.
   - A marked message with no `id` makes no reset. The middleware gives every message one. Without
     it, one summary could not be told from another with the same words.
@@ -321,8 +353,9 @@ supplied, and nothing merges it with anything else.
 
 ## What it supplies that a transcript does not
 
-- **Work in progress.** Runs arrive before they finish, so a slow turn is visible while it runs and
-  a process that died mid-turn still leaves what it had reported.
+- **Work in progress.** A run still going when its client sends a batch arrives before it
+  finishes, so a slow turn is visible while it runs and a process that died mid-turn still leaves
+  what it had reported.
 - **Per-call duration.** Every run carries its own start and end.
 - **The whole message list per call.** `inputs.messages` is what the framework sent, so continuity
   between turns can be checked rather than assumed.
