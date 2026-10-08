@@ -83,6 +83,11 @@ func TestALangChainConversationAssembles(t *testing.T) {
 		// and end sent as one post, its end time in milliseconds, each message
 		// serialized with its kind named only by the class that ends its id.
 		{"js-graph", 1, 1, 1},
+		// LangSmith JS's traceable around a chat model. The thread is on the
+		// function alone, and the model call takes it from the function it
+		// ran inside, so the question, the call and its answer are one
+		// conversation.
+		{"js-traceable", 1, 0, 1},
 	} {
 		t.Run(tc.kase, func(t *testing.T) {
 			zone, sessions := land(t, tc.kase)

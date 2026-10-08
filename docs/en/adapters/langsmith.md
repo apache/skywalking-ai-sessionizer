@@ -51,9 +51,10 @@ lands as the Python one does: the person's question opens the turn, a tool's res
 tool said, and a decorated function keeps its arguments. Read as the Python client writes them,
 every JS run was refused for its end time, and, with that read, no question opened a LangGraph JS
 conversation and a tool's result landed as the serialized message. Because the metadata is not
-passed down, a model call made inside a decorated function supplies no thread of its own, and
-lands under its trace as any run that supplied none does; a LangGraph JS graph puts the thread on
-every run, so its conversation is whole.
+passed down, a model call made inside a decorated function supplies no thread of its own. It takes
+the function's, as [Ownership is a namespace](#ownership-is-a-namespace) says a run that supplies
+none does; landed under its trace, the answer was a conversation of its own and the question's had
+none. A LangGraph JS graph puts the thread on every run.
 
 An update carries only what changed. `update_run(id, outputs=...)` sends the id and the outputs,
 with the trace, the project, the kind of run and the dotted order all null — read on its own,
@@ -304,8 +305,33 @@ and `会话-1` as real thread keys, so the session directory is derived from the
 a digest of the whole namespace, under an `ls-` prefix that keeps it off the leading underscore
 enumeration skips and away from every Windows device name.
 
-A trace with no supplied key is not given one. It lands under a name that says the identity was not
-supplied, and nothing merges it with anything else.
+A run that supplies no key takes the conversation of the nearest run it ran inside whose
+conversation was supplied. The run's dotted order names every run it ran inside, and that run
+supplied the thread, so nothing is guessed. A run with no dotted order is not given one. A run that
+supplies its own key keeps it. The Python client passes a decorated function's metadata down to the
+runs inside it, and LangSmith JS does not, so without this a model call made inside a JS function
+landed apart from the question it answered.
+
+The order runs arrive in does not decide it. A run waits for its ancestry, as
+[A nested agent is its own stream](#a-nested-agent-is-its-own-stream) says, and its conversation is
+decided when the ancestry has arrived. A run above it that supplied nothing, or landed unassigned,
+is passed over. A run above it that is not known, because it has not arrived when the run has
+waited as long as it may or was forgotten after 24 hours, stops the search: it may have supplied a
+thread of its own, so the one further up is not taken, and the run lands as one that supplied none.
+A run's own key decides from the first of its arrivals that brings one, as long as the run has not
+landed yet; once it has, every later arrival of the same run lands where it did, while the receiver
+remembers the run, so one run is not split across two conversations.
+
+An update carries only what changed, so it can name a thread with no project, and arrive before the
+run's start, which carries the project. A thread named before the run's project is known is not a
+whole conversation. It does not decide while the run waits, so a later arrival that carries the
+project still does. The run does not take a conversation from a run above it in place of its own
+thread, and a run below it does not pass over it to take one from further up. If it lands before
+any arrival carries the project, it lands under its thread with an empty project. All 11 updates in
+the captures carry their project with their metadata, so none of them has met this.
+
+A trace with no supplied key anywhere is not given one. It lands under a name that says the
+identity was not supplied, and nothing merges it with anything else.
 
 ## What the wire cannot supply
 

@@ -70,6 +70,18 @@ metadata instead:
 def answer(question): ...
 ```
 
+In LangChain JS, the same goes on the client's `traceable`:
+
+```js
+const answer = traceable(async (question) => { /* ... */ }, {
+  name: "answer",
+  metadata: { thread_id: "the-conversation" },
+});
+```
+
+A run inside it that names no thread, such as a model call, is part of the same
+conversation.
+
 ## What owns a conversation
 
 A thread key alone is not an identity. Two applications can both use the
