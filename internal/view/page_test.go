@@ -18,11 +18,15 @@
 package view_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -153,6 +157,117 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 	blue := get("/logo-blue.svg")
 	if blue.Code != http.StatusOK || !strings.Contains(blue.Body.String(), `fill="#1368B3"`) || strings.Contains(blue.Body.String(), `fill="#fff"`) {
 		t.Fatalf("the blue logo is not the white one recoloured: %d", blue.Code)
+	}
+}
+
+// listPageBrowser runs the list page's scripts, in order, with a stand-in for
+// the browser and reports what they threw, what the page showed, and what it
+// asked the server for. The stand-in keeps what a browser keeps after a script
+// throws: the next script still runs, a list it hands the page has an element
+// in it, every function the page hands it or sets as a handler is called once
+// the scripts end, round after round with a promise's callbacks run between,
+// and window is the page's own global. The body's first child is the element
+// its markup starts with, so a refusal written into nothing fails as it
+// would. Anything else the page touches is a function that returns itself.
+// It is not a browser: a DOM method the page does not use fails inside a
+// callback, which is passed over.
+const listPageBrowser = `"use strict";
+const vm = require("node:vm");
+const fs = require("node:fs");
+const fetched = [];
+const handed = [];
+const take = v => { if (typeof v === "function") handed.push(v); };
+const any = () => new Proxy(function () {}, {
+  get: (_, k) => k === Symbol.iterator ? function* () { yield any(); } : k === Symbol.toPrimitive ? () => "" : k === "then" ? undefined : any(),
+  apply: (_, __, args) => { args.forEach(take); return any(); },
+  set: (_, __, v) => { take(v); return true; },
+});
+const body = { firstChild: null, set innerHTML(html) { this.firstChild = /^\s*<[a-z]/i.test(html) ? { textContent: "" } : null; } };
+const document = new Proxy({ body }, { get: (o, k) => k in o ? o[k] : any(), set: (_, __, v) => { take(v); return true; } });
+const browser = {
+  location: { search: process.argv[process.argv.length - 1], href: "" },
+  document,
+  URLSearchParams,
+  console,
+  fetch: url => { fetched.push(String(url)); return new Promise(() => {}); },
+  localStorage: any(),
+  setTimeout: any(),
+  setInterval: any(),
+  requestAnimationFrame: any(),
+  queueMicrotask: any(),
+  addEventListener: any(),
+};
+const context = vm.createContext(browser);
+browser.window = vm.runInContext("globalThis", context);
+const thrown = [];
+for (const file of process.argv.slice(2, -1)) {
+  try { vm.runInContext(fs.readFileSync(file, "utf8"), context); } catch (e) { thrown.push(String(e && e.message)); }
+}
+const called = new Set();
+(async () => {
+  for (let round = 0; round < 10; round++) {
+    await new Promise(r => setImmediate(r));
+    for (const k of Object.keys(browser)) if (k.startsWith("on") && !called.has(browser[k])) { called.add(browser[k]); take(browser[k]); }
+    if (handed.length === 0) break;
+    for (const f of handed.splice(0)) { try { f(any()); } catch (e) {} }
+  }
+  process.stdout.write(JSON.stringify({ thrown: thrown.join("; "), shown: body.firstChild ? body.firstChild.textContent : "", fetched }));
+})();
+`
+
+// The list page stops before it draws a link or asks for anything when its
+// address holds `;`, and goes on when it does not: with the refusal gone it
+// would offer every conversation without the hide. The scripts are run, since
+// a check of their text passes with the refusal commented out. Without node
+// the test is skipped, as the LangChain shim's tests are without python3.
+func TestListPageRefusesAnAddressThatDoesNotParse(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("the list page's script runs under node, which is not installed")
+	}
+	h := view.New(storage.NewZone(t.TempDir()), nil).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	dir := t.TempDir()
+	browserPath := filepath.Join(dir, "browser.js")
+	if err := os.WriteFile(browserPath, []byte(listPageBrowser), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{browserPath}
+	guarded := false
+	for i, m := range regexp.MustCompile(`(?s)<script>(.*?)</script>`).FindAllStringSubmatch(rec.Body.String(), -1) {
+		guarded = guarded || strings.Contains(m[1], "const unparsed")
+		path := filepath.Join(dir, fmt.Sprintf("script-%d.js", i))
+		if err := os.WriteFile(path, []byte(m[1]), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		args = append(args, path)
+	}
+	if !guarded {
+		t.Fatal("the list page has no script that reads its address")
+	}
+	type run struct {
+		Thrown  string   `json:"thrown"`
+		Shown   string   `json:"shown"`
+		Fetched []string `json:"fetched"`
+	}
+	open := func(search string) run {
+		out, err := exec.Command(node, append(args, search)...).Output()
+		if err != nil {
+			t.Fatalf("node: %v", err)
+		}
+		var r run
+		if err := json.Unmarshal(out, &r); err != nil {
+			t.Fatalf("node wrote %q: %v", out, err)
+		}
+		return r
+	}
+	const refusal = "';' is not a separator"
+	if r := open("?x=1;hide=system_prompt"); !strings.Contains(r.Thrown, refusal) || !strings.Contains(r.Shown, refusal) || len(r.Fetched) != 0 {
+		t.Fatalf("an address holding ';' is not refused before anything is asked for: %+v", r)
+	}
+	if r := open("?hide=system_prompt"); r.Thrown != "" || r.Shown != "" || !slices.Contains(r.Fetched, "/api/status") {
+		t.Fatalf("an address that parses does not reach the list: %+v", r)
 	}
 }
 
