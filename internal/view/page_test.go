@@ -166,7 +166,8 @@ func TestPageServesTheEmbeddedRenderer(t *testing.T) {
 // throws: the next script still runs, a list it hands the page has an element
 // in it, every function the page hands it or sets as a handler is called once
 // the scripts end, round after round with a promise's callbacks run between,
-// and window is the page's own global. The body's first child is the element
+// window is the page's own global, and storage is empty, as a browser's is
+// before a theme is saved, so a script that reads it goes on as it would. The body's first child is the element
 // its markup starts with, so a refusal written into nothing fails as it
 // would. Anything else the page touches is a function that returns itself.
 // It is not a browser: a DOM method the page does not use fails inside a
@@ -190,7 +191,7 @@ const browser = {
   URLSearchParams,
   console,
   fetch: url => { fetched.push(String(url)); return new Promise(() => {}); },
-  localStorage: any(),
+  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
   setTimeout: any(),
   setInterval: any(),
   requestAnimationFrame: any(),
