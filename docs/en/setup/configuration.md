@@ -137,8 +137,8 @@ export:
 
 What `asz view` and `asz server` serve. asz knows nothing about who is reading, so these apply to
 every reader of the instance. Two audiences are two instances over the same root, each behind the
-deployment's own authentication. Or one host serves the API through its own route, and adds `hide`
-to every request for a reader who may not see it. See
+deployment's own authentication. Or one instance with `hide_override` on serves the API through a
+host's own route, and the host sets the `hide` parameter on every request for each reader. See
 [Withholding](../formats/asz-view.md#withholding).
 
 A key this section does not have is refused, and the refusal names the key and its line. Every
@@ -152,13 +152,14 @@ configuration does not have: ignored, and withholding nothing.
 Only the first YAML document of a file is read, so a file with a later document that holds anything
 is refused. `view` is read from 0.6.0. An older asz ignores it, and withholds nothing.
 
-When `hide` is set, `asz view` and `asz server` say so as they start. A record is named for what it
+When `hide` is set, or `hide_override` is on, `asz view` and `asz server` say so as they start. A record is named for what it
 carries when it lands, so a root collected before asz named these records carries no names, and
 withholds nothing. Collect it again into a new root to withhold there.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `hide` | `[]` | The flags whose steps the page withholds from every reader: `system_prompt`, `tool_schemas`. A withheld step keeps its place, its flags and its size, loses its text, and has state `omitted`. The provider bodies go with it, because a request carries both again. |
+| `hide` | `[]` | The flags whose steps the page withholds from every reader: `system_prompt`, `tool_schemas`. A withheld step keeps its place, its flags and its size, loses its text, and has state `omitted`. The provider bodies go with it, because a request carries both again. With `hide_override` on, this applies to a request that sets no `hide` parameter. |
+| `hide_override` | `false` | Whether a request's `hide` parameter replaces `hide` for that request. On, a host that serves the API through its own route decides what each reader is kept from, and `hide=` with no name withholds nothing. Off, `hide` is the whole answer, and a request that carries the parameter is refused with status 400. |
 
 ## The changes adapter
 

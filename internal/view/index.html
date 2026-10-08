@@ -180,9 +180,10 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
 <script>
 "use strict";
 // A hide in the list's address goes with the reader into each conversation
-// and back, so every page they move between withholds the same. It is not
-// access control: a host that withholds per reader adds hide to every request.
-// A key spelled another way goes too, so the server refuses it.
+// and back, so every page they move between withholds the same. The server
+// takes it only when view.hide_override is on, and refuses it otherwise. It is
+// not access control: a host that withholds per reader sets hide on every
+// request. A key spelled another way goes too, so the server refuses it.
 // A `;` in the address is not a separator the API accepts, and a hide written
 // after one would be read as part of another value and dropped here, so the page
 // would ask for the whole conversation. The API refuses such a query, and so does

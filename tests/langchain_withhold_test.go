@@ -118,7 +118,11 @@ func TestAnUnfinishedLangChainCallIsWithheld(t *testing.T) {
 	if shows(doc) {
 		t.Fatal("the withheld document shows text read from the withheld record")
 	}
-	h := view_.New(zone, nil).Handler()
+	srv := view_.New(zone, nil)
+	if err := srv.SetHide(nil, true); err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
 	get := func(path string) *httptest.ResponseRecorder {
 		r := httptest.NewRecorder()
 		h.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
@@ -383,7 +387,11 @@ func TestARunsOwnRecordIsCountedWhenWithheld(t *testing.T) {
 	}
 	walk(doc.Talks)
 	walk(doc.Loose)
-	h := view_.New(zone, nil).Handler()
+	srv := view_.New(zone, nil)
+	if err := srv.SetHide(nil, true); err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
 	get := func(path string) *httptest.ResponseRecorder {
 		r := httptest.NewRecorder()
 		h.ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))

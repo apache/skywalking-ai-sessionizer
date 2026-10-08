@@ -20,10 +20,13 @@ package view_test
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -36,8 +39,8 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
-// A view withholds by the flags the adapter set: for every reader by its
-// configuration, and for one reader by the hide parameter, which only adds.
+// A view withholds by the flags the adapter set: by its configuration, and,
+// when the configuration lets a request replace that, by the hide parameter.
 // The scenario prompt-snapshot-withheld checks the document's rules in both
 // formats. This is the HTTP layer over it: the parameter, what the record
 // endpoint answers, and what the files endpoint serves.
@@ -104,6 +107,18 @@ func TestAViewWithholdsByFlag(t *testing.T) {
 	shown := find(whole.Talks, sessiondata.FlagSystemPrompt)
 	if shown == nil || shown.Text == "" || shown.State != "available" {
 		t.Fatalf("the snapshot step is not shown whole: %+v", shown)
+	}
+
+	// By default the configuration is the whole answer, and a request that
+	// carries hide is refused, whatever it names, rather than served
+	// something other than what it asked for.
+	for _, query := range []string{"hide=system_prompt", "hide=", "hide=system_prompt&hide=tool_schemas"} {
+		if rec := get(api + "/view?" + query); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "view.hide_override") {
+			t.Fatalf("%s on an instance that does not take hide: %d %.200s", query, rec.Code, rec.Body.String())
+		}
+	}
+	if err := srv.SetHide(nil, true); err != nil {
+		t.Fatal(err)
 	}
 
 	// One reader withholds the prompt: the step stays, its text goes, and
@@ -208,18 +223,34 @@ func TestAViewWithholdsByFlag(t *testing.T) {
 		t.Fatalf("a provider body record was served to a reader that withholds: %d %.200s", r.Code, r.Body.String())
 	}
 
-	// The instance withholds for every reader, and a request adds to that
-	// and never takes from it.
-	if err := srv.SetHide([]string{sessiondata.FlagToolSchemas}); err != nil {
+	// The instance's own setting applies to a request that sets no hide.
+	// When the instance takes the parameter, a request's hide replaces that
+	// setting for the request, and `hide=` with no name withholds nothing.
+	if err := srv.SetHide([]string{sessiondata.FlagToolSchemas}, false); err != nil {
 		t.Fatal(err)
 	}
-	if doc := document(api + "/view"); doc.Summary.Withheld["tool_schemas"] != schemas || doc.Summary.Withheld["system_prompt"] != 0 {
+	if doc := document(api + "/view"); fmt.Sprint(keys(doc.Summary.Withheld)) != "[provider_bodies tool_schemas]" || doc.Summary.Withheld["tool_schemas"] != schemas {
 		t.Fatalf("the instance's own setting: %v", doc.Summary.Withheld)
 	}
-	if doc := document(api + "/view?hide=system_prompt"); doc.Summary.Withheld["tool_schemas"] != schemas || doc.Summary.Withheld["system_prompt"] != prompts {
-		t.Fatalf("a request did not add to the instance's setting: %v", doc.Summary.Withheld)
+	if rec := get(api + "/view?hide=system_prompt"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a request named another set on an instance that does not take hide: %d", rec.Code)
 	}
-	if err := srv.SetHide([]string{"finished"}); err == nil {
+	if err := srv.SetHide([]string{sessiondata.FlagToolSchemas}, true); err != nil {
+		t.Fatal(err)
+	}
+	if doc := document(api + "/view"); doc.Summary.Withheld["tool_schemas"] != schemas {
+		t.Fatalf("a request with no hide on an instance that takes it: %v", doc.Summary.Withheld)
+	}
+	if doc := document(api + "/view?hide=system_prompt"); fmt.Sprint(keys(doc.Summary.Withheld)) != "[provider_bodies system_prompt]" || doc.Summary.Withheld["system_prompt"] != prompts {
+		t.Fatalf("a request's hide did not replace the instance's setting: %v", doc.Summary.Withheld)
+	}
+	if doc := document(api + "/view?hide="); len(doc.Summary.Withheld) != 0 || doc.Summary.CapturedPrompts == 0 {
+		t.Fatalf("hide= with no name withheld %v", doc.Summary.Withheld)
+	}
+	if r := get(fmt.Sprintf("%s/files?seq=%d&hide=", api, body)); r.Code != http.StatusOK {
+		t.Fatalf("a provider body file was not served to a request that withholds nothing: %d", r.Code)
+	}
+	if err := srv.SetHide([]string{"finished"}, false); err == nil {
 		t.Fatal("the instance accepted a flag the page cannot withhold")
 	}
 
@@ -232,7 +263,7 @@ func TestAViewWithholdsByFlag(t *testing.T) {
 			transcript = filepath.Join(out, string(scenario.FormatClaudeCode), filepath.FromSlash(f.File))
 		}
 	}
-	if err := srv.SetHide(nil); err != nil {
+	if err := srv.SetHide(nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(transcript, 0o644); err != nil {
@@ -296,6 +327,11 @@ func TestReadersOfDifferentNamesAreServedTogether(t *testing.T) {
 		}
 	}
 	wg.Wait()
+}
+
+// keys lists a count's names in order.
+func keys(counts map[string]int) []string {
+	return slices.Sorted(maps.Keys(counts))
 }
 
 func edgeIDs(nodes []sessionview.Node) int {

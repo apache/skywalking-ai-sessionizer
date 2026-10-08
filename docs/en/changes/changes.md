@@ -105,10 +105,12 @@
   to the people an agent served may need to keep from them what the runtime sent the model, while
   the operator still sees it. asz knows nothing about who is reading. It withholds by the flags the
   adapter set, never by the text or the size of a part. `view.hide` in the configuration lists the
-  flags that `asz view` and `asz server` withhold from every reader. A `hide` parameter on the
-  document, record and files endpoints adds names for one request and never takes one away. A host
-  that serves the API through its own route adds it to every request, and so decides per reader. The
-  page passes a `hide` in its own address on to its document, record and files calls.
+  flags that `asz view` and `asz server` withhold, and by default it is the whole answer: a request
+  that carries a `hide` parameter is refused with status 400. With `view.hide_override` on, a `hide`
+  parameter on the document, record and files endpoints replaces `view.hide` for that request, and
+  `hide=` with no name withholds nothing. A host that serves the API through its own route sets it
+  on every request, and so decides per reader. The page passes a `hide` in its own address on to its
+  document, record and files calls.
 - A withheld step keeps its node, its flags and its size, loses its text and says `omitted`.
   `summary.withheld` counts what was withheld, and lists every name asked for, a zero included. So
   a filter over a root landed before the flags shows that it found nothing. For a reader that
@@ -128,7 +130,8 @@
 
 - The `view` section is read strictly. A key it does not have is refused, where every other section
   ignores one, because a misspelled key there would show everything to everyone. `hide` is read only
-  inside the `view` section, and written anywhere else it is ignored and withholds nothing. Only the
+  inside the `view` section, and written anywhere else it is ignored and withholds nothing.
+  `view.hide_override`, off by default, lets a request's `hide` parameter replace `view.hide`. Only the
   first YAML document of a file is read, so a file with a later one that holds anything is refused
   rather than read in part. The rule is on the [configuration page](../setup/configuration.md#view).
 

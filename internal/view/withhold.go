@@ -18,6 +18,7 @@
 package view
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -35,11 +36,12 @@ import (
 // asz knows nothing about who is reading. What it knows is what a record
 // carries, by the flags its adapter set, and it withholds by those names,
 // never by the text or the size of a part. An instance withholds what its
-// configuration says for every reader. A request adds to that with its hide
-// parameter and never takes from it, so a host that serves the API through
-// its own route can withhold more for one reader. Two audiences are two
-// instances over the same root, each behind the deployment's own
-// authentication.
+// configuration says, view.hide, and by default that is the whole answer: a
+// request that carries the hide parameter is refused. With view.hide_override
+// on, a request's hide replaces view.hide for that request, so a host that
+// serves the API through its own route decides what each reader is kept from.
+// Otherwise two audiences are two instances over the same root, each behind
+// the deployment's own authentication.
 //
 // A withheld step keeps its node, its flags and its size, loses its text,
 // and says so with the state omitted. It is never deleted, so every count,
@@ -48,31 +50,46 @@ import (
 // and the renderer checks a body's digest, so a body is served whole or not
 // at all.
 
-// SetHide says what this instance withholds from every reader. It is set
-// before the handler serves and read by every request after.
-func (s *Server) SetHide(names []string) error {
+// SetHide says what this instance withholds, and whether a request's hide
+// parameter replaces that for the request. It is set before the handler
+// serves and read by every request after.
+func (s *Server) SetHide(names []string, override bool) error {
 	if err := sessiondata.CheckWithholdable(names); err != nil {
 		return fmt.Errorf("view: hide: %w", err)
 	}
 	s.hide = withheldNames(names)
+	s.hideOverride = override
 	return nil
 }
 
-// hideFor is what one request withholds: what the instance withholds, and
-// what the request's hide parameter adds, given once or more, each a name or
-// a comma-separated list. A name that is not a flag a reader may withhold is
-// refused rather than ignored, since withholding by it would withhold nothing
-// and the reader would not be told. So is the parameter spelled another way,
-// such as Hide, hide[] or hide[0], the forms query libraries write a list
-// in, which would otherwise be read as no parameter at all.
+// hideFor is what one request withholds. A request with no hide parameter
+// withholds what the instance withholds. One with the parameter, given once
+// or more, each a name or a comma-separated list, withholds those names
+// alone when the instance lets a request replace its own, and `hide=` with
+// no name withholds nothing. An instance that does not refuses the request,
+// since serving it anything else would not be what it asked for.
+//
+// A name that is not a flag a reader may withhold is refused rather than
+// ignored, since withholding by it would withhold nothing and the reader
+// would not be told. So is the parameter spelled another way, such as Hide,
+// hide[] or hide[0], the forms query libraries write a list in, which would
+// otherwise be read as no parameter at all.
 func (s *Server) hideFor(q url.Values) ([]string, error) {
 	for key := range q {
 		if key != "hide" && spelledAsHide(key) {
 			return nil, fmt.Errorf("view: %q is not a parameter. The parameter is hide", key)
 		}
 	}
-	names := append([]string(nil), s.hide...)
-	for _, value := range q["hide"] {
+	values, given := q["hide"]
+	if !given {
+		return withheldNames(s.hide), nil
+	}
+	if !s.hideOverride {
+		return nil, errors.New("view: this instance does not take the hide parameter. " +
+			"view.hide in its configuration decides what it withholds, and view.hide_override lets a request replace it")
+	}
+	var names []string
+	for _, value := range values {
 		for _, name := range strings.Split(value, ",") {
 			if name = strings.TrimSpace(name); name != "" {
 				names = append(names, name)
