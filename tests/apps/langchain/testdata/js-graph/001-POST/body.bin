@@ -1,0 +1,301 @@
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b73-71ef-a04a-fcc56a6d4b00"
+Content-Type: application/json; length=329
+
+{"session_name":"js-graph","id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","name":"LangGraph","start_time":"2026-10-08T08:46:33.332001Z","end_time":1791449193356,"run_type":"chain","child_runs":[],"trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","tags":[]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.inputs"
+Content-Type: application/json; length=489
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.outputs"
+Content-Type: application/json; length=1409
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","ToolMessage"],"kwargs":{"status":"success","content":"The setup page gained a section on hiding.","tool_call_id":"call-1","name":"read_docs","metadata":{"versions":{"@langchain/core":"1.2.17"}},"additional_kwargs":{},"response_metadata":{},"id":"1d9ba7fa-2523-4861-8493-28d2cd31a1fc"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"The setup page gained a section on hiding.","tool_calls":[],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b8a-7277-8fbc-61ef076cd3e5"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.332Z"},{"name":"end","time":"2026-10-08T08:46:33.356Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.extra"
+Content-Type: application/json; length=200
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.serialized"
+Content-Type: application/json; length=82
+
+{"lc":1,"type":"not_implemented","id":["langgraph","pregel","CompiledStateGraph"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b83-73a4-acb8-38886fb6dd8e"
+Content-Type: application/json; length=476
+
+{"session_name":"js-graph","id":"01a11ab1-5b83-73a4-acb8-38886fb6dd8e","name":"__start__","start_time":"2026-10-08T08:46:33.347002Z","end_time":1791449193348,"run_type":"chain","child_runs":[],"parent_run_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633347002Z01a11ab1-5b83-73a4-acb8-38886fb6dd8e","tags":["graph:step:0","langsmith:hidden"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b83-73a4-acb8-38886fb6dd8e.inputs"
+Content-Type: application/json; length=489
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b83-73a4-acb8-38886fb6dd8e.outputs"
+Content-Type: application/json; length=489
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b83-73a4-acb8-38886fb6dd8e.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.347Z"},{"name":"end","time":"2026-10-08T08:46:33.348Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b83-73a4-acb8-38886fb6dd8e.extra"
+Content-Type: application/json; length=470
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":0,"langgraph_node":"__start__","langgraph_triggers":["__start__"],"langgraph_path":["__pregel_pull","__start__"],"langgraph_checkpoint_ns":"__start__:65b4565f-5cb5-5586-a045-52ca90611c26","checkpoint_ns":"__start__:65b4565f-5cb5-5586-a045-52ca90611c26"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b83-73a4-acb8-38886fb6dd8e.serialized"
+Content-Type: application/json; length=355
+
+{"lc":1,"type":"constructor","id":["langchain_core","runnables","RunnableSequence"],"kwargs":{"first":{"lc":1,"type":"not_implemented","id":["langgraph","ChannelWrite"]},"middle":[{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]}],"last":{"lc":1,"type":"not_implemented","id":["langgraph","ChannelWrite"]},"omit_sequence_tags":true}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b85-71c8-8850-070a6e57ad4d"
+Content-Type: application/json; length=453
+
+{"session_name":"js-graph","id":"01a11ab1-5b85-71c8-8850-070a6e57ad4d","name":"agent","start_time":"2026-10-08T08:46:33.349003Z","end_time":1791449193351,"run_type":"chain","child_runs":[],"parent_run_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633349003Z01a11ab1-5b85-71c8-8850-070a6e57ad4d","tags":["graph:step:1"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b85-71c8-8850-070a6e57ad4d.inputs"
+Content-Type: application/json; length=489
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b85-71c8-8850-070a6e57ad4d.outputs"
+Content-Type: application/json; length=307
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b85-71c8-8850-070a6e57ad4d.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.349Z"},{"name":"end","time":"2026-10-08T08:46:33.351Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b85-71c8-8850-070a6e57ad4d.extra"
+Content-Type: application/json; length=460
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:eabf2e0f-db17-5d88-93de-400bdebbc62d","checkpoint_ns":"agent:eabf2e0f-db17-5d88-93de-400bdebbc62d"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b85-71c8-8850-070a6e57ad4d.serialized"
+Content-Type: application/json; length=431
+
+{"lc":1,"type":"constructor","id":["langchain_core","runnables","RunnableSequence"],"kwargs":{"first":{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]},"middle":[{"lc":1,"type":"not_implemented","id":["langgraph","ChannelWrite"]},{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]}],"last":{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]},"omit_sequence_tags":true}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b86-750a-9781-329f7a1fdf9b"
+Content-Type: application/json; length=504
+
+{"session_name":"js-graph","id":"01a11ab1-5b86-750a-9781-329f7a1fdf9b","name":"FakeToolModel","start_time":"2026-10-08T08:46:33.350004Z","end_time":1791449193350,"run_type":"llm","child_runs":[],"parent_run_id":"01a11ab1-5b85-71c8-8850-070a6e57ad4d","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633349003Z01a11ab1-5b85-71c8-8850-070a6e57ad4d.20261008T084633350004Z01a11ab1-5b86-750a-9781-329f7a1fdf9b","tags":[]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b86-750a-9781-329f7a1fdf9b.inputs"
+Content-Type: application/json; length=491
+
+{"messages":[[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}}]]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b86-750a-9781-329f7a1fdf9b.outputs"
+Content-Type: application/json; length=334
+
+{"generations":[[{"message":{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}},"text":""}]]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b86-750a-9781-329f7a1fdf9b.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.350Z"},{"name":"end","time":"2026-10-08T08:46:33.350Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b86-750a-9781-329f7a1fdf9b.extra"
+Content-Type: application/json; length=626
+
+{"options":{"signal":{}},"invocation_params":{},"batch_size":1,"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langchain_chat_model","thread_id":"js-graph-thread-1","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:eabf2e0f-db17-5d88-93de-400bdebbc62d","checkpoint_ns":"agent:eabf2e0f-db17-5d88-93de-400bdebbc62d","ls_model_type":"chat","ls_provider":"FakeToolModel","versions":{"@langchain/core":"1.2.17"}},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b86-750a-9781-329f7a1fdf9b.serialized"
+Content-Type: application/json; length=100
+
+{"lc":1,"type":"not_implemented","id":["langchain","chat_models","fake-tool-model","FakeToolModel"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b87-70f7-91e8-a2fa84139ff7"
+Content-Type: application/json; length=507
+
+{"session_name":"js-graph","id":"01a11ab1-5b87-70f7-91e8-a2fa84139ff7","name":"RunnableLambda","start_time":"2026-10-08T08:46:33.351005Z","end_time":1791449193351,"run_type":"chain","child_runs":[],"parent_run_id":"01a11ab1-5b85-71c8-8850-070a6e57ad4d","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633349003Z01a11ab1-5b85-71c8-8850-070a6e57ad4d.20261008T084633351005Z01a11ab1-5b87-70f7-91e8-a2fa84139ff7","tags":[]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b87-70f7-91e8-a2fa84139ff7.inputs"
+Content-Type: application/json; length=782
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b87-70f7-91e8-a2fa84139ff7.outputs"
+Content-Type: application/json; length=18
+
+{"output":"tools"}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b87-70f7-91e8-a2fa84139ff7.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.351Z"},{"name":"end","time":"2026-10-08T08:46:33.351Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b87-70f7-91e8-a2fa84139ff7.extra"
+Content-Type: application/json; length=460
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":1,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:eabf2e0f-db17-5d88-93de-400bdebbc62d","checkpoint_ns":"agent:eabf2e0f-db17-5d88-93de-400bdebbc62d"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b87-70f7-91e8-a2fa84139ff7.serialized"
+Content-Type: application/json; length=86
+
+{"lc":1,"type":"not_implemented","id":["langchain_core","runnables","RunnableLambda"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b88-7419-ad8a-1002a490bb71"
+Content-Type: application/json; length=453
+
+{"session_name":"js-graph","id":"01a11ab1-5b88-7419-ad8a-1002a490bb71","name":"tools","start_time":"2026-10-08T08:46:33.352006Z","end_time":1791449193354,"run_type":"chain","child_runs":[],"parent_run_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633352006Z01a11ab1-5b88-7419-ad8a-1002a490bb71","tags":["graph:step:2"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b88-7419-ad8a-1002a490bb71.inputs"
+Content-Type: application/json; length=782
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b88-7419-ad8a-1002a490bb71.outputs"
+Content-Type: application/json; length=364
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","ToolMessage"],"kwargs":{"status":"success","content":"The setup page gained a section on hiding.","tool_call_id":"call-1","name":"read_docs","metadata":{"versions":{"@langchain/core":"1.2.17"}},"additional_kwargs":{},"response_metadata":{},"id":"1d9ba7fa-2523-4861-8493-28d2cd31a1fc"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b88-7419-ad8a-1002a490bb71.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.352Z"},{"name":"end","time":"2026-10-08T08:46:33.354Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b88-7419-ad8a-1002a490bb71.extra"
+Content-Type: application/json; length=460
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["branch:to:tools"],"langgraph_path":["__pregel_pull","tools"],"langgraph_checkpoint_ns":"tools:0df9ac05-80ff-5d58-99cc-071a81764af3","checkpoint_ns":"tools:0df9ac05-80ff-5d58-99cc-071a81764af3"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b88-7419-ad8a-1002a490bb71.serialized"
+Content-Type: application/json; length=419
+
+{"lc":1,"type":"constructor","id":["langchain_core","runnables","RunnableSequence"],"kwargs":{"first":{"lc":1,"type":"not_implemented","id":["langgraph","ToolNode"]},"middle":[{"lc":1,"type":"not_implemented","id":["langgraph","ChannelWrite"]},{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]}],"last":{"lc":1,"type":"not_implemented","id":["langgraph","ChannelWrite"]},"omit_sequence_tags":true}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b89-728e-8c0c-47f9f54169dc"
+Content-Type: application/json; length=501
+
+{"session_name":"js-graph","id":"01a11ab1-5b89-728e-8c0c-47f9f54169dc","name":"read_docs","start_time":"2026-10-08T08:46:33.353007Z","end_time":1791449193353,"run_type":"tool","child_runs":[],"parent_run_id":"01a11ab1-5b88-7419-ad8a-1002a490bb71","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633352006Z01a11ab1-5b88-7419-ad8a-1002a490bb71.20261008T084633353007Z01a11ab1-5b89-728e-8c0c-47f9f54169dc","tags":[]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b89-728e-8c0c-47f9f54169dc.inputs"
+Content-Type: application/json; length=16
+
+{"page":"setup"}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b89-728e-8c0c-47f9f54169dc.outputs"
+Content-Type: application/json; length=360
+
+{"output":{"lc":1,"type":"constructor","id":["langchain_core","messages","ToolMessage"],"kwargs":{"status":"success","content":"The setup page gained a section on hiding.","tool_call_id":"call-1","name":"read_docs","metadata":{"versions":{"@langchain/core":"1.2.17"}},"additional_kwargs":{},"response_metadata":{},"id":"1d9ba7fa-2523-4861-8493-28d2cd31a1fc"}}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b89-728e-8c0c-47f9f54169dc.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.353Z"},{"name":"end","time":"2026-10-08T08:46:33.353Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b89-728e-8c0c-47f9f54169dc.extra"
+Content-Type: application/json; length=524
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":2,"langgraph_node":"tools","langgraph_triggers":["branch:to:tools"],"langgraph_path":["__pregel_pull","tools"],"langgraph_checkpoint_ns":"tools:0df9ac05-80ff-5d58-99cc-071a81764af3","checkpoint_ns":"tools:0df9ac05-80ff-5d58-99cc-071a81764af3","versions":{"@langchain/core":"1.2.17"}},"tool_call_id":"call-1","runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b89-728e-8c0c-47f9f54169dc.serialized"
+Content-Type: application/json; length=84
+
+{"lc":1,"type":"not_implemented","id":["langchain","tools","DynamicStructuredTool"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f"
+Content-Type: application/json; length=453
+
+{"session_name":"js-graph","id":"01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f","name":"agent","start_time":"2026-10-08T08:46:33.354008Z","end_time":1791449193355,"run_type":"chain","child_runs":[],"parent_run_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633354008Z01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f","tags":["graph:step:3"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.inputs"
+Content-Type: application/json; length=1132
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","ToolMessage"],"kwargs":{"status":"success","content":"The setup page gained a section on hiding.","tool_call_id":"call-1","name":"read_docs","metadata":{"versions":{"@langchain/core":"1.2.17"}},"additional_kwargs":{},"response_metadata":{},"id":"1d9ba7fa-2523-4861-8493-28d2cd31a1fc"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.outputs"
+Content-Type: application/json; length=291
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"The setup page gained a section on hiding.","tool_calls":[],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b8a-7277-8fbc-61ef076cd3e5"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.354Z"},{"name":"end","time":"2026-10-08T08:46:33.355Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.extra"
+Content-Type: application/json; length=460
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:48a05af7-8e79-5870-8b07-67b66cd39084","checkpoint_ns":"agent:48a05af7-8e79-5870-8b07-67b66cd39084"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.serialized"
+Content-Type: application/json; length=431
+
+{"lc":1,"type":"constructor","id":["langchain_core","runnables","RunnableSequence"],"kwargs":{"first":{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]},"middle":[{"lc":1,"type":"not_implemented","id":["langgraph","ChannelWrite"]},{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]}],"last":{"lc":1,"type":"not_implemented","id":["langgraph","RunnableCallable"]},"omit_sequence_tags":true}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-61ef076cd3e5"
+Content-Type: application/json; length=504
+
+{"session_name":"js-graph","id":"01a11ab1-5b8a-7277-8fbc-61ef076cd3e5","name":"FakeToolModel","start_time":"2026-10-08T08:46:33.354009Z","end_time":1791449193354,"run_type":"llm","child_runs":[],"parent_run_id":"01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633354008Z01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.20261008T084633354009Z01a11ab1-5b8a-7277-8fbc-61ef076cd3e5","tags":[]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-61ef076cd3e5.inputs"
+Content-Type: application/json; length=1134
+
+{"messages":[[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","ToolMessage"],"kwargs":{"status":"success","content":"The setup page gained a section on hiding.","tool_call_id":"call-1","name":"read_docs","metadata":{"versions":{"@langchain/core":"1.2.17"}},"additional_kwargs":{},"response_metadata":{},"id":"1d9ba7fa-2523-4861-8493-28d2cd31a1fc"}}]]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-61ef076cd3e5.outputs"
+Content-Type: application/json; length=360
+
+{"generations":[[{"message":{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"The setup page gained a section on hiding.","tool_calls":[],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b8a-7277-8fbc-61ef076cd3e5"}},"text":"The setup page gained a section on hiding."}]]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-61ef076cd3e5.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.354Z"},{"name":"end","time":"2026-10-08T08:46:33.354Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-61ef076cd3e5.extra"
+Content-Type: application/json; length=626
+
+{"options":{"signal":{}},"invocation_params":{},"batch_size":1,"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langchain_chat_model","thread_id":"js-graph-thread-1","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:48a05af7-8e79-5870-8b07-67b66cd39084","checkpoint_ns":"agent:48a05af7-8e79-5870-8b07-67b66cd39084","ls_model_type":"chat","ls_provider":"FakeToolModel","versions":{"@langchain/core":"1.2.17"}},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8a-7277-8fbc-61ef076cd3e5.serialized"
+Content-Type: application/json; length=100
+
+{"lc":1,"type":"not_implemented","id":["langchain","chat_models","fake-tool-model","FakeToolModel"]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8b-779c-bd1c-a693275ace15"
+Content-Type: application/json; length=507
+
+{"session_name":"js-graph","id":"01a11ab1-5b8b-779c-bd1c-a693275ace15","name":"RunnableLambda","start_time":"2026-10-08T08:46:33.355010Z","end_time":1791449193355,"run_type":"chain","child_runs":[],"parent_run_id":"01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f","trace_id":"01a11ab1-5b73-71ef-a04a-fcc56a6d4b00","dotted_order":"20261008T084633332001Z01a11ab1-5b73-71ef-a04a-fcc56a6d4b00.20261008T084633354008Z01a11ab1-5b8a-7277-8fbc-5e8fd6dd4d2f.20261008T084633355010Z01a11ab1-5b8b-779c-bd1c-a693275ace15","tags":[]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8b-779c-bd1c-a693275ace15.inputs"
+Content-Type: application/json; length=1409
+
+{"messages":[{"lc":1,"type":"constructor","id":["langchain_core","messages","SystemMessage"],"kwargs":{"content":"You are a docs assistant. You answer from the docs only.","additional_kwargs":{},"response_metadata":{},"id":"47349ec3-6ca2-4ae4-a032-cc300443f6ba"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","HumanMessage"],"kwargs":{"content":"what changed in the setup page","additional_kwargs":{},"response_metadata":{},"id":"694fbdbe-2c68-4f83-81ce-7fc432332c37"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"","tool_calls":[{"id":"call-1","name":"read_docs","args":{"page":"setup"}}],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b86-750a-9781-329f7a1fdf9b"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","ToolMessage"],"kwargs":{"status":"success","content":"The setup page gained a section on hiding.","tool_call_id":"call-1","name":"read_docs","metadata":{"versions":{"@langchain/core":"1.2.17"}},"additional_kwargs":{},"response_metadata":{},"id":"1d9ba7fa-2523-4861-8493-28d2cd31a1fc"}},{"lc":1,"type":"constructor","id":["langchain_core","messages","AIMessage"],"kwargs":{"content":"The setup page gained a section on hiding.","tool_calls":[],"invalid_tool_calls":[],"additional_kwargs":{},"response_metadata":{},"id":"run-01a11ab1-5b8a-7277-8fbc-61ef076cd3e5"}}]}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8b-779c-bd1c-a693275ace15.outputs"
+Content-Type: application/json; length=20
+
+{"output":"__end__"}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8b-779c-bd1c-a693275ace15.events"
+Content-Type: application/json; length=101
+
+[{"name":"start","time":"2026-10-08T08:46:33.355Z"},{"name":"end","time":"2026-10-08T08:46:33.355Z"}]
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8b-779c-bd1c-a693275ace15.extra"
+Content-Type: application/json; length=460
+
+{"metadata":{"LANGSMITH_TRACING":"true","ls_integration":"langgraph","thread_id":"js-graph-thread-1","langgraph_step":3,"langgraph_node":"agent","langgraph_triggers":["branch:to:agent"],"langgraph_path":["__pregel_pull","agent"],"langgraph_checkpoint_ns":"agent:48a05af7-8e79-5870-8b07-67b66cd39084","checkpoint_ns":"agent:48a05af7-8e79-5870-8b07-67b66cd39084"},"runtime":{"library":"langchain-js","runtime":"node","sdk":"langsmith-js","sdk_version":"0.10.8"}}
+------LangSmithFormBoundary7d20vk1yhje
+Content-Disposition: form-data; name="post.01a11ab1-5b8b-779c-bd1c-a693275ace15.serialized"
+Content-Type: application/json; length=86
+
+{"lc":1,"type":"not_implemented","id":["langchain_core","runnables","RunnableLambda"]}
+------LangSmithFormBoundary7d20vk1yhje--

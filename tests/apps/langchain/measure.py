@@ -28,6 +28,12 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TESTDATA = os.path.join(HERE, "testdata")
+
+# The LangChain JS cases are captured by ../langchain-js, not by agents.py.
+JS_CASES = {
+    "js-graph": "LangGraph JS: a graph with one tool on a thread, every message serialized as a constructor.",
+    "js-traceable": "LangSmith JS's traceable around a chat model: no ls_method, and no thread for the runs inside.",
+}
 THREAD_KEYS = ("thread_id", "session_id", "conversation_id")
 
 
@@ -138,7 +144,8 @@ conversation does not already have.
                       "thread keys"]),
         table(by_type, ["run type", "runs", "bytes", "share"]),
         table([(c, (getattr(__import__("agents"), "CASES")[c].__doc__ or "").strip()
-                .splitlines()[0]) for c in cases if c in __import__("agents").CASES],
+                .splitlines()[0]) if c in __import__("agents").CASES else (c, JS_CASES[c])
+               for c in cases if c in __import__("agents").CASES or c in JS_CASES],
               ["case", "what it exercises"]),
     )
     with open(os.path.join(HERE, "MEASUREMENTS.md"), "w") as f:

@@ -137,11 +137,14 @@ func operationsOf(t *testing.T, kase string) []Operation {
 
 func decode(t *testing.T, op Operation) run {
 	t.Helper()
-	var r run
+	// Read as the receiver reads it, so a time LangSmith JS writes as
+	// milliseconds is read as one.
+	var r Run
 	if err := json.Unmarshal(op.Envelope, &r); err != nil {
 		t.Fatalf("%s: envelope: %v", op.RunID, err)
 	}
-	return r
+	return run{ID: r.ID, Trace: r.TraceID, Parent: r.ParentID, Dotted: r.Dotted, Type: r.Type, Name: r.Name,
+		Start: r.Start, End: r.End, Session: r.Session}
 }
 
 // TestRunsArriveUnfinished holds the fact the whole update contract rests on.

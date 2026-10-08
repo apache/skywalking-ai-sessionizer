@@ -131,8 +131,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def keep(self, method):
         global _count
-        length = int(self.headers.get("Content-Length") or 0)
-        wire = self.rfile.read(length) if length else b""
+        if (self.headers.get("Transfer-Encoding") or "").lower() == "chunked":
+            # LangSmith JS streams the multipart body in chunks, with no length,
+            # so a body read by its length alone was kept empty.
+            wire = b""
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip(), 16)
+                if size == 0:
+                    self.rfile.readline()
+                    break
+                wire += self.rfile.read(size)
+                self.rfile.readline()
+        else:
+            length = int(self.headers.get("Content-Length") or 0)
+            wire = self.rfile.read(length) if length else b""
         with _lock:
             _count += 1
             index = _count

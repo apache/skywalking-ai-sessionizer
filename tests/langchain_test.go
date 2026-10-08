@@ -79,6 +79,10 @@ func TestALangChainConversationAssembles(t *testing.T) {
 		// tools itself and nothing on the wire carries the call - see
 		// TestATracedToolsCallIsNotInvented.
 		{"traceable-only", 1, 0, 1},
+		// The same graph and tool as LangGraph JS sends it: each run's start
+		// and end sent as one post, its end time in milliseconds, each message
+		// serialized with its kind named only by the class that ends its id.
+		{"js-graph", 1, 1, 1},
 	} {
 		t.Run(tc.kase, func(t *testing.T) {
 			zone, sessions := land(t, tc.kase)
