@@ -76,6 +76,11 @@ type pendingRun struct {
 	// resolved. It is kept rather than derived again because the update
 	// carries none of what deriving it needs.
 	Session string `json:"session,omitempty"`
+	// Partial records that an arrival named a thread before the run's
+	// project was known, so the conversation it named is not whole. Such a
+	// run neither takes a conversation from a run above it nor gives one to
+	// a run below it.
+	Partial bool `json:"partial,omitempty"`
 	// At is when this was remembered, for the eviction above.
 	At string `json:"at,omitempty"`
 }
@@ -242,6 +247,52 @@ func (p *pending) complete(run Run) (Run, pendingRun, bool) {
 		run.Start = known.Start
 	}
 	return run, known, true
+}
+
+// inherited is the conversation of the nearest run this one ran inside whose
+// conversation was supplied, by that run or by one above it. A run supplied
+// nothing when its own is empty or unassigned, and is passed over. Every
+// arrival is remembered as it is read, before its request lands or waits, so
+// a run of this request or of one still waiting is here.
+//
+// The walk stops at a run that is not remembered: one that has not arrived,
+// or was forgotten by age. What it supplied is not known, and passing over it
+// could give this run a thread from further up that the run in between
+// replaced. Nothing, then, as when no run above supplied one.
+//
+// A run that named a thread before its project was known stops it too: it
+// supplied a conversation, but not a whole one.
+func (p *pending) inherited(run Run) string {
+	for _, id := range ancestors(run.Dotted, run.ID) {
+		known, ok := p.Runs[id]
+		if !ok {
+			return ""
+		}
+		if assigned(id, known) {
+			return known.Session
+		}
+		if known.Partial {
+			return ""
+		}
+	}
+	return ""
+}
+
+// partial records that a run named a thread before its project was known.
+func (p *pending) partial(id string) {
+	known := p.Runs[id]
+	known.Partial = true
+	p.Runs[id] = known
+}
+
+// assigned reports whether a run's conversation was supplied rather than
+// unassigned. An unassigned conversation is named for the run's trace, or for
+// the run when it arrived with no trace, so either name says it.
+func assigned(id string, known pendingRun) bool {
+	if known.Session == "" || known.Session == UnassignedID(id) {
+		return false
+	}
+	return known.Trace == "" || known.Session != UnassignedID(known.Trace)
 }
 
 // sawRun remembers one run of a trace: that it was seen at all, and whether

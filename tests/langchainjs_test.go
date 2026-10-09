@@ -140,40 +140,30 @@ func TestALangGraphJSConversationLandsWhatWasSaid(t *testing.T) {
 // ls_method alone, the function was taken for a graph's own run and its
 // arguments and result were dropped as a repeat; its system message is then
 // named where it lands. LangSmith JS also passes the function's metadata to
-// none of the runs inside it, so the model call it made supplies no thread,
-// and lands under its trace, as any run that supplied none does.
+// none of the runs inside it, so the model call it made supplies no thread.
+// It takes the function's, the run it ran inside: landed under its trace, the
+// answer was in a conversation of its own and the question's had none.
 func TestALangChainJSTracedFunctionKeepsItsArguments(t *testing.T) {
 	zone, sessions := land(t, "js-traceable")
-	var thread, unassigned string
-	for _, s := range sessions {
-		if strings.HasPrefix(s, "ls-unassigned-") {
-			unassigned = s
-		} else {
-			thread = s
-		}
+	if len(sessions) != 1 || strings.HasPrefix(sessions[0], "ls-unassigned-") {
+		t.Fatalf("sessions %v, want the thread's alone", sessions)
 	}
-	if thread == "" || unassigned == "" || len(sessions) != 2 {
-		t.Fatalf("sessions %v, want the thread's and the model call's own", sessions)
-	}
-	kept := false
-	for _, l := range transcriptLines(t, zone, thread) {
+	kept, answered := false, false
+	for _, l := range transcriptLines(t, zone, sessions[0]) {
 		if strings.Contains(l.raw, "You are a careful reviewer.") {
 			kept = strings.Contains(l.raw, `"limit"`)
 			if !slices.Contains(l.Flags, sessiondata.FlagSystemPrompt) {
 				t.Errorf("the function's arguments hold the system prompt unnamed: %.200s", l.raw)
 			}
 		}
-	}
-	if !kept {
-		t.Error("the function's arguments were not kept")
-	}
-	answered := false
-	for _, l := range transcriptLines(t, zone, unassigned) {
 		for _, p := range l.Parts {
 			answered = answered || p.Text == "Two pages changed: the setup page and the formats page."
 		}
 	}
+	if !kept {
+		t.Error("the function's arguments were not kept")
+	}
 	if !answered {
-		t.Error("the model call's reply did not land")
+		t.Error("the model call's reply is not in the thread's conversation")
 	}
 }

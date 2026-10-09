@@ -19,10 +19,22 @@
   of these now reads the message by its class. A decorated function carries no `ls_method` from it,
   and is known by the library that made the run, which both clients write. A model call inside
   a decorated function supplies no thread, because LangSmith JS passes the function's metadata to
-  none of the runs inside it, and lands under its trace. Measured with LangSmith JS 0.10.8 on a
-  LangGraph JS agent and a traced function, the two applications under `tests/apps/langchain-js`.
+  none of the runs inside it, and takes the function's, as the next entry says. Measured with
+  LangSmith JS 0.10.8 on a LangGraph JS agent and a traced function, the two applications under
+  `tests/apps/langchain-js`.
   Their captures sit beside the Python ones under `tests/apps/langchain/testdata`, and the recorder
   reads the chunked body that client sends.
+- A run that supplies no thread takes the conversation of the nearest run it ran inside whose
+  conversation was supplied. Its dotted order names the runs it ran inside, and the thread was
+  supplied there. A model call inside a LangSmith JS `traceable` supplies none, so it landed in
+  a conversation of its own under its trace, with its answer, while the question's conversation had
+  no answer. A run that supplies its own key keeps it, and a trace that supplied none anywhere still
+  lands unassigned. The conversation is decided once the run's ancestry has arrived, so the order
+  runs arrive in does not change it. A run above that is not known stops the search, and the run
+  lands unassigned. A run's own key decides from the first of its arrivals that brings one before
+  the run lands, and once it has landed its later arrivals follow it, while the receiver remembers
+  it. A thread an update names before the run's project is known does not decide while the run
+  waits, and the run neither takes a thread from above in its place nor passes one below.
 - A summary `SummarizationMiddleware` wrote now resets the context, as a Claude Code compaction
   does. The middleware marks its summary message with `additional_kwargs.lc_source` set to
   `summarization`. A model call sent that message starts a new epoch in its stream, with an

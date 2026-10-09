@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -306,7 +307,17 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 	runs := make([]Run, len(operations))
 	sessions := make([]string, len(operations))
 	methods := make([]string, len(operations))
-	unassigned := 0
+	// One run is one conversation. Its first arrival in this request
+	// decides, and a later arrival of the same run follows it, so one run is
+	// never split across two; a later arrival that names a conversation
+	// decides for a first that named none, as it does when it waits in a
+	// request of its own. unsupplied marks a run that named none.
+	unsupplied := make([]bool, len(operations))
+	// partial marks a run that named a thread before its project was known,
+	// in this arrival or an earlier one; see pendingRun.Partial.
+	partial := make([]bool, len(operations))
+	follows := make([]int, len(operations))
+	first := map[string]int{}
 	for i, op := range operations {
 		var envelope Run
 		if err := json.Unmarshal(op.Envelope, &envelope); err != nil {
@@ -320,18 +331,46 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		// later, because a start and an update to it can be in one batch and
 		// the update carries none of what deciding it needs. The start's
 		// answer has to be available by the time the update is read.
-		switch {
+		follows[i] = -1
+		decides := i
+		switch j, seen := first[op.RunID]; {
 		case found && known.Session != "":
 			sessions[i] = known.Session
+		case seen:
+			follows[i], decides = j, j
+			if unsupplied[j] || partial[j] {
+				if session, missing := c.sessionOf(op, completed); !missing {
+					sessions[j], unsupplied[j], partial[j] = session, false, c.projectUnknown(completed)
+				}
+			}
 		default:
-			var missing bool
-			sessions[i], missing = c.sessionOf(op, completed)
-			if missing {
-				unassigned++
+			first[op.RunID] = i
+			sessions[i], unsupplied[i] = c.sessionOf(op, completed)
+			if unsupplied[i] {
+				partial[i] = known.Partial
+			} else {
+				partial[i] = c.projectUnknown(completed)
 			}
 		}
-		if completed.Type != "" {
-			open.started(completed, methodOf(op), sessions[i], c.Now())
+		// A run that supplied no conversation is not remembered in one yet.
+		// Which it takes is decided below, once its ancestry has arrived, and
+		// remembering the unassigned one here kept it when the request was
+		// tried again after its root had arrived. Every arrival is
+		// remembered, with no kind or no conversation too, so a run below it
+		// that arrives in another request while this one waits finds what it
+		// supplied, or that it supplied nothing.
+		//
+		// A thread named before the run's project was known is not
+		// remembered as its conversation either: a later arrival that
+		// carries the project decides, as it did before any arrival was
+		// remembered while it waited.
+		remembered := sessions[decides]
+		if unsupplied[decides] || partial[decides] {
+			remembered = ""
+		}
+		open.started(completed, methodOf(op), remembered, c.Now())
+		if partial[decides] {
+			open.partial(op.RunID)
 		}
 		open.sawRun(completed, c.Now())
 	}
@@ -343,6 +382,37 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 			if !open.placeable(runs[i]) {
 				return Landed{}, &unplaceable{run: runs[i].ID}
 			}
+		}
+	}
+
+	// A run that supplied no conversation takes the one the nearest run it
+	// ran inside supplied, as pending.inherited reads its dotted order.
+	// LangSmith JS passes a decorated function's metadata to none of the
+	// runs inside it, so a model call the function makes names no thread,
+	// although the function names one and the call's dotted order says it
+	// ran there. Only when no run above it supplied one does it land
+	// unassigned, under its trace. The count is of runs, not arrivals.
+	unassigned := 0
+	for i := range operations {
+		if !unsupplied[i] {
+			continue
+		}
+		// An earlier arrival named a thread of its own, with no project,
+		// and this one names none. Its own is not replaced by another's: it
+		// lands unassigned, as it did before a thread was taken from above.
+		if partial[i] {
+			unassigned++
+			continue
+		}
+		if session := open.inherited(runs[i]); session != "" {
+			sessions[i] = session
+			continue
+		}
+		unassigned++
+	}
+	for i, j := range follows {
+		if j >= 0 {
+			sessions[i] = sessions[j]
 		}
 	}
 
@@ -431,11 +501,12 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 	return out, nil
 }
 
-// sessionOf decides where a run's evidence lands.
+// sessionOf decides where a run's evidence lands, by what the run itself
+// supplied.
 //
-// A run with no supplied key is not given one: it lands under its trace, in a
-// session whose name says the identity was not supplied, and nothing merges it
-// with anything else.
+// A run with no supplied key is not given one here: it is named for its trace,
+// in a session whose name says the identity was not supplied, and the second
+// return says so. The caller then looks for a run above it that supplied one.
 func (c *Collector) sessionOf(op Operation, envelope Run) (string, bool) {
 	// The client splits extra out of the envelope only when it is large
 	// enough to be worth a part of its own, so both places have to be read.
@@ -461,6 +532,13 @@ func (c *Collector) sessionOf(op Operation, envelope Run) (string, bool) {
 		return UnassignedID(traceOrRun(envelope)), true
 	}
 	return StorageID(owner), false
+}
+
+// projectUnknown reports whether a run's conversation would be named before
+// its project is known, when the project is one of the dimensions that own
+// it. An update names no project, and can arrive before the run's start.
+func (c *Collector) projectUnknown(run Run) bool {
+	return run.Session == "" && slices.Contains(c.Ownership.Scope, "project")
 }
 
 // traceOrRun is what identifies a run that supplied no conversation: its
