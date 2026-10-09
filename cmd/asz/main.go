@@ -19,7 +19,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -31,7 +30,6 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
-	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeotlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
@@ -170,8 +168,8 @@ func main() {
 		os.Exit(2)
 	}
 
-	// The receiver adapters listen beside whatever else the command does.
-	// Only the two that write for as long as the process runs host one:
+	// The receiver adapter listens beside whatever else the command does.
+	// Only the two that write for as long as the process runs host it:
 	// collect and server. A receiver lands what it is sent, and asz view
 	// only reads.
 	var local []config.Adapter
@@ -183,17 +181,8 @@ func main() {
 		case config.AdapterClaudeCodeLocal, config.AdapterChanges, config.AdapterClaudeCodeChanges,
 			config.AdapterClaudeCodeProvider:
 			local = append(local, ad)
-		case config.AdapterClaudeCodeOTLP:
-			if cmd != "collect" && cmd != "server" {
-				continue
-			}
-			if *once {
-				fmt.Fprintf(os.Stderr, "%s: the receiver runs in watch mode only; not started with -once\n", ad.Name)
-				continue
-			}
-			if err := startReceiver(ad); err != nil {
-				fatal(err)
-			}
+		case config.RemovedClaudeCodeOTLP:
+			fmt.Fprintf(os.Stderr, "skipping %q: asz no longer receives Claude Code's exporter; point the exporter at the receiver that reads it, such as the SkyWalking OAP\n", ad.Name)
 		case config.AdapterLangSmithIngest:
 			if cmd != "collect" && cmd != "server" {
 				continue
@@ -205,11 +194,9 @@ func main() {
 			if err := startLangSmith(cfg, ad); err != nil {
 				fatal(err)
 			}
-			// Unlike the metrics receiver, this one feeds the pipeline: what
-			// it accepts becomes landed Session Data, which has to be parsed
-			// and served like anything else. So it joins the adapters a pass
-			// reads, and a root fed by it alone is a whole pipeline rather
-			// than a push.
+			// What it accepts becomes landed Session Data, which has to be
+			// parsed and served like anything else. So it joins the adapters
+			// a pass reads, and a root fed by it alone is a whole pipeline.
 			local = append(local, ad)
 		default:
 			fmt.Fprintf(os.Stderr, "skipping unknown adapter %q\n", ad.Name)
@@ -234,14 +221,7 @@ func main() {
 		}
 	case "collect":
 		if len(local) == 0 {
-			if receivers == 0 {
-				fatal(fmt.Errorf("%s: no enabled adapter", cmd))
-			}
-			// No local source to land from, but a receiver is landing what
-			// it is sent. Send that on, on the same period.
-			if err := pushOnly(cfg); err != nil {
-				fatal(err)
-			}
+			fatal(fmt.Errorf("%s: no enabled adapter", cmd))
 		}
 		if err := cmdCollect(cfg, local, *once); err != nil {
 			fatal(err)
@@ -268,21 +248,6 @@ func main() {
 	}
 }
 
-// receivers counts the receiver adapters started.
-var receivers int
-
-// startReceiver opens a claude-code-otlp receiver on its address and leaves
-// it listening for the life of the process.
-func startReceiver(ad config.Adapter) error {
-	r := &claudecodeotlp.Receiver{Listen: ad.Listen}
-	if err := r.Start(); err != nil {
-		return err
-	}
-	receivers++
-	fmt.Printf("receiver    : %s on %s, gRPC and HTTP; metrics, logs and traces accepted and dropped\n", ad.Name, r.Addr())
-	return nil
-}
-
 // startLangSmith opens a langsmith-ingest receiver and leaves it listening for
 // the life of the process. What it accepts waits in the inbox; the pipeline's
 // next pass converts it, which is why this only starts the listener.
@@ -298,7 +263,6 @@ func startLangSmith(cfg *config.Config, ad config.Adapter) error {
 	if err := r.Start(); err != nil {
 		return err
 	}
-	receivers++
 	guarded := "any key accepted"
 	if ad.Token != "" {
 		guarded = "a token is required"
@@ -828,55 +792,6 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	ref.loop()
 	return nil
-}
-
-// pushOnly is what a configuration with no local source but a receiver
-// runs: the receiver lands what it is sent, and this sends it on, on the
-// collector's period. Without it a received record would sit in the root
-// until someone ran asz push by hand.
-func pushOnly(cfg *config.Config) error {
-	zoneRoot, err := cfg.ResolvedRoot()
-	if err != nil {
-		return err
-	}
-	p, closeClient, err := newPusher(cfg, zoneRoot)
-	if err != nil {
-		return err
-	}
-	defer closeClient()
-	if p == nil {
-		// Nothing to send anywhere. The receivers keep the process alive.
-		fmt.Println("export      : none; set export.otlp.endpoint to send what the receiver lands")
-		select {}
-	}
-	interval := config.Default().Adapters[0].Collector.Interval
-	fmt.Printf("export      : %s, every %s\n", cfg.Export.OTLP.Endpoint, interval)
-	for {
-		st, perr := p.Pass()
-		if perr != nil && !errors.Is(perr, storage.ErrExportBusy) {
-			fmt.Fprintf(os.Stderr, "  error: %v\n", perr)
-		}
-		wait := interval
-		if st != nil {
-			for _, e := range st.Errors {
-				fmt.Fprintf(os.Stderr, "  error: %v\n", e)
-			}
-			if st.Rejected > 0 {
-				// Taken by the receiver and dropped inside the request. The
-				// files are marked sent and never go again, so this line is
-				// the only place it can be seen.
-				fmt.Fprintf(os.Stderr, "  error: the receiver rejected %d record(s); they are not sent again\n", st.Rejected)
-			}
-			if st.Files > 0 || st.Metrics > 0 || st.Rejected > 0 {
-				fmt.Printf("[%s] pushed=%d metrics=%d rejected=%d\n",
-					time.Now().Format("15:04:05"), st.Files, st.Metrics, st.Rejected)
-			}
-			if st.Throttled && st.RetryAfter > wait {
-				wait = st.RetryAfter
-			}
-		}
-		time.Sleep(wait)
-	}
 }
 
 // newDeriver is the metrics derivation over a root. A single pass is the

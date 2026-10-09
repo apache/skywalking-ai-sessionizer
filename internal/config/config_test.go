@@ -86,43 +86,66 @@ func TestRepoConfigSpellsOutEveryValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Adapters) != 5 {
-		t.Fatalf("adapters: got %d, want the local adapter, the two receivers, the changes adapter and the provider adapter", len(got.Adapters))
+	if len(got.Adapters) != 4 {
+		t.Fatalf("adapters: got %d, want the local adapter, the receiver, the changes adapter and the provider adapter", len(got.Adapters))
 	}
 	for _, a := range got.Adapters {
-		if isReceiver(a.Name) {
-			// A receiver is a server and has no collector to spell out.
-			if a.Collector != (Collector{}) {
-				t.Fatalf("%s: a receiver carries collector settings: %+v", a.Name, a.Collector)
-			}
-			continue
-		}
 		if a.Collector.Mode == "" || a.Collector.Interval == 0 || a.Collector.MaxDeltaBytes == 0 {
 			t.Fatalf("%s: collector values not spelled out: %+v", a.Name, a.Collector)
 		}
 	}
 }
 
-// The receiver adapter needs an address, and it is a server with no
-// collector.
+// The receiver adapter needs an address. Without one it could not start,
+// and the file is refused when it loads, with an error that names the
+// setting, rather than when the listener starts.
 func TestReceiverNeedsAnAddress(t *testing.T) {
 	cfg := Default()
-	if cfg.Adapters[1].Name != AdapterClaudeCodeOTLP {
-		t.Fatalf("the defaults list %s second, want the receiver", cfg.Adapters[1].Name)
+	i := slices.IndexFunc(cfg.Adapters, func(a Adapter) bool { return a.Name == AdapterLangSmithIngest })
+	if i < 0 {
+		t.Fatal("the defaults list no receiver")
 	}
-	cfg.Adapters[1].Enabled = true
-	cfg.Adapters[1].Listen = ""
+	cfg.Adapters[i].Enabled = true
+	cfg.Adapters[i].Listen = ""
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("a receiver without listen was accepted")
 	}
-	cfg.Adapters[1].Listen = "127.0.0.1:4317"
-	cfg.Adapters[1].Collector.Mode = ModeWatch
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("a receiver with collector settings was accepted; it is a server")
-	}
-	cfg.Adapters[1].Collector = Collector{}
+	cfg.Adapters[i].Listen = "127.0.0.1:1985"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("a receiver with an address must be accepted: %v", err)
+	}
+}
+
+// A configuration written for 0.5.0 names the receiver for Claude Code's
+// exporter, with its address. asz no longer has it, and the file must still
+// load, so a collector that was running goes on running.
+func TestARemovedReceiverStillLoads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asz.yaml")
+	body := "adapters:\n" +
+		"  - name: claude-code-local\n    enabled: true\n" +
+		"  - name: claude-code-otlp\n    enabled: true\n    listen: 127.0.0.1:4317\n    metrics: true\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a 0.5.0 configuration is refused: %v", err)
+	}
+	if cfg.Adapters[1].Name != RemovedClaudeCodeOTLP {
+		t.Fatalf("the second adapter is %q", cfg.Adapters[1].Name)
+	}
+
+	// The receiver was off unless turned on. An entry with no enabled key
+	// stays off, as it was.
+	var bare Adapter
+	if err := yaml.Unmarshal([]byte("name: claude-code-otlp\nlisten: 127.0.0.1:4317\n"), &bare); err != nil {
+		t.Fatal(err)
+	}
+	if bare.Enabled {
+		t.Fatal("an entry with no enabled key is on; in 0.5.0 it was off")
 	}
 }
 

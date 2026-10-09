@@ -38,6 +38,12 @@ metrics:
   lookback: 72h   # 0 or none sends all the history
 ```
 
+Cost, active time, sessions, lines of code, commits, pull requests and edit decisions come only
+from Claude Code's own OpenTelemetry exporter, and asz does not receive it. For the SkyWalking OAP,
+point the exporter at the OAP directly, as
+[Metrics of the agent runtime](https://skywalking.apache.org/docs/main/next/en/setup/backend/ai-agent-conversation/#metrics-of-the-agent-runtime)
+shows.
+
 ## Limit the rate
 
 The first send carries the whole history. To spread it out, set a limit:

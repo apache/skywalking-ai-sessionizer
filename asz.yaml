@@ -78,14 +78,6 @@ adapters:
       # repack re-cuts an existing root into a new one.
       max_delta_bytes: 2097152
 
-  # A listener for the runtime's own OpenTelemetry exporter. It accepts
-  # metrics, logs and traces over gRPC or HTTP and keeps none of them, so a
-  # Claude Code already set to export keeps working. The metrics asz sends
-  # are derived from the landed files; see metrics below.
-  - name: claude-code-otlp
-    enabled: false
-    listen: 127.0.0.1:4317
-
   # The workspace change records the asz Claude Code plugin writes: which
   # files each shell command changed, and each edit made inside a
   # subagent, as git-style hunks. The plugin writes them beside Claude

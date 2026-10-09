@@ -27,7 +27,6 @@ A list of the sources asz collects from.
 | `claude-code-local` | yes | Claude Code's transcripts on this machine |
 | `changes` | yes | what a tool call changed on disk, from the [Claude Code](claude-code-plugin.md) or [LangChain](langchain-plugin.md) plugin, and each call to an MCP server the Claude Code plugin saw; see [below](#the-changes-adapter) |
 | `claude-code-provider` | yes | the request and response bodies Claude Code writes when asked; see [below](#the-provider-adapter) |
-| `claude-code-otlp` | no | nothing: it accepts what Claude Code's own OpenTelemetry exporter sends, and keeps none of it; see [below](#the-receiver-adapter) |
 | `langsmith-ingest` | no | what the LangSmith tracing client sends, from a LangChain or LangGraph application; see [LangChain and LangGraph](langchain.md) |
 
 ### More than one agent
@@ -54,7 +53,7 @@ A list of the sources asz collects from.
 | `source_root` | empty | The directory Claude Code keeps its projects in, one directory per project. Empty means `projects` under `CLAUDE_CONFIG_DIR`, else under `XDG_CONFIG_HOME/claude`, else under `~/.claude`. To collect from a copy, name the copy's `projects` directory, not the directory above it. |
 | `include` | empty | [Session filters](#session-filters) a session must match. Empty means every session. |
 | `exclude` | `/private/tmp/**` | [Session filters](#session-filters) that leave a session out. `exclude: []` clears the default. |
-| `listen` | none | `claude-code-otlp` only: the address to receive on, such as `127.0.0.1:4317`, gRPC and HTTP on one port. |
+| `listen` | `127.0.0.1:1985` | `langsmith-ingest` only: the address to receive on; see [LangChain and LangGraph](langchain.md). |
 
 ### Session filters
 
@@ -189,16 +188,3 @@ Two entries that read one directory are refused.
 `claude-code-provider` collects the request and response bodies Claude Code sends to its model
 provider. Claude Code writes them only when you turn it on, as
 [Claude Code Provider Bodies](claude-code-provider-bodies.md) shows.
-
-## The receiver adapter
-
-```yaml
-adapters:
-  - name: claude-code-otlp
-    enabled: true
-    listen: 127.0.0.1:4317
-```
-
-`claude-code-otlp` is for a Claude Code already set to send its own telemetry. It accepts metrics,
-logs and traces over gRPC or HTTP, and keeps none of them. The metrics asz sends come from the
-collected data. It runs while `asz collect` or `asz server` runs, but not with `-once`.

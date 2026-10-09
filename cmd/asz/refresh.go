@@ -241,9 +241,10 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, mc
 		}
 	}
 	if r.col == nil && len(r.changes) == 0 && r.provider == nil && r.langsmith == nil {
-		// Nothing local is enabled and nothing feeds the pipeline. A root
-		// filled somewhere else, by the metrics receiver or copied from
-		// another machine, is served as it is.
+		// Nothing local is enabled and nothing feeds the pipeline, so there
+		// is nothing to refresh, and the caller refuses to run. A root filled
+		// somewhere else, such as one copied from another machine, is served
+		// as it is by asz view.
 		fmt.Fprintln(os.Stderr, "source   : no local adapter enabled; nothing is collected")
 		return nil, nil
 	}

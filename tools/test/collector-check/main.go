@@ -168,11 +168,6 @@ func run(root, logs string) error {
 							if dp.AsInt != "" {
 								n, _ = strconv.ParseInt(dp.AsInt, 10, 64)
 							}
-							// The receiver accepts the runtime's exporter and
-							// keeps nothing, so none of its points is sent on.
-							if a["sender"] == "telemetrygen" {
-								return fmt.Errorf("a point the exporter sent to asz's receiver reached the Collector: %v", a)
-							}
 							switch m.Name {
 							case "agent.token.usage":
 								tokens[a["query_source"]+"/"+a["type"]] += n

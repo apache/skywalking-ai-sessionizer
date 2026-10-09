@@ -175,23 +175,27 @@
   `agent.mcp.calls` and `agent.mcp.duration`, by server, tool, the source of the server's
   configuration, outcome and query source. A server and a tool together name the target a call
   reached, which a receiver can treat as an endpoint of the agent.
-- The `claude-code-otlp` receiver no longer keeps what Claude Code's exporter sends. It accepts
-  metrics, logs and traces, over gRPC or over HTTP in any encoding, and keeps none of them. Its
-  `metrics` key is gone. Every metric asz sends is derived from the landed files, so one root has one
-  source for each count. The exporter's labels a transcript does not carry, such as the user and
-  the organisation, and its other metrics, such as cost, are no longer sent. The spool holds only
-  derived requests, and `spool.state` is no longer written.
+- The `claude-code-otlp` receiver is removed. Every metric asz sends is derived from the landed
+  files, so one root has one source for each count. The exporter's labels a transcript does not
+  carry, such as the user and the organisation, and its other metrics, such as cost, are no longer
+  sent. Point Claude Code's exporter at the receiver that reads it: the SkyWalking OAP reads its
+  cost, active time, sessions, lines of code, commits, pull requests and edit decisions, and takes
+  the tokens from asz. A configuration that still names the adapter loads, and an enabled entry is
+  skipped with a line that says so. The spool holds only derived requests, and `spool.state` is no
+  longer written.
 
 ## Development
 
 - The `all-kinds` scenario holds a call to an MCP server, so the push to a real OpenTelemetry
   Collector carries an `execution` file and the MCP metrics, and the check compares them with the
-  root. The same run sends a real exporter's metrics to the `claude-code-otlp` receiver, and fails
-  if any of them reaches the spool or the Collector.
+  root.
 - The first benchmark: `BenchmarkLangChainRequests` measures cutting every request body of one
   LangChain conversation, for context windows from 8K to 1M tokens, trimmed, summarised or neither.
   `make test` and CI only compile it. Its comment gives the command that runs it, the reference
   numbers, and the machine they come from.
+- golangci-lint is v2.14.0. Go 1.27.2 writes export data version 5, which v2.13.2 cannot read, so
+  under it lint stopped at the first package with a type-check error. CI takes the newest Go 1.27
+  release, so CI failed as soon as 1.27.2 came out.
 
 ## Conversation model
 
