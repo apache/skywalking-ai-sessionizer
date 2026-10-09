@@ -35,11 +35,12 @@ import (
 //
 //	go test ./internal/metrics -run TestCaptures -capture "$PWD/FILE.pb" -capture-name claude-code-VERSION-metrics
 //
-// FILE.pb is one spooled ExportMetricsServiceRequest. The test writes
+// FILE.pb is one ExportMetricsServiceRequest the exporter sent, as protobuf
+// bytes, saved by whatever OTLP receiver it was pointed at. The test writes
 // testdata/NAME.pb with the identifying values replaced, and testdata/NAME.json,
 // the same request in the protocol's JSON, for a person to read.
 var (
-	captureFile = flag.String("capture", "", "a spooled OTLP metrics request to redact into testdata")
+	captureFile = flag.String("capture", "", "an OTLP metrics request, as protobuf bytes, to redact into testdata")
 	captureName = flag.String("capture-name", "", "the name of the capture in testdata, with no extension")
 )
 

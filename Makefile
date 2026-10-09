@@ -52,7 +52,7 @@ DEB_PACKAGES := asz asz-changes
 # gpg's default key. The key must be in the SkyWalking KEYS file.
 GPG_USER  ?=
 
-GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT_VERSION := v2.14.0
 LICENSE_EYE_VERSION   := v0.9.0
 
 .DEFAULT_GOAL := check

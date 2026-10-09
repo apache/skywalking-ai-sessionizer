@@ -37,7 +37,7 @@ leaving them for the next one.
 
 In watch mode, the default, it repeats every `interval`; with `-once` or `mode: once` it makes one
 pass and exits. Every enabled local adapter is read in the same pass, so one watching source never
-keeps another from running. When the `claude-code-otlp` adapter is enabled, its receiver listens
+keeps another from running. When the `langsmith-ingest` adapter is enabled, its receiver listens
 beside the pipeline for as long as the process runs.
 
 One line per pass, and a quiet pass prints nothing:
@@ -170,7 +170,7 @@ it needs no source files.
 
 The pipeline and the page in one process: it lands, parses and sends on the collector interval,
 and serves the result on `ADDR`, `127.0.0.1:8787` by default. This is what a person runs to watch
-their own conversations locally. It hosts the `claude-code-otlp` receiver too, when that adapter
+their own conversations locally. It hosts the `langsmith-ingest` receiver too, when that adapter
 is enabled.
 
 `/api/status` reports the mode, the source, the last and the next refresh and the counts of the

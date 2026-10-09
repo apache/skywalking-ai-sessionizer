@@ -209,9 +209,8 @@ type Adapter struct {
 	Include []string `yaml:"include"`
 	Exclude []string `yaml:"exclude"`
 
-	// Listen, on claude-code-otlp, is the address the receiver listens on
-	// for the runtime's exporter, such as 127.0.0.1:4317, over gRPC and
-	// HTTP on the one port. It keeps nothing it receives.
+	// Listen, on langsmith-ingest, is the address the receiver listens on,
+	// the one LANGSMITH_ENDPOINT is pointed at, such as 127.0.0.1:1985.
 	Listen string `yaml:"listen"`
 	// Token, on langsmith-ingest, is required in the x-api-key header.
 	// Empty accepts any key, which is what a local collector wants: the
@@ -253,6 +252,12 @@ func (a *Adapter) UnmarshalYAML(node *yaml.Node) error {
 	}
 	type plain Adapter
 	value := plain{Name: name.Name, Enabled: true}
+	if name.Name == RemovedClaudeCodeOTLP {
+		// It was off unless turned on, and an entry written for it still
+		// means that. Without this, an entry with no enabled key would turn
+		// on, and print a skip line where it used to print nothing.
+		value.Enabled = false
+	}
 	for _, def := range Default().Adapters {
 		if sameAdapter(def.Name, name.Name) {
 			value = plain(def)
@@ -295,9 +300,13 @@ const (
 
 	// AdapterClaudeCodeLocal reads Claude Code's local files. Pull posture.
 	AdapterClaudeCodeLocal = "claude-code-local"
-	// AdapterClaudeCodeOTLP receives what Claude Code's own OpenTelemetry
-	// exporter sends. Push posture, the runtime's side.
-	AdapterClaudeCodeOTLP = "claude-code-otlp"
+	// RemovedClaudeCodeOTLP names the receiver for Claude Code's own
+	// OpenTelemetry exporter that 0.5.0 and earlier had. It is gone because
+	// every metric asz sends is derived from the landed files. The exporter
+	// is pointed at the receiver that reads it, such as the SkyWalking OAP.
+	// A configuration written then still names it. Such an entry lands
+	// nothing. When it is enabled, it is skipped with a line that says so.
+	RemovedClaudeCodeOTLP = "claude-code-otlp"
 	// AdapterClaudeCodeChanges reads the workspace change records the asz
 	// Claude Code plugin writes beside Claude Code's own files. Pull
 	// posture, like the local adapter, and the plugin needs nothing from
@@ -333,12 +342,6 @@ func Default() *Config {
 				Interval:      DefaultInterval,
 				MaxDeltaBytes: 2 << 20,
 			},
-		}, {
-			// The runtime's own exporter, received. Off until pointed at:
-			// the file names the address the runtime would be given.
-			Name:    AdapterClaudeCodeOTLP,
-			Enabled: false,
-			Listen:  "127.0.0.1:4317",
 		}, {
 			// The LangSmith tracing client, received. Off until pointed
 			// at: the file names the address an application would be
@@ -407,13 +410,6 @@ func isChanges(name string) bool {
 	return name == AdapterChanges || name == AdapterClaudeCodeChanges
 }
 
-// isReceiver reports whether an adapter is a server rather than a reader. A
-// receiver polls nothing and lands no transcript of its own, so the collector
-// settings do not apply to it.
-func isReceiver(name string) bool {
-	return name == AdapterClaudeCodeOTLP
-}
-
 // Load reads a YAML config, applying defaults for anything unset. An empty
 // path returns Default.
 func Load(path string) (*Config, error) {
@@ -440,11 +436,7 @@ func Load(path string) (*Config, error) {
 	if len(loaded.Adapters) > 0 {
 		cfg.Adapters = loaded.Adapters
 		for i := range cfg.Adapters {
-			// A receiver is a server: it polls nothing and lands no
-			// transcript, so the collector settings do not apply to it.
-			if !isReceiver(cfg.Adapters[i].Name) {
-				cfg.Adapters[i].Collector.applyDefaults()
-			}
+			cfg.Adapters[i].Collector.applyDefaults()
 		}
 	}
 	if loaded.Parse.MaxRoundBytes > 0 {
@@ -599,11 +591,6 @@ func (c *Config) Validate() error {
 			}
 			seen[a.Name] = true
 		}
-		if a.Name == AdapterClaudeCodeOTLP && a.Enabled {
-			if a.Listen == "" {
-				return fmt.Errorf("config: adapter %q needs listen, the address the runtime's exporter is pointed at, such as 127.0.0.1:4317", a.Name)
-			}
-		}
 		if a.Name != AdapterLangSmithIngest && a.ProviderBodies {
 			return fmt.Errorf("config: adapter %q does not take provider_bodies; only %q does, and %q lands Claude Code's bodies on its own", a.Name, AdapterLangSmithIngest, AdapterClaudeCodeProvider)
 		}
@@ -614,22 +601,15 @@ func (c *Config) Validate() error {
 			if a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 {
 				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, token, thread_keys, scope, provider_bodies and collector, not source_root, include or exclude", a.Name)
 			}
-			// It takes a period and a byte budget, unlike the metrics
-			// receiver: what it accepts waits in an inbox until a pass
-			// converts it, and one request can be larger than a landed file
-			// should be. A single turn with a 20 KB command and a 32 KB
-			// result measured 3 MB.
+			// It takes a period and a byte budget: what it accepts waits in
+			// an inbox until a pass converts it, and one request can be
+			// larger than a landed file should be. A single turn with a
+			// 20 KB command and a 32 KB result measured 3 MB.
 			if len(a.Scope) == 0 {
 				return fmt.Errorf("config: adapter %q needs scope, the dimensions that own a conversation; the default is [project, thread]", a.Name)
 			}
 			if len(a.ThreadKeys) == 0 {
 				return fmt.Errorf("config: adapter %q needs thread_keys, the metadata keys that may carry the thread", a.Name)
-			}
-			continue
-		}
-		if a.Name == AdapterClaudeCodeOTLP {
-			if a.Collector != (Collector{}) || a.SourceRoot != "" || len(a.Include) > 0 || len(a.Exclude) > 0 {
-				return fmt.Errorf("config: adapter %q is a receiver: it takes listen, not collector, source_root, include or exclude", a.Name)
 			}
 			continue
 		}

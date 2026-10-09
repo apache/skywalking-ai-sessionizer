@@ -928,18 +928,13 @@ runtime's auxiliary calls, which never reach a transcript. asz does not send the
 derivation over a root with history reaches back `metrics.lookback`, 72 hours unless set. See
 [Metrics](../setup/export-otlp.md#metrics).
 
-### The runtime's exporter, received
+### The runtime's exporter
 
-`claude-code-otlp` is an OpenTelemetry receiver the runtime's exporter can be pointed at, over
-gRPC or HTTP on one port. It accepts metrics, logs and traces, and keeps none of them. A runtime
-already set to export keeps working, and nothing it sends is counted beside what asz derives. It
-lands no transcript and reads none, so it adds no structure. The runtime's events carry the
-latency and cost a transcript never has. Landing them is not implemented.
-
-The receiver speaks OTLP because Claude Code has exactly one outward protocol. Its exporter setting
-accepts `console`, `otlp` or `prometheus` for metrics, and `console` or `otlp` for logs and traces.
-Any other value throws. There is no webhook and no custom sink. This was read from the Claude Code
-binary. The version was not recorded.
+asz does not receive the runtime's exporter. Point the exporter at the receiver that reads it. The
+SkyWalking OAP reads its cost, active time, sessions, lines of code, commits, pull requests and
+edit decisions, and takes the tokens from asz, so a call is not counted twice.
+[Metrics of the agent runtime](https://skywalking.apache.org/docs/main/next/en/setup/backend/ai-agent-conversation/#metrics-of-the-agent-runtime)
+lists which source each of its metrics needs, and how to point the exporter at it.
 
 ## Local data hazards
 

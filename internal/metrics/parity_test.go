@@ -33,7 +33,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
-// The parity fixture: what Claude Code 2.1.260 sent to asz's receiver from
+// The parity fixture: what the exporter of Claude Code 2.1.260 sent from
 // one short non-interactive Opus session on 2026-09-07, over gRPC, with
 // the values of every attribute naming a person, an account, an
 // organisation or a session replaced. testdata/claude-code-2.1.260-metrics.json

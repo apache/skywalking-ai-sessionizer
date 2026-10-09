@@ -17,8 +17,7 @@
 
 // Package metrics derives asz's metrics from landed Session Data: the tokens
 // of each model call, and the calls to MCP servers the plugin recorded.
-// Every metric asz sends comes from here; nothing the runtime's own exporter
-// sends is kept.
+// Every metric asz sends comes from here.
 //
 // The token metric counts what Claude Code's exporter counts, under asz's
 // name. The unit, the delta temporality and the token types are the

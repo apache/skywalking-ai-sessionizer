@@ -154,8 +154,8 @@ func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error
 		MaxBytesPerMinute: o.MaxBytesPerMinute,
 		NoLogs:            !o.SendLogs(),
 		NoMetrics:         !o.SendMetrics(),
-		// The metrics spool concerns Claude Code whichever adapter filled it,
-		// the local derivation or the runtime's own exporter.
+		// The metrics spool concerns Claude Code: everything in it is derived
+		// from Claude Code's landed files.
 		MetricsService: claudecode.RuntimeName,
 	}
 	if o.ServiceName != "" {

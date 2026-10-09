@@ -132,8 +132,8 @@ named for any agent rather than for one runtime:
 
 Each is a monotonic delta sum, and every value is a double. A request's resource says
 `service.name` `claude-code`, which asz normalises on the way out, and its instrumentation scope is
-asz's own. The `claude-code-otlp` adapter accepts what Claude Code's own exporter sends and keeps
-none of it, so one root has one source for each count.
+asz's own. asz does not receive Claude Code's own exporter, so one root has one source for each
+count.
 
 ### Token usage
 
@@ -154,8 +154,8 @@ says:
 | a point's window | the exporter's export interval, wall clock | the minute the call's last fragment ended, see below |
 | value | a double | a double |
 
-The right-hand column is held to a capture of what Claude Code 2.1.260 sent to asz's receiver
-from one short session, kept under `internal/metrics/testdata` with every identifying value
+The right-hand column is held to a capture of what the exporter of Claude Code 2.1.260 sent from
+one short session, kept under `internal/metrics/testdata` with every identifying value
 replaced, by a test that fails when the exporter sends a label or a metric this table does not
 account for. A new capture enters that directory only through the same test, which replaces the
 identifying values:
