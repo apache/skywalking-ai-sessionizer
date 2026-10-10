@@ -116,8 +116,8 @@
   around it, and the inspector gains an Execution tab. The Evidence tab lists each change and
   execution record after the step's own positions, and shows what the document carries for the
   picked one: the step's text, a call's result on its result position, or the record itself. It
-  used to show the step's text under every position. The renderer is Horizon's, now pinned at
-  `c903e77`.
+  used to show the step's text under every position. The renderer is Horizon's, pinned at
+  `c903e77` for this.
 
 ## The page
 
@@ -151,6 +151,11 @@
 - The files endpoint serves provider body files only. It served any landed file whole by its
   sequence, transcripts included, and the Prompt tab reads provider body files only. Any other
   file, and one whose header does not read, is refused with status 400.
+- The page's copy buttons work when the page is served over plain HTTP from an address other than
+  localhost. A browser gives a page the Clipboard API only on HTTPS or localhost, and without it
+  every copy button did nothing and said nothing. Each copy button of the Prompt tab now sits in the
+  title of what it copies, so the whole body and the settings copy while their section is closed.
+  The renderer is Horizon's, now pinned at `e55f329` (apache/skywalking-horizon-ui#190).
 
 ## Configuration
 

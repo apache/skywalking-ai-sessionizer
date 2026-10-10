@@ -2307,9 +2307,10 @@ function copyButton(s, title = s.copy) {
 function copyField(btn, copied) {
   var _a;
   const text = (_a = btn.closest(".acv-field, [data-copy-scope]")) == null ? void 0 : _a.querySelector(".acv-copy-src, .acv-field-text, .acv-field-value, .acv-copy-text");
-  if (!text || typeof navigator === "undefined" || !navigator.clipboard) return;
+  if (!text) return;
   const value2 = text.querySelector(".acv-faint") ? "" : Array.from(text.childNodes).filter((node) => !(node instanceof HTMLElement && node.classList.contains("acv-field-cut"))).map((node) => node.textContent ?? "").join("");
-  void navigator.clipboard.writeText(value2).then(() => {
+  void writeClipboard(btn.ownerDocument, value2).then((done) => {
+    if (!done) return;
     const was = btn.textContent;
     btn.textContent = copied;
     btn.classList.add("done");
@@ -2318,6 +2319,31 @@ function copyField(btn, copied) {
       btn.classList.remove("done");
     }, 1400);
   });
+}
+function writeClipboard(doc, value2) {
+  if (typeof navigator === "undefined" || !navigator.clipboard) return Promise.resolve(copySelection(doc, value2));
+  return navigator.clipboard.writeText(value2).then(
+    () => true,
+    () => copySelection(doc, value2)
+  );
+}
+function copySelection(doc, value2) {
+  const focused = doc.activeElement;
+  const area = doc.createElement("textarea");
+  area.value = value2;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  doc.body.appendChild(area);
+  area.select();
+  try {
+    return doc.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    area.remove();
+    if (focused instanceof HTMLElement && doc.activeElement !== focused) focused.focus({ preventScroll: true });
+  }
 }
 function textBody(text, kind, s) {
   const st = kind === "tool" || kind === "agent.call" ? structure(text) : null;
@@ -2432,9 +2458,11 @@ function drawSide(ctx, e, read2, sides, store, ref, failure) {
   } else if (read2.kind === "response") {
     panel = drawResponse(ctx, e, read2);
   } else if (read2.text != null) {
-    panel = section(ctx, e, "raw", s.promptWholeBody, "", block(ctx, { kind: "text", text: read2.text }, `${e.id}|${state.promptSide}|raw`), true);
+    const text = `<div class="acv-prompt-block">${textBlock$1(ctx, read2.text, `${e.id}|${state.promptSide}|raw`)}</div>`;
+    panel = section(ctx, e, "raw", s.promptWholeBody, "", text, { open: true, copy: read2.text });
   } else {
-    panel = section(ctx, e, "raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|${state.promptSide}|raw`), true);
+    const raw = pretty(read2.raw);
+    panel = section(ctx, e, "raw", s.promptWholeBody, "", json(ctx, raw, `${e.id}|${state.promptSide}|raw`), { open: true, copy: raw });
   }
   return panel;
 }
@@ -2499,10 +2527,10 @@ function drawRequest(ctx, e, read2, sides, store) {
     fill(s.promptMessages, { count: String(read2.messages.length) }),
     fill(s.promptMessagesNote, { bytes: f.number(new TextEncoder().encode(JSON.stringify(read2.raw["messages"])).length) }),
     read2.messages.map((m, i) => message(ctx, m, i + 1, read2.messages.length, `${e.id}|req|msg|${i}`)).join(""),
-    true
+    { open: true }
   );
-  const settings2 = Object.keys(read2.rest).length ? section(ctx, e, "settings", s.promptSettings, Object.keys(read2.rest).join(", "), json(ctx, read2.rest, `${e.id}|req|set`)) : "";
-  const whole = section(ctx, e, "request-raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|req|raw`));
+  const settings2 = Object.keys(read2.rest).length ? documentSection(ctx, e, "settings", s.promptSettings, Object.keys(read2.rest).join(", "), read2.rest, `${e.id}|req|set`) : "";
+  const whole = documentSection(ctx, e, "request-raw", s.promptWholeBody, "", read2.raw, `${e.id}|req|raw`);
   return `${modes}${system}${tools}${messages}${settings2}${whole}`;
 }
 const UNNAMED = "unnamed";
@@ -2560,96 +2588,110 @@ function drawResponse(ctx, e, read2) {
     )}</span>`
   ).join("")}</div>` : "";
   const blocks = read2.blocks.map((b, i) => block(ctx, b, `${e.id}|res|${i}`)).join("");
-  const rest = Object.keys(read2.rest).length ? section(ctx, e, "response-settings", s.promptSettings, Object.keys(read2.rest).join(", "), json(ctx, read2.rest, `${e.id}|res|rest`)) : "";
-  const whole = section(ctx, e, "response-raw", s.promptWholeBody, "", json(ctx, read2.raw, `${e.id}|res|raw`));
+  const rest = Object.keys(read2.rest).length ? documentSection(ctx, e, "response-settings", s.promptSettings, Object.keys(read2.rest).join(", "), read2.rest, `${e.id}|res|rest`) : "";
+  const whole = documentSection(ctx, e, "response-raw", s.promptWholeBody, "", read2.raw, `${e.id}|res|raw`);
   return `<div class="acv-prompt-facts">${facts}</div>${usage}${blocks}${rest}${whole}`;
 }
-function section(ctx, e, key, title, note, inner, openByDefault = false) {
+function section(ctx, e, key, title, note, inner, opts = {}) {
   const id = `${e.id}|${key}`;
-  const open = ctx.state.openPromptSections.has(id) || openByDefault && !ctx.state.openPromptSections.has(`-${id}`);
+  const open = ctx.state.openPromptSections.has(id) || !!opts.open && !ctx.state.openPromptSections.has(`-${id}`);
   return `
-    <section class="acv-prompt-section">
-      <button type="button" class="acv-prompt-head-btn" data-prompt-section="${esc(id)}" aria-expanded="${open}">
-        <span class="acv-kicker">${esc(title)}</span>
-        ${note ? `<span class="acv-faint">${esc(note)}</span>` : ""}
-        <span class="acv-prompt-caret">${open ? "▾" : "▸"}</span>
-      </button>
+    <section class="acv-prompt-section"${opts.copy != null ? " data-copy-scope" : ""}>
+      <div class="acv-prompt-section-head">
+        <button type="button" class="acv-prompt-head-btn" data-prompt-section="${esc(id)}" aria-expanded="${open}">
+          <span class="acv-kicker">${esc(title)}</span>
+          ${note ? `<span class="acv-faint">${esc(note)}</span>` : ""}
+          <span class="acv-prompt-caret">${open ? "▾" : "▸"}</span>
+        </button>
+        ${opts.copy != null ? copyOf(ctx, opts.copy) : ""}
+      </div>
       ${open ? `<div class="acv-prompt-body">${inner}</div>` : ""}
     </section>`;
 }
+function documentSection(ctx, e, key, title, note, value2, textKey) {
+  const text = pretty(value2);
+  return section(ctx, e, key, title, note, json(ctx, text, textKey), { copy: text });
+}
 function message(ctx, m, n, total, key) {
   const { s } = ctx;
+  const only = m.blocks.length === 1 && m.blocks[0].kind === "text" && !m.blocks[0].reminder ? m.blocks[0] : null;
   return `
-    <div class="acv-prompt-message">
+    <div class="acv-prompt-message"${only ? " data-copy-scope" : ""}>
       <div class="acv-prompt-message-head">
-        <span class="acv-prompt-role">${esc(m.role || s.promptUnknownRole)}</span>
+        <span><span class="acv-prompt-role">${esc(m.role || s.promptUnknownRole)}</span>${only ? copyOf(ctx, only.text ?? "") : ""}</span>
         <span class="acv-faint">${esc(fill(s.promptMessageOf, { n: String(n), total: String(total) }))}</span>
       </div>
-      <div class="acv-prompt-message-body">${m.blocks.map((b, i) => block(ctx, b, `${key}|${i}`)).join("")}</div>
+      <div class="acv-prompt-message-body">${m.blocks.map((b, i) => block(ctx, b, `${key}|${i}`, b === only)).join("")}</div>
     </div>`;
 }
-function block(ctx, b, key) {
+function block(ctx, b, key, headed = false) {
   const { s } = ctx;
   if (b.kind === "text" || b.kind === "thinking") {
     const text = b.text ?? "";
     const label = b.kind === "thinking" ? s.promptThinking : b.reminder ? s.promptReminder : "";
     const mark = b.kind === "thinking" ? " thinking" : b.reminder ? " injected" : "";
+    if (headed) return `<div class="acv-prompt-block${mark}">${textBlock$1(ctx, text, key)}</div>`;
     return `
-      <div class="acv-prompt-block${mark}">
-        ${label ? `<div class="acv-kicker">${esc(label)}</div>` : ""}
+      <div class="acv-prompt-block${mark}" data-copy-scope>
+        <div class="acv-kicker">${esc(label)}${copyOf(ctx, text)}</div>
         ${textBlock$1(ctx, text, key)}
       </div>`;
   }
   if (b.kind === "tool_use") {
+    const input = pretty(b.json);
     return `
-      <div class="acv-prompt-block tool">
-        <div class="acv-kicker">${esc(fill(s.promptToolUse, { name: b.name ?? "" }))}${blockId(ctx, b)}</div>
-        ${json(ctx, b.json, key)}
+      <div class="acv-prompt-block tool" data-copy-scope>
+        <div class="acv-kicker">${esc(fill(s.promptToolUse, { name: b.name ?? "" }))}${blockId(ctx, b)}${copyOf(ctx, input)}</div>
+        ${json(ctx, input, key)}
       </div>`;
   }
   if (b.kind === "tool_result") {
+    const result = b.text ?? pretty(b.json);
     return `
-      <div class="acv-prompt-block tool${b.failed ? " failed" : ""}">
-        <div class="acv-kicker">${esc(b.failed ? s.promptToolFailed : s.promptToolResult)}${blockId(ctx, b)}</div>
-        ${b.text != null ? textBlock$1(ctx, b.text, key) : json(ctx, b.json, key)}
+      <div class="acv-prompt-block tool${b.failed ? " failed" : ""}" data-copy-scope>
+        <div class="acv-kicker">${esc(b.failed ? s.promptToolFailed : s.promptToolResult)}${blockId(ctx, b)}${copyOf(ctx, result)}</div>
+        ${b.text != null ? textBlock$1(ctx, result, key) : json(ctx, result, key)}
       </div>`;
   }
-  return `<div class="acv-prompt-block"><div class="acv-kicker">${esc(b.kind)}</div>${json(ctx, b.json, key)}</div>`;
+  const value2 = pretty(b.json);
+  return `<div class="acv-prompt-block" data-copy-scope><div class="acv-kicker">${esc(b.kind)}${copyOf(ctx, value2)}</div>${json(ctx, value2, key)}</div>`;
 }
 function blockId(ctx, b) {
   return b.id ? ` <span class="acv-faint mono">${esc(fill(ctx.s.promptToolFor, { id: b.id }))}</span>` : "";
 }
 function tool(ctx, t, key) {
   const first = t.description.split("\n")[0] ?? "";
+  const definition = pretty(t.raw);
   return `
-    <div class="acv-prompt-tool">
-      <div class="acv-prompt-tool-name mono">${esc(t.name)}</div>
+    <div class="acv-prompt-tool" data-copy-scope>
+      <div class="acv-prompt-tool-name mono">${esc(t.name)}${copyOf(ctx, definition)}</div>
       <div class="acv-faint">${esc(first.length > 200 ? `${first.slice(0, 200)}…` : first)}</div>
-      ${json(ctx, t.raw, key)}
+      ${json(ctx, definition, key)}
     </div>`;
 }
 function blockSummary(ctx, blocks) {
   const bytes = new TextEncoder().encode(blocks.map((b) => b.text ?? "").join("")).length;
   return fill(ctx.s.promptBlocks, { count: String(blocks.length), bytes: ctx.f.number(bytes) });
 }
+function copyOf(ctx, text) {
+  return `${copyButton(ctx.s)}<span class="acv-copy-src" hidden>${esc(text)}</span>`;
+}
+function pretty(value2) {
+  return JSON.stringify(value2, null, 2) ?? "";
+}
 function textBlock$1(ctx, text, key) {
   const { s, state } = ctx;
   const long = text.length > PREVIEW;
   const open = long && state.openTexts.has(key);
   const more = long && !open ? `<button type="button" class="acv-linkish acv-text-more" data-text-toggle="${esc(key)}">${esc(s.showAllLines)}</button>` : "";
-  return `<div class="acv-block" data-copy-scope>${esc(open || !long ? text : `${text.slice(0, PREVIEW)}…`)}${copyButton(
-    s
-  )}<span class="acv-copy-src" hidden>${esc(text)}</span></div>${more}`;
+  return `<div class="acv-block">${esc(open || !long ? text : `${text.slice(0, PREVIEW)}…`)}</div>${more}`;
 }
-function json(ctx, value2, key) {
+function json(ctx, text, key) {
   const { s, state } = ctx;
-  const text = JSON.stringify(value2, null, 2) ?? "";
   const long = text.length > JSON_PREVIEW;
   const open = long && state.openTexts.has(key);
   const more = long && !open ? `<button type="button" class="acv-linkish acv-text-more" data-text-toggle="${esc(key)}">${esc(s.showAllLines)}</button>` : "";
-  return `<pre class="acv-raw" data-copy-scope>${esc(open || !long ? text : `${text.slice(0, JSON_PREVIEW)}…`)}${copyButton(
-    s
-  )}<span class="acv-copy-src" hidden>${esc(text)}</span></pre>${more}`;
+  return `<pre class="acv-raw">${esc(open || !long ? text : `${text.slice(0, JSON_PREVIEW)}…`)}</pre>${more}`;
 }
 function wire(ctx, body) {
   body.querySelectorAll("[data-prompt-side]").forEach((b) => {
