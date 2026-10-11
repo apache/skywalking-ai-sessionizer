@@ -25,6 +25,7 @@ checkpoints:
     delta: true
     kinds: {epoch.boundary: 1, epoch.summary: 1, talk: 5}
     unresolved: {open: 0}
+    session: {title: every kind of file}   # the session's own title; a child's meta names only the child
     view: {state: verified, rounds: 2, files: 12}  # main twice, helper, its meta, two children, journal, manifest, script, the execution record; and two rounds
 push:
   kinds: [transcript, agent_meta, journal, workflow_manifest, workflow_script, execution, round]

@@ -322,6 +322,10 @@ const (
 	// local adapter: Claude Code writes the files, and this adapter finds
 	// each body's session and lands it.
 	AdapterClaudeCodeProvider = "claude-code-provider"
+	// AdapterKiroLocal reads the sessions Kiro's V3 agent engine writes
+	// under ~/.kiro: kiro-cli on the V3 engine, and Kiro Crew on its kas
+	// backend. Pull posture, like the Claude Code local adapter.
+	AdapterKiroLocal = "kiro-local"
 	// AdapterLangSmithIngest receives what the LangSmith tracing client
 	// sends. Push posture: an application built on LangChain or LangGraph
 	// already carries that client, so four environment variables are the
@@ -371,6 +375,17 @@ func Default() *Config {
 			// because it costs nothing until OTEL_LOG_RAW_API_BODIES names
 			// the directory: there is nothing to list.
 			Name:    AdapterClaudeCodeProvider,
+			Enabled: true,
+			Exclude: []string{"/private/tmp/**"},
+			Collector: Collector{
+				Mode:          ModeWatch,
+				Interval:      DefaultInterval,
+				MaxDeltaBytes: 2 << 20,
+			},
+		}, {
+			// Kiro's V3 sessions. On by default because it costs nothing
+			// where Kiro is not installed: there is nothing to discover.
+			Name:    AdapterKiroLocal,
 			Enabled: true,
 			Exclude: []string{"/private/tmp/**"},
 			Collector: Collector{
@@ -618,6 +633,9 @@ func (c *Config) Validate() error {
 		}
 		if a.Name == AdapterClaudeCodeProvider && a.Listen != "" {
 			return fmt.Errorf("config: adapter %q reads provider bodies only: it takes source_root, include, exclude and collector, not listen", a.Name)
+		}
+		if a.Name == AdapterKiroLocal && a.Listen != "" {
+			return fmt.Errorf("config: adapter %q reads Kiro's files: it takes source_root, include, exclude and collector, not listen", a.Name)
 		}
 		if a.Collector.Mode != ModeWatch && a.Collector.Mode != ModeOnce {
 			return fmt.Errorf("config: adapter %q: unknown collector mode %q", a.Name, a.Collector.Mode)

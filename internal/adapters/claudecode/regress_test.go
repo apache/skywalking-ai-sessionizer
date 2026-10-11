@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
@@ -365,6 +367,87 @@ func TestIndexGapIsClosedAfterInterruptedPass(t *testing.T) {
 	for _, want := range []string{"m1", "m2", "m3"} {
 		if _, found := ix.EntryByRecord(want); !found {
 			t.Errorf("record %q missing from the index after recovery", want)
+		}
+	}
+}
+
+// TestAFileThatFailsToLandLeavesNoIndexEntryOrGap: the subagent's file lands
+// in the same pass as the main transcript's fails, so the session's index and
+// state are saved. The failed file's records must not be in that index, and the
+// number it gave back must go to the next file that lands, or every round after
+// it reports that number as a missing file.
+func TestAFileThatFailsToLandLeavesNoIndexEntryOrGap(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), "{\"uuid\":\"m1\"}\n{\"uuid\":\"m2\"}\n")
+	mk(t, filepath.Join(src, "-proj-a", tSess, "subagents", "agent-"+tAgent+".jsonl"), "{\"uuid\":\"c1\"}\n")
+	mk(t, filepath.Join(src, "-proj-a", tSess, "subagents", "agent-"+tAgent+".meta.json"), `{"agentType":"helper"}`)
+
+	z := storage.NewZone(zone)
+	col := claudecode.New(src, z, 0)
+	at := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
+	col.Now = func() time.Time { return at }
+	// A directory with something in it where a file would go makes its rename
+	// fail: the main transcript's, a window of a growing file, and the agent's
+	// meta file, a snapshot.
+	var blockers []string
+	for seq := uint64(1); seq <= 4; seq++ {
+		for _, b := range []string{
+			filepath.Join(z.StreamDir(tSess, storage.StreamMain), storage.LandedName("transcript", storage.Stamp(at), seq)),
+			filepath.Join(z.StreamDir(tSess, tAgent), storage.LandedName("meta", storage.Stamp(at), seq)),
+		} {
+			mk(t, filepath.Join(b, "keep"), "")
+			blockers = append(blockers, b)
+		}
+	}
+	st, err := col.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Errors) != 2 || st.SourcesLanded != 1 {
+		t.Fatalf("pass: %+v, want the agent's transcript landed and the other two failed", st)
+	}
+	ix, ok, err := index.Load(z.IndexDir(tSess), tSess)
+	if err != nil || !ok {
+		t.Fatalf("index: ok=%v err=%v", ok, err)
+	}
+	for _, id := range []string{"m1", "m2"} {
+		if _, found := ix.EntryByRecord(id); found {
+			t.Errorf("record %q is in the index, and its file did not land", id)
+		}
+	}
+	landed := map[string]bool{}
+	for _, seq := range landedSeqs(t, z.SessionDir(tSess)) {
+		landed[seq] = true
+	}
+	for _, e := range ix.Entries {
+		if seq := fmt.Sprintf("%06d", e.Seq); !landed[seq] {
+			t.Errorf("the index names file %s, which did not land", seq)
+		}
+	}
+
+	for _, b := range blockers {
+		if err := os.RemoveAll(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	col.Now = time.Now
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	seqs := landedSeqs(t, z.SessionDir(tSess))
+	sort.Strings(seqs)
+	for i, seq := range seqs {
+		if want := fmt.Sprintf("%06d", i+1); seq != want {
+			t.Fatalf("landed numbers %v: %s where %s belongs", seqs, seq, want)
+		}
+	}
+	ix, ok, err = index.Load(z.IndexDir(tSess), tSess)
+	if err != nil || !ok {
+		t.Fatalf("index: ok=%v err=%v", ok, err)
+	}
+	for _, id := range []string{"m1", "m2", "c1"} {
+		if _, found := ix.EntryByRecord(id); !found {
+			t.Errorf("record %q missing from the index after the retry", id)
 		}
 	}
 }

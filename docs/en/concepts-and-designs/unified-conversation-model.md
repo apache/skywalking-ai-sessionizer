@@ -277,9 +277,7 @@ Three rules keep a glossary complete and checkable:
 
 The model lists the names a glossary is checked against in `model.Vocabulary`. For the
 [built-in runtime adapter](../adapters/claude-code-glossary.md), a test fails when an entry breaks
-rule 2 or rule 3, or when a name in that list has no entry. The list leaves out one name the model
-emits, `control.notice`. So no test would fail if the entry for it were missing. The built-in
-glossary has that entry.
+rule 2 or rule 3, or when a name in that list has no entry.
 
 ## Non-goals
 

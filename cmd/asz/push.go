@@ -27,6 +27,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/kiro"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/mock"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
@@ -138,7 +139,8 @@ func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error
 		ServiceName: o.ServiceName,
 		Runtimes: map[string]string{claudecode.Name: claudecode.RuntimeName, claudecodechanges.Name: claudecodechanges.RuntimeName,
 			claudecodechanges.NameWas: claudecodechanges.RuntimeName,
-			langsmith.Name:            langsmith.RuntimeName, claudecodeprovider.Name: claudecodeprovider.RuntimeName, mock.Name: mock.RuntimeName},
+			langsmith.Name:            langsmith.RuntimeName, claudecodeprovider.Name: claudecodeprovider.RuntimeName, mock.Name: mock.RuntimeName,
+			kiro.Name: kiro.RuntimeName},
 		// A session whose transcript has not landed yet is named by asz
 		// itself when it came through the receiver, and that name says so.
 		SessionRuntime: func(session string) string {

@@ -507,6 +507,7 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 			Kind: sessiondata.KindProviderBody, Adapter: Name + "/" + Version, Dialect: Dialect,
 			Src: ".", Session: session,
 		}
+		var staged index.Staged
 		err := storage.WriteAtomic(filepath.Join(c.Zone.ProviderDir(session), name), storage.PermLanded, func(w io.Writer) error {
 			rw, err := sessiondata.NewWriter(w, hdr)
 			if err != nil {
@@ -516,14 +517,15 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 				if err := rw.Write(rec); err != nil {
 					return err
 				}
-				e, blocks, body := index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1))
-				ix.AppendRecord(e, blocks, body)
+				staged.Add(index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1)))
 			}
 			return rw.Close()
 		})
 		if err != nil {
+			state.GiveBack(seq)
 			return err
 		}
+		ix.AppendStaged(&staged)
 		for _, f := range batchFiles {
 			st.Bytes += f.size
 		}

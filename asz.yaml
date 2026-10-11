@@ -197,6 +197,32 @@ adapters:
       interval: 10m
       max_delta_bytes: 2097152
 
+  # The sessions Kiro's V3 agent engine writes: kiro-cli started with --v3
+  # or with chat.agentEngine set to v3, and Kiro Crew on its kas backend.
+  # kiro-cli's V2 and V1 sessions are counted and reported, not collected.
+  # On by default because it costs nothing where Kiro is not installed.
+  - name: kiro-local
+    enabled: true
+
+    # The directory that holds Kiro's sessions directory. Leave empty for
+    # ~/.kiro, where the engine writes; it does not read KIRO_HOME. Set it to
+    # collect from a copy.
+    source_root: ""
+
+    # Session filters, judged by the workspace paths in the session's own
+    # header, session.json. A path ending in /** matches that directory and
+    # everything beneath it; anything else is a glob over the whole path. A
+    # session is left out only when every one of its paths is. Kiro records
+    # the real path, so on macOS a session in /tmp is under /private/tmp.
+    include: []
+    exclude:
+      - /private/tmp/**
+
+    collector:
+      mode: watch
+      interval: 10m
+      max_delta_bytes: 2097152
+
 parse:
   # The largest round file the parser writes, in bytes. A round travels
   # whole as one log record, so it is cut at the same budget as a landed

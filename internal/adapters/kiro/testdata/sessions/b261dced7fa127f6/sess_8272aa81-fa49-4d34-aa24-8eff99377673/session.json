@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataModelVersion": 1,
+  "id": "sess_8272aa81-fa49-4d34-aa24-8eff99377673",
+  "title": "A background task",
+  "agentMode": "kirocrew-lite",
+  "workspacePaths": [
+    "/home/dev/workspace"
+  ],
+  "createdAt": "2026-10-09T14:13:41.882Z",
+  "lastModifiedAt": "2026-10-09T19:26:28.916Z",
+  "modelId": "auto",
+  "status": "idle",
+  "rootPaths": [
+    "/home/dev/workspace"
+  ]
+}

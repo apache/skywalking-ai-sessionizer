@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataModelVersion": 1,
+  "id": "sess_03390a84-1c44-4785-bcd2-d4b15891b24a",
+  "title": "Execute Sleep and Echo Command",
+  "agentMode": "kit-tools",
+  "workspacePaths": [
+    "/work/20261008T145636Z-K14-v3"
+  ],
+  "rootPaths": [
+    "/work/20261008T145636Z-K14-v3"
+  ],
+  "createdAt": "2026-10-08T14:57:12.901Z",
+  "lastModifiedAt": "2026-10-08T14:57:32.520Z",
+  "modelId": "auto",
+  "autopilot": true,
+  "contextSnapshotModelDisplay": {
+    "modelId": "auto",
+    "display": "Auto (model selected dynamically on the server)"
+  },
+  "semanticReviewEnabled": true,
+  "disableAutoCompaction": false,
+  "ftaEnabled": false,
+  "workflowsEnabled": false,
+  "specPlanEnabled": false,
+  "specWorkflow": "quick",
+  "specSkipClarificationEnabled": true,
+  "memoryConfig": {
+    "mode": "read_write",
+    "reflection": true
+  },
+  "memoryConfigSource": "legacy",
+  "status": "in_progress",
+  "_meta": {
+    "kiro": {
+      "settings": {
+        "workflows": {
+          "enabled": false
+        },
+        "goal": {
+          "enabled": false
+        },
+        "codeIntelligence": {
+          "enabled": true
+        },
+        "knowledge": {
+          "enabled": true
+        },
+        "thinking": {
+          "enabled": true
+        },
+        "largeToolOutputHandler": {
+          "enabled": true
+        },
+        "workflowNotifications": {
+          "enabled": false,
+          "delivery": "steer"
+        }
+      },
+      "modeId": "kit-tools",
+      "executionTarget": {
+        "kind": "local"
+      }
+    }
+  }
+}

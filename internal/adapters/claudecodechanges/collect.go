@@ -336,6 +336,7 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		Src: src.Rel, Session: src.Session, Stream: src.Stream,
 	}
 	var written int64
+	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
 		rw, err := sessiondata.NewWriter(w, hdr)
 		if err != nil {
@@ -347,14 +348,15 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 				return err
 			}
 			written += int64(len(ln.Bytes))
-			e, blocks, body := index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1))
-			ix.AppendRecord(e, blocks, body)
+			staged.Add(index.FromRecord(ix, hdr, rec, uint32(seq), uint32(row+1)))
 		}
 		return rw.Close()
 	})
 	if err != nil {
+		state.GiveBack(seq)
 		return false, false, err
 	}
+	ix.AppendStaged(&staged)
 	// Land before committing the cursor, as the transcript adapter does: a
 	// crash between the two lands the same lines again, and assembly and
 	// the view drop the repeat by record id.

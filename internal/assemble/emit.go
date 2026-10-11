@@ -33,6 +33,7 @@ func (b *builder) emitSteps() {
 	for _, c := range b.calls {
 		b.emitCall(c, b.containerOf(c.Fragments[0]))
 	}
+	b.emitOutputWithoutCall()
 	for _, t := range b.tools {
 		if t.Use == nil {
 			continue
@@ -51,6 +52,46 @@ func (b *builder) emitSteps() {
 	b.emitInputSteps()
 	b.emitControlSteps()
 	b.emitSpawnRelations()
+}
+
+// emitOutputWithoutCall writes the output of agent records that name no
+// provider call.
+//
+// Some runtimes record what the model said without saying which provider call
+// said it: Kiro's V3 engine lists a turn's request ids and nothing ties a record
+// to one of them. Grouping such records into one call, per turn or per record,
+// would draw a call boundary the runtime never stated. So no call node is
+// written for them, and their text and reasoning become steps of the record's
+// own container, the run that holds them. A reader still sees every word the
+// agent said; it is only the call around them that is unavailable.
+func (b *builder) emitOutputWithoutCall() {
+	for _, i := range b.canonical {
+		e := &b.ix.Entries[i]
+		if e.Kind != index.KindAssistant || e.Call != 0 {
+			continue
+		}
+		kind := model.KindMessageAssistant
+		if e.Flags.Has(index.FlagSynthetic) {
+			kind = model.KindMessageSynthetic
+		}
+		parent := b.containerOf(e)
+		for _, blk := range b.blocksOf(e) {
+			var id, k string
+			switch blk.Kind {
+			case index.BlockText:
+				id, k = sessionflow.RefID("msg", blockRef(e, blk.Ord)), kind
+			case index.BlockThinking:
+				id, k = sessionflow.RefID("think", blockRef(e, blk.Ord)), model.KindThinking
+			default:
+				continue
+			}
+			b.node(sessionflow.Node{
+				Entity: sessionflow.Entity{ID: id}, Kind: k, Parent: parent,
+				Stream: b.streamName(e), Ref: refPtr(blockRef(e, blk.Ord)),
+			})
+			b.stats.Steps++
+		}
+	}
 }
 
 // emitInputSteps writes the records that carry input into the agent.

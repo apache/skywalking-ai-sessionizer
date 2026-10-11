@@ -1,0 +1,35 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+
+# A runtime that records what the model said but not which provider call said
+# it. Kiro's V3 engine is one: a turn lists its request ids, and no record names
+# one of them.
+#
+# Every word stays. The text, the reasoning and the tool use become steps of the
+# run that holds them, and no call node is written, because grouping the records
+# into calls would draw a boundary the runtime never stated. A message the client
+# made, with no call named either, stays a synthetic message in the same run.
+steps:
+  - input: find the failing test
+  - call:
+      unidentified: true
+      thinking: The test file has one assertion that can fail.
+      text: I will run the tests.
+      tool: {id: t1, name: Bash, input: {command: python3 -m unittest}, result: FAILED (failures=1)}
+  - call: {unidentified: true, text: test_mean fails.}
+  - error: {text: "API Error: the request was refused.", unidentified: true}

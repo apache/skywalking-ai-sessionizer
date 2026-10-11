@@ -58,6 +58,7 @@ adapter reports it as `unavailable` rather than approximating it.
 | --- | --- | --- |
 | [Claude Code](docs/en/adapters/claude-code.md) | collection implemented | local files — no configuration required, and it works on history that already exists. The [plugin](docs/en/setup/claude-code-plugin.md) adds which files each shell command changed. |
 | Codex | planned | — |
+| [Kiro](docs/en/adapters/kiro.md) | collection implemented | local files of Kiro's V3 agent engine, for kiro-cli and Kiro Crew; no configuration of Kiro beyond running that engine. |
 | [LangChain / LangGraph](docs/en/adapters/langsmith.md) | collection implemented | a receiver, `langsmith-ingest`, the tracing client every LangChain application carries is pointed at with four environment variables; nothing changes in the application. It lands the conversation and what each model call was sent. The [plugin](docs/en/setup/langchain-plugin.md) adds which files each tool call changed. |
 
 ## Quick start

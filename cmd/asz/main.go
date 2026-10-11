@@ -179,7 +179,7 @@ func main() {
 		}
 		switch ad.Name {
 		case config.AdapterClaudeCodeLocal, config.AdapterChanges, config.AdapterClaudeCodeChanges,
-			config.AdapterClaudeCodeProvider:
+			config.AdapterClaudeCodeProvider, config.AdapterKiroLocal:
 			local = append(local, ad)
 		case config.RemovedClaudeCodeOTLP:
 			fmt.Fprintf(os.Stderr, "skipping %q: asz no longer receives Claude Code's exporter; point the exporter at the receiver that reads it, such as the SkyWalking OAP\n", ad.Name)
@@ -212,7 +212,7 @@ func main() {
 	case "sources":
 		local = withoutReceivers(local)
 		if len(local) == 0 {
-			fatal(fmt.Errorf("%s: no enabled %s, %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterChanges, config.AdapterClaudeCodeProvider))
+			fatal(fmt.Errorf("%s: no enabled %s, %s, %s or %s adapter", cmd, config.AdapterClaudeCodeLocal, config.AdapterChanges, config.AdapterClaudeCodeProvider, config.AdapterKiroLocal))
 		}
 		for _, ad := range local {
 			if err := run(cfg, ad, *once); err != nil {
@@ -290,6 +290,9 @@ func cmdSources(cfg *config.Config, ad config.Adapter, once bool) error {
 	}
 	if ad.Name == config.AdapterClaudeCodeProvider {
 		return cmdSourcesProvider(cfg, ad, once)
+	}
+	if ad.Name == config.AdapterKiroLocal {
+		return cmdSourcesKiro(cfg, ad, once)
 	}
 	root, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {

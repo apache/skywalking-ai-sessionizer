@@ -30,6 +30,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/kiro"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
@@ -103,10 +104,18 @@ type refresher struct {
 	// and providerAd holds its filter settings.
 	provider   *claudecodeprovider.Collector
 	providerAd config.Adapter
+	// kiroCol lands the sessions Kiro's V3 engine writes, and kiroMatch is
+	// its session filter.
+	kiroCol   *kiro.Collector
+	kiroMatch func(kiro.Session) bool
+	// kiroSkipped is what the last pass said Kiro wrote and is not read, so
+	// a pass says it again only when it changed.
+	kiroSkipped string
 	// The directories the collectors read. They are checked on every pass,
 	// not once, so a source that appears later is picked up.
 	colSource      string
 	providerSource string
+	kiroSource     string
 	interval       time.Duration
 	maxRound       int64
 	// pushAfter is when sending may resume, set when a receiver asks to be
@@ -238,9 +247,18 @@ func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, mc
 			r.providerAd = ad
 			r.providerSource = src
 			names, sources = append(names, ad.Name), append(sources, src)
+		case config.AdapterKiroLocal:
+			src, err := kiro.ResolveSourceRoot(ad.SourceRoot)
+			if err != nil {
+				return nil, err
+			}
+			r.kiroCol = kiro.New(src, zone, ad.Collector.MaxDeltaBytes)
+			r.kiroMatch = kiro.NewMatcher(ad.Include, ad.Exclude).Match
+			r.kiroSource = src
+			names, sources = append(names, ad.Name), append(sources, src)
 		}
 	}
-	if r.col == nil && len(r.changes) == 0 && r.provider == nil && r.langsmith == nil {
+	if r.col == nil && len(r.changes) == 0 && r.provider == nil && r.langsmith == nil && r.kiroCol == nil {
 		// Nothing local is enabled and nothing feeds the pipeline, so there
 		// is nothing to refresh, and the caller refuses to run. A root filled
 		// somewhere else, such as one copied from another machine, is served
@@ -478,6 +496,42 @@ func (r *refresher) pass() error {
 		busy += ch.Busy
 		for _, id := range ch.Changed {
 			changed[id] = true
+		}
+	}
+
+	// Kiro may not be installed, or not have run on its V3 engine yet, and
+	// the next pass looks again.
+	kiroHere := false
+	if r.kiroCol != nil {
+		var kerr error
+		if kiroHere, kerr = present(r.kiroSource, true); kerr != nil {
+			errs = append(errs, kerr)
+		}
+	}
+	if kiroHere {
+		collected = true
+		ks, err := r.kiroCol.CollectAll(r.kiroMatch)
+		if err != nil {
+			errs = append(errs, err)
+			ks = &kiro.Stats{}
+		}
+		errs = append(errs, ks.Errors...)
+		landed += ks.SourcesLanded
+		records += ks.Records
+		sessionsSeen += ks.Sessions
+		pending += ks.Pending
+		conflicts += ks.Conflicts
+		busy += ks.Busy
+		for _, id := range ks.Changed {
+			changed[id] = true
+		}
+		// Sessions that are there and are not read are said once, and
+		// again when the count changes, not on every pass.
+		if said := strings.Join(notCollected(ks.Skipped), "\n"); said != r.kiroSkipped {
+			r.kiroSkipped = said
+			for _, line := range notCollected(ks.Skipped) {
+				fmt.Printf("not read : %s: %s\n", config.AdapterKiroLocal, line)
+			}
 		}
 	}
 

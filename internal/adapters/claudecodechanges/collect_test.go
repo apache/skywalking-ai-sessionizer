@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,78 @@ func TestCollectLandsEachStreamUnderTheSession(t *testing.T) {
 	files, _ = storage.LandedFiles(zone, session)
 	if len(files) != 3 || files[2].Seq != 3 {
 		t.Fatalf("after append: %d files, last seq %d", len(files), files[len(files)-1].Seq)
+	}
+}
+
+// The agent's stream lands in the same pass as the main stream's fails, so the
+// session's index and state are saved. The failed file's record must not be in
+// that index, and the number it gave back must go to the next file that lands,
+// or every round after it reports that number as a missing file.
+func TestAFileThatFailsToLandLeavesNoIndexEntryOrGap(t *testing.T) {
+	src := t.TempDir()
+	out := filepath.Join(src, "asz-changes-inline", "output", session)
+	appendTo(t, filepath.Join(out, "main.jsonl"), line("p1/c1", "main", "toolu_1", "/workspace/project"))
+	appendTo(t, filepath.Join(out, agent+".jsonl"), line("p1/c2", agent, "toolu_2", "/workspace/project"))
+
+	zone := storage.NewZone(t.TempDir())
+	c := claudecodechanges.New(src, zone, 0)
+	at := time.Date(2026, 9, 8, 3, 0, 0, 0, time.UTC)
+	c.Now = func() time.Time { return at }
+	// A directory with something in it where the main stream's file would go
+	// makes its rename fail.
+	stream := zone.StreamDir(session, storage.StreamMain)
+	var blockers []string
+	for seq := uint64(1); seq <= 3; seq++ {
+		b := filepath.Join(stream, storage.LandedName("changes", storage.Stamp(at), seq))
+		appendTo(t, filepath.Join(b, "keep"), "")
+		blockers = append(blockers, b)
+	}
+	st, err := c.CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Errors) == 0 || st.SourcesLanded != 1 {
+		t.Fatalf("pass: %+v, want the agent's stream landed and the main stream's failed", st)
+	}
+	ix, ok, err := index.Load(zone.IndexDir(session), session)
+	if err != nil || !ok {
+		t.Fatalf("index: ok=%v err=%v", ok, err)
+	}
+	if _, found := ix.EntryByRecord("p1/c1"); found {
+		t.Error("the main stream's record is in the index, and its file did not land")
+	}
+
+	for _, b := range blockers {
+		if err := os.RemoveAll(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.Now = time.Now
+	if _, err := c.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seqs := make([]uint64, 0, len(files))
+	for _, f := range files {
+		seqs = append(seqs, f.Seq)
+	}
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
+	for i, seq := range seqs {
+		if seq != uint64(i+1) {
+			t.Fatalf("landed numbers %v: %d where %d belongs", seqs, seq, i+1)
+		}
+	}
+	ix, ok, err = index.Load(zone.IndexDir(session), session)
+	if err != nil || !ok {
+		t.Fatalf("index: ok=%v err=%v", ok, err)
+	}
+	for _, id := range []string{"p1/c1", "p1/c2"} {
+		if _, found := ix.EntryByRecord(id); !found {
+			t.Errorf("record %q missing from the index after the retry", id)
+		}
 	}
 }
 

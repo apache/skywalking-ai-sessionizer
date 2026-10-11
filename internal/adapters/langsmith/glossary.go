@@ -91,6 +91,7 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.KindControlPermission, Note: "no equivalent: nothing here asks before running a tool"},
 	model.Term{Unified: model.KindControlCommand, Note: "no equivalent"},
 	model.Term{Unified: model.KindTurnDuration, Note: "no equivalent as a record; a run's own start and end give it"},
+	model.Term{Unified: model.KindControlNotice, Note: "no equivalent"},
 
 	// ---- relations ----
 	model.Term{Unified: model.RelStarts, Note: "derived from a delegating tool and the runs beneath it"},

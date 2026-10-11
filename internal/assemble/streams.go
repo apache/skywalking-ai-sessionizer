@@ -211,9 +211,11 @@ func (b *builder) latestTitle() string {
 		e := &b.ix.Entries[i]
 		// A title record carries a name and no identity of its own. A sidecar
 		// and a manifest also carry names, but those name a stream and a
-		// workflow rather than the conversation.
-		if e.Label == 0 || e.Record != 0 ||
-			e.Kind == index.KindMeta || e.Kind == index.KindManifest {
+		// workflow rather than the conversation. The main stream's sidecar
+		// is the exception: the stream it names is the conversation. Kiro
+		// keeps the title in the session's header, which lands as one.
+		if e.Label == 0 || e.Record != 0 || e.Kind == index.KindManifest ||
+			(e.Kind == index.KindMeta && b.str(e.Stream) != "main") {
 			continue
 		}
 		title = b.str(e.Label)

@@ -168,3 +168,13 @@ func (s *SessionState) Take() uint64 {
 	s.NextSeq++
 	return seq
 }
+
+// GiveBack returns the number Take just allocated, for a file that did not
+// land. The pass goes on to other sources and saves the state, so a number kept
+// by a failed write would leave a gap in the landed files that every round
+// after it reports as a missing file.
+func (s *SessionState) GiveBack(seq uint64) {
+	if seq+1 == s.NextSeq {
+		s.NextSeq = seq
+	}
+}

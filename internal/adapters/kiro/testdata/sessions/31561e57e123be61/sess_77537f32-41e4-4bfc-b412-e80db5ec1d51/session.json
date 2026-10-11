@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataModelVersion": 1,
+  "id": "sess_77537f32-41e4-4bfc-b412-e80db5ec1d51",
+  "title": "Run Echo Denied-Check Command",
+  "agentMode": "vibe",
+  "workspacePaths": [
+    "/work/20261008T143531Z-K05-v3"
+  ],
+  "rootPaths": [
+    "/work/20261008T143531Z-K05-v3"
+  ],
+  "createdAt": "2026-10-08T14:35:51.438Z",
+  "lastModifiedAt": "2026-10-08T14:36:05.595Z",
+  "modelId": "auto",
+  "contextSnapshotModelDisplay": {
+    "modelId": "auto",
+    "display": "Auto (model selected dynamically on the server)"
+  },
+  "semanticReviewEnabled": true,
+  "disableAutoCompaction": false,
+  "ftaEnabled": false,
+  "workflowsEnabled": false,
+  "specPlanEnabled": false,
+  "specWorkflow": "quick",
+  "specSkipClarificationEnabled": true,
+  "memoryConfig": {
+    "mode": "read_write",
+    "reflection": true
+  },
+  "memoryConfigSource": "legacy",
+  "status": "idle",
+  "_meta": {
+    "kiro": {
+      "settings": {
+        "workflows": {
+          "enabled": false
+        },
+        "goal": {
+          "enabled": false
+        }
+      }
+    }
+  }
+}

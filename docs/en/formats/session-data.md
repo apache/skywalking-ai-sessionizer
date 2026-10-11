@@ -74,7 +74,7 @@ is a directory with one file per body, and each record names its own file.
 | `kind` | Collected from | Its records | What refers to it |
 | --- | --- | --- | --- |
 | `transcript` | one execution stream: the main stream or a child agent's own | the conversation itself: inputs, calls in fragments, results, injections, resets. `stream` on the header is `main` or the agent id. | almost every node of a round |
-| `agent_meta` | what the runtime recorded about a child agent when it started it | one record, `from: runtime`, with `child` and `label`, and a `data` part | the child's `stream` node, for its label |
+| `agent_meta` | what the runtime recorded about an agent: about a child agent when it started it, or, from Kiro, about the session | one record, `from: runtime`, with `child` and `label`, and a `data` part. Kiro's is the session's header, in the `main` stream, with `label` and no `child` | the child's `stream` node, for its label; in the `main` stream, the session node's title |
 | `journal` | a workflow run's journal | one record per event, `from: runtime`, with `child` and `batch`; a `child_result` flag on the record that returns a child's value | `agent.output` nodes and `ends_with` relations |
 | `workflow_manifest` | a workflow run's manifest | one record with `batch` and `label`, and a `data` part | the run's name |
 | `workflow_script` | the program a workflow ran | one record whose part is `unknown`: the source is a program, not data | nothing; kept because it is part of the session |
@@ -84,8 +84,8 @@ is a directory with one file per body, and each record names its own file.
 
 A source that is one document, not a stream of lines, lands as one record with `ord` 1 and `off` 0.
 Its `sha` and `bytes` cover the whole document. The Claude Code adapter's `agent_meta`,
-`workflow_manifest` and `workflow_script` files are of this kind, and a new version of the document
-lands as a new file (see [Snapshot cursors](storage-root.md#snapshot-cursors)).
+`workflow_manifest` and `workflow_script` files are of this kind, as is the Kiro adapter's
+`agent_meta`, and a new version of the document lands as a new file (see [Snapshot cursors](storage-root.md#snapshot-cursors)).
 
 Files of every kind are bound by the rounds' `input_digest`, so a session travels or archives as
 all of them. A session's `agent_meta`, `workflow_manifest` and `workflow_script` records carry

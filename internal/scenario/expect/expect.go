@@ -259,10 +259,12 @@ type Node struct {
 	Absent   bool           `yaml:"absent"`
 }
 
-// Session is the session node's range, as deltas from the base time.
+// Session is the session node's range, as deltas from the base time, and
+// its title.
 type Session struct {
-	From string `yaml:"from"`
-	To   string `yaml:"to"`
+	From  string `yaml:"from"`
+	To    string `yaml:"to"`
+	Title string `yaml:"title"`
 }
 
 // View is what the asz.view document must say.
@@ -490,9 +492,13 @@ func Evaluate(root string, cp *Checkpoint, ctx *Context) ([]string, error) {
 		var attrs struct {
 			From    string `json:"from_time"`
 			Through string `json:"through_time"`
+			Title   string `json:"title"`
 		}
 		if sn != nil {
 			_ = json.Unmarshal(sn.Attrs, &attrs)
+		}
+		if cp.Session.Title != "" && attrs.Title != cp.Session.Title {
+			bad("session.title is %q, want %q", attrs.Title, cp.Session.Title)
 		}
 		if cp.Session.From != "" {
 			if want, err := delta(ctx.At, cp.Session.From); err != nil {
