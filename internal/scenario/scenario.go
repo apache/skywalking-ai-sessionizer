@@ -123,7 +123,7 @@ type Step struct {
 	// gave none: the late result a test watches resolve.
 	Result *Result `yaml:"result"`
 	// Error is an assistant-role message the client fabricated.
-	Error string `yaml:"error"`
+	Error Synthetic `yaml:"error"`
 	// Reset is a context reset and the summary that replaced the context.
 	Reset *Reset `yaml:"reset"`
 	// Replay re-emits the last N records of the main stream, as the runtime
@@ -175,6 +175,10 @@ type Call struct {
 	// script filed with the run.
 	Workflow *Workflow `yaml:"workflow"`
 	Usage    *Usage    `yaml:"usage"`
+	// Unidentified writes the fragments with no provider-call id, as a
+	// runtime does that records what the model said but not which call said
+	// it.
+	Unidentified bool `yaml:"unidentified"`
 }
 
 // Usage is what the provider reported. Zero fields take the defaults a
@@ -227,6 +231,30 @@ type Result struct {
 	String bool `yaml:"string"`
 	// Lost says the result never reached the file, while the call did.
 	Lost bool `yaml:"lost"`
+}
+
+// Synthetic is an assistant-role message the client fabricated. It may be
+// written as a plain string, its text.
+type Synthetic struct {
+	Text string `yaml:"text"`
+	// Unidentified writes it with no call id, as a call's Unidentified does:
+	// a runtime that records what was said but not which call said it.
+	Unidentified bool `yaml:"unidentified"`
+}
+
+// UnmarshalYAML lets a synthetic message be a plain string.
+func (m *Synthetic) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		m.Text = n.Value
+		return nil
+	}
+	type plain Synthetic
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*m = Synthetic(p)
+	return nil
 }
 
 // UnmarshalYAML lets a result be a plain string.
@@ -345,8 +373,44 @@ func (sc *Scenario) Validate() error {
 	if err := bothOrNeither(sc.SystemPrompt, sc.Tools, "the scenario"); err != nil {
 		return err
 	}
+	if sc.ProviderBodies && namesNoCall(sc.Steps) {
+		return errors.New("provider_bodies: a body is written for each call, and an unidentified call or error names none")
+	}
 	seen := map[string]bool{}
 	return validateSteps(sc.Steps, "steps", seen, true, advertised(sc.Tools))
+}
+
+// namesNoCall reports whether a step, in any stream, writes model output with no
+// call id. Provider bodies are written per call and joined by the call's ids, so
+// such output has no body, and the two formats would not agree on what is left.
+func namesNoCall(steps []Step) bool {
+	for i := range steps {
+		s := &steps[i]
+		if s.Error.Unidentified {
+			return true
+		}
+		c := s.Call
+		if c == nil {
+			continue
+		}
+		if c.Unidentified {
+			return true
+		}
+		if c.Agent != nil && namesNoCall(c.Agent.Steps) {
+			return true
+		}
+		if c.Skill != nil && namesNoCall(c.Skill.Steps) {
+			return true
+		}
+		if c.Workflow != nil {
+			for _, child := range c.Workflow.Children {
+				if namesNoCall(child.Steps) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // validateTools checks one advertised tool list. A name is required, and no
@@ -444,7 +508,7 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool, 
 		at := fmt.Sprintf("%s[%d]", where, i)
 		n := 0
 		for _, set := range []bool{s.Input != "", s.Queued != nil, s.Inject != nil, s.Call != nil,
-			s.Result != nil, s.Error != "", s.Reset != nil, s.Replay > 0, s.System != nil} {
+			s.Result != nil, s.Error.Text != "", s.Reset != nil, s.Replay > 0, s.System != nil} {
 			if set {
 				n++
 			}

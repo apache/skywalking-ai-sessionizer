@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/kiro"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
@@ -36,6 +37,7 @@ import (
 func glossaries() map[string]*model.Glossary {
 	return map[string]*model.Glossary{
 		claudecode.Dialect: claudecode.Glossary(),
+		kiro.Dialect:       kiro.Glossary(),
 		langsmith.Dialect:  langsmith.Glossary(),
 	}
 }

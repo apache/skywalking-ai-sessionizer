@@ -408,10 +408,13 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 			Run: b.runOf(l), Of: r.Of, Text: r.Text, Failed: r.Failed, StringEnrichment: r.String, Lost: lost || r.Lost}
 		b.emit(e)
 		l.last = e.ID
-	case s.Error != "":
+	case s.Error.Text != "":
 		at := b.tick(l, s.After)
 		e := Event{Kind: EvSynthetic, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-synthetic", Parent: l.last,
-			Call: id + "-synthetic-call", Req: id + "-req", Text: s.Error, Lost: lost}
+			Call: id + "-synthetic-call", Req: id + "-req", Text: s.Error.Text, Lost: lost}
+		if s.Error.Unidentified {
+			e.Call, e.Req = "", ""
+		}
 		b.emit(e)
 		l.last = e.ID
 	case s.Reset != nil:
@@ -479,6 +482,11 @@ func (b *planner) call(l *lane, s *Step, id string) error {
 		sum := sha256.Sum256([]byte(b.p.Session))
 		tag := hex.EncodeToString(sum[:6])
 		call, req = call+"-"+tag, req+"-"+tag
+	}
+	if c.Unidentified {
+		// Usage is reported per call, so a runtime that names no call has
+		// none to report either.
+		call, req, usage = "", "", Usage{}
 	}
 	var frags []Event
 	if c.Thinking != "" {
@@ -694,7 +702,10 @@ func derivedSession(sc *Scenario) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s|%s|%d", sc.Title, sc.Project, len(sc.Steps))
 	for _, s := range sc.Steps {
-		fmt.Fprintf(h, "|%s%v%v%v%s%v%d%v", s.Input, s.Queued, s.Inject, s.Call != nil, s.Error, s.Reset != nil, s.Replay, s.System)
+		fmt.Fprintf(h, "|%s%v%v%v%s%v%d%v", s.Input, s.Queued, s.Inject, s.Call != nil, s.Error.Text, s.Reset != nil, s.Replay, s.System)
+		if s.Error.Unidentified {
+			fmt.Fprint(h, "|unidentified")
+		}
 	}
 	x := hex.EncodeToString(h.Sum(nil))
 	return fmt.Sprintf("%s-%s-4%s-8%s-%s", x[0:8], x[8:12], x[13:16], x[17:20], x[20:32])

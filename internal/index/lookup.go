@@ -59,6 +59,33 @@ func (ix *Index) AppendRecord(e Entry, blocks []Block, body *Body) {
 	ix.Append(e, blocks...)
 }
 
+// Staged holds what FromRecord returned for the records of a file that is
+// still being written. A collector appends them with AppendStaged only once the
+// file has landed: appended during the write, a file that then failed to land
+// would leave entries for records that do not exist, and the index state saved
+// after it would keep them.
+type Staged struct {
+	rows []stagedRow
+}
+
+type stagedRow struct {
+	e      Entry
+	blocks []Block
+	body   *Body
+}
+
+// Add keeps one record until its file has landed.
+func (s *Staged) Add(e Entry, blocks []Block, body *Body) {
+	s.rows = append(s.rows, stagedRow{e: e, blocks: blocks, body: body})
+}
+
+// AppendStaged adds the staged records in the order they were staged.
+func (ix *Index) AppendStaged(s *Staged) {
+	for _, r := range s.rows {
+		ix.AppendRecord(r.e, r.blocks, r.body)
+	}
+}
+
 // Append adds one record and its blocks, wiring the block range.
 func (ix *Index) Append(e Entry, blocks ...Block) {
 	ei := uint32(len(ix.Entries))

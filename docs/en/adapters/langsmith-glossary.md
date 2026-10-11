@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · trace_id · id · run_type: tool
 asz conversation -terms both ID     run  (trace_id)
 ```
 
-**60 terms: 17 that LangChain names, 43 this project derives.** That ratio is worth watching against
+**61 terms: 17 that LangChain names, 44 this project derives.** That ratio is worth watching against
 the Claude Code one. A framework that records its own graph in detail still has no word for a
 conversation boundary, a context reset or a delegated agent — which is the whole reason this model
 exists separately from any product's.
@@ -74,6 +74,7 @@ not there.
 | `continues` | — | derived here | no equivalent: a marked summary names no last message before it |
 | `control.command` | — | derived here | no equivalent |
 | `control.interrupt` | — | derived here | no equivalent |
+| `control.notice` | — | derived here | no equivalent |
 | `control.permission` | — | derived here | no equivalent: nothing here asks before running a tool |
 | `ends_with` | — | derived here | derived from a nested agent's last response |
 | `epoch` | — | derived here | the span between two summaries SummarizationMiddleware marked |

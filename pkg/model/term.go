@@ -121,7 +121,7 @@ func Vocabulary() []string {
 		KindAgentCall, KindAgentLaunchAck, KindAgentOutput, KindRuntimeNotification,
 		KindEpochBoundary, KindEpochSummary,
 		KindErrorAPI, KindControlInterrupt, KindControlPermission, KindControlCommand,
-		KindTurnDuration,
+		KindControlNotice, KindTurnDuration,
 		// relations
 		RelStarts, RelReports, RelEndsWith, RelResultOf, RelFollows, RelSummarizes,
 		RelInSegment, RelRetries, RelCancels, RelInputOf,

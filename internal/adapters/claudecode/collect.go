@@ -400,6 +400,7 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 	}
 
 	var written int64
+	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
 		rw, err := sessiondata.NewWriter(w, hdr)
 		if err != nil {
@@ -415,14 +416,15 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 			written += int64(len(ln.Bytes))
 			// The index is built from the CONVERTED record, so the source is
 			// parsed once and the index has no dialect in it.
-			e, blocks, body := index.FromRecord(p.ix, hdr, rec, uint32(seq), uint32(row+1))
-			p.ix.AppendRecord(e, blocks, body)
+			staged.Add(index.FromRecord(p.ix, hdr, rec, uint32(seq), uint32(row+1)))
 		}
 		return rw.Close()
 	})
 	if err != nil {
+		state.GiveBack(seq)
 		return false, false, err
 	}
+	p.ix.AppendStaged(&staged)
 
 	// Land before committing the cursor. A crash between the two re-lands the
 	// same records next pass, which is safe because the assembler must already
@@ -477,6 +479,7 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 		Kind: src.Kind.RecordKind(), Adapter: Name + "/" + Version, Dialect: Dialect,
 		Src: src.Rel, Session: src.Session, Stream: src.Stream, Batch: src.RunID,
 	}
+	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
 		rw, err := sessiondata.NewWriter(w, hdr)
 		if err != nil {
@@ -486,13 +489,14 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 		if err := rw.Write(rec); err != nil {
 			return err
 		}
-		e, blocks, body := index.FromRecord(p.ix, hdr, rec, uint32(seq), 1)
-		p.ix.AppendRecord(e, blocks, body)
+		staged.Add(index.FromRecord(p.ix, hdr, rec, uint32(seq), 1))
 		return rw.Close()
 	})
 	if err != nil {
+		state.GiveBack(seq)
 		return false, err
 	}
+	p.ix.AppendStaged(&staged)
 
 	info, _ := statSource(src.Path)
 	cur.ContentSHA256 = digest

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataModelVersion": 1,
+  "id": "sess_5f20ccf4-b254-4bdb-945b-080e051eb7f5",
+  "title": "A Kiro Crew chat",
+  "agentMode": "kirocrew",
+  "workspacePaths": [
+    "/home/dev/workspace"
+  ],
+  "createdAt": "2026-10-10T00:11:30.682Z",
+  "lastModifiedAt": "2026-10-10T08:22:20.282Z",
+  "modelId": "claude-opus-5.5",
+  "status": "idle",
+  "rootPaths": [
+    "/home/dev/workspace"
+  ]
+}

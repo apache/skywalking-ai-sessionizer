@@ -38,14 +38,14 @@ Eight stages. The order is forced: each depends on the one before it.
 | --- | --- |
 | 1. Remove duplicate records | the first copy of each record id wins, and nothing downstream is correct before it |
 | 2. Partition streams | one ordered lineage per agent, from the file it was written in |
-| 3. Group provider calls | by message id, in line order |
+| 3. Group provider calls | by message id, in line order; output that names no call is grouped into none |
 | 4. Join tools | request and result become one step |
 | 5. Join child agents | which call started which child stream |
 | 6. Cut context epochs | only from an explicit reset record |
 | 7. Build Talks and Runs | the conversation a person reads |
 | 8. Propose segments | activity windows, and whether each could be committed |
 
-Seven rules in here are the opposite of the obvious choice, and each is the opposite because a
+Eight rules in here are the opposite of the obvious choice, and each is the opposite because a
 measurement said so.
 
 **A record type is not what a record is.** Every tool result in the corpus sits on a record whose
@@ -72,6 +72,11 @@ again.
 **Group a provider call by message id, in line order.** Never by walking the parent pointer forward,
 which drops a tool use on nearly one call in five; and never by request id, because a record the
 client fabricated can carry a real call's request id.
+
+**Output that names no call is grouped into none.** Kiro's V3 engine lists the request ids of a
+turn and ties no record to one of them, so no record names its call. Grouping such output by turn
+or by record would draw call boundaries the runtime never recorded. So no `llm.call` is written,
+and the text, reasoning and tool uses are steps of the run that holds them.
 
 **Take usage from the last fragment in line order.** Not from the fragment with a stop reason — a
 parent lineage stamps the same stop reason on every fragment — and never by adding fragments up,
@@ -183,6 +188,7 @@ session
              ├ llm.call
              │  ├ message.assistant · thinking
              │  └ tool · agent.call
+             ├ message.assistant · thinking · tool · agent.call, where no call is named
              ├ message.external · context.injection
              ├ agent.launch_ack
              └ runtime.notification

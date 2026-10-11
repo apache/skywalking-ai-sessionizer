@@ -260,9 +260,9 @@ Every step is exactly one of these, plus an optional `after`, `checkpoint` and `
 | `input` | a person's message; `trigger: external`; opens a run and a talk |
 | `queued: {text, mode}` | input that exists only as a queued attachment; `mode` is `prompt` or `task-notification` |
 | `inject: {type, text}` | material the harness put into context, of any type. `inject: {type: prompt_snapshot, system_prompt, tools, text}` is the snapshot Claude Code and a runtime built on the Agent SDK write, landed with `system_prompt` and, with tools, `tool_schemas`. `text` is prose beside them, which no version measured writes. `inject: {type: deferred_tools_record, tools}` is the record of the tools offered on demand, landed with `tool_schemas` |
-| `call` | fragments in this order: `thinking`, `text`, then one of `tool`, `agent`, `skill`, `workflow`; `usage` on every fragment; the last carries the stop reason |
+| `call` | fragments in this order: `thinking`, `text`, then one of `tool`, `agent`, `skill`, `workflow`; `usage` on every fragment; the last carries the stop reason. `unidentified: true` writes the fragments with no call id and no usage, as a runtime does that records what the model said but not which call said it |
 | `result: {of, text, after, failed, string}` | a tool result arriving on its own, for a tool whose call gave none |
-| `error` | a synthetic message |
+| `error` | a synthetic message. `error: {text, unidentified: true}` writes it with no call id, as `call`'s `unidentified` does. A scenario with `provider_bodies` has neither form of `unidentified`: bodies are written per call |
 | `reset: {summary}` | a context reset and its summary, the summary timestamped before the boundary as the runtime writes it |
 | `replay: N` | the last N main-stream records re-emitted with their run rewritten |
 | `system: {subtype, fields}` | a system record of any subtype |
@@ -355,7 +355,7 @@ checkpoints:
     relations: {starts: 1, reports: 1}
     unresolved: {open: 0, resolved: 0}
     unresolved_kinds: {tool_result: none}
-    session: {from: +0s, to: +11.1s}      # the session node's range, as deltas from --at
+    session: {from: +0s, to: +11.1s}      # the session node's range, as deltas from --at; title: its title
     view: {state: verified, problems: 0, talks: 3, files: 6, first_talk: {label: run the build, runs: 2}}
     # with provider_bodies: the landed bodies, and the calls whose request is captured
     # view: {provider_bodies: 14, captured_prompts: 7, provider_files: 5}

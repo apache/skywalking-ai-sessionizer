@@ -1,0 +1,26 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+
+# The run holds every step the agent produced, and there is no call node. The
+# talk's reply is read from its run, so it is there only if the messages are.
+checkpoints:
+  final:
+    kinds: {message.assistant: 2, message.synthetic: 1, thinking: 1, tool: 1, llm.call: 0, run: 1}
+    view: {first_talk: {label: find the failing test, reply: test_mean fails., runs: 1}}
+    nodes:
+      tool/t1: {kind: tool, refs: 2, attrs: {result: available, result_join: exact_unique}}

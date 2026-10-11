@@ -27,6 +27,7 @@ A list of the sources asz collects from.
 | `claude-code-local` | yes | Claude Code's transcripts on this machine |
 | `changes` | yes | what a tool call changed on disk, from the [Claude Code](claude-code-plugin.md) or [LangChain](langchain-plugin.md) plugin, and each call to an MCP server the Claude Code plugin saw; see [below](#the-changes-adapter) |
 | `claude-code-provider` | yes | the request and response bodies Claude Code writes when asked; see [below](#the-provider-adapter) |
+| `kiro-local` | yes | the sessions Kiro's V3 agent engine writes on this machine, for kiro-cli and Kiro Crew; see [below](#the-kiro-adapter) and [Kiro](kiro.md) |
 | `langsmith-ingest` | no | what the LangSmith tracing client sends, from a LangChain or LangGraph application; see [LangChain and LangGraph](langchain.md) |
 
 ### More than one agent
@@ -40,6 +41,8 @@ A list of the sources asz collects from.
   deployments never share one unless they share both.
 - **Several machines.** One asz on each, with its own storage root, exporting to one SkyWalking
   OAP. `instance_id` says who is pushing, `user@host` by default, so instances stay apart there.
+- **kiro-cli and Kiro Crew on one machine.** Supported by one `kiro-local` entry. Both write
+  under `~/.kiro`, and each session is collected on its own.
 - **Several recorder directories on one machine.** One `changes` entry per directory, as
   [below](#the-changes-adapter).
 - **Several Claude Code directories on one machine** - two users, or instances started with
@@ -188,3 +191,15 @@ Two entries that read one directory are refused.
 `claude-code-provider` collects the request and response bodies Claude Code sends to its model
 provider. Claude Code writes them only when you turn it on, as
 [Claude Code Provider Bodies](claude-code-provider-bodies.md) shows.
+
+## The Kiro adapter
+
+`kiro-local` collects the sessions Kiro's V3 agent engine writes, as [Kiro](kiro.md) shows how to
+turn on. With no `source_root` it reads `~/.kiro`, the directory that holds Kiro's `sessions`
+directory, and does nothing where Kiro is not installed. Kiro does not read `KIRO_HOME` for these
+sessions, so neither does asz.
+
+Its session filters match the workspace paths in each session's `session.json`, not a directory
+name. A filter ending in `/**` matches that path and everything beneath it; any other filter is a
+glob over the whole path. A session is left out only when every one of its paths is. Kiro records
+the real path, so on macOS a session started in `/tmp` is under `/private/tmp`.

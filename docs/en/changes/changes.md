@@ -2,6 +2,31 @@
 
 > In development, not yet released. `tools/release/release.sh prepare 0.6.0` removes this note.
 
+## Kiro
+
+- A new adapter, `kiro-local`, collects the sessions Kiro's V3 agent engine writes under `~/.kiro`:
+  kiro-cli started with `--v3` or with `chat.agentEngine` set to `v3`, and Kiro Crew on its `kas`
+  backend. It is on by default and needs nothing from Kiro. Measured with kiro-cli 2.28.0 and its
+  engine `@kiro/agent` 0.66.26, and Kiro Crew 0.7.2, over 86 sessions and 3,101 records, and with
+  Kiro Crew 0.8.0, which bundles kiro-cli 2.27.1 and engine 0.66.22, over 13 sessions and 2,069
+  records.
+  A session is read when its header names schema `1.0.0`; kiro-cli's V2 sessions and V3 sessions of
+  another schema are counted, in `asz sources` and once in `asz collect`, and not collected. See
+  [Kiro](../setup/kiro.md) and the [Kiro adapter](../adapters/kiro.md).
+- A prompt carries no turn id in Kiro, nor does a message sent while a turn runs. Each belongs to the
+  first turn named after it in the file, and waits to land until that turn is named, since a landed
+  record is never written again. A prompt whose turn never starts lands with no turn once its file
+  has been still for five minutes.
+- A Kiro record's id is the engine's id followed by the record's digest. The engine gives one id to
+  an approval it asks twice, 46 ids in the measured records, and assembly would have removed the
+  second as a copy.
+- Kiro's subagents are joined by the child's id, which the parent's start and end records and the
+  child's own file share. A compaction is a context reset with its summary. A turn's `elapsedTime`
+  is its measured duration. Kiro Crew's system prompt arrives as the first prompt of a session and
+  is not named `system_prompt`, because nothing in the record tells it from a person's prompt.
+- Kiro records no token counts, so no token metric is derived for it. Pushed, its sessions are the
+  service `Kiro`.
+
 ## LangChain and LangGraph
 
 - Two records that could carry a system prompt unnamed are named. An unfinished model call whose
@@ -157,6 +182,16 @@
   title of what it copies, so the whole body and the settings copy while their section is closed.
   The renderer is Horizon's, now pinned at `e55f329` (apache/skywalking-horizon-ui#190).
 
+## Collection
+
+- A file that fails to land leaves nothing behind. Its records entered the index while it was being
+  written, and it kept the number it took, so a failed rename left index entries for records that
+  never landed, and a gap in the landed numbers that every later round reported as a missing file.
+  Claude Code's transcripts and workspace changes and Kiro's sessions did both. Provider bodies
+  stopped the session's pass at the failed file, before anything was saved, and they land in the same
+  order now. Records enter the index only once their file has landed, and a file that did not land
+  gives its number back.
+
 ## Configuration
 
 - The `view` section is read strictly. A key it does not have is refused, where every other section
@@ -198,11 +233,26 @@
   LangChain conversation, for context windows from 8K to 1M tokens, trimmed, summarised or neither.
   `make test` and CI only compile it. Its comment gives the command that runs it, the reference
   numbers, and the machine they come from.
+- A scenario's `error` step can name no call, `error: {text, unidentified: true}`, and an
+  expectation can check the session's title, `session: {title}`. `all-kinds` checks that a child's
+  meta file does not rename the conversation.
 - golangci-lint is v2.14.0. Go 1.27.2 writes export data version 5, which v2.13.2 cannot read, so
   under it lint stopped at the first package with a type-check error. CI takes the newest Go 1.27
   release, so CI failed as soon as 1.27.2 came out.
 
 ## Conversation model
+
+- Model output whose record names no provider call is a step of its run. It was in no node at all,
+  because only a call held text and reasoning. No Claude Code or LangChain record lacks the call;
+  every Kiro record does, since Kiro ties no record to a request. Grouping such output into calls
+  by turn or by record would draw boundaries the runtime never recorded, so no `llm.call` is
+  written for it. The scenario `output-without-call` holds it.
+- A sidecar of the `main` stream names the conversation: its label is the session's title, as a
+  title record's is. A sidecar used to name only the stream it described. Kiro keeps a session's
+  title in its header, which lands as the main stream's `agent_meta`.
+- `control.notice` is in `model.Vocabulary`, the list every glossary is checked against. It was the
+  one kind the model emits that the list left out, so a glossary could miss it with no test failing,
+  and the Kiro and LangSmith glossaries did.
 
 - A stream whose first record is a reset now has one epoch, opened by that reset. It used to get an
   empty epoch before the reset, with the reset's own id, so one epoch replaced the other and

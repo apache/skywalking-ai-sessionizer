@@ -161,3 +161,22 @@ func TestWorkflowRunNameCollision(t *testing.T) {
 		}
 	}
 }
+
+// Provider bodies are written per call, so a scenario that writes them cannot
+// also write output that names no call, in its own stream or a child's.
+func TestProviderBodiesNeedEveryCallNamed(t *testing.T) {
+	for _, step := range []string{
+		"{call: {unidentified: true, text: done}}",
+		"{error: {text: refused, unidentified: true}}",
+		"{call: {agent: {name: helper, steps: [{call: {unidentified: true, text: done}}]}}}",
+	} {
+		path := filepath.Join(t.TempDir(), "bodies.yaml")
+		body := "provider_bodies: true\nsteps:\n  - input: check\n  - " + step + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "provider_bodies") {
+			t.Fatalf("%s: %v", step, err)
+		}
+	}
+}

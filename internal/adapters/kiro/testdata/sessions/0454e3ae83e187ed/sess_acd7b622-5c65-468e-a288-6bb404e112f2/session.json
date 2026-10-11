@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0.0",
+  "dataModelVersion": 1,
+  "id": "sess_acd7b622-5c65-468e-a288-6bb404e112f2",
+  "title": "Parallel Code Review for Calc Module",
+  "agentMode": "kit-subagent",
+  "workspacePaths": [
+    "/work/20261008T143326Z-K09-v3"
+  ],
+  "rootPaths": [
+    "/work/20261008T143326Z-K09-v3"
+  ],
+  "createdAt": "2026-10-08T14:33:29.243Z",
+  "lastModifiedAt": "2026-10-08T14:34:10.552Z",
+  "modelId": "auto",
+  "autopilot": true,
+  "contextSnapshotModelDisplay": {
+    "modelId": "auto",
+    "display": "Auto (model selected dynamically on the server)"
+  },
+  "semanticReviewEnabled": true,
+  "disableAutoCompaction": false,
+  "ftaEnabled": false,
+  "workflowsEnabled": false,
+  "specPlanEnabled": false,
+  "specWorkflow": "quick",
+  "specSkipClarificationEnabled": true,
+  "memoryConfig": {
+    "mode": "read_write",
+    "reflection": true
+  },
+  "memoryConfigSource": "legacy",
+  "status": "idle",
+  "_meta": {
+    "kiro": {
+      "settings": {
+        "workflows": {
+          "enabled": false
+        },
+        "goal": {
+          "enabled": false
+        }
+      }
+    }
+  }
+}
