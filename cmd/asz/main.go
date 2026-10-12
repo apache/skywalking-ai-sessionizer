@@ -774,7 +774,7 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 		return err
 	}
 	zone := storage.NewZone(zoneRoot)
-	ref, err := newRefresher(nil, zone, ads, cfg.Metrics, cfg.Parse.MaxRoundBytes, once)
+	ref, err := newRefresher(nil, zone, ads, pipelineMetrics(cfg), cfg.Parse.MaxRoundBytes, once)
 	if err != nil {
 		return err
 	}
@@ -806,6 +806,20 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	ref.loop()
 	return nil
+}
+
+// pipelineMetrics is the metrics a pipeline derives: the configured ones when
+// they will be sent, and none otherwise. With no endpoint, or with
+// export.otlp.metrics off, every request a pass derived stayed in the spool,
+// which only grew. A root that never derived starts, once an endpoint is set,
+// with a first derivation bounded by the look-back; asz push derives too.
+func pipelineMetrics(cfg *config.Config) config.Metrics {
+	m := cfg.Metrics
+	if !cfg.MetricsSent() {
+		off := false
+		m.Enabled = &off
+	}
+	return m
 }
 
 // newDeriver is the metrics derivation over a root. A single pass is the

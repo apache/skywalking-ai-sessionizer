@@ -635,3 +635,25 @@ func TestPushSendsOnlyWhatIsSwitchedOn(t *testing.T) {
 		t.Fatalf("the spool was not left for a pass with metrics on: files=%d metrics=%d err=%v", st.Files, st.Metrics, err)
 	}
 }
+
+// BeforeSend runs under the export lock: a pipeline that removes a sent
+// session holds the same lock, so it never meets a request a push derived
+// there and has not sent yet.
+func TestBeforeSendRunsUnderTheExportLock(t *testing.T) {
+	z, _ := zoneWithOneSession(t)
+	rcv := startReceiver(t)
+	held := false
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Version: "test", ServiceName: "Claude Code",
+		Layer: "AI_AGENT", InstanceID: "sender-1", BeforeSend: func() error {
+			l, err := storage.LockExport(z.Root())
+			held = errors.Is(err, storage.ErrExportBusy)
+			_ = l.Unlock()
+			return nil
+		}}
+	if _, err := p.Pass(); err != nil {
+		t.Fatal(err)
+	}
+	if !held {
+		t.Fatal("BeforeSend ran while another could take the export lock")
+	}
+}

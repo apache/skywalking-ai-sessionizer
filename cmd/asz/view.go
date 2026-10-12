@@ -153,7 +153,7 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 		return err
 	}
 
-	ref, err := newRefresher(srv, zone, ads, cfg.Metrics, cfg.Parse.MaxRoundBytes, once)
+	ref, err := newRefresher(srv, zone, ads, pipelineMetrics(cfg), cfg.Parse.MaxRoundBytes, once)
 	if err != nil {
 		return err
 	}
@@ -240,9 +240,12 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 	default:
 		fmt.Printf("source   : %s (once)\n", ref.base.Source)
 	}
-	if ref.deriver != nil {
+	switch {
+	case ref.deriver != nil:
 		fmt.Printf("metrics  : %s, %s and %s, derived from the landed files, look-back %s on the first pass\n",
 			metrics.TokenUsage, metrics.MCPCalls, metrics.MCPDuration, lookbackWord(ref.deriver.Lookback))
+	case cfg.Metrics.On():
+		fmt.Println("metrics  : not derived, since nothing would send them; set export.otlp.endpoint, with export.otlp.metrics on")
 	}
 	if ref.pusher == nil {
 		fmt.Println("export   : none; set export.otlp.endpoint to send what is landed")

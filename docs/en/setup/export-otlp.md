@@ -29,8 +29,9 @@ asz derives these metrics from what it collects, and sends them with the files:
 - `agent.mcp.calls` and `agent.mcp.duration`: each call to an MCP server and the time it took.
   They need the [Claude Code plugin](claude-code-plugin.md).
 
-They are on by default. The first run reaches back three days. To change that, or to turn the
-metrics off:
+They are on by default, and derived only when they will be sent: with an endpoint set and
+`export.otlp.metrics` on. `asz push` derives them too, before it sends. The first derivation over a
+root reaches back three days. To change that, or to turn the metrics off:
 
 ```yaml
 metrics:

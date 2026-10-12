@@ -120,8 +120,10 @@ fails the build. See [Scenarios](../guides/scenario.md).
 
 ## Metrics
 
-asz derives these metrics from the landed files when `metrics.enabled` is on, and `asz push` sends
-them when `export.otlp.metrics` is on. Both are on by default. The metrics are asz's own family,
+asz derives these metrics from the landed files when `metrics.enabled` is on and they will be sent,
+which is when `export.otlp.endpoint` is set and `export.otlp.metrics` is on, and `asz push` sends
+them. `metrics.enabled` and `export.otlp.metrics` are on by default. A root that sends nothing
+derives nothing, since each request waits in the spool until it is sent. The metrics are asz's own family,
 named for any agent rather than for one runtime:
 
 | Metric | Unit | One point | Attributes |

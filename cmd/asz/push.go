@@ -42,6 +42,10 @@ import (
 // which pushes what it has landed at the end of every period; this command
 // is for sending a root that is already there, such as one copied from
 // another machine or brought under a new budget by asz repack.
+//
+// Metrics are derived only when they will be sent, so a root collected with
+// no endpoint holds none. When this command sends metrics, it first derives
+// what the root has not derived yet, as a pass of asz collect does.
 func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 	o := cfg.Export.OTLP
 	if o.Endpoint == "" {
@@ -80,6 +84,27 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 	fmt.Printf("storage root: %s\nendpoint    : %s\nservice     : %s\ninstance    : %s\nlayer       : %s\nrate        : %s\nsending     : %s\n",
 		zoneRoot, endpoint, service, p.InstanceID, o.Layer, rate, strings.Join(sending, "; "))
+	// The derivation runs inside the pass, under the export lock, and a file
+	// it could not derive fails the command: its metrics were not sent.
+	var derived []error
+	if cfg.MetricsSent() {
+		d, err := newDeriver(storage.NewZone(zoneRoot), cfg.Metrics, true)
+		if err != nil {
+			return err
+		}
+		p.BeforeSend = func() error {
+			ms, err := d.Pass(nil)
+			if err != nil {
+				return fmt.Errorf("push: derive the metrics: %w", err)
+			}
+			fmt.Printf("derived     : %d file(s), %d request(s), %d point(s)\n", ms.Files, ms.Requests, ms.Points)
+			for _, e := range ms.Errors {
+				fmt.Fprintf(os.Stderr, "  error: %v\n", e)
+			}
+			derived = ms.Errors
+			return nil
+		}
+	}
 	pass := func() (*otlp.Stats, error) {
 		start := time.Now()
 		st, err := p.Pass()
@@ -99,6 +124,9 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 			// Rounds another process was still writing. This command makes
 			// one pass, so nothing comes back for them on its own.
 			return st, fmt.Errorf("pass incomplete: %d round(s) were still being written and were not sent; run it again", st.Deferred)
+		}
+		if len(derived) > 0 {
+			return st, fmt.Errorf("pass incomplete: the metrics of %d landed file(s) could not be derived and were not sent; run it again", len(derived))
 		}
 		return st, nil
 	}

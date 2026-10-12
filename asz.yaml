@@ -236,7 +236,8 @@ parse:
 # The metrics asz derives from the landed files, for every adapter at once:
 # agent.token.usage from the model calls of a Claude Code conversation, and
 # agent.mcp.calls and agent.mcp.duration from the MCP calls the Claude Code
-# plugin saw. They wait in the root's spool, and asz push sends them when
+# plugin saw. They wait in the root's spool until they are sent, so they are
+# derived only when they will be: export.otlp.endpoint is set and
 # export.otlp.metrics is on.
 metrics:
   enabled: true

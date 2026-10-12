@@ -99,7 +99,7 @@ The metrics asz derives from the collected data, whichever adapter collected it.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `true` | Derive the metrics. |
+| `enabled` | `true` | Derive the metrics. They are derived only when they will be sent: `export.otlp.endpoint` is set and `export.otlp.metrics` is on. |
 | `lookback` | `72h` | How far back the first derivation reaches, such as `72h` or `3d`. `0` or `none` derives everything. Later ones derive everything new. |
 
 ## export

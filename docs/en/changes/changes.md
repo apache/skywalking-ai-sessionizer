@@ -209,6 +209,13 @@
   step that stands on a whole record says `too_large` when a part of it was taken out. `asz verify`
   counts both apart from damage, and still holds a body's record to its manifest. See
   [Too large to land](../formats/session-data.md#too-large-to-land).
+- A failed directory sync is reported. After the rename that publishes a landed file, a round or a
+  state file, the directory is synced, an attempt to make the name survive a power loss as well, and
+  a failure there was ignored without a word. It is now reported once for the directory, since a power loss may lose the
+  newest names there; the write still succeeds, since the file is in place, which is what a process
+  crash needs, and another process may have read it. A filesystem that cannot sync a directory at
+  all, as some network, FUSE and container mounts cannot, reports nothing; on macOS a plain fsync is
+  tried before a directory is called so, and on Windows none is synced.
 - A source line larger than the budget lands in a file of its own. The Claude Code, Kiro and
   workspace change collectors read on to the end of the source to find where the long line ended,
   and landed every line up to the last one in the same file: one 4.6 MB line made an 8 MB file. The
@@ -226,6 +233,15 @@
 
 ## Metrics
 
+- Metrics are derived only when they will be sent: `export.otlp.endpoint` is set and
+  `export.otlp.metrics` is on. A root with no endpoint derived every metric on every pass and kept
+  each request in its spool until it was sent, which was never, so the spool only grew. Such a root
+  now derives nothing, and the pipeline's first lines say so. `asz push` derives what the root has
+  not derived yet before it sends, under the export lock, so a root collected with no endpoint and
+  pushed later still carries its metrics; a file it cannot derive fails the command. One derivation
+  runs at a time over a root: two at once, of different files of one series, could each decide a
+  window from the state as it was and send windows that overlap. A root that never derived starts with a first derivation, bounded by
+  `metrics.lookback`; one that derived before goes on from what it derived.
 - Metrics are one section of the configuration, for the whole root. `metrics.enabled`, on by
   default, derives every metric from every landed file, whichever adapter landed it.
   `metrics.lookback`, 72 hours by default, bounds the first derivation over a root that already
@@ -262,6 +278,14 @@
 - golangci-lint is v2.14.0. Go 1.27.2 writes export data version 5, which v2.13.2 cannot read, so
   under it lint stopped at the first package with a type-check error. CI takes the newest Go 1.27
   release, so CI failed as soon as 1.27.2 came out.
+- Two tests in `tests/chain` cover an upgrade cut into several rounds: one loses
+  `conversation.state` after the first round and the next parse finishes from the rounds on disk;
+  in the other, a round written by hand removes a node and a relation, adds others and an open
+  unresolved entry, and changes a node, and the next parse, one frame a round, adds, removes,
+  revises and resolves until the conversation is what the evidence builds.
+- The verify package's record digest field, never filled, is removed. A record's `sha` is the
+  digest of its source bytes, which the storage root does not hold, so only each file's closing
+  digest and each provider body's digest can be checked, and both are.
 - A scenario's tool result and queued message can be padded, `result: {text, pad}` and
   `queued: {text, pad}`, to carry more than a landed file's budget without spelling it out. An
   expectation counts the document's steps by content state, `view: {states}`, and its change records
