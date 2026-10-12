@@ -107,6 +107,11 @@ type Pusher struct {
 	// default, does not wait, which is what a watching pass wants: it comes
 	// round again anyway.
 	WaitForExport time.Duration
+	// BeforeSend runs inside a pass, under the export lock, before what is
+	// sent is listed. asz push derives the metrics there, so a pipeline that
+	// removes a sent session, which holds the same lock, never removes a
+	// request this pass has derived and not sent yet.
+	BeforeSend func() error
 
 	// MaxBytesPerMinute caps what goes on the wire: a pass waits before a
 	// request until a minute's budget, refilled continuously, holds the
@@ -275,6 +280,11 @@ func (p *Pusher) Pass() (*Stats, error) {
 		return nil, err
 	}
 	defer func() { _ = lock.Unlock() }()
+	if p.BeforeSend != nil {
+		if err := p.BeforeSend(); err != nil {
+			return nil, err
+		}
+	}
 	st := &Stats{}
 	state, err := loadState(p.statePath())
 	if err != nil {

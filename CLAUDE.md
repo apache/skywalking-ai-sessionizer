@@ -162,7 +162,11 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 
 ## Invariants worth knowing before changing collector code
 
-- **Landed files are write-once.** temp → fsync → rename → `chmod 0444`. Never appended.
+- **Landed files are write-once.** temp → fsync → `chmod 0444` → rename → sync the directory.
+  Never appended. A failed directory sync does not fail the write (a process crash keeps the rename,
+  and a reader may have taken the file) and is reported once per directory; failing it made a disk
+  that kept failing land the same records on every pass. Retention, when it removes, must make a
+  replacement durable, its directory synced and the error checked, before it deletes what it replaces.
 - **asz never removes a real session.** Only a session a scenario build marked is removed, by the
   policy in its marker, and only once all of it was sent to the one receiver the pipeline sends to.
   The product configuration has no removal setting. A removal renames each directory away before it

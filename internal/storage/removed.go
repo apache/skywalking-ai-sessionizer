@@ -104,9 +104,10 @@ func RemoveDir(root, dir, name string, hook func(where string) error) error {
 		return err
 	}
 	// Either side of the rename is a whole directory, so a crash that loses
-	// the rename is safe. Syncing both directories only narrows that window.
-	syncDir(filepath.Dir(dir))
-	syncDir(filepath.Dir(target))
+	// the rename is safe. Syncing both directories only narrows that window,
+	// and a failure to sync leaves it as it was.
+	_ = syncDir(filepath.Dir(dir))
+	_ = syncDir(filepath.Dir(target))
 	if hook != nil {
 		if err := hook("renamed"); err != nil {
 			return err
@@ -259,15 +260,4 @@ func removeEntry(path string, regular bool) error {
 		return err
 	}
 	return nil
-}
-
-// syncDir flushes a directory's entries to disk, as far as the platform
-// allows. It is best effort by design.
-func syncDir(dir string) {
-	d, err := os.Open(dir)
-	if err != nil {
-		return
-	}
-	_ = d.Sync()
-	_ = d.Close()
 }

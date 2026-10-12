@@ -18,6 +18,7 @@
 package metrics_test
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -423,4 +424,26 @@ func seriesOf(m map[string][]got) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// One derivation at a time over one root: two at once, of different files of
+// one series, would each decide a window from the state as it was and
+// publish windows that overlap. A pass waits for the one that holds the root,
+// and says so when it does not end.
+func TestOneDerivationAtATime(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	land(t, z, "s1", "main", 1, []call{{id: "c1", model: "claude-opus-5", at: base.Add(10 * time.Second), frags: 1, in: 10, out: 100}})
+	held, err := storage.LockMetricsWait(z.Root(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deriver(z, base.Add(time.Hour), metrics.Options{LockWait: 100 * time.Millisecond}).Pass(nil); !errors.Is(err, storage.ErrMetricsBusy) {
+		t.Fatalf("a pass while another derives returned %v, want ErrMetricsBusy", err)
+	}
+	if err := held.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := deriver(z, base.Add(time.Hour), metrics.Options{}).Pass(nil); err != nil || st.Requests != 1 {
+		t.Fatalf("once released: %v, %+v", err, st)
+	}
 }

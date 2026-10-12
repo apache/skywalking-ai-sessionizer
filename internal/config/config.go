@@ -154,6 +154,14 @@ func (o OTLP) SendLogs() bool { return o.Logs == nil || *o.Logs }
 // SendMetrics says whether a push sends the metrics spool.
 func (o OTLP) SendMetrics() bool { return o.Metrics == nil || *o.Metrics }
 
+// MetricsSent says whether derived metrics have somewhere to go: an endpoint
+// is set and export.otlp.metrics is on. A pipeline derives only then. Every
+// request it derives waits in the spool until it is sent, so a root that
+// never sends would keep each one for ever.
+func (c *Config) MetricsSent() bool {
+	return c.Metrics.On() && c.Export.OTLP.Endpoint != "" && c.Export.OTLP.SendMetrics()
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 // LookbackDuration is the look-back as a duration: 72h when unset, zero for

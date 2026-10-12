@@ -275,10 +275,7 @@ func closeOut(o *out) (err error) {
 	if err = storage.RenameExclusive(name, o.final); err != nil {
 		return err
 	}
-	if d, derr := os.Open(filepath.Dir(o.final)); derr == nil {
-		_ = d.Sync()
-		d.Close()
-	}
+	storage.SyncAfterRename(filepath.Dir(o.final))
 	return nil
 }
 

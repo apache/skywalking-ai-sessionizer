@@ -88,8 +88,8 @@ func TestCleanStreamPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !rep.OK() {
-		t.Fatalf("clean stream reported problems: ord=%v byte=%v sha=%v",
-			rep.OrdGaps, rep.ByteGaps, rep.ShaBad)
+		t.Fatalf("clean stream reported problems: ord=%v byte=%v end=%v",
+			rep.OrdGaps, rep.ByteGaps, rep.End)
 	}
 	if rep.Records != 20 || rep.FirstOrd != 1 || rep.LastOrd != 20 {
 		t.Errorf("records=%d ord=%d..%d, want 20 records ord 1..20",

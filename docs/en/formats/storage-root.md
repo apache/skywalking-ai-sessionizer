@@ -45,7 +45,8 @@ session.
   _provider/                             when claude-code-provider runs
     seen.state                           which body files landed, in which session, and which wait
     .lock                                one provider collector per root
-  _metrics/                              the metrics spool, when metrics are on
+  _metrics/                              the metrics spool, when metrics are on and sent
+    .lock                                one derivation per root
     metrics.state                        what the derivation has counted
     metrics-<session-id>-<seq>-local.pb  the points derived from the session's landed file <seq>
   push.state                             what has been sent: each file's digest, the receivers,
@@ -84,6 +85,15 @@ record. It is written once to a temporary name, synced, made read-only, and only
 place. So a file under its final name is read-only from the moment it appears. It is never appended
 to and never rewritten. A source that keeps growing produces more files, each starting where the
 previous cursor stopped.
+
+After the rename, the directory is synced, an attempt to make the new name survive a power loss as
+well; a directory the write had to create is not synced into its own parent. A rename survives a
+process crash whether or not its directory was synced, and that is the safety asz promises. When the sync fails for a disk error, the write still succeeds, since the file is in place
+and another process may have read it, and the failure is reported once for the directory: a power
+loss may lose the newest names there. A filesystem that cannot sync a directory at all, as some
+network, FUSE and container mounts cannot, reports nothing, and there a rename's survival of a power
+loss is up to the filesystem, as it is on Windows, where a directory is not synced. State files and
+rounds are written the same way.
 
 A landed file is named `<kind>-<collected-at>-<seq>.sd`. `<collected-at>` is the UTC time the
 session's pass started, with nanoseconds and no separators, such as `20260831T091204.481523000Z`.
@@ -333,8 +343,9 @@ at a time. Without it, two parsers could both read round N and both write a roun
 is part of the file name, so the two files would not collide, and the chain would fork with no
 error. A second parser gets a lock error and writes nothing. Under the lock, a round that does not
 follow the head is refused. The next round is written to a temporary file, made read-only and
-synced before an atomic operation installs its final name without replacing an existing file.
-An interrupted write leaves no partial round for a reader to fold. Tests in `tests/chain` cover
+synced before an atomic operation installs its final name without replacing an existing file, and
+the directory is synced after it, as for a landed file. An interrupted write leaves no partial
+round for a reader to fold. Tests in `tests/chain` cover
 an interrupted writer and four parsers running at once.
 
 The atomic operation is `renameat2` with `RENAME_NOREPLACE` on Linux, `renamex_np` with

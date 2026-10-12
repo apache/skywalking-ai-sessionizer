@@ -87,7 +87,10 @@ type StreamReport struct {
 
 	OrdGaps  []Gap // a source line was skipped
 	ByteGaps []Gap // a source byte range is unaccounted for
-	ShaBad   []Gap // a payload does not match its recorded digest
+	// No record's sha is checked: it is the digest of the source bytes,
+	// which the root does not hold. The digests a root can check are each
+	// file's closing digest, by reading, and each provider body's, by
+	// rebuilding it in Provider.
 	// End is set when the landed records stop before where the stream's
 	// cursor says the collector read to.
 	End *EndGap
@@ -112,7 +115,7 @@ type StreamReport struct {
 
 // OK reports whether the stream is contiguous and intact.
 func (r *StreamReport) OK() bool {
-	return len(r.OrdGaps) == 0 && len(r.ByteGaps) == 0 && len(r.ShaBad) == 0 && r.End == nil
+	return len(r.OrdGaps) == 0 && len(r.ByteGaps) == 0 && r.End == nil
 }
 
 // Stream checks one stream or run directory for a given landed kind.

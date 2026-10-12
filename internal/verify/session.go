@@ -71,7 +71,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			rep.Records += sr.Records
 			rep.Relanded += sr.Relanded
 			rep.TooLarge += sr.TooLarge
-			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps) + len(sr.ShaBad)
+			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps)
 			if sr.End != nil {
 				rep.Problems++
 				rep.EndGaps++
@@ -129,9 +129,6 @@ func (r *SessionReport) Details() []string {
 		}
 		for _, g := range s.ByteGaps {
 			out = append(out, fmt.Sprintf("byte gap %s", g))
-		}
-		for _, g := range s.ShaBad {
-			out = append(out, fmt.Sprintf("digest   %s row %d", filepath.Base(g.File), g.Row))
 		}
 		if s.End != nil {
 			out = append(out, fmt.Sprintf("end gap  %s", *s.End))

@@ -150,6 +150,10 @@ type Options struct {
 	Grace   time.Duration
 	Version string
 	Now     func() time.Time
+	// LockWait is how long a pass waits for another derivation over the
+	// same root; zero means two minutes, longer than a pass derives for and
+	// short enough that a stuck one is reported.
+	LockWait time.Duration
 }
 
 // Stats reports what one pass did.
@@ -196,6 +200,15 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		grace = DefaultGrace
 	}
 	st := &Stats{}
+	wait := d.LockWait
+	if wait == 0 {
+		wait = 2 * time.Minute
+	}
+	lock, err := storage.LockMetricsWait(d.Zone.Root(), wait)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Unlock() }()
 	spool := storage.NewSpool(d.Zone)
 	state, first, err := loadState(filepath.Join(spool.Dir(), StateFile))
 	if err != nil {

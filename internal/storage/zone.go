@@ -32,6 +32,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -157,13 +158,7 @@ func WriteAtomic(path string, perm os.FileMode, fn func(io.Writer) error) (err e
 	if err = os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	// Sync the directory so the rename itself survives a crash.
-	d, err := os.Open(dir)
-	if err != nil {
-		return nil // rename succeeded; durability of the entry is best effort
-	}
-	defer d.Close()
-	_ = d.Sync()
+	SyncAfterRename(dir)
 	return nil
 }
 
@@ -206,9 +201,31 @@ func WriteExclusive(path string, perm os.FileMode, fn func(io.Writer) error) (er
 	if err = RenameExclusive(tmpName, path); err != nil {
 		return err
 	}
-	syncDir(dir)
+	SyncAfterRename(dir)
 	return nil
 }
+
+// SyncAfterRename syncs a directory after a rename into it, an attempt to make
+// the new name survive a power loss. A write does not fail when it cannot: the
+// file is in place, which is all a process crash needs, and another process
+// may already have read it. Failing the write made a collector land the same records
+// again on every pass of a disk that kept failing. A failure other than a
+// filesystem that cannot sync a directory at all is reported, once per
+// directory, because a power loss may then lose the newest names there.
+func SyncAfterRename(dir string) {
+	if err := syncDir(dir); err != nil {
+		if _, said := syncWarned.LoadOrStore(dir, true); !said {
+			syncWarning(dir, err)
+		}
+	}
+}
+
+var (
+	syncWarned  sync.Map
+	syncWarning = func(dir string, err error) {
+		fmt.Fprintf(os.Stderr, "warning  : could not sync the directory %s: %v; a power loss may lose its newest files\n", dir, err)
+	}
+)
 
 // PermLanded is the mode of a landed record file: read-only, because it is
 // write-once by contract.

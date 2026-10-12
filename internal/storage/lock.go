@@ -116,6 +116,29 @@ func LockExportWait(root string, timeout time.Duration) (*SessionLock, error) {
 	}
 }
 
+// ErrMetricsBusy means another derivation holds this root's metrics.
+var ErrMetricsBusy = errors.New("storage: the metrics are being derived by another pass")
+
+// LockMetricsWait takes the lock one metrics derivation holds over a root,
+// waiting up to timeout for it. Two derivations at once, of different files
+// of one series, would each decide a window from the state as it was before
+// either saved, and publish windows that overlap. asz push derives under the
+// export lock and then this one; a pipeline derives under this one alone, so
+// the two are always taken in that order.
+func LockMetricsWait(root string, timeout time.Duration) (*SessionLock, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		l, err := lockDir(filepath.Join(root, "_metrics"))
+		if errors.Is(err, ErrSessionBusy) {
+			err = ErrMetricsBusy
+		}
+		if !errors.Is(err, ErrMetricsBusy) || time.Now().After(deadline) {
+			return l, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // ScenarioDir is the directory a claude-code scenario build creates in its
 // storage root. A pipeline over a root that has it takes the scenario lock
 // there, because a pipeline over such a root removes sessions.
