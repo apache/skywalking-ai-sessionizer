@@ -61,9 +61,9 @@ producer of them.
            "from_time":1786033245531,"through_time":1786322168715}],
  "streams":[{"id":"stream/main","name":"main","role":"main","label":"","parent":"","records":10728,
              "steps":7310,"talk":"talk/main/95a1…","named_by":"","opened_by":[]}, …],
- "segments":[{"id":"segment/at_2_7","state":"candidate","committable":true,"talks":24,"from":1786033290556,"to":1786039329174}, …],
+ "segments":[{"id":"segment/at_2_7","talks":24,"from":1786033290556,"to":1786039329174}, …],
  "talks":[{"id":"talk/main/95a1…","kind":"talk","parent":"epoch/main/0","stream":"main","at":1786033290556,
-           "ref":{"seq":2,"row":7},"attrs":{"loops":1,"runs":1,"trigger":"external"},
+           "ref":{"seq":2,"row":7},
            "label":"for meter mal, …","reply":"## Short answer…","runs":1,"steps":132,"tools":51,
            "from":1786033290556,"to":1786033717089,"segment":"segment/at_2_7",
            "children":[…],"edges":[{"type":"in_segment","other":"segment/at_2_7","dir":"out","quality":"exact_unique","via":"activity window"}]}, …],
@@ -82,7 +82,7 @@ producer of them.
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
 | `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
-| `segments` | one per activity window: `id`, `state`, `committable`, `talks`, `from`, `to` |
+| `segments` | one per activity window: `id`, `talks`, `from`, `to`. A window says where the work happened, not whether it has finished; a reader with a clock compares `to` with the time |
 | `talks` | one tree per talk, in time order. See the node below |
 | `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold within twelve levels of its root, so the document covers the whole session |
 | `relations` | one per relation of the fold: `id`, `type`, `from`, `to`, `quality`, `via`, `evidence`; in the order they happened, each at the earliest record its evidence names |
@@ -114,7 +114,7 @@ say.
 ```json
 {"id":"tool/toolu_01KH…","kind":"tool","parent":"call/msg_011C…","stream":"main","at":1786033295667,
  "ref":{"seq":2,"row":13,"block":0},"refs":[{"seq":2,"row":13,"block":0},{"seq":2,"row":14,"block":0}],
- "attrs":{"name":"Bash","result":"available","result_join":"exact_unique","timing":"unavailable"},
+ "attrs":{"result":"available","result_join":"exact_unique","timing":"unavailable"},
  "text":"{\"command\":\"ls …\"}","state":"available","bytes":145,"flags":["finished"],
  "name":"Bash","result":"…","result_state":"available","result_bytes":2048,
  "request_to_result_ms":1312,"request_to_result_join":"exact_unique",

@@ -303,8 +303,16 @@ func TestABodyThatCannotBeCutLandsWholeAndSaysWhy(t *testing.T) {
 			// Whitespace between tokens is no problem: literals keep it.
 			continue
 		}
-		if m.Why == "" || rec.Parts[0].Kind != sessiondata.PartUnknown {
+		if rec.Parts[0].Kind != sessiondata.PartUnknown || rec.Parts[0].Text == "" {
 			t.Fatalf("%s: landed cut, want whole with a reason", name)
+		}
+		if len(m.Segments) != 1 || m.Segments[0].Part == nil || *m.Segments[0].Part != 0 {
+			t.Fatalf("%s: the manifest does not name the whole part: %+v", name, m.Segments)
+		}
+		// The reason is the whole part's text, and the manifest does not
+		// repeat it.
+		if last := rec.Parts[len(rec.Parts)-1]; bytes.Contains(last.Data, []byte(`"why"`)) {
+			t.Fatalf("%s: the manifest repeats the reason: %s", name, last.Data)
 		}
 	}
 }
@@ -497,5 +505,30 @@ func TestARebuildStopsAtItsClaim(t *testing.T) {
 	}
 	if n := RecordBytes(first); n <= 0 {
 		t.Fatalf("RecordBytes is %d", n)
+	}
+}
+
+// A request's run is its record's own. The manifest carries the keys a reader
+// joins a body by, and does not repeat the run.
+func TestARequestKeepsItsRunOnTheRecord(t *testing.T) {
+	s := NewSession()
+	rec, err := s.Encode(Body{ID: "00000000-0000-4000-8000-000000000001.request", Role: RoleRequest,
+		Src: "00000000-0000-4000-8000-000000000001.request.json", Bytes: []byte(`{"model":"m","messages":[]}`),
+		Keys: Keys{Run: "r1", Session: "s1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Run != "r1" {
+		t.Fatalf("the record's run is %q, want r1", rec.Run)
+	}
+	m, err := ManifestOf(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Session != "s1" {
+		t.Fatalf("the manifest's session is %q, want s1", m.Session)
+	}
+	if last := rec.Parts[len(rec.Parts)-1]; bytes.Contains(last.Data, []byte(`"run"`)) {
+		t.Fatalf("the manifest repeats the run: %s", last.Data)
 	}
 }

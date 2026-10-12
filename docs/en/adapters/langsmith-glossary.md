@@ -91,7 +91,7 @@ not there.
 | `reports` | — | derived here | derived |
 | `retries` | — | derived here | no equivalent yet: the client does not say a run retried another |
 | `runtime.notification` | — | derived here | no equivalent |
-| `segment` | — | derived here | an activity window chosen for commit |
+| `segment` | — | derived here | an activity window |
 | `size_only` | — | derived here | no equivalent |
 | `starts` | — | derived here | derived from a delegating tool and the runs beneath it |
 | `stream` | — | derived here | no equivalent: a nested agent is a run like any other |

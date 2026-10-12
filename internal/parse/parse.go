@@ -49,13 +49,14 @@ import (
 const Parser = "v1"
 
 // policyBase is the version of the choices that are settings rather than
-// interpretation: the segment gates, and how a commit window is proposed.
+// interpretation: how activity windows are cut.
 const policyBase = "v1"
 
-// DefaultIdleGap is the quiet period that makes a segment a close candidate.
+// DefaultIdleGap is the quiet period between two Talks that opens a new
+// activity window.
 //
 // It is part of the POLICY, not a free parameter, because changing it changes
-// which segments a round proposes. A chain is one interpretation of one body of
+// which windows a round cuts. A chain is one interpretation of one body of
 // evidence, so a round produced under a different gap must not fold together
 // with rounds produced under this one.
 const DefaultIdleGap = assemble.DefaultIdleGap
@@ -121,9 +122,10 @@ type Round struct {
 	FromSeq    uint64
 	ThroughSeq uint64
 
-	// More reports that the round was cut at the byte budget and evidence
-	// past ThroughSeq is indexed already. A caller that wants the chain to
-	// reach the index calls Session again until More is false.
+	// More reports that the round was cut at the byte budget: evidence past
+	// ThroughSeq is indexed already, or revisions that need no new evidence
+	// are left. A caller that wants the chain to reach the index calls Session
+	// again until More is false.
 	More bool
 
 	Nodes      int
@@ -263,33 +265,40 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	indexed := through
 	round := view.Round + 1
 	var (
+		res         *assemble.Result
 		d           *delta
 		data        []byte
 		digest      string
 		inputDigest string
+		// revising is set when the round carries only what changes with no new
+		// evidence, and frames is how many of the delta's frames it writes.
+		revising bool
+		frames   int
 	)
 	for {
-		res, err := assemble.Session(ix, assemble.Options{
-			Conversation: opt.Conversation,
-			Session:      opt.Session,
-			IdleGap:      opt.IdleGap,
-			ThroughSeq:   through,
-		})
-		if err != nil {
-			return nil, err
-		}
-		out.Stats = res.Stats
-		d = diff(view, res)
+		if !revising {
+			res, err = assemble.Session(ix, assemble.Options{
+				Conversation: opt.Conversation,
+				Session:      opt.Session,
+				IdleGap:      opt.IdleGap,
+				ThroughSeq:   through,
+			})
+			if err != nil {
+				return nil, err
+			}
+			out.Stats = res.Stats
+			d = diff(view, res)
 
-		// A round is written when EVIDENCE advanced, not only when the
-		// structure changed. Evidence that produced no new entity - a replayed
-		// block, a record type nothing reads - still has to move the chain's
-		// watermark, or the next round re-reads it forever and "no round" comes
-		// to mean two different things: nothing new arrived, and nothing new
-		// mattered.
-		if d.empty() && through <= view.ThroughSeq {
-			out.ThroughSeq = view.ThroughSeq
-			return out, nil
+			// A round is written when EVIDENCE advanced, not only when the
+			// structure changed. Evidence that produced no new entity - a
+			// replayed block, a record type nothing reads - still has to move
+			// the chain's watermark, or the next round re-reads it forever and
+			// "no round" comes to mean two different things: nothing new
+			// arrived, and nothing new mattered.
+			if d.empty() && through <= view.ThroughSeq {
+				out.ThroughSeq = view.ThroughSeq
+				return out, nil
+			}
 		}
 
 		// The input digest chains from the LAST ROUND's own header, not from
@@ -300,55 +309,58 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		if err != nil {
 			return nil, err
 		}
-		fromTime, throughTime := windowTimes(ix, view.ThroughSeq, through)
-		ch := changeStats(ix, through)
-		sessionFrom, sessionThrough, title := sessionRange(res, opt.Session)
-		w, err := sessionflow.NewWriter(sessionflow.Header{
-			Conversation: opt.Conversation, Session: opt.Session,
-			Round: round, Previous: view.Digest,
-			FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
-			InputDigest: inputDigest, Parser: Parser, Policy: policy,
-			FromTime: fromTime, ThroughTime: throughTime,
-			SessionFromTime: sessionFrom, SessionThroughTime: sessionThrough,
-			Title: title, Talks: countKind(res, model.KindTalk), Steps: countSteps(res), Streams: countKind(res, model.KindStream),
-			Segments: countKind(res, model.KindSegment), Unresolved: countOpen(res),
-			Changes: &ch.records, LinesAdded: &ch.added, LinesRemoved: &ch.removed,
-			LLMCalls: ptr(countKind(res, model.KindLLMCall)), Subagents: ptr(countChildStreams(res)),
-			BashRuns: ptr(countTool(res, "Bash")),
-		})
+		h := roundHeader(ix, res, opt, view, round, through, inputDigest, policy)
+		frames = d.frames()
+		data, digest, err = encodeRound(h, d, frames)
 		if err != nil {
 			return nil, err
 		}
-		for _, n := range d.nodes {
-			if err := w.Node(n); err != nil {
-				return nil, err
-			}
-		}
-		for _, r := range d.relations {
-			if err := w.Relation(r); err != nil {
-				return nil, err
-			}
-		}
-		for _, u := range d.unresolved {
-			if err := w.Unresolved(u); err != nil {
-				return nil, err
-			}
-		}
-		data, digest, err = w.Close()
-		if err != nil {
-			return nil, err
+		if int64(len(data)) <= budget {
+			break
 		}
 		// A round over the budget is built again over a narrower window,
 		// halved each time, until it fits or covers a single landed file.
 		// Nothing is lost: the evidence past the window is still indexed and
 		// the next round starts where this one stops.
-		if int64(len(data)) <= budget || through <= out.FromSeq {
-			break
+		if through > out.FromSeq {
+			through = out.FromSeq + (through-out.FromSeq)/2
+			continue
 		}
-		through = out.FromSeq + (through-out.FromSeq)/2
+		// One landed file and still over the budget. What differs already at
+		// the chain's own watermark needs no new evidence: an upgrade that
+		// revises what earlier rounds wrote, on every node of a long
+		// conversation. It goes first, in rounds of its own over no new file,
+		// so the round of the evidence carries only what the evidence changed.
+		if !revising && through == out.FromSeq && view.Round > 0 {
+			r0, err := assemble.Session(ix, assemble.Options{
+				Conversation: opt.Conversation,
+				Session:      opt.Session,
+				IdleGap:      opt.IdleGap,
+				ThroughSeq:   view.ThroughSeq,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if d0 := diff(view, r0); !d0.empty() {
+				revising, res, d, through = true, r0, d0, view.ThroughSeq
+				out.Stats = r0.Stats
+				continue
+			}
+		}
+		// A round over no new file carries revisions only, and is cut by its
+		// frames: as many as fit, at least one. The next round writes the
+		// rest. A round over one landed file is not cut: it may exceed the
+		// budget, as a landed file holding one oversize record may.
+		if through < out.FromSeq {
+			frames, data, digest, err = fitFrames(h, d, budget)
+			if err != nil {
+				return nil, err
+			}
+		}
+		break
 	}
 	out.ThroughSeq = through
-	out.More = through < indexed
+	out.More = through < indexed || frames < d.frames()
 	path, err := chain.Publish(round, digest, data)
 	if err != nil {
 		return nil, err
@@ -365,9 +377,74 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	}
 
 	out.Number, out.Digest, out.Path = round, digest, path
-	out.Nodes, out.Relations, out.Unresolved = len(d.nodes), len(d.relations), len(d.unresolved)
-	out.Tombstones = d.tombstones
+	out.Nodes, out.Relations, out.Unresolved, out.Tombstones = d.written(frames)
 	return out, nil
+}
+
+// roundHeader is the header of a round through the given watermark. Its counts
+// are the assembly's: when revisions are split across several rounds over no
+// new file, each of them names the conversation those rounds lead to.
+func roundHeader(ix *index.Index, res *assemble.Result, opt Options, view *sessionflow.View,
+	round, through uint64, inputDigest, policy string) sessionflow.Header {
+	fromTime, throughTime := windowTimes(ix, view.ThroughSeq, through)
+	ch := changeStats(ix, through)
+	sessionFrom, sessionThrough, title := sessionRange(res, opt.Session)
+	return sessionflow.Header{
+		Conversation: opt.Conversation, Session: opt.Session,
+		Round: round, Previous: view.Digest,
+		FromSeq: view.ThroughSeq + 1, ThroughSeq: through,
+		InputDigest: inputDigest, Parser: Parser, Policy: policy,
+		FromTime: fromTime, ThroughTime: throughTime,
+		SessionFromTime: sessionFrom, SessionThroughTime: sessionThrough,
+		Title: title, Talks: countKind(res, model.KindTalk), Steps: countSteps(res), Streams: countKind(res, model.KindStream),
+		Segments: countKind(res, model.KindSegment), Unresolved: countOpen(res),
+		Changes: &ch.records, LinesAdded: &ch.added, LinesRemoved: &ch.removed,
+		LLMCalls: ptr(countKind(res, model.KindLLMCall)), Subagents: ptr(countChildStreams(res)),
+		BashRuns: ptr(countTool(res, "Bash")),
+	}
+}
+
+// encodeRound writes a round of the header and the first n frames of the
+// delta: its nodes, then its relations, then its unresolved entries.
+func encodeRound(h sessionflow.Header, d *delta, n int) ([]byte, string, error) {
+	w, err := sessionflow.NewWriter(h)
+	if err != nil {
+		return nil, "", err
+	}
+	for i := 0; i < n; i++ {
+		switch {
+		case i < len(d.nodes):
+			err = w.Node(d.nodes[i])
+		case i < len(d.nodes)+len(d.relations):
+			err = w.Relation(d.relations[i-len(d.nodes)])
+		default:
+			err = w.Unresolved(d.unresolved[i-len(d.nodes)-len(d.relations)])
+		}
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	return w.Close()
+}
+
+// fitFrames finds how many of the delta's frames fit the budget, at least one,
+// and encodes them. A round grows with each frame, so the count is searched.
+func fitFrames(h sessionflow.Header, d *delta, budget int64) (int, []byte, string, error) {
+	lo, hi := 1, d.frames()
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		data, _, err := encodeRound(h, d, mid)
+		if err != nil {
+			return 0, nil, "", err
+		}
+		if int64(len(data)) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	data, digest, err := encodeRound(h, d, lo)
+	return lo, data, digest, err
 }
 
 // noLandedFiles reports whether a session has no landed file at all.
@@ -486,22 +563,7 @@ func countChildStreams(res *assemble.Result) int {
 // that started a child agent is classed as an agent call and keeps its name,
 // so it counts too; otherwise the count would fall when a child's transcript
 // lands.
-func countTool(res *assemble.Result, name string) int {
-	n := 0
-	for i := range res.Nodes {
-		nd := &res.Nodes[i]
-		if (nd.Kind != model.KindTool && nd.Kind != model.KindAgentCall) || len(nd.Attrs) == 0 {
-			continue
-		}
-		var a struct {
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(nd.Attrs, &a) == nil && a.Name == name {
-			n++
-		}
-	}
-	return n
-}
+func countTool(res *assemble.Result, name string) int { return res.ToolCalls[name] }
 
 func ptr(n int) *int { return &n }
 
@@ -592,11 +654,32 @@ type delta struct {
 	nodes      []sessionflow.Node
 	relations  []sessionflow.Relation
 	unresolved []sessionflow.Unresolved
-	tombstones int
 }
 
 func (d *delta) empty() bool {
 	return len(d.nodes) == 0 && len(d.relations) == 0 && len(d.unresolved) == 0
+}
+
+// frames is how many frames the delta holds.
+func (d *delta) frames() int { return len(d.nodes) + len(d.relations) + len(d.unresolved) }
+
+// written counts the nodes, relations, unresolved entries and tombstones among
+// the first n frames.
+func (d *delta) written(n int) (nodes, relations, unresolved, tombstones int) {
+	nodes = min(n, len(d.nodes))
+	relations = min(n-nodes, len(d.relations))
+	unresolved = n - nodes - relations
+	for _, x := range d.nodes[:nodes] {
+		if x.Tombstone {
+			tombstones++
+		}
+	}
+	for _, x := range d.relations[:relations] {
+		if x.Tombstone {
+			tombstones++
+		}
+	}
+	return nodes, relations, unresolved, tombstones
 }
 
 // diff compares a fresh assembly against what the chain already says.
@@ -618,11 +701,9 @@ func diff(view *sessionflow.View, res *assemble.Result) *delta {
 		}
 		d.nodes = append(d.nodes, n)
 	}
-	for id, prev := range view.Nodes {
+	for id := range view.Nodes {
 		if !seenNode[id] {
 			d.nodes = append(d.nodes, sessionflow.Node{Entity: sessionflow.Entity{ID: id, Tombstone: true}})
-			d.tombstones++
-			_ = prev
 		}
 	}
 
@@ -637,7 +718,6 @@ func diff(view *sessionflow.View, res *assemble.Result) *delta {
 	for id := range view.Relations {
 		if !seenRel[id] {
 			d.relations = append(d.relations, sessionflow.Relation{Entity: sessionflow.Entity{ID: id, Tombstone: true}})
-			d.tombstones++
 		}
 	}
 

@@ -90,7 +90,7 @@ data later.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `max_round_bytes` | `2097152` | The largest round file the parser writes, 2 MiB. |
+| `max_round_bytes` | `2097152` | The largest round file the parser writes, 2 MiB. A round over it covers fewer landed files, and revisions that need no new evidence are cut by their frames. A round covering one landed file may exceed it. |
 
 ## metrics
 

@@ -125,11 +125,13 @@ func writeSD(p *Plan, root string, now time.Time, maxDelta int64) ([]string, err
 // a missing one is built from nothing.
 func (w *sdWriter) reindex() error {
 	dir := w.z.IndexDir(w.p.Session)
-	ix, ok, err := index.Load(dir, w.p.Session)
+	st, err := storage.LoadIndexState(w.z.IndexStatePath(w.p.Session), w.p.Session)
 	if err != nil {
 		return err
 	}
-	st, err := storage.LoadIndexState(w.z.IndexStatePath(w.p.Session), w.p.Session)
+	// Only an index that agrees with its saved state is extended, as the
+	// adapters do; see index.LoadFor.
+	ix, ok, err := index.LoadFor(dir, w.p.Session, st)
 	if err != nil {
 		return err
 	}

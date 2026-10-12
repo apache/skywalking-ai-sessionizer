@@ -33,8 +33,9 @@ unchanged around it.
 
 ## Structure
 
-**Segment** — an activity window that can be committed on its own. It sits above Session and cuts
-**across** every stream beneath it, so it is a time window rather than a branch of the tree.
+**Segment** — an activity window. It sits above Session and cuts **across** every stream beneath
+it, so it is a time window rather than a branch of the tree. It says where the work happened, not
+whether the work has finished.
 *Not:* a turn, a Talk, or a new conversation.
 
 **Session** — the source-runtime context a record came from, carried as provenance. One conversation
@@ -97,7 +98,7 @@ typed relation carrying its own correlation quality. Cross-stream flow is never 
 | `result_of` | a record → the tool use whose result it carried; and a stream's final step → the call that started it, when that call received it as its result |
 | `follows` | an epoch → the epoch it continues after a reset |
 | `summarizes` | a summary → the reset that produced it |
-| `in_segment` | a Talk → the window that will commit it |
+| `in_segment` | a Talk → the activity window it falls in |
 | `retries` | an attempt → the attempt it replaced |
 | `cancels` | an interruption → the operation it ended |
 | `input_of` | a record → the provider call whose input it was part of |

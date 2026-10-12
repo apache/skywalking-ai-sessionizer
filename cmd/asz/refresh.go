@@ -146,6 +146,13 @@ type refresher struct {
 	// never moves again. So they are carried until one pass gets the lock.
 	retry map[string]bool
 
+	// unparsed holds sessions whose parse failed. They are parsed again on
+	// every pass until one succeeds, for the same reason as retry, and no
+	// removal takes them meanwhile: a chain whose watermark reaches the last
+	// landed file can still have revisions left to write, so the watermark
+	// alone does not say the chain is complete.
+	unparsed map[string]bool
+
 	// langsmith converts what the langsmith-ingest receiver accepted. It is
 	// not a collector of sources: there is nothing to poll, only an inbox to
 	// drain.
@@ -181,7 +188,7 @@ type refresher struct {
 // appears later has to be picked up without a restart; every pass looks
 // again.
 func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, mc config.Metrics, maxRound int64, once bool) (*refresher, error) {
-	r := &refresher{srv: srv, zone: zone, maxRound: maxRound, full: true, retry: map[string]bool{}}
+	r := &refresher{srv: srv, zone: zone, maxRound: maxRound, full: true, retry: map[string]bool{}, unparsed: map[string]bool{}}
 
 	// One pipeline serves every adapter, so it needs one mode and one
 	// period, and both have to be settled before anything is built: the
@@ -370,7 +377,14 @@ func (r *refresher) close() {
 // root does not say: where it sends, what it sends, and what it is holding
 // back to parse again.
 func (r *refresher) removeInput() remove.Input {
-	in := remove.Input{Busy: r.retry}
+	busy := map[string]bool{}
+	for id := range r.retry {
+		busy[id] = true
+	}
+	for id := range r.unparsed {
+		busy[id] = true
+	}
+	in := remove.Input{Busy: busy}
 	if r.pusher != nil {
 		in.Endpoint, in.SendLogs, in.SendMetrics = r.pusher.Endpoint, !r.pusher.NoLogs, !r.pusher.NoMetrics
 	}
@@ -583,8 +597,11 @@ func (r *refresher) pass() error {
 	}
 
 	// What this pass landed, plus whatever an earlier pass could not take
-	// the lock for.
+	// the lock for or failed to parse.
 	for id := range r.retry {
+		changed[id] = true
+	}
+	for id := range r.unparsed {
 		changed[id] = true
 	}
 	r.retry = map[string]bool{}
@@ -641,8 +658,10 @@ func (r *refresher) pass() error {
 				continue
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", id, perr))
+			r.unparsed[id] = true
 			continue
 		}
+		delete(r.unparsed, id)
 		if res.Changed() || written > 0 {
 			rounds += written
 			// The server caches a folded conversation. A new round has to
@@ -715,6 +734,7 @@ func (r *refresher) pass() error {
 				r.srv.Forget(id)
 			}
 			delete(r.retry, id)
+			delete(r.unparsed, id)
 			delete(r.deferred, id)
 		}
 		r.derive = map[string]bool{}

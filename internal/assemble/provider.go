@@ -201,9 +201,6 @@ func (b *builder) bodiesInWindow() []body {
 	for i := range b.ix.Bodies {
 		y := &b.ix.Bodies[i]
 		e := &b.ix.Entries[y.Entry]
-		if b.opt.ThroughSeq > 0 && uint64(e.Seq) > b.opt.ThroughSeq {
-			continue
-		}
 		if e.Record == 0 || seen[e.Record] {
 			continue
 		}
@@ -278,9 +275,6 @@ func (b *builder) streamHasGap(stream uint32) bool {
 	for i := range b.ix.Entries {
 		e := &b.ix.Entries[i]
 		if e.Stream != stream || !transcriptKind(e.Kind) {
-			continue
-		}
-		if b.opt.ThroughSeq > 0 && uint64(e.Seq) > b.opt.ThroughSeq {
 			continue
 		}
 		if e.Ord > prev+1 {

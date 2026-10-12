@@ -141,10 +141,8 @@ func (b *builder) emitCall(c *providerCall, parent string) {
 	for _, f := range c.Fragments {
 		refs = append(refs, ref(f))
 	}
-	a := map[string]any{
-		"fragments":  len(c.Fragments),
-		"usage_from": usageRule,
-	}
+	// The fragments are the references above; their count is not repeated.
+	a := map[string]any{"usage_from": usageRule}
 	if last := c.Last(); last != nil && c.Finished {
 		a["usage"] = model.ObservedReplayable
 		a["usage_at"] = map[string]any{"seq": last.Seq, "row": last.Row}

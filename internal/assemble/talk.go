@@ -272,37 +272,25 @@ func (b *builder) emitTalks() {
 		if t.Epoch != nil {
 			parent = t.Epoch.NodeID
 		}
-		trigger := model.TriggerExternal
-		if t.Stream.Role != model.StreamMain {
-			// A delegated prompt is input to the child, but it did not come from
-			// outside the agent - the parent wrote it. The same holds for a
-			// prompt the agent wrote for a plain call of its own.
-			trigger = model.TriggerUnknown
-		}
+		// A talk carries no attributes. Its runs are its children. What
+		// triggered it follows from where it is: a talk on the main stream
+		// starts with input from outside the agent, and a talk on any other
+		// stream with a prompt the agent wrote itself. Its first run is that
+		// trigger, and every later run is a notification.
 		b.node(sessionflow.Node{
 			Entity: sessionflow.Entity{ID: t.NodeID}, Kind: model.KindTalk,
 			Parent: parent, Stream: t.Stream.Name,
 			Ref: refPtr(t.At),
-			Attrs: attrs(map[string]any{
-				"loops":   len(t.Runs),
-				"runs":    len(t.Emitted),
-				"trigger": trigger,
-			}),
 		})
 		for _, cyc := range t.Emitted {
 			id, ok := b.runNode[runKey{t.Stream.ID, cyc}]
 			if !ok {
 				continue
 			}
-			trigger := model.TriggerNotification
-			if len(t.Runs) > 0 && cyc == t.Runs[0] {
-				trigger = model.TriggerExternal
-			}
 			b.node(sessionflow.Node{
 				Entity: sessionflow.Entity{ID: id}, Kind: model.KindRun,
 				Parent: t.NodeID, Stream: t.Stream.Name,
-				Ref:   refPtr(b.runAt[runKey{t.Stream.ID, cyc}]),
-				Attrs: attrs(map[string]any{"trigger": trigger}),
+				Ref: refPtr(b.runAt[runKey{t.Stream.ID, cyc}]),
 			})
 		}
 	}

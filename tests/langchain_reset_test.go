@@ -362,17 +362,16 @@ func TestABodyNamesThePromptItsCallWasPlacedUnder(t *testing.T) {
 	for _, kase := range []string{"subagent", "summarized"} {
 		zone, sessions := land(t, kase)
 		calls, bodies := map[string]string{}, map[string]string{}
+		// A response joins by its call and its request, and names no prompt.
+		// A request names it as its record's own run.
 		eachRecord(t, zone, sessions[0], func(_, _ uint64, rec sessiondata.Record) {
 			if rec.Call != "" && rec.Call == rec.ID {
 				calls[rec.Call] = rec.Run
 			}
-		})
-		// A response joins by its call and its request, and names no prompt.
-		for id, m := range manifestsOf(t, zone, sessions[0]) {
-			if strings.HasSuffix(id, ":request") {
-				bodies[id] = m.Run
+			if strings.HasSuffix(rec.ID, ":request") {
+				bodies[rec.ID] = rec.Run
 			}
-		}
+		})
 		checked := 0
 		for id, run := range bodies {
 			call := id[:strings.LastIndex(id, ":")]

@@ -25,8 +25,8 @@ package model
 
 // Structural node kinds - the hierarchy above the leaves.
 //
-// Segment sits above Session and cuts ACROSS every stream beneath it: it is a
-// time window chosen for commit, not a branch of the stream tree.
+// Segment sits above Session and cuts ACROSS every stream beneath it: it is an
+// activity window, not a branch of the stream tree.
 const (
 	KindConversation = "conversation"
 	KindSegment      = "segment"
@@ -123,7 +123,7 @@ const (
 	RelFollows = "follows"
 	// RelSummarizes: a summary -> the reset that produced it.
 	RelSummarizes = "summarizes"
-	// RelInSegment places a Talk in the activity window that will commit it.
+	// RelInSegment places a Talk in the activity window it falls in.
 	//
 	// This is a relation and not containment on purpose. A Segment is a time
 	// window and a Session outlives many of them, so a Session cannot sit under

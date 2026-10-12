@@ -244,8 +244,7 @@ part that asz builds, the manifest, schema `provider_body/1`:
 | `depth` | how many copies lie between this body and one with none. It is at most 32; a body whose base is that deep copies nothing |
 | `bytes` limit | a body may claim at most 256 MiB, and a rebuild stops as soon as it passes the size its record claims, so a damaged record cannot make a reader hold more than one body |
 | `chain` | the first sixteen hexadecimal characters of the SHA-256 of the request's first message, with the cache marker taken out. It chooses which earlier body a copy comes from. It is storage, and a join must not rely on it |
-| `why` | set when the body is kept whole in one `unknown` part, and why it could not be cut |
-| `model`, `session`, `run`, `call`, `request`, `previous_request` | the values the body carries that join it, as its adapter read them, in the model's words: the session it names; on a request, the run it was sent in; on a response, the call it answers and the provider's id for its request; on a request, the call it was sent to when its adapter knew it, and otherwise the provider request id of the call before it in its chain. Empty when the body carries none. The [adapter's glossary](../adapters/claude-code.md#provider-bodies) says what the runtime calls each |
+| `model`, `session`, `call`, `request`, `previous_request` | the values the body carries that join it, as its adapter read them, in the model's words: the session it names; on a response, the call it answers and the provider's id for its request; on a request, the call it was sent to when its adapter knew it, and otherwise the provider request id of the call before it in its chain. Empty when the body carries none. The [adapter's glossary](../adapters/claude-code.md#provider-bodies) says what the runtime calls each |
 
 A reference is a digest or a record id, never a file and a row, because `asz repack` renumbers files
 and rows and carries record lines unchanged. Every reference points at a record that landed before
@@ -268,7 +267,7 @@ several storage stages has to read the earlier files from whichever stage holds 
 
 The adapter checks each record before it lands: it writes the record with the Session Data writer,
 reads it back and rebuilds the body. A body that does not come back whole, or is not one JSON object
-in valid UTF-8, lands whole in one `unknown` part with a `why`. `asz verify` rebuilds every landed
+in valid UTF-8, lands whole in one `unknown` part, whose text says why it was not cut. `asz verify` rebuilds every landed
 body and compares it with `sha256`, and reports a reference to something the session does not hold.
 
 On two captures of Claude Code 2.1.260, the landed `provider_body` files were 25.5% and 21.6% of the

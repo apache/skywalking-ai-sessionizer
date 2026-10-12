@@ -453,11 +453,11 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 	if err := state.RecoverNextSeq(sessionDir); err != nil {
 		return err
 	}
+	// Only an index that agrees with its saved state is extended; one that
+	// does not is built again. See index.LoadFor for the crash it guards.
 	var ix *index.Index
-	if ixState.Schema == index.Schema {
-		if loaded, ok, lerr := index.Load(c.Zone.IndexDir(session), session); lerr == nil && ok {
-			ix = loaded
-		}
+	if loaded, ok, lerr := index.LoadFor(c.Zone.IndexDir(session), session, ixState); lerr == nil && ok {
+		ix = loaded
 	}
 	if ix == nil {
 		ix = index.New(session)

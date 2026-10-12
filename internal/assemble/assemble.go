@@ -50,9 +50,8 @@ type Options struct {
 	Conversation string
 	Session      string
 
-	// IdleGap is how long a session must be quiet before a segment becomes a
-	// candidate for commit. A candidate is not a commit: about a third of long
-	// gaps fall in the middle of a turn, so the gates in stage 8 decide.
+	// IdleGap is how long the main stream must be quiet between two talks for
+	// a new activity window to open.
 	IdleGap time.Duration
 
 	// ThroughSeq bounds assembly to landed sequences at or below it.
@@ -67,14 +66,13 @@ type Options struct {
 	ThroughSeq uint64
 }
 
-// DefaultIdleGap is the quiet period that makes a segment a close candidate.
+// DefaultIdleGap is the quiet period between two Talks that opens a new activity
+// window.
 //
-// Ten minutes is where the measurement puts the worst trade: about 39% of gaps
-// that long fall inside a Talk rather than between two, against 22% at twenty
-// minutes. It stays the default because the gates in stage 8 are what actually
-// decide, and a shorter gap proposes more candidates for them to judge. It is
-// carried in the round's policy version, so a chain built under one gap can
-// never be extended under another.
+// It is measured between Talks, never between records: in the measured corpus
+// about 39% of the gaps this long between two records fall inside a Talk. It
+// stays at ten minutes because it is carried in the round's policy version,
+// and a chain built under one gap is never extended under another.
 const DefaultIdleGap = 10 * time.Minute
 
 // Stats records what assembly saw. Every count carries its denominator, because
@@ -109,9 +107,6 @@ type Stats struct {
 	ChildrenOrphan  int
 	Notifications   int
 	NotifyUnmatched int
-
-	SegmentsOpen      int
-	SegmentsCandidate int
 }
 
 // Result is one assembly of a whole session.
@@ -120,6 +115,11 @@ type Result struct {
 	Relations  []sessionflow.Relation
 	Unresolved []sessionflow.Unresolved
 	Stats      Stats
+
+	// ToolCalls counts the tool and agent call nodes by the name of the tool
+	// called. The round header counts Bash runs from it; the name itself is the
+	// call part's, so no node carries it a second time.
+	ToolCalls map[string]int
 
 	// ThroughSeq is the highest landed sequence the assembly covered. It is what
 	// the round header records, and what tells the next round where to resume.
@@ -141,6 +141,11 @@ type builder struct {
 	rels  map[string]*sessionflow.Relation
 	unres map[string]*sessionflow.Unresolved
 	stats Stats
+
+	// toolName is the name of the tool each tool or agent call node calls, by
+	// node id. Two tool uses whose ids give one node id are one node, and so
+	// one call.
+	toolName map[string]string
 
 	// canonical is the session's entries in landed order with replayed copies
 	// removed. Every stage works from this, never from Entries directly.
@@ -198,6 +203,9 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 	if opt.IdleGap == 0 {
 		opt.IdleGap = DefaultIdleGap
 	}
+	// Every stage and every lookup sees only what the watermark covers.
+	all := len(ix.Entries)
+	ix = ix.Through(opt.ThroughSeq)
 	b := &builder{
 		ix: ix, opt: opt,
 		nodes:     map[string]*sessionflow.Node{},
@@ -207,8 +215,10 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 		talkOfRun: map[runKey]string{},
 		runNode:   map[runKey]string{},
 		runAt:     map[runKey]sessionflow.Ref{},
+		toolName:  map[string]string{},
 	}
 	ix.Build()
+	b.stats.Beyond = all - len(ix.Entries)
 
 	// The order is forced: each stage depends on the one before it.
 	b.stage1Canonical() // duplicates removed
@@ -218,7 +228,7 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 	b.stage5Spawns()    // children joined to the calls that started them
 	b.stage6Epochs()    // context resets cut
 	b.stage7Talks()     // talks and runs built, steps placed
-	b.stage8Segments()  // commit windows proposed
+	b.stage8Segments()  // activity windows cut
 	b.joinProviderBodies()
 	b.emitSteps() // leaves written, now that their containers are known
 
@@ -231,7 +241,10 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 // bytes. Map iteration order in Go is deliberately random, so emitting in map
 // order would make every round differ from the last for no reason.
 func (b *builder) result() *Result {
-	r := &Result{Stats: b.stats}
+	r := &Result{Stats: b.stats, ToolCalls: map[string]int{}}
+	for _, name := range b.toolName {
+		r.ToolCalls[name]++
+	}
 	for _, n := range b.nodes {
 		r.Nodes = append(r.Nodes, *n)
 	}

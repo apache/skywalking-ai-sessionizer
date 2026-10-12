@@ -43,7 +43,7 @@ Eight stages. The order is forced: each depends on the one before it.
 | 5. Join child agents | which call started which child stream |
 | 6. Cut context epochs | only from an explicit reset record |
 | 7. Build Talks and Runs | the conversation a person reads |
-| 8. Propose segments | activity windows, and whether each could be committed |
+| 8. Cut segments | activity windows |
 
 Eight rules in here are the opposite of the obvious choice, and each is the opposite because a
 measurement said so.
@@ -112,24 +112,27 @@ child, it would start a new Talk on every run.
 
 ### Segments
 
-Stage 8 proposes segments. It never commits one.
+Stage 8 cuts activity windows. A window says where the work happened. It says nothing about whether
+the work is finished: a round carries no clock, so only a reader, who knows the time, can tell
+whether the last window is still going.
 
 Only the main stream is cut. Its Talks are taken in order of their first record time. A new window
 opens where the gap between one Talk's last record and the next Talk's first record is longer than
 the idle gap. Only records that resolve to a run count toward a Talk's time range. A window's id
 comes from where it opens, the landed position of its first Talk, and not from its place in the
-list. So late evidence that adds an earlier window cannot renumber a later one. The last window is
-`open`, and every earlier one is a `candidate`. A child stream's Talk joins the window whose time
-range holds its first record, as `strong_inference`, because delegated work belongs to the window
-of the Talk that asked for it.
+list. So late evidence that adds an earlier window cannot renumber a later one. A child stream's
+Talk joins the window whose time range holds its first record, as `strong_inference`, because
+delegated work belongs to the window of the Talk that asked for it.
 
 **A negative gap is no gap.** Record times can step backward. In the corpus, 0.315% of consecutive
 records step back, by up to 4.06 hours. Provider-error records are the main cause: their time is
 when the failed request began, not when the record was written. So a negative difference between
 two Talks is treated as no gap, never as a large one.
 
-**The idle gap is 10 minutes, and a gap only proposes.** A long gap often falls inside a turn rather
-than between two, so it cannot decide on its own. In the corpus:
+**The idle gap is 10 minutes, and it is measured between Talks.** A long quiet period between two
+records often falls inside a Talk rather than between two, so a window is never cut there: stage 8
+compares only one Talk's last record with the next Talk's first. Among the gaps between consecutive
+records in the corpus:
 
 | Idle gap | Gaps that long | Share inside a run | Share inside a Talk |
 | --- | --- | --- | --- |
@@ -137,43 +140,20 @@ than between two, so it cannot decide on its own. In the corpus:
 | 15 minutes | 444 | unavailable | 30.41% |
 | 20 minutes | 302 | 9.60% | 21.52% |
 
-The Talk column is the one that matters. A window cut inside a Talk splits one interaction between
-two windows. Whether provider-error records count on this timeline moves the run column by five
-percentage points. In asz such a record counts only when its containment parents reach a run,
-because only those records set a Talk's time range.
-
-Twenty minutes would propose 57% fewer candidates. The default stays at 10 minutes because the gates
-below decide what could be committed, and a shorter gap only gives them more candidates to judge.
-How often the gates stop a bad candidate has not been measured.
+The Talk column is why the cut is made between Talks: cut on the gap between records, about two
+cuts in five would fall inside one interaction. Whether provider-error records count on this timeline
+moves the run column by five percentage points. In asz such a record counts only when its
+containment parents reach a run, because only those records set a Talk's time range. A gap of
+twenty minutes would find 57% fewer gaps that long.
 
 The gap is fixed in the build. No configuration key and no command flag changes it. It is part of
-the policy every round header carries, `v1+idle=10m0s`, so windows proposed under one gap never
-fold together with windows proposed under another. [Session Flow](../formats/session-flow.md#header)
-says how a chain refuses a change of policy.
+the policy every round header carries, `v1+idle=10m0s`, so windows cut under one gap never fold
+together with windows cut under another. That is why it stays at 10 minutes:
+[Session Flow](../formats/session-flow.md#header) says how a chain refuses a change of policy.
 
-**Four gates decide whether a window could be committed.**
-
-| Gate | Passes when |
-| --- | --- |
-| `activity_boundary` | the window is not the last one |
-| `no_crossing_open_operation` | every tool use whose request time falls inside the window has exactly one result, also timed inside the window, and the session holds no open `child_stream` or `notified_child` entry. The second test covers the whole session, not the window. |
-| `lateness_watermark` | the window is not the last one, and the main stream's last record is more than one idle gap after the window ends |
-| `conversation_identity` | the conversation id is not empty. Assembly refuses to run without one, so this gate always passes. |
-
-A segment node carries `state`, `talks`, `gates_unmet` and `committable`. `gates_unmet` lists the
-gates that fail, and `committable` is true when none fail. [asz.view](../formats/asz-view.md) shows
-the same windows to a reader.
-
-`no_crossing_open_operation` is the gate that does real work. It does not exist for a request left
-with no result at the end of a file. In the corpus that is 0 of 25,892 tool requests on the main
-stream, because the runtime writes a result even for a failure. It exists for a result that arrives
-after the quiet period, which in the corpus happens on 85 of the 697 gaps longer than 10 minutes,
-12.2%. Committing that window would freeze the request in one window while its result lands in the
-next.
-
-**Nothing commits a segment.** Assembly proposes windows and reports `committable`, and no command
-acts on it. The [model](unified-conversation-model.md) calls a segment the commit unit, but the
-commit step is not implemented.
+A segment node carries no attributes. Its Talks are its `in_segment` relations, and its time range
+is theirs. [asz.view](../formats/asz-view.md) shows each window to a reader with the count of its
+Talks and its time range.
 
 ## What comes out
 
@@ -268,6 +248,13 @@ first copy. A repeated record therefore cannot become a second node in a later r
 the byte budget is assembled again over a narrower window, as
 [`max_round_bytes`](../setup/configuration.md#parse) describes.
 
+**An upgrade's revisions go first, cut by their frames.** A newer parser can change what it writes
+for every node, and a round cannot narrow below one landed file. When the round of one landed file
+is still over the budget and the chain changes even with no new evidence, those changes go first, in
+rounds of their own over no new file. Each holds as many frames as fit the budget, and at least one.
+The round of the new evidence follows. On a 17 MB chain, the revision of 35,434 nodes that came with
+dropping repeated attributes was one round of 12.5 MB, and is six rounds of at most 2 MiB this way.
+
 **The watermark is fixed before assembly, and assembly reads nothing past it.** Deciding it
 afterwards would let a round hold nodes drawn from evidence that its own header and input digest do
 not cover. A collector writing at the same time makes that likely. A parse also refuses to run when
@@ -288,11 +275,12 @@ It holds under any round budget, because the budget changes where the chain is c
 says. A chain test builds one session as a single round and again under a one-byte budget, one round
 per landed file, and the two folds hold the same entities. The rule does not say that the fold of
 round N+1 extends the fold of round N. Later evidence replaces entities that earlier rounds wrote.
+It holds once the chain has reached the index: between the rounds of an upgrade's revisions, which
+are cut by their frames, the fold holds part of the revision, and the next rounds write the rest.
 
-**Rounds and segments are separate.** The round is the unit of appending. The segment is a proposed
-commit window. A segment is a node like any other, so when a later Talk turns the open window into a
-candidate, that change is an ordinary node revision in whatever round the parse writes. There is no
-separate mechanism for it, and nothing freezes a segment today, as [Segments](#segments) says.
+**Rounds and segments are separate.** The round is the unit of appending. A segment is an activity
+window. When a later Talk joins a window, the round the parse writes adds that Talk's `in_segment`
+relation, and the segment node itself does not change. There is no separate mechanism for it.
 
 The page that `asz view` serves folds the same chain in the same way, every round in order.
 [asz.view](../formats/asz-view.md) says what it does with a broken chain, and when it folds again.
@@ -335,8 +323,7 @@ The assembler writes seven kinds of unresolved entry:
 
 Every entry is written `open`, and it resolves when the missing evidence lands. `child_stream` and
 `notified_child` are routine in a live session, because a child can be announced before its stream
-lands. While either is open, no segment is committable. A child in a batch that never reports a
-result is normal, and it is not recorded.
+lands. A child in a batch that never reports a result is normal, and it is not recorded.
 
 The assembler makes one change of state. An open entry it no longer produces is superseded as
 `resolved`, and [the fold](../formats/session-flow.md#the-fold) keeps it. The scenario

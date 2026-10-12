@@ -78,7 +78,7 @@ func (b *builder) stage6Epochs() {
 				b.epochAt[[2]uint32{e.Seq, e.Row}] = ep.NodeID
 			}
 
-			a := map[string]any{"records": end - start}
+			a := map[string]any{}
 			var refs []sessionflow.Ref
 			if boundary != nil {
 				refs = append(refs, ref(boundary))

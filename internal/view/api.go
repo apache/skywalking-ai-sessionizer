@@ -484,11 +484,7 @@ func segmentRows(c *Conversation, talks []talkRow) []sessionview.Segment {
 	out := []sessionview.Segment{}
 	for _, n := range sessionflow.InOrder(segs) {
 		s := span[n.ID]
-		out = append(out, sessionview.Segment{
-			ID: n.ID, State: attrString(n, "state"),
-			Talks: count[n.ID], From: s[0], To: s[1],
-			Committable: attrBool(n, "committable"),
-		})
+		out = append(out, sessionview.Segment{ID: n.ID, Talks: count[n.ID], From: s[0], To: s[1]})
 	}
 	return out
 }
@@ -570,18 +566,6 @@ func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
 		})
 	}
 	return out
-}
-
-func attrBool(n *sessionflow.Node, key string) bool {
-	if len(n.Attrs) == 0 {
-		return false
-	}
-	var m map[string]any
-	if json.Unmarshal(n.Attrs, &m) != nil {
-		return false
-	}
-	b, _ := m[key].(bool)
-	return b
 }
 
 // labelRefs finds where a talk's name should be read from: the first

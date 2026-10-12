@@ -23,7 +23,7 @@ checkpoints:
       tool/s2-tool: {kind: tool, attrs: {mcp_server: status, mcp_tool: lookup}}
       tool/s3-tool: {kind: tool, attrs: {mcp_server: status, mcp_tool: lookup}}
       # A second "__" makes two splits possible, so none is made.
-      tool/s5-tool: {kind: tool, attrs: {name: mcp__odd__name__twice, mcp_server: null, mcp_tool: null}}
+      tool/s5-tool: {kind: tool, attrs: {name: null, mcp_server: null, mcp_tool: null}}
       tool/auditor-s1-tool: {kind: tool, stream: auditor, attrs: {mcp_server: docs, mcp_tool: read}}
     view:
       state: verified

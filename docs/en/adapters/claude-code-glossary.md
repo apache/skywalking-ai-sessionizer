@@ -89,11 +89,11 @@ than a plausible word that would send a reader looking for a field that does not
 | `exact_ambiguous` | an identifier matched several; nothing chose one |
 | `exact_unique` | an identifier matched exactly one candidate |
 | `hash_only` | only a digest of the bytes was kept |
-| `in_segment` | an activity window chosen for commit |
+| `in_segment` | the activity window a Talk falls in |
 | `input_of` | unavailable; the serialized provider request is not written locally |
 | `omitted` | deliberately not carried |
 | `retries` | unavailable; retry identity is not recorded |
-| `segment` | an activity window chosen for commit |
+| `segment` | an activity window |
 | `size_only` | only the length was kept |
 | `strong_inference` | no identifier, but a well-founded structural argument |
 | `talk` | one readable interaction; derived from where a run was triggered |
