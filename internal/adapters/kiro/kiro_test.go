@@ -455,6 +455,47 @@ func TestCancelledTurn(t *testing.T) {
 	}
 }
 
+// A prompt held for its turn is counted once, by the call that lands the
+// last line before it, though a small budget cuts the lines before it into
+// several files and each cut drains the source again.
+func TestAHeldPromptIsCountedOnceAcrossCuts(t *testing.T) {
+	lines := fixtureLines(t, combined)
+	src := t.TempDir()
+	dir := filepath.Join(src, "sessions", "01fceef077f333f9", combined)
+	header, err := os.ReadFile(filepath.Join(fixtures, "sessions", "01fceef077f333f9", combined, "session.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, filepath.Join(dir, "session.json"), string(header))
+	// The first turn whole, then the next prompt, whose turn is not written yet.
+	mkfile(t, filepath.Join(dir, "messages.jsonl"), strings.Join(lines[:27], "\n")+"\n")
+
+	z := storage.NewZone(t.TempDir())
+	col := kiro.New(src, z, 2048)
+	held, records := 0, 0
+	for i := 0; ; i++ {
+		st, err := col.CollectAll(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held, records = held+st.Held, records+st.Records
+		if st.Complete() {
+			break
+		}
+		if i > 10 {
+			t.Fatal("collection does not finish")
+		}
+	}
+	files, err := storage.LandedFiles(z, combined)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held != 1 || records != 27 || len(files) < 3 {
+		t.Fatalf("held %d, landed %d records in %d files; want the prompt held once and the rest landed in several files",
+			held, records, len(files))
+	}
+}
+
 // A prompt waits for the turn it opens. Landed before its turn's first record
 // is written, it would sit outside that turn for good, since a landed record
 // is never written again.
@@ -843,5 +884,74 @@ func mkfile(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestImagesTooLargeToLandAreLeftOut lands Kiro Crew's prompt with two
+// images under a budget its record does not fit. The two images are left
+// out, the sentence beside them lands, every file fits, and the prompt's step
+// says too_large. The budget is the one measured to leave out the images
+// alone: at 1,050 bytes the sentence goes too, at 1,100 one image stays.
+func TestImagesTooLargeToLandAreLeftOut(t *testing.T) {
+	const budget = 1075
+	z := storage.NewZone(t.TempDir())
+	r := &root{t: t, zone: z, col: kiro.New(fixtures, z, budget)}
+	// A small budget takes more files than one pass lands.
+	for i := 0; ; i++ {
+		st, err := r.col.CollectAll(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Complete() {
+			break
+		}
+		if i > 10 {
+			t.Fatal("collection does not finish")
+		}
+	}
+	r.parse(images)
+	files, err := storage.LandedFiles(z, images)
+	if err != nil {
+		t.Fatal(err)
+	}
+	media := 0
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > budget {
+			t.Errorf("%s is %d bytes, over the budget of %d", filepath.Base(lf.Path), len(data), budget)
+		}
+		_, recs, err := sessiondata.All(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rec := range recs {
+			for _, p := range rec.Parts {
+				switch {
+				case p.State != model.ContentTooLarge:
+				case p.Kind == sessiondata.PartMedia && p.Media == "image/png" && len(p.SHA256) == 64 && p.Bytes > 0 && len(p.Data) == 0:
+					media++
+				default:
+					t.Errorf("%s left out a %s part", rec.ID, p.Kind)
+				}
+			}
+		}
+	}
+	if media != 2 {
+		t.Fatalf("left out %d image(s), want the two", media)
+	}
+	found := false
+	for _, n := range nodes(r.doc(images)) {
+		if n.State == model.ContentTooLarge {
+			if n.Kind != model.KindMessageExternal || n.Text == "" {
+				t.Fatalf("step %s %s says too_large with text %q; want the prompt, with its sentence", n.ID, n.Kind, n.Text)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no step says too_large")
 	}
 }

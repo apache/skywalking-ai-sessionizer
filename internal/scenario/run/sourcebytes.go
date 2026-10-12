@@ -21,6 +21,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -114,17 +117,38 @@ func partsKeepSourceBytes(root, session string, sources map[string]string) ([]st
 				fail("%s row %d: sha %s, and its source's bytes give %s", l.name, row+1, rec.Sha, got)
 				continue
 			}
+			var values map[string]bool
 			for b, p := range rec.Parts {
+				// A changes/1 record an adapter derives beside a transcript's
+				// result is asz's own encoding, whole or made smaller, and no
+				// slice of the source.
+				if l.hdr.Kind == sessiondata.KindTranscript && p.Kind == sessiondata.PartData {
+					if _, derived := changes.Decode(p.Data); derived {
+						continue
+					}
+				}
+				if p.State == model.ContentTooLarge || p.State == model.ContentTruncated {
+					// What landed is not the source's bytes, or nothing of
+					// them, so the digest of what the part carried is checked
+					// instead: it must be the digest of a value of its source
+					// record. A part taken out keeps no payload, apart from an
+					// unknown part's reason; a part shrunk keeps a smaller one.
+					if values == nil {
+						values = valueDigests(line)
+					}
+					takenOut := p.State == model.ContentTooLarge
+					kept := len(p.Data) > 0 || (p.Text != "" && p.Kind != sessiondata.PartUnknown)
+					if !values[p.SHA256] || (takenOut && kept) {
+						fail("%s row %d block %d: the %s part made smaller to fit says %s, keeps a payload %v, and names a digest its source has %v",
+							l.name, row+1, b, p.Kind, p.State, kept, values[p.SHA256])
+					}
+					continue
+				}
 				var kept []byte
 				switch p.Kind {
 				case sessiondata.PartCall, sessiondata.PartResult, sessiondata.PartData:
 					if len(p.Data) == 0 {
 						continue
-					}
-					if l.hdr.Kind == sessiondata.KindTranscript && p.Kind == sessiondata.PartData {
-						if _, derived := changes.Decode(p.Data); derived {
-							continue
-						}
 					}
 					kept = p.Data
 				case sessiondata.PartUnknown:
@@ -167,6 +191,10 @@ func providerKeepsSourceBytes(name, dir string, recs []*sessiondata.Record, held
 			fail("%s row %d: sha %s and %d bytes, and its file %s gives %s and %d", name, row+1, rec.Sha, rec.Bytes, m.Src, got, len(src))
 		}
 		for b, p := range rec.Parts[:len(rec.Parts)-1] {
+			if p.State == model.ContentTooLarge {
+				// Checked below, where the body is rebuilt from its file.
+				continue
+			}
 			kept := []byte(p.Data)
 			if p.Kind == sessiondata.PartUnknown {
 				if kept, err = p.Raw(); err != nil {
@@ -183,6 +211,11 @@ func providerKeepsSourceBytes(name, dir string, recs []*sessiondata.Record, held
 			continue
 		}
 		body, err := held.Body(rec.ID)
+		if errors.Is(err, providerbody.ErrTooLarge) {
+			// A piece of it was too large to land. Its digest names it, so
+			// the file the runtime wrote gives it back.
+			body, err = held.BodyFrom(rec.ID, src)
+		}
 		if err != nil {
 			fail("%s row %d: %v", name, row+1, err)
 			continue
@@ -191,4 +224,50 @@ func providerKeepsSourceBytes(name, dir string, recs []*sessiondata.Record, held
 			fail("%s row %d: the body rebuilds to other bytes than %s", name, row+1, m.Src)
 		}
 	}
+}
+
+// valueDigests returns the SHA-256 of every value in a source record: each
+// string as its text, and every value both as the source wrote it and as
+// compact JSON, and of the whole line, which may not be JSON at all. A part
+// omitted as too large names the digest of one of them: data as the writer
+// lands it, compacted, and an unknown part's bytes as the source had them.
+func valueDigests(line []byte) map[string]bool {
+	out := map[string]bool{digestHex(line): true}
+	var walk func(raw json.RawMessage)
+	walk = func(raw json.RawMessage) {
+		out[digestHex(bytes.TrimSpace(raw))] = true
+		var compact bytes.Buffer
+		if json.Compact(&compact, raw) != nil {
+			return
+		}
+		out[digestHex(compact.Bytes())] = true
+		switch v := bytes.TrimSpace(raw); {
+		case len(v) > 0 && v[0] == '{':
+			var m map[string]json.RawMessage
+			if json.Unmarshal(v, &m) == nil {
+				for _, x := range m {
+					walk(x)
+				}
+			}
+		case len(v) > 0 && v[0] == '[':
+			var a []json.RawMessage
+			if json.Unmarshal(v, &a) == nil {
+				for _, x := range a {
+					walk(x)
+				}
+			}
+		case len(v) > 0 && v[0] == '"':
+			var text string
+			if json.Unmarshal(v, &text) == nil {
+				out[digestHex([]byte(text))] = true
+			}
+		}
+	}
+	walk(line)
+	return out
+}
+
+func digestHex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

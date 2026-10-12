@@ -335,6 +335,28 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		Kind: src.Kind, Adapter: Name + "/" + Version, Dialect: Dialect,
 		Src: src.Rel, Session: src.Session, Stream: src.Stream,
 	}
+	// A record is larger than its line, so the file ends where the converted
+	// records reach the budget, and the cursor stops before the first line
+	// left out.
+	cut, err := sessiondata.NewCut(hdr, c.MaxDelta)
+	if err != nil {
+		state.GiveBack(seq)
+		return false, false, err
+	}
+	var recs []*sessiondata.Record
+	for _, ln := range chunk.Lines {
+		rec := ConvertKind(src.Kind, ln.Ord, ln.Off, ln.Bytes)
+		ok, err := cut.Take(rec)
+		if err != nil {
+			state.GiveBack(seq)
+			return false, false, err
+		}
+		if !ok {
+			break
+		}
+		recs = append(recs, rec)
+	}
+	chunk.Keep(len(recs), cur.LastUUID)
 	var written int64
 	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
@@ -342,8 +364,9 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		if err != nil {
 			return err
 		}
+		rw.Budget(c.MaxDelta)
 		for row, ln := range chunk.Lines {
-			rec := ConvertKind(src.Kind, ln.Ord, ln.Off, ln.Bytes)
+			rec := recs[row]
 			if err := rw.Write(rec); err != nil {
 				return err
 			}

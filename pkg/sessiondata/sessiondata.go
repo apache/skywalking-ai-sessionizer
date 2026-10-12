@@ -161,10 +161,14 @@ type Part struct {
 	Encoding string `json:"encoding,omitempty"`
 
 	// State says how much of the original is here: available, truncated,
-	// redacted, omitted or unavailable. A reader is always told.
+	// redacted, omitted, unavailable or too_large. A reader is always told.
 	State string `json:"state,omitempty"`
 	// Bytes is the size of the original, even when this part holds less of it.
 	Bytes int `json:"bytes,omitempty"`
+	// SHA256 is set on a part whose payload was too large to land: the digest
+	// of the data it would have carried, or of its text when it had no data.
+	// A reader can still match the payload against another copy of it.
+	SHA256 string `json:"sha256,omitempty"`
 }
 
 // EncodingBase64 is the Encoding of an unknown part whose bytes are not valid

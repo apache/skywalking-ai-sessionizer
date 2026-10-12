@@ -452,3 +452,69 @@ func TestALegacyCursorIsNotClaimedOnASharedTailAlone(t *testing.T) {
 		t.Fatalf("b landed %d records, want all %d of its own: a cursor read from a's file was claimed on the shared tail", records, want)
 	}
 }
+
+// A change record larger than the budget lands as a change record: its
+// largest files lose their hunks and say their diff is too_large, and its
+// identity, files and counts stay, so it still joins its step and adds up.
+func TestALargeChangeRecordKeepsItsIdentity(t *testing.T) {
+	src, root := t.TempDir(), t.TempDir()
+	r := &changes.Record{
+		Schema: changes.Schema, ID: "p1/big", CapturedBy: changes.CapturedByASZPlugin, Session: session, Stream: "main",
+		Tool: "toolu_9", ToolName: "Bash", Time: "2026-09-08T02:00:04Z", Basis: changes.BasisToolWindow,
+		Root: &changes.Root{Path: "/workspace/project"}, ChangedFiles: changes.Int(2),
+	}
+	for _, path := range []string{"big.json", "small.go"} {
+		n := 2_000
+		if path == "small.go" {
+			n = 2
+		}
+		lines := make([]string, n)
+		for i := range lines {
+			lines[i] = "+" + strings.Repeat("y", 40)
+		}
+		r.Changes = append(r.Changes, changes.FileChange{Path: path, Operation: changes.OpModify,
+			Diff: changes.DiffAvailable, Additions: changes.Int(n), Deletions: changes.Int(0),
+			Hunks: []changes.Hunk{{NewStart: 1, NewLines: n, Lines: lines}}})
+	}
+	b, _ := r.Marshal()
+	out := filepath.Join(src, "asz-changes-inline", "output", session)
+	appendTo(t, filepath.Join(out, "main.jsonl"), string(b)+"\n")
+
+	const budget = 16 << 10
+	zone := storage.NewZone(root)
+	if _, err := claudecodechanges.New(src, zone, budget).CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil || len(files) != 1 {
+		t.Fatalf("landed %d files, %v", len(files), err)
+	}
+	if fi, _ := os.Stat(files[0].Path); fi.Size() > budget {
+		t.Fatalf("the file is %d bytes, over the budget of %d", fi.Size(), budget)
+	}
+	_, recs := readAll(t, files[0].Path)
+	p := recs[0].Parts[0]
+	got, ok := changes.Decode(p.Data)
+	if !ok || p.State != "truncated" || p.Bytes != len(b) {
+		t.Fatalf("the part is %s and decodes %v, want a truncated change record of the original size", p.State, ok)
+	}
+	if got.ID != "p1/big" || got.Tool != "toolu_9" || len(got.Changes) != 2 ||
+		got.Changes[0].Diff != changes.DiffTooLarge || got.Changes[0].Hunks != nil || *got.Changes[0].Additions != 2_000 ||
+		got.Changes[1].Diff != changes.DiffAvailable || len(got.Changes[1].Hunks) != 1 {
+		t.Fatalf("the change record kept %+v", got.Changes)
+	}
+	// The index sees a change record, with its lines.
+	ix, ok, err := index.Load(zone.IndexDir(session), session)
+	if err != nil || !ok {
+		t.Fatalf("no index: %v", err)
+	}
+	adds := uint32(0)
+	for _, blk := range ix.Blocks {
+		if blk.Kind == index.BlockChanges {
+			adds += blk.Adds
+		}
+	}
+	if adds != 2_002 {
+		t.Fatalf("the index counts %d added lines, want 2002", adds)
+	}
+}

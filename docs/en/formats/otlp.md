@@ -260,9 +260,10 @@ A request carries at most `export.otlp.batch_bytes` of file bytes, 8 MiB by defa
 request under the 10 MiB the OAP's HTTP server accepts. A file larger than that is sent alone, in
 a request of its own. A landed file is cut at
 `max_delta_bytes`, 2 MiB by default, and a round is cut at `parse.max_round_bytes`, also
-2 MiB, so a request normally carries several files. The exception on both sides is a single
-unit larger than the budget: a source record is landed whole, and a round covering one landed
-file is published whole. The largest source record in the measured corpus is 4.5 MB.
+2 MiB, so a request normally carries several files. A source record larger than the budget lands
+alone, with its largest payloads omitted until the file fits: the largest source record in the
+measured corpus is a 4.6 MB pasted screenshot. The exception is a round covering one landed file,
+which is published whole.
 
 The receiver's limit must cover the largest single request. The OAP accepts 50 MB over gRPC and
 10 MiB over HTTP by default. An OpenTelemetry Collector accepts 4 MiB over gRPC and 20 MiB over

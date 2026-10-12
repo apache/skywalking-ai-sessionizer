@@ -36,6 +36,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
@@ -139,6 +140,23 @@ type Step struct {
 type Queued struct {
 	Text string `yaml:"text"`
 	Mode string `yaml:"mode"`
+	// Pad repeats the text until it is this many bytes long, as a result's
+	// Pad does: a message typed while the agent works can carry a pasted
+	// screenshot, measured at 4.6 MB.
+	Pad int `yaml:"pad"`
+}
+
+// UnmarshalYAML applies Pad as the step is read, so every writer gets the
+// same text.
+func (q *Queued) UnmarshalYAML(n *yaml.Node) error {
+	type plain Queued
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*q = Queued(p)
+	q.Text = padded(q.Text, q.Pad)
+	return nil
 }
 
 // Inject is material the harness put into model context, of a named type.
@@ -216,6 +234,25 @@ type Change struct {
 	Path   string  `yaml:"path"`
 	Before *string `yaml:"before"`
 	After  *string `yaml:"after"`
+	// Pad repeats After until it is this many bytes long, as a result's Pad
+	// does, so a change record can be larger than a landed file's budget.
+	Pad int `yaml:"pad"`
+}
+
+// UnmarshalYAML applies Pad as the step is read, so every writer gets the
+// same file.
+func (c *Change) UnmarshalYAML(n *yaml.Node) error {
+	type plain Change
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*c = Change(p)
+	if c.After != nil && c.Pad > 0 {
+		after := padded(*c.After, c.Pad)
+		c.After = &after
+	}
+	return nil
 }
 
 // Result is what a tool returned. In a Tool it may be written as a plain
@@ -231,6 +268,11 @@ type Result struct {
 	String bool `yaml:"string"`
 	// Lost says the result never reached the file, while the call did.
 	Lost bool `yaml:"lost"`
+	// Pad repeats the text until it is this many bytes long, so a scenario
+	// can return more than a landed file's byte budget without spelling it
+	// out. It is applied as the scenario is read, so every writer gets the
+	// same text.
+	Pad int `yaml:"pad"`
 }
 
 // Synthetic is an assistant-role message the client fabricated. It may be
@@ -269,7 +311,27 @@ func (r *Result) UnmarshalYAML(n *yaml.Node) error {
 		return err
 	}
 	*r = Result(p)
+	r.Text = padded(r.Text, r.Pad)
 	return nil
+}
+
+// padded repeats text until it is n bytes long, or returns it as it is when
+// it is already that long. The cut stays on a character boundary, so the
+// text stays valid UTF-8 and both formats write the same bytes.
+func padded(text string, n int) string {
+	if n <= len(text) {
+		return text
+	}
+	unit := text
+	if unit == "" {
+		unit = "x"
+	}
+	long := strings.Repeat(unit, n/len(unit)+1)
+	end := n
+	for end > 0 && !utf8.RuneStart(long[end]) {
+		end--
+	}
+	return long[:end]
 }
 
 // Agent is a request to start a child agent: the call, a launch

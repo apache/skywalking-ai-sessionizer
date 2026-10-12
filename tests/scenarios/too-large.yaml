@@ -1,0 +1,62 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+# A tool returns more than a landed file may hold. The record of its result
+# is larger than the budget on its own, so it lands with the result omitted
+# as too large: the step stays, with the result's size and digest. The
+# request that sends the result back to the model is too large as well, and
+# its piece of the result is omitted the same way. The next request names
+# that piece rather than carrying it again. A message typed while the agent
+# works, as long as a pasted screenshot, is a step of a whole record, and
+# says too_large too. A command writes a file larger than the budget, and
+# its change record lands shrunk: its hunks go, its identity and counts stay,
+# and it still joins the command. The runtime's own Write tool does the same,
+# and the change record the adapter derives from the runtime's patch lands
+# shrunk beside its result. Every other record lands whole.
+title: a result too large to land
+provider_bodies: true
+steps:
+  - input: read the log
+  - call:
+      text: Reading it.
+      tool:
+        name: Read
+        input: {file_path: /Users/dev/scenario/app.log}
+        result: {text: "one line of the log\n", pad: 40000, after: 200ms}
+  - call:
+      text: Writing it out.
+      tool:
+        name: Bash
+        input: {command: ./dump > copy.log}
+        result: dumped
+        changes:
+          - path: copy.log
+            after: "one line of the log\n"
+            pad: 30000
+  - call:
+      text: Saving a copy.
+      tool:
+        name: Write
+        input: {file_path: /Users/dev/scenario/saved.log}
+        result: File created successfully
+        changes:
+          - path: saved.log
+            after: "one line of the log\n"
+            pad: 30000
+  - call: {text: The log repeats one line.}
+  - queued: {text: "and this screenshot: ", pad: 30000, mode: prompt}
+  - input: thanks
+  - call: {text: You are welcome.}

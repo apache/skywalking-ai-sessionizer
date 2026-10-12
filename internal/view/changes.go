@@ -48,7 +48,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 
 	var out []sessionview.WorkspaceChange
 	seen := map[string]bool{}
-	add := func(r *changes.Record, ref sessionflow.Ref) {
+	add := func(r *changes.Record, ref sessionflow.Ref, state string) {
 		// The id is the tool-use id, so two producers observing one call
 		// share it; who captured the record tells them apart, and a line
 		// landed twice by an interrupted pass is the same on both counts.
@@ -57,7 +57,10 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 			return
 		}
 		seen[key] = true
-		out = append(out, sessionview.WorkspaceChange{Step: stepOf[r.Tool], Ref: ref, Record: *r})
+		if state == model.ContentAvailable {
+			state = ""
+		}
+		out = append(out, sessionview.WorkspaceChange{Step: stepOf[r.Tool], Ref: ref, State: state, Record: *r})
 	}
 
 	// The runtime's own patches, on the result records the tool steps read.
@@ -77,7 +80,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 				}
 				if r, ok := changes.Decode(p.Data); ok {
 					block := b
-					add(r, sessionflow.Ref{Seq: ref.Seq, Row: ref.Row, Block: &block})
+					add(r, sessionflow.Ref{Seq: ref.Seq, Row: ref.Row, Block: &block}, p.State)
 				}
 			}
 		}
@@ -108,7 +111,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 				}
 				if r, ok := changes.Decode(p.Data); ok {
 					block := b
-					add(r, sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block})
+					add(r, sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block}, p.State)
 				}
 			}
 		}

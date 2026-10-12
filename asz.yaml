@@ -71,11 +71,12 @@ adapters:
       interval: 10m
 
       # The largest landed file the collector writes, in bytes. A large
-      # catch-up is split into several files rather than one enormous one,
-      # and a single record larger than this is landed whole. A file travels
-      # whole as one log record, so this is also the largest record a
-      # receiver has to accept. A change applies to new files only: asz
-      # repack re-cuts an existing root into a new one.
+      # catch-up is split into several files rather than one enormous one.
+      # A single record larger than this lands alone, with its largest
+      # payloads omitted until it fits: each keeps its size and SHA-256 and
+      # says too_large. A file travels whole as one log record, so this is
+      # also the largest record a receiver has to accept. A change applies
+      # to new files only: asz repack re-cuts an existing root into a new one.
       max_delta_bytes: 2097152
 
   # The workspace change records the asz Claude Code plugin writes: which
@@ -145,7 +146,8 @@ adapters:
       # The largest landed file a conversion writes. One request can carry
       # more than this: a single turn with a 20 KB command and a 32 KB result
       # measured 3 MB, so a request is cut across files rather than landing as
-      # one. A record larger than the budget lands alone in a file of its own.
+      # one. A record larger than the budget lands alone in a file of its own,
+      # with its largest payloads omitted until it fits.
       max_delta_bytes: 2097152
 
   - name: changes

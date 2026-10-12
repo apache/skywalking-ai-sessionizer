@@ -309,13 +309,16 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		return false, false, err
 	}
 	lines, newOffset, newOrd, more := chunk.Lines, chunk.NewOffset, chunk.NewOrd, chunk.More
-	if keep < len(lines) {
+	held := keep < len(lines)
+	if held {
 		// The rest waits for its turn. The cursor stops before it, so the
 		// next pass reads it again with whatever followed.
-		st.Held++
 		lines, newOffset, newOrd, more = lines[:keep], lines[keep].Off, lines[keep].Ord-1, false
 	}
 	if len(lines) == 0 {
+		if held {
+			st.Held++
+		}
 		return false, false, nil
 	}
 
@@ -326,6 +329,36 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		Kind: recordKind(src.Kind), Adapter: Name + "/" + Version, Dialect: Dialect,
 		Src: src.Rel, Session: src.Session, Stream: src.Stream,
 	}
+	// A record is larger than its line, so the file ends where the converted
+	// records reach the budget, and the cursor stops before the first line
+	// left out.
+	cut, err := sessiondata.NewCut(hdr, c.MaxDelta)
+	if err != nil {
+		p.state.GiveBack(seq)
+		return false, false, err
+	}
+	var recs []*sessiondata.Record
+	for row, ln := range lines {
+		rec := Convert(src, ln.Ord, ln.Off, ln.Bytes, runs[row])
+		ok, err := cut.Take(rec)
+		if err != nil {
+			p.state.GiveBack(seq)
+			return false, false, err
+		}
+		if !ok {
+			break
+		}
+		recs = append(recs, rec)
+	}
+	switch {
+	case len(recs) < len(lines):
+		newOffset, newOrd, more = lines[len(recs)].Off, lines[len(recs)].Ord-1, true
+		lines = lines[:len(recs)]
+	case held:
+		// Counted once, by the call that lands the last line before what is
+		// held, not by every call a cut makes on the way.
+		st.Held++
+	}
 	var written int64
 	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
@@ -333,8 +366,9 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		if err != nil {
 			return err
 		}
+		rw.Budget(c.MaxDelta)
 		for row, ln := range lines {
-			rec := Convert(src, ln.Ord, ln.Off, ln.Bytes, runs[row])
+			rec := recs[row]
 			if err := rw.Write(rec); err != nil {
 				return err
 			}
@@ -402,6 +436,7 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 		if err != nil {
 			return err
 		}
+		rw.Budget(c.MaxDelta)
 		rec := Convert(src, 1, 0, body, "")
 		if err := rw.Write(rec); err != nil {
 			return err

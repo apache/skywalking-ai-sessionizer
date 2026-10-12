@@ -118,6 +118,7 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.ContentHashOnly, Note: "no equivalent"},
 	model.Term{Unified: model.ContentSizeOnly, Note: "no equivalent"},
 	model.Term{Unified: model.ContentTruncated, Note: "not read: the model is sent a preview of a large tool output, and that preview is the result here; the whole output is in tool-outputs, which is not collected"},
+	model.Term{Unified: model.ContentTooLarge, Note: "no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget"},
 	model.Term{Unified: model.ContentUnavailable, Native: "...", Where: "the content of a Reasoning record"},
 
 	// ---- what began a turn ----

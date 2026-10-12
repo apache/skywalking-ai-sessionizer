@@ -79,6 +79,24 @@ type Chunk struct {
 	Moved bool
 }
 
+// Keep trims the chunk to its first n lines, as when a landed file is full
+// before the chunk is: reading stops before the first line left out, and
+// the caller drains again. prev is the uuid the cursor held before the chunk.
+func (ch *Chunk) Keep(n int, prev string) {
+	if n >= len(ch.Lines) {
+		return
+	}
+	left := ch.Lines[n]
+	ch.Lines = ch.Lines[:n]
+	ch.NewOffset, ch.NewOrd, ch.More = left.Off, left.Ord-1, true
+	ch.LastUUID = prev
+	for _, ln := range ch.Lines {
+		if u := extractUUID(ln.Bytes); u != "" {
+			ch.LastUUID = u
+		}
+	}
+}
+
 // statInfo carries the identity and size checks a cursor is validated against.
 // statSource fills it and lives in one file per platform, because a file's
 // identity is an inode on Unix and a volume serial plus file index on Windows.
@@ -164,13 +182,13 @@ func TailAppend(path string, cur *storage.Cursor, maxBytes int64) (*Chunk, error
 		// The window is full and there is more file beyond it, so this single
 		// line is larger than the byte budget. Reading only the budget would
 		// stall this source forever, silently, with no error - so grow past the
-		// budget to find the line's end. The budget bounds throughput, not the
-		// maximum record we are willing to store.
-		buf, err = readWindow(f, int64(cur.Offset), info.size, 0)
-		if err != nil {
+		// budget to find the line's end, and take that one line alone. Taking
+		// every line up to the last newline instead landed all the rest of a
+		// source in the same file: one 4.6 MB line made an 8 MB file. The
+		// writer takes out what does not fit; see sessiondata.Fit.
+		if buf, end, err = longLine(f, int64(cur.Offset), info.size, maxBytes); err != nil {
 			return nil, err
 		}
-		end = bytes.LastIndexByte(buf, '\n')
 	}
 	if end < 0 {
 		// Still no complete line: an in-flight write. Nothing safe to land yet.
@@ -199,6 +217,32 @@ func TailAppend(path string, cur *storage.Cursor, maxBytes int64) (*Chunk, error
 	ch.NewOrd = ord
 	ch.More = int64(off) < info.size
 	return ch, nil
+}
+
+// longLine reads the line starting at from that is longer than maxBytes, and
+// returns the window that holds it and where it ends, or -1 when the window
+// reached the end of the file first: a line still being written. The window
+// doubles each time. A read that brings nothing new means the file is shorter
+// than size, cut while it was read, and the line is left for the next pass,
+// which checks the file again.
+func longLine(f *os.File, from, size, maxBytes int64) ([]byte, int, error) {
+	var buf []byte
+	for n := 2 * maxBytes; ; n *= 2 {
+		next, err := readWindow(f, from, size, n)
+		if err != nil {
+			return nil, -1, err
+		}
+		if len(next) <= len(buf) {
+			return buf, -1, nil
+		}
+		buf = next
+		if end := bytes.IndexByte(buf, '\n'); end >= 0 {
+			return buf, end, nil
+		}
+		if from+int64(len(buf)) >= size || n <= 0 {
+			return buf, -1, nil
+		}
+	}
 }
 
 // readWindow reads at most maxBytes starting at from.

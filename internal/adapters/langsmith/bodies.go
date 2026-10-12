@@ -112,6 +112,7 @@ func bodiesOf(items []placed, records [][]sessiondata.Record) []body {
 // verify reports the damage itself.
 func (c *Collector) loadHeld(session string) (*providerbody.Session, error) {
 	held := providerbody.NewSession()
+	held.Budget(c.MaxDeltaBytes)
 	files, err := storage.LandedFiles(c.Zone, session)
 	if err != nil {
 		return nil, err

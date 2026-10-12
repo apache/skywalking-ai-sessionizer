@@ -244,6 +244,9 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 		{"fold_equals_parse", ex.Properties.FoldEqualsParse, func() ([]string, error) { return expect.FoldEqualsParse(out, session, session) }},
 		{"immutable_rounds", ex.Properties.ImmutableRounds, func() ([]string, error) { return expect.ImmutableRounds(out, session) }},
 		{"records_well_formed", ex.Properties.RecordsWellFormed, func() ([]string, error) { return expect.RecordsWellFormed(out, session) }},
+		{"files_fit_the_budget", ex.Properties.FilesFitTheBudget, func() ([]string, error) {
+			return expect.FilesFitTheBudget(out, session, ex.Collect.MaxDeltaBytes)
+		}},
 		{"repack_keeps_structure", ex.Properties.RepackKeepsStructure, func() ([]string, error) { return repackKeepsStructure(out, session, ex.Parse.MaxRoundBytes) }},
 		{"push_follows_the_wire", ex.Properties.PushFollowsTheWire, func() ([]string, error) {
 			return pushFollowsTheWire(out, session, f, ex.Push, expectedTokens(built.Plan), expectedMCP(built.Plan), expect.On(ex.Properties.MetricsMatchThePlan))

@@ -22,6 +22,7 @@
 package expect
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,6 +89,7 @@ type Properties struct {
 	HeaderMatchesFold     *bool `yaml:"header_matches_fold"`
 	RecordsMatch          *bool `yaml:"records_match"`
 	RecordsWellFormed     *bool `yaml:"records_well_formed"`
+	FilesFitTheBudget     *bool `yaml:"files_fit_the_budget"`
 	EveryLineARecord      *bool `yaml:"every_line_a_record"`
 	PartsKeepSourceBytes  *bool `yaml:"parts_keep_source_bytes"`
 	DiscoveryIgnoresNoise *bool `yaml:"discovery_ignores_noise"`
@@ -299,6 +301,13 @@ type View struct {
 	// Flags counts the document's steps by each flag they carry, so a
 	// scenario can say which records landed named.
 	Flags map[string]int `yaml:"flags"`
+	// States counts the document's steps by the state of their content and
+	// of their result, so a scenario can say which parts landed whole and
+	// which did not. A step whose content is available is not counted.
+	States map[string]int `yaml:"states"`
+	// ChangeStates counts the document's change records by the state of
+	// the part they landed in; one that landed whole is not counted.
+	ChangeStates map[string]int `yaml:"change_states"`
 	// Hide builds the document with these flags withheld, as a view
 	// configured or asked to hide them does, and Withheld is what its
 	// summary must then count, every key of it, zeros included. Every step
@@ -694,6 +703,34 @@ func checkView(root, session string, want *View) ([]string, error) {
 			}
 			if got[name] != n {
 				bad("view.flags.%s is %d, want %d", name, got[name], n)
+			}
+		}
+	}
+	if want.States != nil {
+		got := map[string]int{}
+		eachNode(doc, func(n *sessionview.Node) {
+			for _, state := range []string{n.State, n.ResultState} {
+				if state != "" && state != model.ContentAvailable {
+					got[state]++
+				}
+			}
+		})
+		for state, n := range want.States {
+			if got[state] != n {
+				bad("view.states.%s is %d, want %d", state, got[state], n)
+			}
+		}
+	}
+	if want.ChangeStates != nil {
+		got := map[string]int{}
+		for _, wc := range doc.WorkspaceChanges {
+			if wc.State != "" {
+				got[wc.State]++
+			}
+		}
+		for state, n := range want.ChangeStates {
+			if got[state] != n {
+				bad("view.change_states.%s is %d, want %d", state, got[state], n)
 			}
 		}
 	}
@@ -1111,7 +1148,13 @@ func viewOf(hdr *sessiondata.Header, r *sessiondata.Record) recordView {
 		if p.Failed != nil {
 			failed = fmt.Sprint(*p.Failed)
 		}
-		parts = append(parts, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s", p.Kind, p.ID, p.Of, p.Name, p.State, failed, text))
+		// A part made smaller to fit the budget keeps the size and digest
+		// of what it carried, which both formats must give alike.
+		kept := ""
+		if p.State == model.ContentTooLarge || p.State == model.ContentTruncated {
+			kept = fmt.Sprintf("%d/%s", p.Bytes, p.SHA256)
+		}
+		parts = append(parts, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s", p.Kind, p.ID, p.Of, p.Name, p.State, failed, text, kept))
 	}
 	return recordView{
 		Kind: string(hdr.Kind), Stream: hdr.Stream, Batch: hdr.Batch,
@@ -1252,6 +1295,57 @@ func RecordsWellFormed(root, session string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// FilesFitTheBudget checks that every landed file is at most budget bytes.
+// A collector cuts a file by what its records take once encoded, and a
+// record over the budget lands alone with its largest payloads left out, so
+// the one file allowed over the budget holds a single record with no payload
+// left to take out.
+func FilesFitTheBudget(root, session string, budget int64) ([]string, error) {
+	if budget <= 0 {
+		budget = 2 << 20
+	}
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) <= budget {
+			continue
+		}
+		hdr, recs, err := sessiondata.All(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		if len(recs) == 1 && !holdsPayload(hdr.Kind, recs[0]) {
+			continue
+		}
+		out = append(out, fmt.Sprintf("files_fit_the_budget: %s is %d bytes in %d record(s), over the budget of %d",
+			filepath.Base(lf.Path), len(data), len(recs), budget))
+	}
+	return out, nil
+}
+
+// holdsPayload reports whether a record still holds a payload that could be
+// taken out, by Fit's own rule. A provider body's manifest, the last part of
+// a record in a provider_body file, is never taken out.
+func holdsPayload(kind sessiondata.Kind, rec *sessiondata.Record) bool {
+	manifest := -1
+	if _, err := providerbody.ManifestOf(rec); kind == sessiondata.KindProviderBody && err == nil {
+		manifest = len(rec.Parts) - 1
+	}
+	for i, p := range rec.Parts {
+		if i != manifest && sessiondata.Payload(p) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ViewCoversTheSession checks the asz.view document holds the whole
@@ -1610,10 +1704,14 @@ func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
 			continue
 		}
 		body, err := held.Body(rec.ID)
+		// A body that holds or names a piece too large to land cannot be
+		// rebuilt from the root. parts_keep_source_bytes rebuilds it from
+		// the file the runtime wrote, where a format has one.
+		tooLarge := errors.Is(err, providerbody.ErrTooLarge)
 		switch {
-		case err != nil:
+		case err != nil && !tooLarge:
 			bad("%s does not rebuild from the files up to %d: %v", rec.ID, r.Ref.Seq, err)
-		case len(body) != m.Bytes || providerbody.Digest(body) != m.SHA256:
+		case !tooLarge && (len(body) != m.Bytes || providerbody.Digest(body) != m.SHA256):
 			bad("%s rebuilds to other bytes than its manifest states", rec.ID)
 		case m.Role != r.Role:
 			bad("%s is a %s, listed as a %s", rec.ID, m.Role, r.Role)

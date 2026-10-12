@@ -34,6 +34,7 @@ import (
 	"strings"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -90,6 +91,14 @@ type StreamReport struct {
 	// End is set when the landed records stop before where the stream's
 	// cursor says the collector read to.
 	End *EndGap
+
+	// TooLarge counts the parts whose payload was too large to land, and
+	// Unbuilt the provider bodies that cannot be rebuilt because a piece of
+	// them was. Neither is a problem: a collector omits such a payload on
+	// purpose, keeping its size and digest, so the landed file fits its
+	// byte budget. They are counted so the loss is visible.
+	TooLarge int
+	Unbuilt  int
 
 	// Relanded counts records that repeat a range already landed.
 	//
@@ -174,6 +183,7 @@ func Stream(dir, kind string) (*StreamReport, error) {
 				return nil, fmt.Errorf("verify: %s row %d: %w", path, row, rerr)
 			}
 			rep.Records++
+			rep.TooLarge += tooLarge(rec)
 
 			if first {
 				rep.FirstOrd = rec.Ord
@@ -216,6 +226,17 @@ func Stream(dir, kind string) (*StreamReport, error) {
 			LastOrd: rep.LastOrd, Covered: rep.BytesCovered}
 	}
 	return rep, nil
+}
+
+// tooLarge counts a record's parts whose payload was too large to land.
+func tooLarge(rec *sessiondata.Record) int {
+	n := 0
+	for _, p := range rec.Parts {
+		if p.State == model.ContentTooLarge {
+			n++
+		}
+	}
+	return n
 }
 
 // landedFiles lists a directory's landed files of one kind, in sequence order.
