@@ -399,6 +399,30 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		Src: src.Rel, Session: src.Session, Stream: src.Stream, Batch: src.RunID,
 	}
 
+	// Conversion happens HERE, once, while the source is being read. Nothing
+	// above this line ever sees a Claude Code shape. A record is larger than
+	// its line, so the file ends where the converted records reach the
+	// budget, and the cursor stops before the first line left out.
+	cut, err := sessiondata.NewCut(hdr, c.MaxDelta)
+	if err != nil {
+		state.GiveBack(seq)
+		return false, false, err
+	}
+	var recs []*sessiondata.Record
+	for _, ln := range chunk.Lines {
+		rec := Convert(src, ln.Ord, ln.Off, ln.Bytes)
+		ok, err := cut.Take(rec)
+		if err != nil {
+			state.GiveBack(seq)
+			return false, false, err
+		}
+		if !ok {
+			break
+		}
+		recs = append(recs, rec)
+	}
+	chunk.Keep(len(recs), cur.LastUUID)
+
 	var written int64
 	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {
@@ -406,14 +430,12 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		if err != nil {
 			return err
 		}
-		for row, ln := range chunk.Lines {
-			// Conversion happens HERE, once, while the source is being read.
-			// Nothing above this line ever sees a Claude Code shape.
-			rec := Convert(src, ln.Ord, ln.Off, ln.Bytes)
+		rw.Budget(c.MaxDelta)
+		for row, rec := range recs {
 			if err := rw.Write(rec); err != nil {
 				return err
 			}
-			written += int64(len(ln.Bytes))
+			written += int64(len(chunk.Lines[row].Bytes))
 			// The index is built from the CONVERTED record, so the source is
 			// parsed once and the index has no dialect in it.
 			staged.Add(index.FromRecord(p.ix, hdr, rec, uint32(seq), uint32(row+1)))
@@ -485,6 +507,7 @@ func (c *Collector) landSnapshot(src Source, cur *storage.Cursor, cursorPath, di
 		if err != nil {
 			return err
 		}
+		rw.Budget(c.MaxDelta)
 		rec := Convert(src, 1, 0, body)
 		if err := rw.Write(rec); err != nil {
 			return err

@@ -99,6 +99,7 @@ not there.
 | `summarizes` | — | derived here | derived: the summary and its boundary come from one marked message |
 | `talk` | — | derived here | one readable interaction; one trace is one turn |
 | `thinking` | — | derived here | no equivalent yet: a provider's reasoning arrives inside the message content |
+| `too_large` | — | derived here | no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget |
 | `trigger` | — | derived here | no equivalent: derived from a trace's root run |
 | `truncated` | — | derived here | no equivalent: nothing measured arrived truncated |
 | `turn.duration` | — | derived here | no equivalent as a record; a run's own start and end give it |

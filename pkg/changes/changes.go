@@ -294,6 +294,45 @@ func (r *Record) Validate() error {
 	return nil
 }
 
+// DropHunks takes the hunks out of the file whose hunks are largest, and
+// says its diff is too_large, as a diff too large to compute does. Its
+// additions and deletions stay. It reports false when no file has hunks
+// left. A landed record too large for its file is made smaller this way
+// before anything else is left out, so its identity and its counts survive.
+func (r *Record) DropHunks() bool {
+	best, size := -1, 0
+	for i, c := range r.Changes {
+		n := 0
+		for _, h := range c.Hunks {
+			for _, l := range h.Lines {
+				n += len(l)
+			}
+			n += len(h.Lines) + 1
+		}
+		if len(c.Hunks) > 0 && n > size {
+			best, size = i, n
+		}
+	}
+	if best < 0 {
+		return false
+	}
+	r.Changes[best].Hunks, r.Changes[best].Diff = nil, DiffTooLarge
+	return true
+}
+
+// DropFiles takes out the lists that grow with the workspace, once no file
+// has hunks left: the files, the overlaps and the gaps. The record keeps its
+// identity, its tool, its window and changed_files, so a reader still sees
+// that the call changed files, and how many. It reports false when nothing
+// is left to take out.
+func (r *Record) DropFiles() bool {
+	if len(r.Changes)+len(r.Overlaps)+len(r.Gaps) == 0 {
+		return false
+	}
+	r.Changes, r.Overlaps, r.Gaps = nil, nil, nil
+	return true
+}
+
 // Marshal writes a record as one JSON line without a trailing newline.
 func (r *Record) Marshal() ([]byte, error) {
 	if r.Changes == nil {

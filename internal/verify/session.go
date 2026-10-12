@@ -40,6 +40,10 @@ type SessionReport struct {
 	// Relanded counts records an interrupted pass caused to be landed twice.
 	// It is reported so it is visible, not because it is wrong.
 	Relanded int
+	// TooLarge counts the parts whose payload was too large to land, and
+	// Unbuilt the provider bodies that cannot be rebuilt for it. They are
+	// reported so they are visible, not because they are wrong.
+	TooLarge, Unbuilt int
 	// Bodies lists the provider bodies that do not rebuild. They are counted
 	// in Problems too.
 	Bodies []BodyProblem
@@ -66,6 +70,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			rep.Streams = append(rep.Streams, sr)
 			rep.Records += sr.Records
 			rep.Relanded += sr.Relanded
+			rep.TooLarge += sr.TooLarge
 			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps) + len(sr.ShaBad)
 			if sr.End != nil {
 				rep.Problems++
@@ -107,6 +112,8 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 		rep.Streams = append(rep.Streams, pr)
 		rep.Records += pr.Records
 		rep.Relanded += pr.Relanded
+		rep.TooLarge += pr.TooLarge
+		rep.Unbuilt += pr.Unbuilt
 		rep.Bodies = bodies
 		rep.Problems += len(bodies)
 	}

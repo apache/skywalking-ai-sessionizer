@@ -398,3 +398,11 @@ A record that repeats a range already landed is counted, not reported as a probl
 `N record(s) landed more than once by an interrupted pass; assembly removes them`. A file lands
 before its cursor is committed, so an interrupted pass repeats data rather than losing it.
 [Storage Root](../formats/storage-root.md#landed-files) explains the order.
+
+A part whose payload was [too large to land](../formats/session-data.md#too-large-to-land) is
+counted the same way, with the provider bodies that cannot be rebuilt because of it: verify prints
+`N part(s) were too large to land and hold their size and digest only; M provider body(ies) cannot
+be rebuilt for it`. The collector left the payload out on purpose, so the file fits its budget. A
+body that holds or refers to such a piece is not damage: its references are still checked, and its
+record's `bytes` and `sha` are still held to its manifest. Only the comparison of its rebuilt bytes
+with its digest cannot be made.

@@ -539,7 +539,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return err
 	}
 
-	var sessions, streams, records, problems, relanded int
+	var sessions, streams, records, problems, relanded, tooLarge, unbuilt int
 	for _, d := range entries {
 		if !d.IsDir() || (want != "" && d.Name() != want) {
 			continue
@@ -556,6 +556,8 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		records += rep.Records
 		problems += rep.Problems
 		relanded += rep.Relanded
+		tooLarge += rep.TooLarge
+		unbuilt += rep.Unbuilt
 		if !rep.OK() {
 			fmt.Printf("%s: %d problem(s)\n", rep.Session, rep.Problems)
 			for _, line := range rep.Details() {
@@ -569,6 +571,15 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		// Expected after an interrupted pass, not a fault: data is landed before
 		// the cursor is committed, so a crash repeats rather than loses.
 		fmt.Printf("%d record(s) landed more than once by an interrupted pass; assembly removes them\n", relanded)
+	}
+	if tooLarge > 0 {
+		// Omitted on purpose, so a landed file fits its byte budget. The
+		// part keeps its size and digest.
+		fmt.Printf("%d part(s) were too large to land and hold their size and digest only", tooLarge)
+		if unbuilt > 0 {
+			fmt.Printf("; %d provider body(ies) cannot be rebuilt for it", unbuilt)
+		}
+		fmt.Println()
 	}
 
 	// A conversation's rounds are checked too. They are a digest chain, so a

@@ -289,8 +289,9 @@ type Collector struct {
 	// MaxDeltaBytes caps how much of a source is landed in a single file, so a
 	// large catch-up is split rather than producing one enormous delta. A
 	// file travels whole as one log record, so this is also the largest
-	// record a receiver has to accept, apart from a single source record
-	// larger than the budget, which is landed whole. The default is 2 MiB.
+	// record a receiver has to accept. A single source record larger than the
+	// budget lands alone, with its largest payloads omitted until it fits.
+	// The default is 2 MiB.
 	MaxDeltaBytes int64 `yaml:"max_delta_bytes"`
 }
 

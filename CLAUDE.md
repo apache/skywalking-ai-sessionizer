@@ -139,7 +139,7 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Entity ids come from stable evidence, never from position.** An id that shifts when an earlier
   source is backfilled cannot supersede its own earlier revision.
 - **A round is cut at a byte budget** by narrowing its input window. A round covering one landed
-  file may exceed the budget, as a landed file holding one oversize record may. Revisions that need
+  file may exceed the budget. Revisions that need
   no new evidence, as after an upgrade, go first in rounds over no new file, cut by their frames.
   `Round.More` says the chain has not reached the index yet, or has revisions left.
 - **A round carries no wall-clock time**, so the same evidence reproduces the same bytes and digest.
@@ -176,6 +176,12 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Payload bytes are the source bytes** where a part carries the source's own JSON: byte for
   byte, apart from whitespace between tokens. `json.RawMessage` both directions, and the writer
   never re-encodes a part's data. Older files hold `\u003c`, `\u003e` and `\u0026` for the same values.
+- **A landed file fits its budget.** A collector cuts a file by what its records take once
+  written (`sessiondata.Cut`), never by source bytes: an envelope made 4 KiB of short lines 19 KB.
+  A single record over `max_delta_bytes` lands alone with its largest payloads taken out as
+  `too_large`, size and SHA-256 kept, through the writer's `Budget`. A change or execution record
+  is never taken out whole, and the provider cutter's own `Budget` never takes out a manifest. A
+  collector without a cut and a budget is a bug. `asz repack` carries records whole.
 - **Land before committing the cursor.** At-least-once is intentional; the reverse loses data.
 - **`next_seq` is monotonic across all streams in a session**, so a session is processed
   single-threaded and under a lock. The filesystem is the authority on the counter.

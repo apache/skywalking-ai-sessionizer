@@ -52,9 +52,9 @@ type Collector struct {
 	Ownership Ownership
 	// MaxDeltaBytes is the largest landed file a conversion writes. One
 	// request can carry more: a single turn with a 46 KB command and a 32 KB
-	// result measured 1.29 MB. A record larger than the budget lands alone,
-	// because a file is cut by narrowing what goes in it and never by
-	// splitting a record.
+	// result measured 1.29 MB. A file is cut by narrowing what goes in it and
+	// never by splitting a record, so a record larger than the budget lands
+	// alone, with its largest payloads omitted until it fits.
 	MaxDeltaBytes int64
 	// ProviderBodies lands what each model call was sent and what came
 	// back, beside the conversation, cut against what the session already
@@ -814,9 +814,14 @@ func (c *Collector) encodable(session, stream string, records []sessiondata.Reco
 	if err != nil {
 		return err
 	}
+	writer.Budget(c.MaxDeltaBytes)
 	for i := range records {
+		// A copy, parts included: fitting under the budget changes a record
+		// in place, and this check must not change what is placed and
+		// landed afterwards.
 		record := records[i]
 		record.Ord, record.Off = uint64(i+1), 0
+		record.Parts = append([]sessiondata.Part(nil), record.Parts...)
 		if err := writer.Write(&record); err != nil {
 			if errors.Is(err, sessiondata.ErrNotEncodable) {
 				return &unreadable{err}
@@ -847,25 +852,39 @@ func (c *Collector) landStream(g *grouped, state *storage.SessionState, stream s
 		off += uint64(records[i].Bytes) + 1
 	}
 	// One request can be larger than a landed file should be, so it is cut
-	// across files here. The cut narrows what goes in a file and never splits
-	// a record: a record over the budget lands alone in a file of its own,
-	// which is the same rule every other landed file follows.
+	// across files here, by what each record takes once encoded. The cut
+	// narrows what goes in a file and never splits a record: a record over
+	// the budget lands alone in a file of its own, with its largest payloads
+	// omitted until it fits, which is the same rule every other landed file
+	// follows.
 	for start := 0; start < len(records); {
-		end, size := start, int64(0)
-		for end < len(records) {
-			next := size + int64(records[end].Bytes)
-			if end > start && next > c.MaxDeltaBytes {
-				break
-			}
-			size = next
-			end++
-		}
 		seq := state.Take()
 		header := &sessiondata.Header{
 			Seq: seq, At: now.Format(time.RFC3339Nano),
 			Kind: sessiondata.KindTranscript, Adapter: Name + "/" + Version,
 			Dialect: Dialect, Src: filepath.Base(request.Path),
 			Session: g.session, Stream: stream,
+		}
+		cut, err := sessiondata.NewCut(header, c.MaxDeltaBytes)
+		if err != nil {
+			state.GiveBack(seq)
+			return err
+		}
+		end := start
+		for end < len(records) {
+			ok, err := cut.Take(&records[end])
+			if errors.Is(err, sessiondata.ErrNotEncodable) {
+				state.GiveBack(seq)
+				return &unreadable{err}
+			}
+			if err != nil {
+				state.GiveBack(seq)
+				return err
+			}
+			if !ok {
+				break
+			}
+			end++
 		}
 		path := filepath.Join(streamDir, storage.LandedName("transcript", storage.Stamp(now), seq))
 		batch := records[start:end]
@@ -880,6 +899,7 @@ func (c *Collector) landStream(g *grouped, state *storage.SessionState, stream s
 			if err != nil {
 				return err
 			}
+			writer.Budget(c.MaxDeltaBytes)
 			for i := range batch {
 				if err := writer.Write(&batch[i]); err != nil {
 					return err

@@ -109,6 +109,12 @@ type ProviderBody struct {
 type WorkspaceChange struct {
 	Step string          `json:"step"`
 	Ref  sessionflow.Ref `json:"ref"`
+	// State is the state of the part the record landed in: truncated when
+	// it was made smaller to fit its landed file, its hunks or its file list
+	// taken out, and empty when it landed whole. A record whose file list
+	// was taken out keeps changed_files, so an empty list with a positive
+	// count is files changed, not none.
+	State string `json:"state,omitempty"`
 	changes.Record
 }
 

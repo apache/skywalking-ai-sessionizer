@@ -46,7 +46,8 @@ func (p BodyProblem) String() string {
 // a body that no longer rebuilds: a piece or an earlier body it names is not
 // there, or the bytes it rebuilds to do not match its digest. So every body is
 // rebuilt, in landing order, and compared. A body landed twice with the same
-// digest is a repeat, as in a stream.
+// digest is a repeat, as in a stream. A body that holds or refers to a piece
+// too large to land cannot be rebuilt, and is counted, not reported.
 func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 	files, err := landedFiles(dir, string(sessiondata.KindProviderBody))
 	if err != nil {
@@ -75,7 +76,16 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 				return nil, nil, fmt.Errorf("verify: %s row %d: %w", path, row, rerr)
 			}
 			rep.Records++
+			rep.TooLarge += tooLarge(rec)
 			rep.FirstOrd, rep.LastOrd = 1, 1
+			// A rebuilt body has the manifest's size and digest, so the record
+			// is held to the manifest, which a body that cannot be rebuilt,
+			// and a repeat, still have.
+			if m, err := providerbody.ManifestOf(rec); err == nil &&
+				(rec.Bytes != m.Bytes || len(m.SHA256) < 12 || rec.Sha != m.SHA256[:12]) {
+				problems = append(problems, BodyProblem{File: path, Row: row,
+					Why: "the record's size or digest is not the body's"})
+			}
 			if err := s.Add(rec); err != nil {
 				if errors.Is(err, providerbody.ErrRepeat) {
 					rep.Relanded++
@@ -84,14 +94,12 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 				problems = append(problems, BodyProblem{File: path, Row: row, Why: err.Error()})
 				continue
 			}
-			m, _ := providerbody.ManifestOf(rec)
-			body, err := s.Body(rec.ID)
+			_, err := s.Body(rec.ID)
 			switch {
+			case errors.Is(err, providerbody.ErrTooLarge):
+				rep.Unbuilt++
 			case err != nil:
 				problems = append(problems, BodyProblem{File: path, Row: row, Why: err.Error()})
-			case rec.Bytes != len(body) || len(m.SHA256) < 12 || rec.Sha != m.SHA256[:12]:
-				problems = append(problems, BodyProblem{File: path, Row: row,
-					Why: "the record's size or digest is not the body's"})
 			}
 		}
 		f.Close()

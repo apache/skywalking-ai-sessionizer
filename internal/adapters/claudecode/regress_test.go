@@ -18,6 +18,9 @@
 package claudecode_test
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,6 +34,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -174,6 +178,146 @@ func TestOversizedLineDoesNotStall(t *testing.T) {
 	}
 	if st.Records != 2 {
 		t.Errorf("landed %d records, want 2 - an oversized line stalled the source", st.Records)
+	}
+}
+
+// TestOversizedLineLandsAlone covers what happens after the window grows past
+// the budget: the long line lands in a file of its own, the lines after it in
+// later files, and the record fits the budget with its payload omitted. The
+// window used to grow to the end of the source and land every line up to the
+// last newline in one file: a 4.6 MB line made an 8 MB file.
+func TestOversizedLineLandsAlone(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	small := func(id string) string { return fmt.Sprintf("{\"uuid\":%q,\"pad\":%q}\n", id, strings.Repeat("s", 300)) }
+	big := fmt.Sprintf("{\"uuid\":\"big\",\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":%q}}\n", strings.Repeat("y", 50_000))
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), small("before")+big+small("a")+small("b")+small("c"))
+
+	const budget = 4096
+	z := storage.NewZone(zone)
+	st, err := claudecode.New(src, z, budget).CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Records != 5 {
+		t.Fatalf("landed %d records, want 5", st.Records)
+	}
+	files, err := storage.LandedFiles(z, tSess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, recs, err := sessiondata.All(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > budget {
+			t.Errorf("%s is %d bytes, over the budget of %d", filepath.Base(lf.Path), len(data), budget)
+		}
+		for _, rec := range recs {
+			if rec.ID != "big" {
+				continue
+			}
+			if len(recs) != 1 {
+				t.Errorf("the long line shares %s with %d other records", filepath.Base(lf.Path), len(recs)-1)
+			}
+			p := rec.Parts[0]
+			if p.State != model.ContentTooLarge || p.Text != "" || p.Bytes != 50_000 || p.SHA256 != sha256Hex(strings.Repeat("y", 50_000)) {
+				t.Errorf("the long line's part is %s with %d bytes of text, size %d and digest %q; want too_large with no text, the size and the text's digest",
+					p.State, len(p.Text), p.Bytes, p.SHA256)
+			}
+		}
+	}
+}
+
+// TestFilesAreCutByWhatTheRecordsTake covers lines that are small at the
+// source and larger once converted: each record adds its envelope, so a
+// budget's worth of short lines makes a file over the budget. The collector
+// cuts by the converted records, lands every line, and its cursor ends where
+// the source does.
+func TestFilesAreCutByWhatTheRecordsTake(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	var b strings.Builder
+	for i := 0; i < 400; i++ {
+		fmt.Fprintf(&b, "{\"uuid\":\"u%03d\",\"type\":\"system\",\"content\":\"x\"}\n", i)
+	}
+	mk(t, filepath.Join(src, "-proj-a", tSess+".jsonl"), b.String())
+	const budget = 4096
+	z := storage.NewZone(zone)
+	st, err := claudecode.New(src, z, budget).CollectAll(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Records != 400 {
+		t.Fatalf("landed %d records, want 400", st.Records)
+	}
+	files, err := storage.LandedFiles(z, tSess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ords := 0
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > budget {
+			t.Errorf("%s is %d bytes, over the budget of %d", filepath.Base(lf.Path), len(data), budget)
+		}
+		_, recs, err := sessiondata.All(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rec := range recs {
+			ords++
+			if rec.Ord != uint64(ords) {
+				t.Fatalf("record %d has ord %d: a line was skipped or repeated at a cut", ords, rec.Ord)
+			}
+		}
+	}
+	if len(files) < 3 {
+		t.Fatalf("400 records went into %d file(s)", len(files))
+	}
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// TestTailTakesOneLongLine is the tail half of the same rule: past the
+// budget, one line is taken, the rest is left for the next read, and a long
+// line still being written is not taken at all.
+func TestTailTakesOneLongLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.jsonl")
+	long := strings.Repeat("x", 5000)
+	writeFile(t, p, long+"\nafter one\nafter two\n"+long)
+	cur := storage.NewCursor(storage.CursorAppend, "s.jsonl")
+	ch, err := claudecode.TailAppend(p, cur, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ch.Lines) != 1 || len(ch.Lines[0].Bytes) != 5000 || !ch.More || ch.NewOffset != 5001 {
+		t.Fatalf("took %d line(s) to offset %d, more %v; want the one long line to 5001 with more to come", len(ch.Lines), ch.NewOffset, ch.More)
+	}
+	cur.Offset, cur.Ord = ch.NewOffset, ch.NewOrd
+	ch, err = claudecode.TailAppend(p, cur, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ch.Lines) != 2 || string(ch.Lines[1].Bytes) != "after two" {
+		t.Fatalf("took %d line(s), want the two short ones", len(ch.Lines))
+	}
+	cur.Offset, cur.Ord = ch.NewOffset, ch.NewOrd
+	ch, err = claudecode.TailAppend(p, cur, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ch.Lines) != 0 || ch.NewOffset != cur.Offset {
+		t.Fatalf("took %d line(s) of a long line still being written", len(ch.Lines))
 	}
 }
 

@@ -184,31 +184,54 @@ func (w *sdWriter) land(dir, prefix, cursorName string, hdr sessiondata.Header, 
 		return false, nil
 	}
 	fresh := recs[cur.Ord:]
-	seq := w.state.Take()
-	hdr.H, hdr.Schema, hdr.Seq = 1, "", seq
+	hdr.H, hdr.Schema = 1, ""
 	hdr.At = w.now.UTC().Format(time.RFC3339Nano)
 	hdr.Adapter, hdr.Dialect, hdr.Session = mock.Name+"/"+mock.Version, mock.Dialect, w.p.Session
-	path := filepath.Join(dir, storage.LandedName(prefix, storage.Stamp(w.now), seq))
-	err = storage.WriteAtomic(path, storage.PermLanded, func(out io.Writer) error {
-		rw, err := sessiondata.NewWriter(out, &hdr)
+	// Files are cut as a collector cuts them, by what the records take once
+	// encoded, and a record over the budget loses its largest payloads, so
+	// both formats land the same parts.
+	for len(fresh) > 0 {
+		seq := w.state.Take()
+		hdr.Seq = seq
+		cut, err := sessiondata.NewCut(&hdr, w.maxDelta)
 		if err != nil {
-			return err
+			return false, err
 		}
-		for _, r := range fresh {
-			if err := rw.Write(r); err != nil {
+		n := 0
+		for n < len(fresh) {
+			ok, err := cut.Take(fresh[n])
+			if err != nil {
+				return false, err
+			}
+			if !ok {
+				break
+			}
+			n++
+		}
+		path := filepath.Join(dir, storage.LandedName(prefix, storage.Stamp(w.now), seq))
+		err = storage.WriteAtomic(path, storage.PermLanded, func(out io.Writer) error {
+			rw, err := sessiondata.NewWriter(out, &hdr)
+			if err != nil {
 				return err
 			}
+			rw.Budget(w.maxDelta)
+			for _, r := range fresh[:n] {
+				if err := rw.Write(r); err != nil {
+					return err
+				}
+			}
+			return rw.Close()
+		})
+		if err != nil {
+			return false, err
 		}
-		return rw.Close()
-	})
-	if err != nil {
-		return false, err
+		cur.Ord, cur.LastSeq, cur.State = cur.Ord+uint64(n), seq, storage.CursorActive
+		if err := cur.Save(cursorPath, w.now); err != nil {
+			return false, err
+		}
+		w.written = append(w.written, path)
+		fresh = fresh[n:]
 	}
-	cur.Ord, cur.LastSeq, cur.State = uint64(len(recs)), seq, storage.CursorActive
-	if err := cur.Save(cursorPath, w.now); err != nil {
-		return false, err
-	}
-	w.written = append(w.written, path)
 	return true, nil
 }
 
@@ -431,6 +454,10 @@ func (w *sdWriter) record(e *Event) *sessiondata.Record {
 			data = map[string]any{"runId": e.Launch.Run, "status": "async_launched", "transcriptDir": "subagents/workflows/" + e.Launch.Run, "workflowName": e.Launch.Name}
 		case e.StringEnrichment:
 			data = "a bare string, not an object"
+		case len(e.Changes) > 0 && isEditingTool(e.ToolName):
+			// The runtime's own record of an editing tool's result, which
+			// the adapter keeps as the result's data.
+			data = w.p.runtimeResult(e)
 		}
 		if !e.Replayed {
 			part.Data = jsLine(data)
@@ -513,6 +540,7 @@ func (w *sdWriter) provider() error {
 		return err
 	}
 	held := providerbody.NewSession()
+	held.Budget(w.maxDelta)
 	files, err := storage.LandedFiles(w.z, w.p.Session)
 	if err != nil {
 		return err

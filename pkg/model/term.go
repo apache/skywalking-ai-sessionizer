@@ -131,7 +131,7 @@ func Vocabulary() []string {
 		// qualification
 		ExactUnique, ExactAmbiguous, StrongInference, WeakInference, Unresolved, Conflict,
 		ContentAvailable, ContentRedacted, ContentOmitted, ContentHashOnly,
-		ContentSizeOnly, ContentTruncated, ContentUnavailable,
+		ContentSizeOnly, ContentTruncated, ContentUnavailable, ContentTooLarge,
 		TriggerExternal, TriggerNotification, TriggerUnknown,
 	}
 }

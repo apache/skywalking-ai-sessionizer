@@ -245,6 +245,14 @@ func fill(s *step, rec *sessiondata.Record, block *int) {
 	p := partOf(rec, block)
 	if p == nil {
 		s.Text = clip(readable(rec))
+		// A step that stands on a whole record reads every part of it, so
+		// one part too large to land, such as a screenshot pasted beside a
+		// sentence, makes the step say so. Its text is what landed.
+		for _, part := range rec.Parts {
+			if part.State == model.ContentTooLarge {
+				s.State = model.ContentTooLarge
+			}
+		}
 		return
 	}
 	s.Name, s.Failed, s.State, s.Bytes = p.Name, p.Failed, p.State, p.Bytes

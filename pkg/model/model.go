@@ -171,6 +171,10 @@ const (
 	ContentSizeOnly    = "size_only"
 	ContentTruncated   = "truncated"
 	ContentUnavailable = "unavailable"
+	// ContentTooLarge is a payload that was not landed because its record
+	// would not fit a landed file's byte budget on its own. Its size and
+	// digest stay.
+	ContentTooLarge = "too_large"
 )
 
 // StreamRole distinguishes lineages within one session.

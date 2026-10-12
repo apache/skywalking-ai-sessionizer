@@ -48,6 +48,12 @@ type Writer struct {
 	bw *bufio.Writer
 	h  hash.Hash
 	n  int
+
+	kind Kind
+	// head is the header line's size, its newline included, and max the
+	// largest record line Budget allows: zero until it is set.
+	head int
+	max  int
 }
 
 // End is the last line of a .sd file.
@@ -75,12 +81,29 @@ func NewWriter(w io.Writer, h *Header) (*Writer, error) {
 	if err := bw.WriteByte('\n'); err != nil {
 		return nil, err
 	}
-	return &Writer{bw: bw, h: sum}, nil
+	return &Writer{bw: bw, h: sum, kind: h.Kind, head: len(enc) + 1}, nil
 }
 
-// Write appends one record.
+// Budget makes Write fit every record into a file of budget bytes on its
+// own, header and closing line included, by Fit. A collector cuts its files
+// at the budget by narrowing what goes into them, and this is the one case
+// that cannot narrow: a single record over the budget.
+//
+// A provider_body record is never changed here. Its last part is the
+// manifest that rebuilds the body, and its cutter fits it instead, knowing
+// which of its parts later bodies refer to.
+func (w *Writer) Budget(budget int64) {
+	if budget <= 0 || w.kind == KindProviderBody {
+		w.max = 0
+		return
+	}
+	w.max = max(int(budget)-w.head-endLineMax-1, 1)
+}
+
+// Write appends one record. Under a Budget, it may first omit the record's
+// largest payloads, in place, so the caller's index sees what landed.
 func (w *Writer) Write(r *Record) error {
-	enc, err := encodeRecord(r)
+	enc, _, err := fit(r, w.max)
 	if err != nil {
 		return fmt.Errorf("sessiondata: encode record %d: %w", r.Ord, err)
 	}

@@ -98,6 +98,7 @@ not there.
 | `strong_inference` | — | derived here | derived |
 | `summarizes` | — | derived here | not read: nothing joins a summary to its tombstone |
 | `talk` | — | derived here | one readable interaction: a prompt and the turn it opened |
+| `too_large` | — | derived here | no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget |
 | `trigger` | — | derived here | derived: a user record that is neither a steering note nor written by the engine |
 | `truncated` | — | derived here | not read: the model is sent a preview of a large tool output, and that preview is the result here; the whole output is in tool-outputs, which is not collected |
 | `unknown` | — | derived here | derived |

@@ -75,7 +75,7 @@ Set on each adapter.
 | --- | --- | --- |
 | `mode` | `watch` | `watch` collects again every `interval`. `once` collects once; `asz collect` then exits. `-once` on the command line does the same. |
 | `interval` | `10m` | The time between collections. `asz collect` and `asz server` also collect when they start. |
-| `max_delta_bytes` | `2097152` | The largest file asz writes from one source, 2 MiB. A single longer record gets a file of its own. |
+| `max_delta_bytes` | `2097152` | The largest file asz writes from one source, 2 MiB. A single longer record gets a file of its own, and its largest payloads are left out until it fits: see [Too large to land](../formats/session-data.md#too-large-to-land). |
 
 When several adapters are enabled, asz collects from all of them together, at the shortest
 `interval` among them, and watches if any of them has `mode: watch`.

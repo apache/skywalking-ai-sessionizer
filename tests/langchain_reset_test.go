@@ -395,11 +395,25 @@ func TestABodyNamesThePromptItsCallWasPlacedUnder(t *testing.T) {
 // conversation has to come out whole: the boundary is kept once and the
 // summary joins it.
 func TestAResetRecoversWhenOnlyItsBoundaryLanded(t *testing.T) {
+	// Smaller than a boundary or a summary as it was read, 5,322 bytes each,
+	// so each lands in a file of its own, and larger than the largest file of
+	// one record, 4,449 bytes, with room for a provider body file's header,
+	// so no record has its payload omitted.
+	const perRecord = 5120
 	zone := storage.NewZone(t.TempDir())
-	session := landIntoBudget(t, zone, "summarized", 1)[0]
+	session := landIntoBudget(t, zone, "summarized", perRecord)[0]
 	files, err := storage.LandedFiles(zone, session)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, f := range files {
+		eachRecordIn(t, f.Path, func(rec sessiondata.Record) {
+			for _, p := range rec.Parts {
+				if p.State == model.ContentTooLarge {
+					t.Fatalf("%s lost a part to the budget of %d; the corpus changed", rec.ID, perRecord)
+				}
+			}
+		})
 	}
 	crashAt := uint64(0)
 	for _, f := range files {
@@ -434,7 +448,7 @@ func TestAResetRecoversWhenOnlyItsBoundaryLanded(t *testing.T) {
 	}
 	t.Logf("crashed after file %d, %d files lost", crashAt, removed)
 
-	landIntoBudget(t, zone, "summarized", 1)
+	landIntoBudget(t, zone, "summarized", perRecord)
 	view := parsed(t, zone, session)
 	resetsAre(t, view, 2)
 	// Each summary is a record that exists again, with the summariser's words.

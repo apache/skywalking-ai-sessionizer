@@ -22,14 +22,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"unicode/utf8"
 
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // ErrRepeat reports a body the session already holds with the same bytes: a
 // file landed again after an interrupted pass.
 var ErrRepeat = errors.New("providerbody: the session already holds this body")
+
+// ErrTooLarge reports a body that cannot be rebuilt because a piece of it was
+// too large to land: its record, or an earlier one it refers to, holds the
+// piece's size and digest and not its bytes.
+var ErrTooLarge = errors.New("providerbody: a piece of the body was too large to land")
 
 // maxTips bounds how many chain tips a new body is compared against. A tip is
 // one per chain that is still growing: the main stream and each child running
@@ -47,6 +54,10 @@ const cacheLimit = 64 << 20
 // and rebuilds any of them. Records must be added in the order they landed,
 // because a record may refer only to what came before it.
 type Session struct {
+	// maxRecord is the largest line a record Encode returns may take in a
+	// landed file, its newline included; zero means no limit. See Budget.
+	maxRecord int64
+
 	records map[string]*held
 	pieces  map[string]pieceAt
 	// tips holds the latest request body of each chain, by chain, and
@@ -72,6 +83,17 @@ type pieceAt struct {
 // NewSession returns an empty session.
 func NewSession() *Session {
 	return &Session{records: map[string]*held{}, pieces: map[string]pieceAt{}, tips: map[string]string{}, cache: map[string][]byte{}}
+}
+
+// Budget makes Encode fit every record into a landed file of budget bytes on
+// its own, the file's header and closing line included. A record over it has
+// its largest pieces taken out until it fits. Zero or less means no limit; a
+// budget no record can fit still takes out every piece it can.
+func (s *Session) Budget(budget int64) {
+	s.maxRecord = 0
+	if budget > 0 {
+		s.maxRecord = max(budget-FileOverhead, 1)
+	}
 }
 
 // ManifestOf returns the manifest a provider_body record carries as its last part.
@@ -155,8 +177,9 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 			return fmt.Errorf("providerbody: %s is held with digest %s and landed again with %s", rec.ID, h.m.SHA256, m.SHA256)
 		}
 		// A repeat is a repeat only if it rebuilds to what it claims; a
-		// record that says so and does not is damage.
-		if _, err := s.rebuild(rec, m); err != nil {
+		// record that says so and does not is damage. One that cannot be
+		// rebuilt for a piece too large to land is still a repeat.
+		if _, err := s.rebuild(rec, m, nil); err != nil && !errors.Is(err, ErrTooLarge) {
 			return err
 		}
 		return ErrRepeat
@@ -166,7 +189,13 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 		if p.Kind != sessiondata.PartData {
 			continue
 		}
-		if d := digest(p.Data); !hasPiece(s.pieces, d) {
+		// A piece taken out is still a piece: a later body that holds it
+		// refers to it rather than taking it out again.
+		d := p.SHA256
+		if p.State != model.ContentTooLarge {
+			d = digest(p.Data)
+		}
+		if !hasPiece(s.pieces, d) {
 			s.pieces[d] = pieceAt{id: rec.ID, part: i}
 		}
 	}
@@ -207,6 +236,29 @@ func (s *Session) Body(id string) ([]byte, error) {
 	return append([]byte(nil), b...), nil
 }
 
+// BodyFrom rebuilds the body held under id, as Body does, taking the bytes of
+// any piece that was too large to land from source: another copy of the
+// body, such as the file the runtime wrote. A piece is matched by its
+// digest, so a source that is not the same body gives nothing it can use.
+func (s *Session) BodyFrom(id string, source []byte) ([]byte, error) {
+	h, ok := s.records[id]
+	if !ok {
+		return nil, fmt.Errorf("providerbody: no body %s", id)
+	}
+	fill := map[string][]byte{digest(source): source}
+	if spans, _, err := pieces(source); err == nil {
+		for _, sp := range spans {
+			piece := source[sp.a:sp.z]
+			fill[digest(piece)] = piece
+		}
+	}
+	b, err := s.rebuild(h.rec, h.m, fill)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), b...), nil
+}
+
 // body is Body without the copy, for this package only: a later body's copy
 // must read the base as it was rebuilt, and nothing here changes it.
 func (s *Session) body(id string) ([]byte, error) {
@@ -217,7 +269,7 @@ func (s *Session) body(id string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("providerbody: no body %s", id)
 	}
-	b, err := s.rebuild(h.rec, h.m)
+	b, err := s.rebuild(h.rec, h.m, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,8 +290,10 @@ func (s *Session) remember(id string, b []byte) {
 }
 
 // rebuild joins a record's segments. The record need not be added yet, so a
-// record can be checked before it lands.
-func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest) ([]byte, error) {
+// record can be checked before it lands. fill holds, by digest, the bytes of
+// pieces that were too large to land, when the caller has them: the body it
+// is encoding. Without them such a piece fails with ErrTooLarge.
+func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest, fill map[string][]byte) ([]byte, error) {
 	if m.Bytes < 0 || m.Bytes > MaxBytes {
 		return nil, fmt.Errorf("providerbody: %s claims %d bytes", rec.ID, m.Bytes)
 	}
@@ -260,7 +314,7 @@ func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest) ([]byte, error) 
 			if *seg.Part < 0 || *seg.Part >= len(rec.Parts)-1 {
 				return nil, fmt.Errorf("providerbody: %s names part %d it does not have", rec.ID, *seg.Part)
 			}
-			b, err := partBytes(rec.Parts[*seg.Part])
+			b, err := partBytes(rec.Parts[*seg.Part], fill)
 			if err != nil {
 				return nil, err
 			}
@@ -273,7 +327,7 @@ func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest) ([]byte, error) 
 			if !ok {
 				return nil, fmt.Errorf("providerbody: %s names piece %s, which no earlier record holds", rec.ID, seg.Piece)
 			}
-			b, err := partBytes(s.records[at.id].rec.Parts[at.part])
+			b, err := partBytes(s.records[at.id].rec.Parts[at.part], fill)
 			if err != nil {
 				return nil, err
 			}
@@ -301,8 +355,14 @@ func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest) ([]byte, error) 
 	return out, nil
 }
 
-func partBytes(p sessiondata.Part) ([]byte, error) {
-	if p.Kind == sessiondata.PartUnknown {
+func partBytes(p sessiondata.Part, fill map[string][]byte) ([]byte, error) {
+	switch {
+	case p.State == model.ContentTooLarge:
+		if b, ok := fill[p.SHA256]; ok {
+			return b, nil
+		}
+		return nil, fmt.Errorf("%w: %d bytes with digest %s", ErrTooLarge, p.Bytes, p.SHA256)
+	case p.Kind == sessiondata.PartUnknown:
 		return p.Raw()
 	}
 	return p.Data, nil
@@ -338,10 +398,19 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 		rec.Call = k.Call
 	}
 
-	parts, why := s.cut(body, m)
+	// The bytes of every piece of this body, by digest, so the round trip
+	// can check a record whose pieces did not fit.
+	fill := map[string][]byte{sum: body}
+	parts, why := s.cut(body, m, fill)
 	if why == "" {
 		rec.Parts = append(parts, manifestPart(m))
-		if err := s.roundTrip(rec, m); err != nil {
+		s.fit(rec, fill)
+		// What is left after the pieces go is the manifest, and a body of
+		// many short strings keeps nearly all of itself there. Whole, the
+		// body is one part, which can be taken out.
+		if s.maxRecord > 0 && RecordBytes(rec) > s.maxRecord {
+			why = "the record is larger than the budget with every piece taken out"
+		} else if err := s.roundTrip(rec, fill); err != nil {
 			why = err.Error()
 		}
 	}
@@ -353,7 +422,8 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 		// does not repeat it.
 		m.Depth, m.Segments = 0, []Segment{{Part: &zero}}
 		rec.Parts = []sessiondata.Part{whole, manifestPart(m)}
-		if err := s.roundTrip(rec, m); err != nil {
+		s.fit(rec, fill)
+		if err := s.roundTrip(rec, fill); err != nil {
 			return nil, err
 		}
 	}
@@ -363,8 +433,9 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 	return rec, nil
 }
 
-// cut builds the parts and segments of a body, or says why it cannot.
-func (s *Session) cut(body []byte, m *Manifest) ([]sessiondata.Part, string) {
+// cut builds the parts and segments of a body, or says why it cannot. It
+// adds every piece of the body to fill.
+func (s *Session) cut(body []byte, m *Manifest, fill map[string][]byte) ([]sessiondata.Part, string) {
 	if !utf8.Valid(body) {
 		return nil, "the body is not valid UTF-8"
 	}
@@ -396,6 +467,7 @@ func (s *Session) cut(body []byte, m *Manifest) ([]sessiondata.Part, string) {
 		}
 		piece := body[sp.a:sp.z]
 		d := digest(piece)
+		fill[d] = piece
 		switch i, ok := local[d]; {
 		case ok:
 			m.Segments = append(m.Segments, Segment{Part: &i})
@@ -513,10 +585,48 @@ func manifestPart(m *Manifest) sessiondata.Part {
 	return sessiondata.Part{Kind: sessiondata.PartData, Data: data, State: "available", Bytes: len(data)}
 }
 
+// fit takes out the largest parts a record holds of its body, never its
+// manifest, until the record is a line of at most the budget's bytes. A record
+// of one body is cut by leaving out what earlier records hold, so a body whose
+// new pieces are larger than the budget is the one case left: the first
+// request after a person pasted a screenshot, measured at 4.6 MB. A part taken
+// out keeps its place and its size, and its sha256 is the piece's digest, so
+// every segment still names it and later bodies refer to it as to any piece.
+// The body then cannot be rebuilt, and a reader is told why with ErrTooLarge.
+func (s *Session) fit(rec *sessiondata.Record, fill map[string][]byte) {
+	if s.maxRecord <= 0 || RecordBytes(rec) <= s.maxRecord {
+		return
+	}
+	own := len(rec.Parts) - 1
+	order := make([]int, 0, own)
+	for i := range rec.Parts[:own] {
+		if len(rec.Parts[i].Data) > 0 {
+			order = append(order, i)
+		}
+	}
+	sort.SliceStable(order, func(a, b int) bool { return len(rec.Parts[order[a]].Data) > len(rec.Parts[order[b]].Data) })
+	for _, i := range order {
+		p := &rec.Parts[i]
+		b, err := partBytes(*p, fill)
+		if err != nil {
+			continue
+		}
+		d := digest(b)
+		fill[d] = b
+		p.Data, p.Encoding = nil, ""
+		p.State, p.SHA256, p.Bytes = model.ContentTooLarge, d, len(b)
+		if RecordBytes(rec) <= s.maxRecord {
+			return
+		}
+	}
+}
+
 // roundTrip writes the record with the Session Data writer, reads it back,
 // and rebuilds the body from what was read. Only that proves the bytes a
-// reader will get, since the writer compacts every data part.
-func (s *Session) roundTrip(rec *sessiondata.Record, m *Manifest) error {
+// reader will get, since the writer compacts every data part. fill gives the
+// bytes of the pieces that were too large to land, so a record that omits
+// them is still proven to rebuild the body once they are given.
+func (s *Session) roundTrip(rec *sessiondata.Record, fill map[string][]byte) error {
 	var buf bytes.Buffer
 	hdr := &sessiondata.Header{Kind: sessiondata.KindProviderBody, Session: "check", Src: ".", Dialect: "check"}
 	w, err := sessiondata.NewWriter(&buf, hdr)
@@ -541,10 +651,9 @@ func (s *Session) roundTrip(rec *sessiondata.Record, m *Manifest) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.rebuild(back, bm); err != nil {
+	if _, err := s.rebuild(back, bm, fill); err != nil {
 		return fmt.Errorf("the record does not rebuild the body after a round trip: %w", err)
 	}
-	_ = m
 	return nil
 }
 

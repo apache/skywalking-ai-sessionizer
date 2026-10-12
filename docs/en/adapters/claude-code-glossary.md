@@ -97,6 +97,7 @@ than a plausible word that would send a reader looking for a field that does not
 | `size_only` | only the length was kept |
 | `strong_inference` | no identifier, but a well-founded structural argument |
 | `talk` | one readable interaction; derived from where a run was triggered |
+| `too_large` | no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget, such as a pasted screenshot |
 | `truncated` | part of the bytes, with the full length reported |
 | `unavailable` | the runtime never wrote it, or the source was pruned |
 | `unknown` | no record of the run states a trigger |

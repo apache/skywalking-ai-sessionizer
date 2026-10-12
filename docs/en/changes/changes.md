@@ -191,6 +191,29 @@
   stopped the session's pass at the failed file, before anything was saved, and they land in the same
   order now. Records enter the index only once their file has landed, and a file that did not land
   gives its number back.
+- Every landed file fits `max_delta_bytes`. A collector cut a file by the bytes it read, and a
+  record is larger than its source line by its envelope: 4 KiB of short lines landed as 19 KB. Files
+  are now cut by what their records take once written. A single record larger than the budget lands
+  alone, and its largest payloads are taken out, one at a time, until the file fits. A part taken
+  out keeps its place, its kind and its identifiers, and says `too_large`, with the size of the
+  original and the SHA-256 of what it carried in the new part field `sha256`. A part loses its data
+  before its text, so a result whose runtime record of a written file is large keeps its readable
+  text, and says `truncated`. A change record or an
+  execution record is never taken out whole, since a step joins to it: a change record is made
+  smaller in its own format, its largest files losing their hunks and then its file list going, so
+  it keeps its identity and says `truncated`, as its entry in the document now says with `state`. A pasted screenshot measured 4.6 MB in
+  one transcript line, and a file that size is more than a receiver may have to store at once. A
+  provider body is fitted by its cutter, which never takes out the manifest: a later body names a
+  piece taken out as it names any piece, a body of short strings with nothing to take out lands
+  whole and is taken out whole, and such a body cannot be rebuilt from the root. In the document, a
+  step that stands on a whole record says `too_large` when a part of it was taken out. `asz verify`
+  counts both apart from damage, and still holds a body's record to its manifest. See
+  [Too large to land](../formats/session-data.md#too-large-to-land).
+- A source line larger than the budget lands in a file of its own. The Claude Code, Kiro and
+  workspace change collectors read on to the end of the source to find where the long line ended,
+  and landed every line up to the last one in the same file: one 4.6 MB line made an 8 MB file. The
+  window now grows until it holds the line's end, and stops growing when the source was cut short
+  while it was read.
 
 ## Configuration
 
@@ -239,6 +262,19 @@
 - golangci-lint is v2.14.0. Go 1.27.2 writes export data version 5, which v2.13.2 cannot read, so
   under it lint stopped at the first package with a type-check error. CI takes the newest Go 1.27
   release, so CI failed as soon as 1.27.2 came out.
+- A scenario's tool result and queued message can be padded, `result: {text, pad}` and
+  `queued: {text, pad}`, to carry more than a landed file's budget without spelling it out. An
+  expectation counts the document's steps by content state, `view: {states}`, and its change records
+  by theirs, `view: {change_states}`. A new property,
+  `files_fit_the_budget`, holds every landed file of every scenario to the budget.
+  `parts_keep_source_bytes` checks that a part taken out names the digest of a value of its source
+  record, and rebuilds a provider body that took a piece out from the file the runtime wrote, and
+  `records_match` compares the size and digest of a part taken out or shrunk across the two formats.
+  The `too-large` scenario returns a 40,000-byte result, queues a 30,000-byte message, and writes two
+  30,000-byte files, one through a shell command the plugin observes and one through the runtime's
+  own Write tool, under a 16 KiB budget. The scenario's Session Data writer now gives an editing
+  tool's result the runtime's own record of it as data, as the adapter lands it; it gave such a
+  result the shell's shape before.
 
 ## Conversation model
 

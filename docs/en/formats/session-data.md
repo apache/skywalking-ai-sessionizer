@@ -270,6 +270,22 @@ reads it back and rebuilds the body. A body that does not come back whole, or is
 in valid UTF-8, lands whole in one `unknown` part, whose text says why it was not cut. `asz verify` rebuilds every landed
 body and compares it with `sha256`, and reports a reference to something the session does not hold.
 
+A record whose new pieces are larger than the collector's `max_delta_bytes` has its largest pieces
+taken out until it fits, as [Too large to land](#too-large-to-land) describes for any record, and
+never its manifest. This is the first request after a person pasted a screenshot. A piece taken out
+keeps its place, so every segment still names it, and its `sha256` is the piece's digest, so a later
+body that holds the same piece names it as any earlier piece. A body made of short strings keeps
+nearly all of itself in the manifest's literals, so when the record is still too large with every
+piece taken out, the body lands whole in one `unknown` part, and that part is taken out.
+
+A body with a piece taken out cannot be rebuilt from the root: `Session.Body` returns `ErrTooLarge`,
+and `Session.BodyFrom` rebuilds it from another copy of the body, such as the file the runtime wrote.
+A reader registers a piece taken out by its `sha256`, as any piece, so a later body that names it is
+read, and one that names only other pieces still rebuilds. The adapter's check before landing
+rebuilds the record with the pieces it took out. No body copies the front of a body that cannot be
+rebuilt. `asz verify` counts these bodies apart from damage, and still holds the record's `bytes`
+and `sha` to its manifest.
+
 On two captures of Claude Code 2.1.260, the landed `provider_body` files were 25.5% and 21.6% of the
 bytes Claude Code wrote, and all 42 bodies rebuilt exactly.
 
@@ -299,8 +315,8 @@ reads every landed file this way.
 | `data` | structure that is not prose: a record the runtime keeps for itself, a manifest | `data` |
 | `unknown` | content the dialect could not describe | the bytes in `data` as one JSON string, the bytes themselves or their base64 when `encoding` is `base64`, and the reason in `text` |
 
-In a part, `k`, `text`, `id`, `name`, `of`, `server`, `server_tool`, `media`, `encoding` and
-`state` are strings, `bytes` is an integer, `failed` is a boolean, and `data` is any JSON value.
+In a part, `k`, `text`, `id`, `name`, `of`, `server`, `server_tool`, `media`, `encoding`, `state`
+and `sha256` are strings, `bytes` is an integer, `failed` is a boolean, and `data` is any JSON value.
 
 `server` and `server_tool` say which MCP server a call is addressed to and which of its tools. An
 adapter sets them only where its runtime's name for the call splits exactly. Claude Code names such a
@@ -311,8 +327,41 @@ form of the configured name, so "claude.ai Claude Docs" is `claude_ai_Claude_Doc
 server was configured with is in the call's execution record, when there is one.
 
 Every part carries `state` and `bytes`. `state` is one of `available`, `truncated`, `redacted`,
-`omitted` or `unavailable`, and `bytes` is the size of the original even when the part holds less.
-A reader is always told how much of the original it has.
+`omitted`, `unavailable` or `too_large`, and `bytes` is the size of the original even when the part
+holds less. A reader is always told how much of the original it has.
+
+### Too large to land
+
+A landed file travels whole, so the collector's `max_delta_bytes` is the most a receiver has to store
+at once. A collector cuts a file by what its records take once written, not by the bytes they were
+read from: a record carries an envelope its source line does not, and 4 KiB of short source lines
+measured 19 KB of records. One record cannot be cut: a pasted screenshot measured 4.6 MB in one
+transcript line. Such a record lands alone in a file of its own, and its largest payloads are taken
+out, one at a time, until the file fits.
+
+A part taken out keeps its place, its kind and every identifier: `id`, `name`, `of`, `server`,
+`server_tool`, `failed` and `media`. Its `data` and `encoding` go first, and then its `text`, except
+an `unknown` part's, which is the reason its bytes were not described rather than content. A part
+with text and data, such as a result with the runtime's structured copy of it, so keeps its readable
+text while it can: its `state` is `truncated`. A part with nothing left says `too_large`. Its
+`bytes` is the size of the original, and its `sha256` is the SHA-256 of what was taken out first:
+an `unknown` part's bytes, other data compacted as the writer lands it, or the text of a part with
+no data. A reader still sees the step, and can match the payload against another copy of it.
+
+A `changes/1` record and an `execution/1` record are evidence a step joins to by its tool call, so
+neither is ever taken out whole: a reader that found nothing would read that the call changed no file
+or ran nowhere. A change record is made smaller in its own format instead. Its file with the largest
+hunks loses them and says its `diff` is `too_large`, as a diff too large to compute says, and its
+additions and deletions stay. This goes on, file by file, until the record fits. When no file has
+hunks left, its files, overlaps and gaps go, and it keeps its identity, its tool, its window and
+`changed_files`. Its part says `truncated`, with the original's `bytes` and `sha256`, and the record
+still joins its step. An execution record keeps sizes and digests only, never what was sent or
+returned, so it is a few hundred bytes and is left as it is.
+
+Of two payloads of the same size, the one in the earlier part goes first, so the same record always
+loses the same parts. No other part carries `sha256`. A record that is still too large with every
+payload taken out lands as it is: what is left is its identifiers, its label and the list of its
+parts. `asz repack` carries records as they landed, and takes nothing out.
 
 ### What data holds
 
@@ -360,7 +409,8 @@ The measured corpus is 62 Claude Code sessions: 3,032 files and 1,100.1 MB of so
 tool result in it was 1.1 MB. Over its 28 sessions larger than 1 MB, the share of a session that is
 tool output ran from 17.3% to 83.5%, with a median of 35.1%. A rule tuned to the median is wrong by
 a factor of two at both ends. So every part states its own size and state, and a reader decides.
-No built-in adapter writes `truncated` or `omitted`, so no part they write is clipped. Clipping is
+No built-in adapter writes `omitted`, and a part one writes as `truncated` is one made smaller to fit
+the budget, so no part they write is clipped otherwise. Clipping is
 left to a reader, such as the [asz.view](asz-view.md#a-node-in-talks) document, which clips a
 node's text and gives the full size beside it. A part is still not always all the runtime gave.
 The Claude Code dialect leaves some content out with no `dropped` entry. Its
