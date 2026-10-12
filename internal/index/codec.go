@@ -131,9 +131,9 @@ func (ix *Index) Write(dir string) error {
 	return os.Rename(tmp, path)
 }
 
-// Load reads an index written by Write. A missing file, a foreign file or a
-// schema mismatch returns ok=false rather than an error: the index is derived,
-// so the caller rebuilds instead of migrating.
+// Load reads an index written by Write. A missing file, a foreign file, a
+// schema mismatch or entries out of landed order return ok=false rather than an
+// error: the index is derived, so the caller rebuilds instead of migrating.
 func Load(dir, session string) (ix *Index, ok bool, err error) {
 	data, err := os.ReadFile(filepath.Join(dir, "entries.bin"))
 	if err != nil {
@@ -213,6 +213,15 @@ func Load(dir, session string) (ix *Index, ok bool, err error) {
 		decodeBody(b, &bodies[i])
 	}
 
+	// Entries are in landed order, and a round's watermark takes the entries
+	// at or below it as a prefix (Through). An index whose sequences go back
+	// was extended twice over the same files; it is built again rather than
+	// read.
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Seq < entries[i-1].Seq {
+			return nil, false, nil
+		}
+	}
 	return &Index{
 		Session: session, Strings: loadInterner(strs),
 		Entries: entries, Blocks: blocks, Bodies: bodies,

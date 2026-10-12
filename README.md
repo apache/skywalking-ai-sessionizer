@@ -26,7 +26,7 @@ measured, stored and exported as one unit.
 
 ```text
 Conversation                          durable identity · ownership boundary
- └ Segment                            activity window · the COMMIT unit
+ └ Segment                            activity window
     └ Session                         observed source provenance
        ├ ExecutionStream  main        ordered parent-agent lineage
        │  └ Context epoch × N         model-context lifetime

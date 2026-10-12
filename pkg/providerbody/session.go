@@ -311,8 +311,8 @@ func partBytes(p sessiondata.Part) ([]byte, error) {
 // Encode cuts a body against what the session holds, checks that the record
 // rebuilds the body after a round trip through the Session Data writer and
 // reader, and adds it. A body that cannot be cut, or does not come back whole,
-// lands whole in one unknown part, and the manifest says why. A body the
-// session already holds returns ErrRepeat.
+// lands whole in one unknown part, whose text says why. A body the session
+// already holds returns ErrRepeat.
 func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 	body := b.Bytes
 	sum := digest(body)
@@ -325,7 +325,7 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 	k := b.Keys
 	m := &Manifest{
 		Schema: Schema, Role: b.Role, Src: b.Src, SHA256: sum, Bytes: len(body),
-		Model: k.Model, Session: k.Session, Run: k.Run, Call: k.Call, Request: k.Request, PreviousRequest: k.PreviousRequest,
+		Model: k.Model, Session: k.Session, Call: k.Call, Request: k.Request, PreviousRequest: k.PreviousRequest,
 	}
 	rec := &sessiondata.Record{Ord: 1, Sha: sum[:12], Bytes: len(body), ID: b.ID, Model: k.Model}
 	switch b.Role {
@@ -349,7 +349,9 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 		whole := sessiondata.Part{Kind: sessiondata.PartUnknown, Text: why, State: "available", Bytes: len(body)}
 		whole.SetRaw(body)
 		zero := 0
-		m.Depth, m.Why, m.Segments = 0, why, []Segment{{Part: &zero}}
+		// Why the body was not cut is the whole part's text; the manifest
+		// does not repeat it.
+		m.Depth, m.Segments = 0, []Segment{{Part: &zero}}
 		rec.Parts = []sessiondata.Part{whole, manifestPart(m)}
 		if err := s.roundTrip(rec, m); err != nil {
 			return nil, err

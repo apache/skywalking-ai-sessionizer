@@ -39,12 +39,10 @@ import (
 // measurable share of tool joins look ambiguous when they are not.
 func (b *builder) stage1Canonical() {
 	all := b.ix.Canonical()
-	// Everything above the watermark is set aside, not read. The index may
-	// already hold records a concurrent collector landed after this round's
-	// range was fixed, and a round must describe only the evidence its own
-	// header and input digest cover.
+	// The index holds nothing above the watermark: Session narrowed it before
+	// any stage ran.
 	//
-	// A workspace change record is set aside too. It is evidence beside a
+	// A workspace change record is set aside. It is evidence beside a
 	// stream, not a step of it: it names the tool it belongs to and a view
 	// joins the two. Letting it into a stream would change that stream's
 	// record count and time range, so a session with such records would
@@ -55,9 +53,6 @@ func (b *builder) stage1Canonical() {
 	bounded := make([]int32, 0, len(all))
 	for _, i := range all {
 		e := &b.ix.Entries[i]
-		if b.opt.ThroughSeq > 0 && uint64(e.Seq) > b.opt.ThroughSeq {
-			continue
-		}
 		if e.Kind == index.KindChanges || e.Kind == index.KindProviderBody || e.Kind == index.KindExecution {
 			continue
 		}
@@ -67,7 +62,6 @@ func (b *builder) stage1Canonical() {
 	b.stats.ProviderBodies = len(b.bodiesInWindow())
 	b.stats.Entries = len(b.canonical)
 	b.stats.Duplicates = len(b.ix.Entries) - len(all)
-	b.stats.Beyond = len(all) - len(b.canonical)
 }
 
 // streamInfo is one execution stream: an ordered lineage inside a session.
@@ -95,13 +89,14 @@ type streamInfo struct {
 // identifier - never from visual nesting, agent identity or timestamps.
 func (b *builder) stage2Streams() {
 	sessionNode := sessionflow.NodeID("session", b.opt.Session)
-	a := map[string]any{"conversation": b.opt.Conversation}
+	// The conversation is the round header's; the session node does not repeat
+	// it.
+	a := map[string]any{}
 	// The runtime writes a title and rewrites it as the work goes on - up to
 	// ninety times in one session - so the last one is the current one. It is
 	// the only name anything in this data has.
 	if t := b.latestTitle(); t != "" {
 		a["title"] = t
-		a["title_from"] = model.ObservedReplayable
 	}
 	// When the session began and when it was last active, from the record
 	// times the runtime wrote. A reader learns both without opening a landed

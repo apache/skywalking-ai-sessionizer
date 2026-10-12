@@ -99,6 +99,34 @@ func (ix *Index) Append(e Entry, blocks ...Block) {
 	ix.byRecord = nil // invalidate; Build rebuilds on demand
 }
 
+// Through returns the index as it stood when the landed file with sequence
+// seq was the last one: the entries at or below seq, with their blocks and
+// bodies, and lookup maps built over those alone.
+//
+// A round assembled under a watermark must draw on nothing past it, or it could
+// hold structure that its own header and input digest do not cover. Bounding
+// each lookup separately would leave the next new lookup unbounded; bounding
+// the index bounds them all. Entries are kept in landed order, so the entries
+// at or below seq are a prefix. Zero, or a seq at or above the last entry's,
+// returns ix itself.
+func (ix *Index) Through(seq uint64) *Index {
+	n := len(ix.Entries)
+	if seq == 0 || n == 0 || uint64(ix.Entries[n-1].Seq) <= seq {
+		return ix
+	}
+	k := sort.Search(n, func(i int) bool { return uint64(ix.Entries[i].Seq) > seq })
+	blocks := 0
+	if k > 0 {
+		last := ix.Entries[k-1]
+		blocks = int(last.BlockFirst + last.BlockCount)
+	}
+	bodies := sort.Search(len(ix.Bodies), func(i int) bool { return int(ix.Bodies[i].Entry) >= k })
+	return &Index{
+		Session: ix.Session, Strings: ix.Strings,
+		Entries: ix.Entries[:k:k], Blocks: ix.Blocks[:blocks:blocks], Bodies: ix.Bodies[:bodies:bodies],
+	}
+}
+
 // Build constructs the lookup maps. It is idempotent.
 func (ix *Index) Build() {
 	if ix.byRecord != nil {
@@ -262,7 +290,7 @@ func (ix *Index) Streams() []string {
 
 // Batch returns every entry the runtime filed under one orchestration.
 func (ix *Index) Batch(batchID string) []*Entry {
-	return ix.resolve(ix.byBatch, batchID)
+	return ix.resolve(&ix.byBatch, batchID)
 }
 
 // IsDuplicate reports whether an entry is a replayed copy of an earlier one.
@@ -290,14 +318,14 @@ func (ix *Index) Canonical() []int32 {
 
 // Run returns every entry of one agent loop, in landed order.
 func (ix *Index) Run(runID string) []*Entry {
-	return ix.resolve(ix.byRun, runID)
+	return ix.resolve(&ix.byRun, runID)
 }
 
 // AboutTool returns every record that names a tool use outside its content
 // blocks - a child's sidecar naming the call that created it, a notification
 // naming the call it completes.
 func (ix *Index) AboutTool(toolUseID string) []*Entry {
-	return ix.resolve(ix.byToolRef, toolUseID)
+	return ix.resolve(&ix.byToolRef, toolUseID)
 }
 
 // AboutChild returns every record that names a child agent stream, whether it
@@ -307,16 +335,18 @@ func (ix *Index) AboutTool(toolUseID string) []*Entry {
 // session: a nested child notifies the main stream while the call that created
 // it lives in an agent file, so resolution scoped to one file would miss it.
 func (ix *Index) AboutChild(stream string) []*Entry {
-	return ix.resolve(ix.byChild, stream)
+	return ix.resolve(&ix.byChild, stream)
 }
 
-func (ix *Index) resolve(m map[uint32][]int32, key string) []*Entry {
+// resolve looks a key up in one of the lookup maps. It takes the map's field,
+// not the map: Build fills the field, and a map read before Build is nil.
+func (ix *Index) resolve(m *map[uint32][]int32, key string) []*Entry {
 	ix.Build()
 	id, ok := ix.Strings.Lookup(key)
 	if !ok || id == 0 {
 		return nil
 	}
-	idxs := m[id]
+	idxs := (*m)[id]
 	out := make([]*Entry, 0, len(idxs))
 	for _, i := range idxs {
 		out = append(out, &ix.Entries[i])

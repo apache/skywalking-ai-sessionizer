@@ -287,6 +287,36 @@
   last time, and a node's, keep a time before 1970, which the last time used to lose, and no
   longer depend on the order Go gives a map when a record is at exactly 1970-01-01T00:00:00Z.
 
+- Segments are activity windows only. A segment node carries no attributes: its talks are its
+  `in_segment` relations, and its time range is theirs. `state`, `gates_unmet` and `committable` are
+  gone, with the four gates that set them. A round carries no clock, so the last window of every
+  session stayed `open` for ever, even in a session quiet for weeks, and nothing committed a
+  segment or read its state. In `asz.view` a segment keeps `id`, `talks`, `from` and `to`; whether
+  the last one is still going is for a reader, who knows the time.
+- A round no longer repeats what it says elsewhere. Gone from the nodes: the session's
+  `conversation`, which the header names, and `title_from`; an epoch's `records`; a talk's `loops`
+  and `runs`, which its runs are; a talk's and a run's `trigger` (on the main stream a talk's first
+  run is external and every later run a notification, and a child's talk is unknown); a call's
+  `fragments`, which its `refs` are; and a tool's `name`, which its call part carries. A provider
+  body's manifest no longer repeats a request's `run`, which is the record's own, or `why`, which is
+  the text of the part that holds the body whole. The fixture conversation's round is 6% smaller.
+  The header's `bash_runs` is counted as before, from the tool calls assembly made.
+- The next round of an existing conversation revises each session, segment, epoch, talk, run, call and
+  tool node once, without the dropped keys. Nothing is landed again, and the parser and policy stay
+  the same.
+- Revisions that need no new evidence go first, cut to the round budget by their frames. A round
+  cannot be narrowed below one landed file, so on a long conversation an upgrade's revisions made one
+  round past `max_round_bytes`: 12.5 MB for 35,434 nodes on a 17 MB chain, more than the 10 MiB one
+  write may be in a BanyanDB cluster. They are now rounds of their own over no new file, six of at most 2 MiB
+  there, and the round of the new evidence follows.
+- The Claude Code provider adapter extends only an index that agrees with its saved state, as the
+  other adapters do. A pass that wrote the index and stopped before saving its state made the next
+  pass index the same files a second time, out of landed order.
+- A round cut by `max_round_bytes` reads nothing past its watermark, not even through a lookup.
+  Finding the record a reset continues from, or the run a record's parents lead to, could reach
+  records past the round's `through_seq`, so the round could hold structure its own header and input
+  digest did not cover. Assembly now works on the index as it stood at the watermark.
+
 ## Release
 
 - The `pypi` skill says what a release manager sets up before an upload. PyPI requires two-factor

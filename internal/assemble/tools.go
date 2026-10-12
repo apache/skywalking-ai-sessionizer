@@ -145,11 +145,9 @@ func (b *builder) manifestFor(t *toolUse) *index.Entry {
 // from record timestamps, timing is unavailable rather than guessed from the
 // gap between two records.
 func (b *builder) emitTool(t *toolUse, parent string) {
-	a := map[string]any{
-		"name": t.Name,
-		// The request lives in the tool_use block; the reference below locates it.
-		"timing": model.Unavailable,
-	}
+	// The tool's name is the call part's, which the request reference below
+	// locates; it is not repeated here.
+	a := map[string]any{"timing": model.Unavailable}
 	// A call to an MCP server names the server and the tool, as the adapter
 	// read them from the call's name. They are the runtime's names, which
 	// can differ from the configured ones; which server ran the call is an
@@ -195,5 +193,6 @@ func (b *builder) emitTool(t *toolUse, parent string) {
 		Parent: parent, Stream: t.Stream.Name,
 		Ref: refPtr(refs[0]), Refs: refs, Attrs: attrs(a),
 	})
+	b.toolName[t.NodeID] = t.Name
 	b.stats.Steps++
 }

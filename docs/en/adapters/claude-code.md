@@ -479,7 +479,7 @@ pass). Two consequences:
   conversation continuing past them, and 7,311 of them had their tools run. Nothing waits for them,
   and nothing is marked open.
 
-Every `llm.call` node in a round carries `fragments` and `usage_from: last_fragment_in_line_order`. A
+Every `llm.call` node in a round carries `usage_from: last_fragment_in_line_order`, and its `refs` are its fragments in line order. A
 finished call adds `usage: observed_replayable` and `usage_at`, the `{seq, row}` of the fragment the
 usage is read from. An unfinished call has `usage: unavailable` and `stop_reason: unavailable`.
 [asz.view](../formats/asz-view.md#a-node-in-talks) copies the token counts from the one record

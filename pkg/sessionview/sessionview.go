@@ -244,12 +244,10 @@ type Origin struct {
 
 // Segment is one activity window, with the span of the talks placed in it.
 type Segment struct {
-	ID          string `json:"id"`
-	State       string `json:"state"`
-	Committable bool   `json:"committable"`
-	Talks       int    `json:"talks"`
-	From        int64  `json:"from"`
-	To          int64  `json:"to"`
+	ID    string `json:"id"`
+	Talks int    `json:"talks"`
+	From  int64  `json:"from"`
+	To    int64  `json:"to"`
 }
 
 // Node is one entity of the fold with what its record says, and its

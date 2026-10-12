@@ -138,9 +138,10 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   is never rewritten; later evidence produces a new revision in a later round.
 - **Entity ids come from stable evidence, never from position.** An id that shifts when an earlier
   source is backfilled cannot supersede its own earlier revision.
-- **A round is cut at a byte budget** by narrowing its input window, never by splitting its frames.
-  A round covering one landed file may exceed the budget, as a landed file holding one oversize
-  record may. `Round.More` says the chain has not reached the index yet.
+- **A round is cut at a byte budget** by narrowing its input window. A round covering one landed
+  file may exceed the budget, as a landed file holding one oversize record may. Revisions that need
+  no new evidence, as after an upgrade, go first in rounds over no new file, cut by their frames.
+  `Round.More` says the chain has not reached the index yet, or has revisions left.
 - **A round carries no wall-clock time**, so the same evidence reproduces the same bytes and digest.
   Anything mutable or temporal lives in `conversation.state`, outside every digest. Record times
   are evidence, not the clock: the header carries the window's first and last record time, and the

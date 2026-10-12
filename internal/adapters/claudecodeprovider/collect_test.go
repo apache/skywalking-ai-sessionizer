@@ -514,3 +514,49 @@ func TestADamagedFileDoesNotStopOtherSessions(t *testing.T) {
 		t.Fatal("a damaged file in one session kept another session's body from landing")
 	}
 }
+
+// A pass that wrote the index and stopped before saving its state leaves the
+// index ahead of the state. The next pass builds the index again rather than
+// adding those files a second time: each landed record is in it once, in
+// landed order, which a round's watermark relies on.
+func TestAnIndexAheadOfItsStateIsBuiltAgain(t *testing.T) {
+	f := newFixture(t)
+	f.request(sessionA, "", 2)
+	f.pass(all)
+	statePath := f.zone.IndexStatePath(sessionA)
+	first, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.request(sessionA, "", 3)
+	f.pass(all)
+	// The crash: the index holds the second pass, its state the first.
+	if err := os.Remove(statePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(statePath, first, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.request(sessionA, "", 4)
+	f.pass(all)
+
+	ix, ok, err := index.Load(f.zone.IndexDir(sessionA), sessionA)
+	if err != nil || !ok {
+		t.Fatalf("index: ok=%v %v", ok, err)
+	}
+	seen := map[[2]uint32]bool{}
+	var last uint32
+	for _, e := range ix.Entries {
+		if e.Seq < last {
+			t.Fatalf("entry at sequence %d follows one at %d", e.Seq, last)
+		}
+		last = e.Seq
+		if seen[[2]uint32{e.Seq, e.Row}] {
+			t.Fatalf("sequence %d row %d is indexed twice", e.Seq, e.Row)
+		}
+		seen[[2]uint32{e.Seq, e.Row}] = true
+	}
+	if len(seen) != 3 {
+		t.Fatalf("%d records indexed, want the 3 bodies landed", len(seen))
+	}
+}

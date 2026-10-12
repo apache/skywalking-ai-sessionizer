@@ -49,7 +49,7 @@ var glossary = model.NewGlossary(Dialect,
 	// ---- structure ----
 	model.Term{Unified: model.KindConversation, Native: "id", Where: "session.json",
 		Note: "one session is one conversation; Kiro Crew names no chain between the sessions of one chat"},
-	model.Term{Unified: model.KindSegment, Note: "an activity window chosen for commit"},
+	model.Term{Unified: model.KindSegment, Note: "an activity window"},
 	model.Term{Unified: model.KindSession, Native: "session", Where: "sessions/<workspace key>/sess_<id>"},
 	model.Term{Unified: model.KindStream, Native: "sub-execution", Where: "sub-executions/<subSessionId>.jsonl",
 		Note: "the main stream is messages.jsonl"},

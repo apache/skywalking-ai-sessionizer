@@ -22,8 +22,8 @@ checkpoints:
     talks_on: {main: 1, checker: 1}
     relations: {starts: 1, reports: 1, ends_with: 1}
     nodes:
-      tool/tool-run-make-build: {refs: 2, attrs: {name: Bash, result: available}}
-      tool/srvtool-websearch: {refs: 2, attrs: {name: WebSearch, result: available}}
+      tool/tool-run-make-build: {refs: 2, attrs: {name: null, result: available}}
+      tool/srvtool-websearch: {refs: 2, attrs: {name: null, result: available}}
   final:
     rounds: 2
     delta: true

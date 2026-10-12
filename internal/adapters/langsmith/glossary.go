@@ -56,7 +56,7 @@ var glossary = model.NewGlossary(Dialect,
 	// ---- structure ----
 	model.Term{Unified: model.KindConversation, Native: "extra.metadata.thread_id", Where: "a run",
 		Note: "with session_id and conversation_id as the other spellings; supplied, never inferred"},
-	model.Term{Unified: model.KindSegment, Note: "an activity window chosen for commit"},
+	model.Term{Unified: model.KindSegment, Note: "an activity window"},
 	model.Term{Unified: model.KindSession, Native: "session_name", Where: "a run",
 		Note: "the client's word for the PROJECT; a conversation is the thread key, and a session here is the two together"},
 	model.Term{Unified: model.KindStream, Note: "no equivalent: a nested agent is a run like any other"},

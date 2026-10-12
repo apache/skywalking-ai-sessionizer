@@ -93,7 +93,7 @@ not there.
 | `reports` | — | derived here | no equivalent |
 | `retries` | — | derived here | no equivalent |
 | `runtime.notification` | — | derived here | no equivalent: a subagent's end is the result of its call |
-| `segment` | — | derived here | an activity window chosen for commit |
+| `segment` | — | derived here | an activity window |
 | `size_only` | — | derived here | no equivalent |
 | `strong_inference` | — | derived here | derived |
 | `summarizes` | — | derived here | not read: nothing joins a summary to its tombstone |

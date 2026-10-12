@@ -85,15 +85,13 @@ type Manifest struct {
 	// moving cache marker taken out. It is storage, not structure: it picks
 	// the body a copy comes from, and says nothing a join may rely on.
 	Chain string `json:"chain,omitempty"`
-	// Why says the body is kept whole, in part 0, and why it was not cut.
-	Why string `json:"why,omitempty"`
 
 	// The values the body carries that join it, as its adapter read them,
 	// so a reader can join a body without rebuilding it. Empty when the
-	// body does not carry one.
+	// body does not carry one. A request's run is the record's own, not
+	// repeated here.
 	Model           string `json:"model,omitempty"`
 	Session         string `json:"session,omitempty"`
-	Run             string `json:"run,omitempty"`
 	Call            string `json:"call,omitempty"`
 	Request         string `json:"request,omitempty"`
 	PreviousRequest string `json:"previous_request,omitempty"`

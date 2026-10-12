@@ -120,8 +120,8 @@ type Input struct {
 	Endpoint    string
 	SendLogs    bool
 	SendMetrics bool
-	// Busy holds sessions another process held this pass, the pipeline's
-	// sessions to parse again.
+	// Busy holds the pipeline's sessions to parse again: another process
+	// held them this pass, or their parse failed. None of them is removed.
 	Busy map[string]bool
 }
 

@@ -264,3 +264,88 @@ func TestProviderBodiesAreIndexedAndSurviveTheRoundTrip(t *testing.T) {
 		t.Errorf("response entry: %+v", e)
 	}
 }
+
+// Through keeps the entries at or below a sequence and builds its lookups over
+// them alone, leaving the index it came from as it was.
+func TestThroughBoundsEveryLookup(t *testing.T) {
+	ix := build(t)
+	cut := ix.Through(1)
+	if _, ok := cut.EntryByRecord("u-c1"); ok {
+		t.Error("a record landed at sequence 2 was found through sequence 1")
+	}
+	if got := cut.Streams(); len(got) != 1 {
+		t.Errorf("Streams through 1: %v, want main only", got)
+	}
+	if got := cut.ProviderCall("msg_1"); len(got) != 2 {
+		t.Errorf("ProviderCall through 1: %d, want 2", len(got))
+	}
+	if got := cut.ToolBlocks("toolu_1"); len(got) != 2 {
+		t.Errorf("ToolBlocks through 1: %d, want 2", len(got))
+	}
+	if _, ok := ix.EntryByRecord("u-c1"); !ok {
+		t.Error("Through changed the index it was called on")
+	}
+	if ix.Through(0) != ix || ix.Through(2) != ix || ix.Through(9) != ix {
+		t.Error("a bound at or past the last entry must return the index itself")
+	}
+}
+
+// An index whose sequences go back was extended twice over the same files, by
+// a pass that wrote the index and stopped before saving its state. It is not
+// read: the caller builds it again from the landed files.
+func TestAnIndexOutOfLandedOrderIsNotRead(t *testing.T) {
+	ix := index.New("s")
+	in := ix.Strings
+	for _, seq := range []uint32{1, 2, 1, 2} {
+		ix.Append(index.Entry{Seq: seq, Row: 1, Record: in.ID("r")})
+	}
+	dir := t.TempDir()
+	if err := ix.Write(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := index.Load(dir, "s"); err != nil || ok {
+		t.Fatalf("an index out of landed order was read: ok=%v %v", ok, err)
+	}
+}
+
+// The first lookup on an index builds its maps, whichever lookup it is.
+func TestAFirstLookupBuildsTheMaps(t *testing.T) {
+	fresh := func() *index.Index {
+		ix := index.New("s")
+		in := ix.Strings
+		ix.Append(index.Entry{Seq: 1, Row: 1, Record: in.ID("a"), Run: in.ID("r"), Batch: in.ID("b"),
+			Tool: in.ID("t"), Child: in.ID("c")})
+		ix.Append(index.Entry{Seq: 2, Row: 1, Record: in.ID("z")})
+		return ix.Through(1)
+	}
+	for name, lookup := range map[string]func(*index.Index) []*index.Entry{
+		"Run":        func(ix *index.Index) []*index.Entry { return ix.Run("r") },
+		"Batch":      func(ix *index.Index) []*index.Entry { return ix.Batch("b") },
+		"AboutTool":  func(ix *index.Index) []*index.Entry { return ix.AboutTool("t") },
+		"AboutChild": func(ix *index.Index) []*index.Entry { return ix.AboutChild("c") },
+	} {
+		if got := lookup(fresh()); len(got) != 1 {
+			t.Errorf("%s as the first lookup found %d entries, want 1", name, len(got))
+		}
+	}
+}
+
+// Through keeps the blocks and bodies of the entries it keeps, and only those.
+// A record appended to the prefix does not write over the index it came from.
+func TestThroughKeepsTheBlocksAndBodiesOfItsEntries(t *testing.T) {
+	ix := index.New("s")
+	in := ix.Strings
+	ix.AppendRecord(index.Entry{Seq: 1, Row: 1, Record: in.ID("a"), Kind: index.KindProviderBody},
+		[]index.Block{{Kind: index.BlockOther}}, &index.Body{Role: index.BodyRoleRequest})
+	ix.AppendRecord(index.Entry{Seq: 2, Row: 1, Record: in.ID("b"), Kind: index.KindProviderBody},
+		[]index.Block{{Kind: index.BlockOther}, {Kind: index.BlockOther}}, &index.Body{Role: index.BodyRoleResponse})
+	cut := ix.Through(1)
+	if len(cut.Entries) != 1 || len(cut.Blocks) != 1 || len(cut.Bodies) != 1 || cut.Bodies[0].Entry != 0 {
+		t.Fatalf("through 1: %d entries, %d blocks, %d bodies", len(cut.Entries), len(cut.Blocks), len(cut.Bodies))
+	}
+	cut.AppendRecord(index.Entry{Seq: 2, Row: 1, Record: in.ID("c")}, []index.Block{{Kind: index.BlockText}},
+		&index.Body{Role: index.BodyRoleRequest})
+	if ix.Entries[1].Record != in.ID("b") || ix.Blocks[1].Kind != index.BlockOther || ix.Bodies[1].Role != index.BodyRoleResponse {
+		t.Fatal("appending to the prefix wrote over the index it came from")
+	}
+}

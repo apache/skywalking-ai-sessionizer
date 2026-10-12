@@ -466,6 +466,60 @@ func TestAnotherBuilderHoldingTheChainIsNotAFailure(t *testing.T) {
 	}
 }
 
+// A session whose parse failed is parsed again on the next pass, even though
+// nothing new landed, and no removal takes it meanwhile. A chain whose
+// watermark reaches the last landed file can still have revisions left to
+// write, so the watermark alone does not say the chain is complete.
+func TestAFailedParseIsParsedAgain(t *testing.T) {
+	root := t.TempDir()
+	sc, err := scenario.Load(filepath.Join("..", "..", "tests", "scenarios", "growth.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	b, err := scenario.Build(sc, scenario.FormatClaudeCode, root, scenario.Options{At: at, Through: "turn1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone := storage.NewZone(root)
+	ref := testRefresher(t, zone, root)
+	if err := ref.pass(); err != nil {
+		t.Fatalf("the first pass failed: %v", err)
+	}
+
+	// A round that does not read makes the next parse of the session fail.
+	bad := filepath.Join(root, "_conversations", b.Session, "rounds", "r000099-000000000000.sf")
+	if err := os.WriteFile(bad, []byte("not a round\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scenario.Build(sc, scenario.FormatClaudeCode, root, scenario.Options{At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ref.pass(); err == nil {
+		t.Fatal("a pass whose parse failed reported no error")
+	}
+	if !ref.unparsed[b.Session] || !ref.removeInput().Busy[b.Session] {
+		t.Fatal("a session whose parse failed is neither carried to the next pass nor held back from removal")
+	}
+
+	if err := os.Remove(bad); err != nil {
+		t.Fatal(err)
+	}
+	if err := ref.pass(); err != nil {
+		t.Fatalf("the pass after the round was removed failed: %v", err)
+	}
+	if ref.unparsed[b.Session] {
+		t.Fatal("the session is still carried after a parse succeeded")
+	}
+	rounds, err := filepath.Glob(filepath.Join(root, "_conversations", b.Session, "rounds", "*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rounds) < 2 {
+		t.Fatalf("%d round(s): what landed while the parse failed was never parsed", len(rounds))
+	}
+}
+
 // TestOnlyOnePassSendsAtATime.
 //
 // Two pipelines over one root is a supported setup, and both push. A push

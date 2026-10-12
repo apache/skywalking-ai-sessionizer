@@ -27,7 +27,7 @@ Everything else is defined relative to those two.
 
 ```text
 Conversation                          durable identity · ownership boundary
- └ Segment                            activity window · the COMMIT unit
+ └ Segment                            activity window
     └ Session                         observed source provenance
        ├ ExecutionStream  main        ordered parent-agent lineage
        │  └ Context epoch × N         model-context lifetime
@@ -50,9 +50,9 @@ does not run across it; the call that opened it stays a tool step, and the calle
 continues unchanged around it. What tells the two apart is what ran directly under the call: a
 chain of any kind is a program, only model calls are a plain call. When in doubt it is a child.
 
-`Segment` sits above `Session` and **cuts across every stream beneath it**: it is a time window
-chosen for commit, not a branch of the stream tree. A segment is committed only once all of its
-streams are safe to freeze.
+`Segment` sits above `Session` and **cuts across every stream beneath it**: it is a time window,
+not a branch of the stream tree. It says where the work happened, not whether the work has
+finished.
 
 `Context epoch` exists **only where a runtime can reset model context in place**. A stream with no
 compaction always has exactly one epoch, and its message history accumulates without interruption.
@@ -75,7 +75,7 @@ has to say which of them it means.
 | Object | Is | Is **not** |
 | --- | --- | --- |
 | **Conversation** | stable semantic branch; the unit of storage, analysis and export | a person, an account, a session, a trace, or a time range |
-| **Segment** | independently committable activity window | a turn, a Talk, or a new conversation |
+| **Segment** | activity window across every stream beneath it | a turn, a Talk, or a new conversation |
 | **Session** | source-runtime context carried as provenance | an agent, a stream, or a conversation |
 | **ExecutionStream** | ordered main, child, auxiliary or judge lineage within one session | timestamp order, or a prompt sequence |
 | **Context epoch** | the lifetime of one model context within a stream | a token-count threshold |

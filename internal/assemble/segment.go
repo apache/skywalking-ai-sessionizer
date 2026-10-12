@@ -24,42 +24,22 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
-// segment is an activity window that can be committed on its own.
+// segment is an activity window: the main stream's talks between two quiet
+// periods, and the delegated work that started inside them.
 type segment struct {
 	NodeID string
-	Index  int
 	Talks  []*talk
 	From   int64
 	To     int64
-	Gates  map[string]bool
 }
 
-// Gate names. All four must pass before a segment may be committed.
-const (
-	// GateActivityBoundary - the quiet period is real and not an artefact of
-	// records arriving out of order.
-	GateActivityBoundary = "activity_boundary"
-	// GateNoCrossingOpenOperation - no unfinished tool call and no child agent
-	// still running. This gate does real work rather than being a safety net: it
-	// is what makes "a committed segment is never rewritten" safe to promise.
-	// Without it a tool request could sit in a committed segment while its
-	// result arrives in the next one.
-	GateNoCrossingOpenOperation = "no_crossing_open_operation"
-	// GateLatenessWatermark - no late evidence is still expected.
-	GateLatenessWatermark = "lateness_watermark"
-	// GateConversationIdentity - the conversation this belongs to is known.
-	GateConversationIdentity = "conversation_identity"
-)
-
-// Stage 8 - propose segment boundaries.
+// Stage 8 - cut the activity windows.
 //
-// A long quiet period creates a CANDIDATE, not a commit. About a third of gaps
-// over ten minutes fall in the middle of a turn - a slow tool, a provider retry
-// - so a rule that split on idle time alone would cut roughly one in three
-// boundaries in the wrong place.
-//
-// This stage proposes and reports. Committing is the caller's decision, because
-// only the caller knows whether collection has finished.
+// A window is where the work happened, nothing more. It says neither that the
+// window is finished nor that it may be committed: a round carries no clock, so
+// only a reader, who knows the time, can tell whether the last window is still
+// going. A later talk that starts within the idle gap of a window's end joins it
+// through a new in_segment relation; the window's own node does not change.
 func (b *builder) stage8Segments() {
 	main := b.mainStream()
 	if main == nil || len(main.talks) == 0 {
@@ -72,7 +52,7 @@ func (b *builder) stage8Segments() {
 	sort.SliceStable(talks, func(i, j int) bool { return talks[i].First < talks[j].First })
 
 	gap := b.opt.IdleGap.Nanoseconds()
-	cur := &segment{Index: 1}
+	cur := &segment{}
 	flush := func() {
 		if len(cur.Talks) == 0 {
 			return
@@ -92,7 +72,7 @@ func (b *builder) stage8Segments() {
 		// is clamped rather than read as a very large gap in the other direction.
 		if i > 0 && t.First != 0 && talks[i-1].Last != 0 && t.First-talks[i-1].Last > gap {
 			flush()
-			cur = &segment{Index: cur.Index + 1}
+			cur = &segment{}
 		}
 		if cur.From == 0 || (t.First != 0 && t.First < cur.From) {
 			cur.From = t.First
@@ -104,41 +84,13 @@ func (b *builder) stage8Segments() {
 	}
 	flush()
 
-	sessionEnd := main.Last
 	for _, sg := range b.segments {
-		last := sg.Index == len(b.segments)
-		sg.Gates = map[string]bool{
-			GateActivityBoundary:     !last,
-			GateConversationIdentity: b.opt.Conversation != "",
-			// Late evidence is still expected while the window sits inside the
-			// quiet period at the end of the session.
-			GateLatenessWatermark:       !last && sessionEnd-sg.To > gap,
-			GateNoCrossingOpenOperation: b.noOpenOperation(sg),
-		}
-		state := "candidate"
-		if last {
-			state = "open"
-			b.stats.SegmentsOpen++
-		} else {
-			b.stats.SegmentsCandidate++
-		}
-		open := []string{}
-		for _, g := range []string{GateActivityBoundary, GateNoCrossingOpenOperation,
-			GateLatenessWatermark, GateConversationIdentity} {
-			if !sg.Gates[g] {
-				open = append(open, g)
-			}
-		}
+		// A window carries no attributes: its talks are its in_segment
+		// relations, and its time range is theirs.
 		b.node(sessionflow.Node{
 			Entity: sessionflow.Entity{ID: sg.NodeID}, Kind: model.KindSegment,
 			Parent: sessionflow.NodeID("session", b.opt.Session),
 			Ref:    refPtr(sg.Talks[0].At),
-			Attrs: attrs(map[string]any{
-				"state":       state,
-				"talks":       len(sg.Talks),
-				"gates_unmet": open,
-				"committable": len(open) == 0,
-			}),
 		})
 		for _, t := range sg.Talks {
 			b.relate(model.RelInSegment, t.NodeID, sg.NodeID, model.ExactUnique,
@@ -156,34 +108,4 @@ func (b *builder) stage8Segments() {
 			}
 		}
 	}
-}
-
-// noOpenOperation reports whether every operation started in a window also
-// finished inside it.
-//
-// The thing this catches is not a request left dangling at the end of the file -
-// the runtime writes a result even for a failure, so that is close to
-// non-existent. It is a request whose result arrives on the FAR SIDE of the
-// quiet period, which is roughly one long gap in eight. Committing the window
-// then would freeze the request into a segment that is never rewritten while
-// its result lands in the next one.
-func (b *builder) noOpenOperation(sg *segment) bool {
-	inWindow := func(ts int64) bool { return ts >= sg.From && ts <= sg.To }
-	for _, t := range b.tools {
-		if t.Use == nil || !inWindow(t.Use.TS) {
-			continue
-		}
-		if t.Result == nil || t.Ambiguous {
-			return false
-		}
-		if !inWindow(t.Result.TS) {
-			return false
-		}
-	}
-	for _, u := range b.unres {
-		if u.Kind == "child_stream" || u.Kind == "notified_child" {
-			return false
-		}
-	}
-	return true
 }

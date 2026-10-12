@@ -60,7 +60,7 @@ var glossary = model.NewGlossary(Dialect,
 
 	// ---- structure; the runtime names a session, a stream and a run, and the model derives the rest ----
 	model.Term{Unified: model.KindConversation, Note: "supplied, never inferred; defaults to the session id"},
-	model.Term{Unified: model.KindSegment, Note: "an activity window chosen for commit"},
+	model.Term{Unified: model.KindSegment, Note: "an activity window"},
 	model.Term{Unified: model.KindSession, Native: "sessionId", Where: "record, and the transcript filename"},
 	// The file name, not the record: the adapter reads the in-record agentId
 	// only on a sidecar or a journal record.
@@ -111,7 +111,7 @@ var glossary = model.NewGlossary(Dialect,
 		Note: "also stated redundantly as sourceToolAssistantUUID"},
 	model.Term{Unified: model.RelFollows, Native: "logicalParentUuid", Where: "a compact_boundary record"},
 	model.Term{Unified: model.RelSummarizes, Native: "parentUuid", Where: "an isCompactSummary record"},
-	model.Term{Unified: model.RelInSegment, Note: "an activity window chosen for commit"},
+	model.Term{Unified: model.RelInSegment, Note: "the activity window a Talk falls in"},
 	model.Term{Unified: model.RelRetries, Note: "unavailable; retry identity is not recorded"},
 	model.Term{Unified: model.RelCancels, Native: "toolUseResult.interrupted", Where: "a tool result",
 		Note: "not read, so asz writes no cancels relation today"},
