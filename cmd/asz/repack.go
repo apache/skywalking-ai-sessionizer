@@ -18,9 +18,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -50,9 +52,42 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
-	if dstRoot == srcRoot {
+	// Both are compared with their symbolic links followed, since two
+	// spellings can name one directory.
+	realSrc, realDst := resolved(srcRoot), resolved(dstRoot)
+	if realDst == realSrc {
 		return fmt.Errorf("repack: DEST is the storage root itself; landed files are never rewritten in place")
 	}
+	// A directory inside the root would be read as one of its sessions, by
+	// this repack and by every command after it.
+	if rel, err := filepath.Rel(realSrc, realDst); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("repack: DEST %s is inside the storage root; use a directory outside it", dstRoot)
+	}
+	if err := repack.CheckDestination(dstRoot); err != nil {
+		return err
+	}
+	// The root read from is held for the whole copy, so no pass lands a file
+	// or moves a cursor while the copy reads them.
+	lock, err := holdRootFor(srcRoot, "repack")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock() }()
+	// The root written to is held too, and checked again under its lock,
+	// since another command could have started on it while this one waited.
+	// It is not waited for: a command that holds a new or empty root is
+	// writing into it, and the copy must not.
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		return err
+	}
+	dstLock, err := storage.LockRoot(dstRoot)
+	if errors.Is(err, storage.ErrRootBusy) {
+		return fmt.Errorf("repack: another command is writing %s; use a new or empty directory", dstRoot)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dstLock.Unlock() }()
 	if err := repack.CheckDestination(dstRoot); err != nil {
 		return err
 	}
@@ -91,4 +126,21 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 	// The chains are built on the new files: their old references named
 	// positions that no longer exist.
 	return parseZone(dstRoot, want, cfg.Parse.MaxRoundBytes)
+}
+
+// resolved is path with every symbolic link in the part of it that exists
+// followed. The part that does not exist yet is joined on as it is written.
+func resolved(path string) string {
+	var rest []string
+	for p := path; ; {
+		if followed, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(append([]string{followed}, rest...)...)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return path
+		}
+		rest = append([]string{filepath.Base(p)}, rest...)
+		p = parent
+	}
 }

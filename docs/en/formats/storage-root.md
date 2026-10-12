@@ -50,7 +50,10 @@ session.
     metrics.state                        what the derivation has counted
     metrics-<session-id>-<seq>-local.pb  the points derived from the session's landed file <seq>
   push.state                             what has been sent: each file's digest, the receivers,
-                                         and the files a receiver rejected records of
+                                         the owner of each session, and the files a receiver
+                                         rejected records of
+  _root/
+    .lock                                one writing command per root, for one pass
   _export/
     .lock                                one pusher per root
   _scenario/                             only in a root a claude-code scenario build wrote
@@ -66,6 +69,16 @@ not mirror the source tree: a path must not encode a relationship the pipeline i
 derive. [OTLP Records](otlp.md) says how the metrics spool fills and
 what `push.state` records. `_scenario/` and `_removed/` exist only in a root a scenario build
 wrote. [Retention](#retention) says what they are for.
+
+Every command that writes to a root holds `_root/.lock` for one pass: `asz collect` and `asz
+server` for each pass, `asz parse`, `asz push` and `asz repack` for their run, and `asz scenario
+build` for each session it builds. Another command over the same root waits for it, a watching
+pipeline by doing nothing that period, so two commands never write the same root at once. `asz
+view` and `asz index` only read, and take no lock. The LangSmith receiver is the one writer outside
+a pass. It only adds requests to `_langsmith/`, each under a new name, and a pass takes them under
+that directory's own lock.
+Locks are taken in one order: `_scenario`, `_root`, `_export`, `_metrics`, `_provider`, a
+session's, a chain's.
 
 `liveness` in `session.state` is always `unknown`. asz has no check for whether a session is
 still running.

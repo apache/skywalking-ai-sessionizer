@@ -150,6 +150,18 @@ func Check(scenarioPath string, opts Options) (*Report, error) {
 // needs it, parses, and evaluates; at the end it runs the properties. It
 // returns the fold's summary and the session, for the cross-format checks.
 func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out string, opts Options, rep *Report) (*expect.Summary, string, error) {
+	// The check holds the root it builds for the whole of its run, as every
+	// command that writes a root does. It does not wait: the root is its
+	// own, so a command holding it is one a person started over it, and the
+	// check would read what that command writes.
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return nil, "", err
+	}
+	lock, err := storage.LockRoot(out)
+	if err != nil {
+		return nil, "", fmt.Errorf("scenario check: %s: %w", out, err)
+	}
+	defer func() { _ = lock.Unlock() }()
 	points := append(sc.Checkpoints(), "")
 	var built *scenario.Built
 	var round *parse.Round

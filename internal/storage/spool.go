@@ -40,11 +40,30 @@ func NewSpool(z *Zone) *Spool { return &Spool{dir: filepath.Join(z.Root(), Spool
 // Dir is the spool directory.
 func (s *Spool) Dir() string { return s.dir }
 
+// SpoolSession reads the session a spool file is named after:
+// metrics-<session>-<seq>-<source>.pb. A session id may hold dashes, so the
+// sequence and the source are taken from the end.
+func SpoolSession(name string) (string, bool) {
+	if !strings.HasPrefix(name, "metrics-") || !strings.HasSuffix(name, ".pb") {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimSuffix(name, ".pb"), "-")
+	if len(parts) < 4 {
+		return "", false
+	}
+	if _, err := strconv.ParseUint(parts[len(parts)-2], 10, 64); err != nil {
+		return "", false
+	}
+	session := strings.Join(parts[1:len(parts)-2], "-")
+	return session, session != ""
+}
+
 // SpoolFile is one request waiting in the spool.
 type SpoolFile struct {
-	Path   string
-	Seq    uint64
-	Source string
+	Path    string
+	Session string
+	Seq     uint64
+	Source  string
 }
 
 // PutNamed writes one request under a name the caller chose, and reports
@@ -80,19 +99,13 @@ func (s *Spool) List() ([]SpoolFile, error) {
 	var out []SpoolFile
 	for _, it := range items {
 		name := it.Name()
-		if it.IsDir() || !strings.HasPrefix(name, "metrics-") || !strings.HasSuffix(name, ".pb") {
+		session, ok := SpoolSession(name)
+		if it.IsDir() || !ok {
 			continue
 		}
-		// metrics-<session>-<seq>-<source>.pb
 		parts := strings.Split(strings.TrimSuffix(name, ".pb"), "-")
-		if len(parts) < 4 {
-			continue
-		}
-		seq, err := strconv.ParseUint(parts[len(parts)-2], 10, 64)
-		if err != nil {
-			continue
-		}
-		out = append(out, SpoolFile{Path: filepath.Join(s.dir, name), Seq: seq, Source: parts[len(parts)-1]})
+		seq, _ := strconv.ParseUint(parts[len(parts)-2], 10, 64)
+		out = append(out, SpoolFile{Path: filepath.Join(s.dir, name), Session: session, Seq: seq, Source: parts[len(parts)-1]})
 	}
 	// The order only has to be the same every time.
 	sort.Slice(out, func(i, j int) bool {

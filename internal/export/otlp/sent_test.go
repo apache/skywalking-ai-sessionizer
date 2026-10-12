@@ -242,7 +242,8 @@ func TestPushStateWithNoEndpointNamesTheReceiverUnknown(t *testing.T) {
 }
 
 // ForgetGone drops only the lines of the files it is told are owned and that
-// are gone. Every other line, and every endpoint line, stays.
+// are gone, and the owner lines of the sessions it is told are owned and whose
+// directory is gone. Every other line, and every endpoint line, stays.
 func TestForgetGoneDropsOnlyOwnedFilesThatAreGone(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "a"), 0o755); err != nil {
@@ -253,11 +254,14 @@ func TestForgetGoneDropsOnlyOwnedFilesThatAreGone(t *testing.T) {
 	}
 	state := "schema 1\nupdated_at 2026-09-10T00:00:00Z\nendpoint grpc://oap:11800\n" +
 		"pushed a/kept.sd d1\npushed a/gone.sd d2\npushed b/gone.sd d3\n" +
-		"rejected a/gone.sd\nrejected b/gone.sd\n"
+		"rejected a/gone.sd\nrejected b/gone.sd\n" +
+		"owner a grpc:%2F%2Foap:11800|s|i\nowner g grpc:%2F%2Foap:11800|s|i\nowner b grpc:%2F%2Foap:11800|s|i\n"
 	if err := os.WriteFile(filepath.Join(root, otlp.StateFile), []byte(state), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	owned := func(rel string) bool { return strings.HasPrefix(rel, "a/") }
+	owned := func(rel string) bool {
+		return rel == "a" || rel == "g" || strings.HasPrefix(rel, "a/") || strings.HasPrefix(rel, "g/")
+	}
 	if err := otlp.ForgetGone(root, owned, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +280,50 @@ func TestForgetGoneDropsOnlyOwnedFilesThatAreGone(t *testing.T) {
 	}
 	if got := sent.Endpoints(); len(got) != 1 || got[0] != "grpc://oap:11800" {
 		t.Fatalf("endpoints %v, want the one recorded", got)
+	}
+	if sent.Owner("a") == "" {
+		t.Fatal("the owner of a session whose directory is still there was dropped")
+	}
+	if sent.Owner("g") != "" {
+		t.Fatal("the owner of an owned session that is gone stayed")
+	}
+	if sent.Owner("b") == "" {
+		t.Fatal("the owner of a session nobody owns was dropped")
+	}
+	// The file came from a build before owners were recorded. Saving it
+	// must not say they are, or its other sessions would never be given one.
+	if data, err := os.ReadFile(filepath.Join(root, otlp.StateFile)); err != nil || strings.Contains(string(data), "owners recorded") {
+		t.Fatalf("ForgetGone marked an earlier build's push.state as having its owners: %v\n%s", err, data)
+	}
+
+	// A removal that stopped part way: the session's directory is gone, but
+	// a round of it and a metrics request of another are still there, and
+	// still recorded. Each keeps its owner, so what is left goes to the same
+	// receiver.
+	stopped := t.TempDir()
+	for _, rel := range []string{"_conversations/h/rounds/r000001-abcdefabcdef.sf", "_metrics/metrics-k-000001-local.pb"} {
+		path := filepath.Join(stopped, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state = "schema 1\nupdated_at 2026-09-10T00:00:00Z\nendpoint grpc://oap:11800\n" +
+		"pushed _conversations/h/rounds/r000001-abcdefabcdef.sf d1\npushed _metrics/metrics-k-000001-local.pb d2\n" +
+		"owner h grpc:%2F%2Foap:11800|s|i\nowner k grpc:%2F%2Foap:11800|s|i\n"
+	if err := os.WriteFile(filepath.Join(stopped, otlp.StateFile), []byte(state), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := otlp.ForgetGone(stopped, func(string) bool { return true }, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if sent, err = otlp.LoadSent(stopped); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Owner("h") == "" || sent.Owner("k") == "" {
+		t.Fatalf("a session with a round or a request left lost its owner: h=%q k=%q", sent.Owner("h"), sent.Owner("k"))
 	}
 
 	bare := t.TempDir()

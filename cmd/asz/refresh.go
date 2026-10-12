@@ -168,8 +168,9 @@ type refresher struct {
 	scenarioLock *storage.SessionLock
 	scenarioWait time.Duration
 	// waitingSaid says a pass already reported that another pipeline holds
-	// the scenario root, so later passes wait quietly.
-	waitingSaid bool
+	// the scenario root, so later passes wait quietly; rootWaitingSaid says
+	// the same of the root lock.
+	waitingSaid, rootWaitingSaid bool
 	// derive holds sessions the removal found not derived yet. The next
 	// derivation takes them beside what moved, because a session that no
 	// longer lands anything would otherwise never be derived again.
@@ -428,6 +429,43 @@ func present(dir string, optional bool) (bool, error) {
 	return true, nil
 }
 
+// holdRoot takes the root lock for one pass, or returns nil when this pass
+// does nothing. Every command that writes to the root holds it for a pass,
+// so two commands never write the same root at once. A single pass waits for
+// it, since it was asked to do its work; a watching pass that finds it held
+// does nothing this period, and says so once.
+func (r *refresher) holdRoot() (*storage.SessionLock, error) {
+	root := r.zone.Root()
+	lockPath := filepath.Join(root, storage.RootLockDir, ".lock")
+	if r.last {
+		lock, err := storage.LockRootWait(root, r.scenarioWait)
+		if errors.Is(err, storage.ErrRootBusy) {
+			err = fmt.Errorf("another command holds this storage root (%s) and did not release it within %s; nothing was done", lockPath, r.scenarioWait)
+			st := r.base
+			st.LastError = err.Error()
+			r.setStatus(st)
+		}
+		return lock, err
+	}
+	lock, err := storage.LockRoot(root)
+	if errors.Is(err, storage.ErrRootBusy) {
+		if !r.rootWaitingSaid {
+			msg := fmt.Sprintf("another command holds %s; this pass does nothing until it is released", lockPath)
+			fmt.Printf("waiting  : %s\n", msg)
+			st := r.base
+			if r.srv != nil {
+				st.LastRefresh = r.srv.Status().LastRefresh
+			}
+			st.LastError = msg
+			r.setStatus(st)
+			r.rootWaitingSaid = true
+		}
+		return nil, nil
+	}
+	r.rootWaitingSaid = false
+	return lock, err
+}
+
 // pass lands what is new from every source, writes a round wherever
 // something moved, sends what the receiver is owed, and records the result
 // for the page.
@@ -441,6 +479,11 @@ func (r *refresher) pass() error {
 	if held, err := r.holdScenario(); !held {
 		return err
 	}
+	rootLock, err := r.holdRoot()
+	if rootLock == nil {
+		return err
+	}
+	defer func() { _ = rootLock.Unlock() }()
 	start := time.Now()
 	first := r.full
 
@@ -714,6 +757,9 @@ func (r *refresher) pass() error {
 		}
 		if ps.Throttled && ps.RetryAfter > 0 {
 			r.pushAfter = time.Now().Add(ps.RetryAfter)
+		}
+		for _, h := range ps.Held {
+			errs = append(errs, heldError(h))
 		}
 	}
 	// Remove what a scenario build marked and what is proved sent. It runs

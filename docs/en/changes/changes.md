@@ -209,6 +209,22 @@
   step that stands on a whole record says `too_large` when a part of it was taken out. `asz verify`
   counts both apart from damage, and still holds a body's record to its manifest. See
   [Too large to land](../formats/session-data.md#too-large-to-land).
+- One command writes to a storage root at a time. `asz collect` and `asz server` hold the new root
+  lock, `_root/.lock`, for each pass. `asz parse` and `asz push` hold it for their run, `asz
+  scenario build` for each session it builds, and `asz scenario check` for each root it builds.
+  `asz repack` holds the root it reads and the root it writes, and refuses a destination inside
+  the root it reads, which every command would take for a session. Another command waits for it, and a
+  watching pipeline does nothing that period and says so once. `asz view` and `asz index` only
+  read and take none. The LangSmith receiver is the one writer outside a pass: it only adds
+  requests to `_langsmith/`, and a pass takes them under that directory's own lock.
+- A session goes to one owner: the endpoint, the configured `service_name` and the
+  `service.instance.id` it was first sent under. `push.state` records it, as an `owner` line,
+  before the first request carrying anything of the session goes out, so a request whose answer
+  never came still leaves the session with its owner. After the endpoint, the service name or the
+  instance changes, a session sent before is held. None of its files, rounds or metrics are sent,
+  every pass says why, and `asz push` exits non-zero. A receiver holds a session whole, so its later
+  files must not go somewhere else. Every session an earlier build sent takes the owner of the
+  first pass after the upgrade, which marks `push.state` with `owners recorded`.
 - A failed directory sync is reported. After the rename that publishes a landed file, a round or a
   state file, the directory is synced, an attempt to make the name survive a power loss as well, and
   a failure there was ignored without a word. It is now reported once for the directory, since a power loss may lose the

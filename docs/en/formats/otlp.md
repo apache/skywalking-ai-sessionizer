@@ -24,16 +24,50 @@ carrying it succeeded, so a failed request leaves it for the next pass.
 `push.state` also names the receivers the files went to, with one `endpoint` line each:
 `grpc://host:port`, `grpcs://host:port` with `tls: true`, or the HTTP base URL. A `rejected` line
 names each file of a request a receiver took while it rejected some of its records, as
-[Transport](#transport) describes. Every save writes all three kinds, so neither new line is lost
-at the next request. An older asz passes over both, and drops them when it saves the file.
+[Transport](#transport) describes. An `owner` line names the owner each session is sent under, and
+an `owners recorded` line says every session the file holds files of has one, as
+[One owner per session](#one-owner-per-session) describes. Every save writes every kind, so no
+line is lost at the next request. An older asz passes over the newer kinds, and drops them when it
+saves the file.
 
 ```text
 schema 1
 updated_at 2026-09-11T10:00:00Z
 endpoint grpc://127.0.0.1:11800
+owners recorded
+owner <session-id> grpc:%2F%2F127.0.0.1:11800|Claude%20Code|me@laptop
 pushed <session-id>/streams/main/transcript-20260911T095959.000000000Z-000001.sd 9f2c…
 rejected <session-id>/streams/main/transcript-20260911T095959.000000000Z-000001.sd
 ```
+
+### One owner per session
+
+A receiver holds a session whole, so a session goes to one owner: the endpoint, the configured
+service name and the `service.instance.id` it was first sent under, each percent-encoded and joined
+by `|`. The service name is the one `export.otlp.service_name` sets, and it is empty when asz names
+each session's service after its runtime. It is never the name a session resolves to. That name
+depends on reading the session's files, and a person could not set it back.
+
+The owner is recorded in `push.state`, and the file is saved, before the first request that carries
+anything of the session goes out: a landed file, a round whose header names the session, or a
+metrics request derived from it. A request whose answer never came, after a crash or a lost
+connection, still leaves the session with its owner. When that save fails, nothing of the session
+is sent. A session with an owner was sent, or tried to be, answered or not.
+
+A pass that would send a session under another owner, after the endpoint, the service name or the
+instance changed, holds the session. None of its files, rounds or metrics are sent, and none is
+recorded as sent. Every pass says which session waits and for which owner, and `asz push` then
+exits non-zero. Setting the three back sends what waited.
+
+A `push.state` that a build before this rule wrote has files and no `owners recorded` line. The
+first pass that loads it gives its owner to every session the file holds files of, before it sends
+anything, whether or not anything of that session goes out then. For a sent round, that is the
+session the round's header names. A sent round whose header cannot be read stops that pass before
+anything is sent, with an error that names the file, and the next pass tries again. The pass saves
+the file with `owners recorded`, so this happens once. After that, a session with no owner was never sent, and takes one at its first request. A
+removed [scenario session](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
+loses its owner line once nothing of it is left: not its directory, not its conversation's
+directory, and no line for any of its files.
 
 Removing a [scenario session](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
 depends on these lines. A session goes only when `push.state` names exactly one receiver, the one

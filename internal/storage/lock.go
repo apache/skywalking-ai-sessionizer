@@ -116,6 +116,48 @@ func LockExportWait(root string, timeout time.Duration) (*SessionLock, error) {
 	}
 }
 
+// ErrRootBusy means another command holds this storage root for a pass.
+var ErrRootBusy = errors.New("storage: the storage root is held by another command")
+
+// RootLockDir is where the root lock lives. The name starts with an
+// underscore, so a storage root's session listing passes over it.
+const RootLockDir = "_root"
+
+// LockRoot takes the lock every command that writes to a storage root holds
+// for one pass: asz collect and asz server for each pass, asz parse, asz push
+// and asz repack for their run, asz scenario build for each session it
+// builds, and asz scenario check for each root it builds. asz view and asz
+// index read and take none. The LangSmith receiver adds requests to its inbox
+// at any time, and a pass takes them under the inbox's own lock.
+//
+// Two commands over one root each load shared state, such as push.state, the
+// metrics state and a session's index, and save it back, so the commands take
+// turns. Retention, still to come, replaces landed files inside a pass and
+// needs the same: no command may read a file while another replaces it. The
+// lock is taken before any shared state is loaded. Locks are taken in one order: the
+// scenario lock, this one, the export lock, the metrics lock, the provider
+// lock, a session's and a chain's.
+func LockRoot(root string) (*SessionLock, error) {
+	l, err := lockDir(filepath.Join(root, RootLockDir))
+	if errors.Is(err, ErrSessionBusy) {
+		return nil, ErrRootBusy
+	}
+	return l, err
+}
+
+// LockRootWait is LockRoot, waiting up to timeout. A command asked to do its
+// work waits; a watching pipeline tries on every pass.
+func LockRootWait(root string, timeout time.Duration) (*SessionLock, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		l, err := LockRoot(root)
+		if !errors.Is(err, ErrRootBusy) || time.Now().After(deadline) {
+			return l, err
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // ErrMetricsBusy means another derivation holds this root's metrics.
 var ErrMetricsBusy = errors.New("storage: the metrics are being derived by another pass")
 

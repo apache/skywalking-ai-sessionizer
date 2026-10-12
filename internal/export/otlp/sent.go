@@ -76,6 +76,11 @@ func (s *Sent) Digest(rel string) (string, bool) {
 // send such a request again, so the file is recorded as sent all the same.
 func (s *Sent) Rejected(rel string) bool { return s.state.rejected[rel] }
 
+// Owner is the owner a session was first sent under (OwnerOf), recorded
+// before that request went out, or empty when nothing of the session was
+// ever sent. A session with an owner was attempted, answered or not.
+func (s *Sent) Owner(session string) string { return s.state.owners[session] }
+
 // Endpoints lists the receivers the recorded files were sent to, in order.
 // It names "unknown" when push.state records files and no receiver.
 func (s *Sent) Endpoints() []string { return sortedKeys(s.state.endpoints) }
@@ -97,9 +102,13 @@ func (s *Sent) SentTo(endpoint, rel, digest string) bool {
 }
 
 // ForgetGone drops the pushed and rejected lines of every path that owned
-// reports true for and whose file is gone. Every endpoint line stays. The
-// caller holds the root's export lock (storage.LockExport), because a pusher
-// rewrites the same file.
+// reports true for and whose file is gone. It drops the owner line of a
+// session that owned reports true for, asked by its id, once nothing of the
+// session is left: its directory and its conversation's are gone, and no
+// line names a file of it. A removal that stopped part way keeps the owner,
+// so what it left is still sent to the same receiver. Every endpoint line
+// stays. The caller holds the root's export lock (storage.LockExport),
+// because a pusher rewrites the same file.
 //
 // A line is dropped only once its file is gone, and a pusher sends only files
 // that exist, so dropping a line sends nothing again. It would, if a file of
@@ -124,6 +133,13 @@ func ForgetGone(root string, owned func(rel string) bool, now time.Time) error {
 	for rel := range s.rejected {
 		if owned(rel) && fileGone(root, rel) {
 			delete(s.rejected, rel)
+			changed = true
+		}
+	}
+	left := s.sessions()
+	for session := range s.owners {
+		if owned(session) && !left[session] && fileGone(root, session) && fileGone(root, conversationsDir+"/"+session) {
+			delete(s.owners, session)
 			changed = true
 		}
 	}

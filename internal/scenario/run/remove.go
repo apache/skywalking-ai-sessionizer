@@ -654,7 +654,10 @@ func copyRoot(from, to string) error {
 		if err != nil {
 			return err
 		}
-		if rel == "asz.yaml" {
+		// A lock file carries nothing, and the copy takes its own locks. The
+		// check holds this root's lock while it copies, and on Windows a held
+		// lock file cannot even be opened for reading.
+		if rel == "asz.yaml" || (!d.IsDir() && d.Name() == ".lock") {
 			return nil
 		}
 		info, err := d.Info()
