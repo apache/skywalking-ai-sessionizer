@@ -57,6 +57,8 @@ type slot struct {
 
 // CheckDestination refuses a populated root before any session is written.
 // A prior chain binds to its original landed bytes and cannot be reused.
+// The root lock's directory is not content: the repack holds it while it
+// checks and writes.
 func CheckDestination(root string) error {
 	items, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
@@ -65,8 +67,10 @@ func CheckDestination(root string) error {
 	if err != nil {
 		return fmt.Errorf("repack: destination: %w", err)
 	}
-	if len(items) > 0 {
-		return fmt.Errorf("repack: destination %s is not empty; use a new or empty directory", root)
+	for _, it := range items {
+		if it.Name() != storage.RootLockDir {
+			return fmt.Errorf("repack: destination %s is not empty; use a new or empty directory", root)
+		}
 	}
 	return nil
 }

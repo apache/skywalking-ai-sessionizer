@@ -55,6 +55,11 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
+	lock, err := holdRootFor(zoneRoot, "push")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock() }()
 	p, closeClient, err := newPusher(cfg, zoneRoot)
 	if err != nil {
 		return err
@@ -117,6 +122,9 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 		for _, e := range st.Errors {
 			fmt.Fprintf(os.Stderr, "  error: %v\n", e)
 		}
+		for _, h := range st.Held {
+			fmt.Fprintf(os.Stderr, "  held: %v\n", heldError(h))
+		}
 		if len(st.Errors) > 0 {
 			return st, fmt.Errorf("pass incomplete: %d error(s); unsent files are retried on the next pass", len(st.Errors))
 		}
@@ -124,6 +132,9 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 			// Rounds another process was still writing. This command makes
 			// one pass, so nothing comes back for them on its own.
 			return st, fmt.Errorf("pass incomplete: %d round(s) were still being written and were not sent; run it again", st.Deferred)
+		}
+		if len(st.Held) > 0 {
+			return st, fmt.Errorf("pass incomplete: %d session(s) were sent before under another receiver, service or instance, and were held", len(st.Held))
 		}
 		if len(derived) > 0 {
 			return st, fmt.Errorf("pass incomplete: the metrics of %d landed file(s) could not be derived and were not sent; run it again", len(derived))
@@ -134,6 +145,13 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return fmt.Errorf("another pass over this root held the export state for %s; nothing was sent, run it again", exportWait)
 	}
 	return err
+}
+
+// heldError says why a session was not sent: it went before to another
+// owner, and its later files go there or nowhere.
+func heldError(h otlp.Held) error {
+	return fmt.Errorf("session %s was sent to %s and this pass sends to %s; its later files wait, since a receiver holds a session whole. Set the endpoint, service and instance back to send them",
+		h.Session, h.Pinned, h.Now)
 }
 
 // exportWait is how long a command that was asked to send waits for another

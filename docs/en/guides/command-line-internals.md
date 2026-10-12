@@ -65,6 +65,15 @@ held is parsed on a later pass. A single pass has no later pass, so there that s
 as an error. So is an export state that another process still holds after two minutes of waiting,
 because then nothing was sent.
 
+Each pass holds the root lock, `_root/.lock`, from the first step to the last, so two commands
+never write the same root at once. `asz parse`, `asz push` and `asz repack` hold it for their run,
+and `asz scenario build` for each session it builds. The LangSmith receiver is the one writer
+outside a pass. It only adds requests to `_langsmith/`, and a pass takes them under that
+directory's own lock.
+When another command holds it, a watching pipeline prints `waiting  : another command holds
+<root>/_root/.lock; this pass does nothing until it is released` once and skips the pass. A single
+pass waits up to two minutes for it, then exits non-zero with nothing done.
+
 Anything else the pass could not do is listed on standard error under the line, one `error:` line
 each: a session that failed to parse, a request the receiver refused. A watching collector goes on
 to the next pass. A single pass exits non-zero, so an unattended backfill can be read by its exit
@@ -154,9 +163,13 @@ Re-cuts every landed file of the storage root, or of one session, into `DEST` so
 exceeds the configured `max_delta_bytes`, then assembles `DEST`'s chains. Every record keeps its
 bytes and its order; the cursors come along so collection can continue into `DEST`; the index and
 the chains are rebuilt there, because a round addresses records by file and line and the old
-references name positions that no longer exist. `DEST` must be a new or empty directory. A populated
-destination is refused before any session is written, because its chains bind to the original
-landed files. If a repack is interrupted, retry into another empty directory. One row per session:
+references name positions that no longer exist. `DEST` must be a new or empty directory outside
+the storage root. A populated destination is refused before any session is written, because its
+chains bind to the original landed files. One inside the root is refused too, because every
+command would read it as a session of the root. If a repack is interrupted, retry into another empty directory. The repack holds the
+root lock of the root it reads, and waits for a pass that holds it. It holds `DEST`'s lock too,
+without waiting, and checks `DEST` again under it: a command that holds a new or empty root is
+writing into it. One row per session:
 
 ```text
 SESSION                               FILES IN  FILES OUT  RECORDS  BYTES
@@ -344,6 +357,17 @@ encoded, and `paused` is how long the pass waited for budget under
 `export.otlp.max_bytes_per_minute`. A pass with errors exits non-zero; the files whose requests
 failed are not recorded as sent and go again on the next pass. See
 [Export over OpenTelemetry](../setup/export-otlp.md).
+
+A session goes to the endpoint, the configured service name and the instance it was first sent
+under. After one of them changes, a session sent before is held: nothing more of it is sent, and
+the pass says so on standard error and exits non-zero. `asz collect` lists the same words as an `error:` line on every
+pass:
+
+```text
+  held: session 3189c1f0-9ec4-4bd2-88dc-8eda88ac6db3 was sent to grpc:%2F%2F10.0.0.1:11800|Claude%20Code|me@laptop and this pass sends to grpc:%2F%2F10.0.0.2:11800|Claude%20Code|me@laptop; its later files wait, since a receiver holds a session whole. Set the endpoint, service and instance back to send them
+```
+
+[One owner per session](../formats/otlp.md#one-owner-per-session) says why.
 
 ## verify
 

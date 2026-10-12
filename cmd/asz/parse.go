@@ -19,6 +19,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -47,7 +48,31 @@ func cmdParse(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
+	lock, err := holdRootFor(zoneRoot, "parse")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Unlock() }()
 	return parseZone(zoneRoot, arg(0), cfg.Parse.MaxRoundBytes)
+}
+
+// rootWait is how long a command that writes to a storage root waits for a
+// pass that holds it, as long as it waits for the export state.
+var rootWait = exportWait
+
+// holdRootFor takes the root lock for a command that writes to the root, and
+// waits for a pass of another command that holds it. The root has to be
+// there first: taking the lock makes a directory under it, which would make
+// a mistyped path look like an empty root.
+func holdRootFor(root, command string) (*storage.SessionLock, error) {
+	if _, err := os.Stat(root); err != nil {
+		return nil, err
+	}
+	lock, err := storage.LockRootWait(root, rootWait)
+	if errors.Is(err, storage.ErrRootBusy) {
+		return nil, fmt.Errorf("%s: another command held this storage root for %s; nothing was done, run it again", command, rootWait)
+	}
+	return lock, err
 }
 
 // parseZone assembles every session under zoneRoot, or the one named by want,

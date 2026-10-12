@@ -657,3 +657,73 @@ func TestBeforeSendRunsUnderTheExportLock(t *testing.T) {
 		t.Fatal("BeforeSend ran while another could take the export lock")
 	}
 }
+
+// A session's owner is recorded before its first request goes out, so a
+// request whose answer never came still leaves the session pinned to it.
+func TestAnAttemptIsRecordedBeforeItIsSent(t *testing.T) {
+	z, _ := zoneWithOneSession(t)
+	rcv := startReceiver(t)
+	rcv.Fail(true)
+	o := rcv.Options(otlp.ProtocolGRPC)
+	p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Endpoint: otlp.EndpointOf(o.Protocol, o.Endpoint, false),
+		Version: "test", ServiceName: "Claude Code", Layer: "AI_AGENT", InstanceID: "sender-1"}
+	if st, err := p.Pass(); err != nil || len(st.Errors) == 0 || st.Files != 0 {
+		t.Fatalf("a pass to a failing receiver: %v, %+v", err, st)
+	}
+	sent, err := otlp.LoadSent(z.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := otlp.OwnerOf(p.Endpoint, "Claude Code", "sender-1"); sent.Owner("sess1") != want {
+		t.Fatalf("the session's owner is %q, want %q recorded before the request", sent.Owner("sess1"), want)
+	}
+	if _, ok := sent.Digest("sess1/streams/main/" + filepath.Base(mustLanded(t, z, "sess1")[0])); ok {
+		t.Fatal("a file the receiver never answered for is recorded as sent")
+	}
+}
+
+// A session sent under one owner stays with it: a pass under another
+// instance holds the session's later files and its metrics, and says why.
+func TestASessionStaysWithItsOwner(t *testing.T) {
+	z, _ := zoneWithOneSession(t)
+	rcv := startReceiver(t)
+	o := rcv.Options(otlp.ProtocolGRPC)
+	endpoint := otlp.EndpointOf(o.Protocol, o.Endpoint, false)
+	push := func(instance string) *otlp.Stats {
+		p := &otlp.Pusher{Zone: z, Client: clientFor(t, rcv, otlp.ProtocolGRPC), Endpoint: endpoint,
+			Version: "test", ServiceName: "Claude Code", MetricsService: "Claude Code", Layer: "AI_AGENT", InstanceID: instance}
+		st, err := p.Pass()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	if st := push("sender-1"); st.Files == 0 || len(st.Held) != 0 {
+		t.Fatalf("the first pass sent %d files and held %d sessions", st.Files, len(st.Held))
+	}
+	// Something new for the session: a request in the spool.
+	if _, _, err := storage.NewSpool(z).PutNamed("metrics-sess1-000002-local.pb", []byte{}); err != nil {
+		t.Fatal(err)
+	}
+	rcv.Reset()
+	st := push("sender-2")
+	if len(st.Held) != 1 || st.Held[0].Session != "sess1" || st.Metrics != 0 || len(rcv.MetricsRequests()) != 0 {
+		t.Fatalf("a pass under another instance held %v and sent %d metrics request(s)", st.Held, st.Metrics)
+	}
+	if st := push("sender-1"); len(st.Held) != 0 || st.Metrics != 1 {
+		t.Fatalf("back under the first instance: held %v, sent %d metrics request(s)", st.Held, st.Metrics)
+	}
+}
+
+func mustLanded(t *testing.T, z *storage.Zone, session string) []string {
+	t.Helper()
+	files, err := storage.LandedFiles(z, session)
+	if err != nil || len(files) == 0 {
+		t.Fatalf("%d landed files, %v", len(files), err)
+	}
+	var out []string
+	for _, f := range files {
+		out = append(out, f.Path)
+	}
+	return out
+}

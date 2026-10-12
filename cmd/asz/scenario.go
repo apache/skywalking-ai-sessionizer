@@ -208,7 +208,7 @@ func cmdScenario(args []string) int {
 			case count > 1:
 				one.Session = unusedSession(used, repeatedSession(l.Scenario, k))
 			}
-			b, err := scenario.Build(&one, scenario.Format(*format), *out, opts)
+			b, err := buildHolding(&one, scenario.Format(*format), *out, opts)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "asz:", err)
 				return 1
@@ -282,6 +282,23 @@ func cmdScenario(args []string) int {
 		fmt.Fprint(os.Stderr, scenarioUsage)
 		return 2
 	}
+}
+
+// buildHolding builds one session under the root lock of the root it
+// writes. A pipeline can watch the same root while a feed builds into it, and
+// a pass must not read a session's files and state while they are written.
+// The lock is taken for each build, not for the whole feed, so a watching
+// pipeline still has its passes between two builds.
+func buildHolding(sc *scenario.Scenario, f scenario.Format, out string, opts scenario.Options) (*scenario.Built, error) {
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return nil, err
+	}
+	lock, err := holdRootFor(out, "scenario build")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = lock.Unlock() }()
+	return scenario.Build(sc, f, out, opts)
 }
 
 // How a feed chooses the next scenario when it was given more than one.

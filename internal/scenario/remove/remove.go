@@ -1202,7 +1202,11 @@ func dirsNamedFor(session string, files []scenario.MarkerFile) []string {
 func ownedBy(ids map[string]bool) func(rel string) bool {
 	return func(rel string) bool {
 		first, rest, ok := strings.Cut(rel, "/")
-		if !ok || rest == "" {
+		if !ok {
+			// A bare name is a session's id, asked for its owner line.
+			return ids[rel]
+		}
+		if rest == "" {
 			return false
 		}
 		switch first {

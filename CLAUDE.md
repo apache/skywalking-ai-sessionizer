@@ -189,6 +189,15 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Land before committing the cursor.** At-least-once is intentional; the reverse loses data.
 - **`next_seq` is monotonic across all streams in a session**, so a session is processed
   single-threaded and under a lock. The filesystem is the authority on the counter.
+- **Locks are taken in one order:** `_scenario`, `_root`, `_export`, `_metrics`, `_provider`, a
+  session's, a chain's. Every command that writes to a root holds `_root` for its pass, so two
+  commands never write the same root at once. The LangSmith receiver is the one writer outside a
+  pass: it only adds requests to `_langsmith/`, which a pass takes under that directory's own lock.
+  A new lock takes its place in this order, or two commands can wait on each other for ever.
+- **A session is sent to one owner**, the endpoint, the configured service name and the instance it
+  was first sent under. `push.state` records the owner, and saves it, before the first request
+  carrying anything of the session goes out, because a receiver holds a session whole. Never the
+  service a session resolves to: that depends on reading its files, and a person cannot set it back.
 - **Never use `bufio.Scanner` on source records.** Real lines reach ~1 MB, past its 64 KB
   default, where it fails silently.
 - **The index is derived and disposable.** Delete it and it rebuilds from landed files; a schema
