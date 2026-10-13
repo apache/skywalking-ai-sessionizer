@@ -223,8 +223,7 @@
   never came still leaves the session with its owner. After the endpoint, the service name or the
   instance changes, a session sent before is held. None of its files, rounds or metrics are sent,
   every pass says why, and `asz push` exits non-zero. A receiver holds a session whole, so its later
-  files must not go somewhere else. Every session an earlier build sent takes the owner of the
-  first pass after the upgrade, which marks `push.state` with `owners recorded`.
+  files must not go somewhere else.
 - A failed directory sync is reported. After the rename that publishes a landed file, a round or a
   state file, the directory is synced, an attempt to make the name survive a power loss as well, and
   a failure there was ignored without a word. It is now reported once for the directory, since a power loss may lose the

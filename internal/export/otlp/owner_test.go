@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -282,131 +281,6 @@ func TestAHeldSessionWaitsWhole(t *testing.T) {
 	}
 	if got := o.sessionsSent(); len(got) != 1 || got[0] != "sess1" {
 		t.Fatalf("the receiver got records of %v, want sess1 only", got)
-	}
-}
-
-// A push.state a build before owners wrote has files and no owner lines.
-// The first pass that loads it gives its owner to every session the file
-// holds files of, before it sends anything and even when it sends nothing:
-// a landed session, a conversation with no session directory, and the
-// session a sent round's header names, whatever its conversation is called.
-// It marks the file, so this happens once, and holds them from then on.
-func TestSessionsSentBeforeOwnersTakeTheFirstPassOwner(t *testing.T) {
-	o := newOwnerTest(t)
-	o.round("lonely", "lonely", 1)
-	o.round("assembled", "sess9", 1)
-	// Two conversations whose names collide with the sessions their
-	// neighbours' rounds name.
-	o.round("alpha", "beta", 1)
-	o.round("beta", "gamma", 1)
-	o.pass("Claude Code", "sender-1")
-	path := filepath.Join(o.z.Root(), otlp.StateFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "\nowners recorded\n") {
-		t.Fatalf("a push.state this build wrote does not say owners are recorded:\n%s", data)
-	}
-	var kept []string
-	for _, line := range strings.SplitAfter(string(data), "\n") {
-		if !strings.HasPrefix(line, "owner") {
-			kept = append(kept, line)
-		}
-	}
-	if err := os.WriteFile(path, []byte(strings.Join(kept, "")), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	o.rcv.Reset()
-	if st := o.pass("Claude Code", "sender-2"); st.Files != 0 || len(o.rcv.Requests()) != 0 {
-		t.Fatalf("a pass with nothing new sent %d file(s)", st.Files)
-	}
-	want := otlp.OwnerOf(o.endpoint, "Claude Code", "sender-2")
-	for _, s := range []string{"sess1", "lonely", "sess9", "beta", "gamma"} {
-		if got := o.sent().Owner(s); got != want {
-			t.Fatalf("the earlier session %s's owner is %q, want %q", s, got, want)
-		}
-	}
-	// Once is once: a later pass with nothing to send does not adopt again,
-	// so it leaves push.state as it was.
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := o.pusher("Claude Code", "sender-2")
-	p.Now = func() time.Time { return time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) }
-	if _, err := p.Pass(); err != nil {
-		t.Fatal(err)
-	}
-	if after, _ := os.ReadFile(path); string(after) != string(before) {
-		t.Fatalf("an idle pass after the adoption rewrote push.state:\n%s", after)
-	}
-	o.land("sess1", 3)
-	o.round("lonely", "lonely", 2)
-	o.round("assembled", "sess9", 2)
-	o.round("beta", "gamma", 2)
-	st := o.pass("Claude Code", "sender-3")
-	var held []string
-	for _, h := range st.Held {
-		held = append(held, h.Session)
-	}
-	sort.Strings(held)
-	if strings.Join(held, ",") != "gamma,lonely,sess1,sess9" {
-		t.Fatalf("held %v, want gamma, lonely, sess1 and sess9", held)
-	}
-}
-
-// The one adoption reads every sent round's header. One it cannot read
-// fails the pass before anything is sent and leaves push.state unmarked, so
-// the next pass adopts again rather than leave the round's session unowned.
-func TestAnUnreadableRoundStopsTheAdoption(t *testing.T) {
-	o := newOwnerTest(t)
-	rel := o.round("assembled", "sess9", 1)
-	o.pass("Claude Code", "sender-1")
-	path := filepath.Join(o.z.Root(), otlp.StateFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var kept []string
-	for _, line := range strings.SplitAfter(string(data), "\n") {
-		if !strings.HasPrefix(line, "owner") {
-			kept = append(kept, line)
-		}
-	}
-	legacy := strings.Join(kept, "")
-	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	round := filepath.Join(o.z.Root(), filepath.FromSlash(rel))
-	good, err := os.ReadFile(round)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(round, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(round, []byte("not a header\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	o.land("sess1", 3)
-	o.rcv.Reset()
-	if _, err := o.pusher("Claude Code", "sender-2").Pass(); err == nil || !strings.Contains(err.Error(), "header cannot be read") {
-		t.Fatalf("a pass over an unreadable sent round returned %v", err)
-	}
-	if len(o.rcv.Requests()) != 0 {
-		t.Fatal("a pass that could not adopt sent something")
-	}
-	if now, _ := os.ReadFile(path); string(now) != legacy {
-		t.Fatalf("a pass that could not adopt changed push.state:\n%s", now)
-	}
-	if err := os.WriteFile(round, good, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	o.pass("Claude Code", "sender-2")
-	if got, want := o.sent().Owner("sess9"), otlp.OwnerOf(o.endpoint, "Claude Code", "sender-2"); got != want {
-		t.Fatalf("once the round could be read, sess9's owner is %q, want %q", got, want)
 	}
 }
 

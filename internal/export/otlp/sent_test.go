@@ -290,11 +290,6 @@ func TestForgetGoneDropsOnlyOwnedFilesThatAreGone(t *testing.T) {
 	if sent.Owner("b") == "" {
 		t.Fatal("the owner of a session nobody owns was dropped")
 	}
-	// The file came from a build before owners were recorded. Saving it
-	// must not say they are, or its other sessions would never be given one.
-	if data, err := os.ReadFile(filepath.Join(root, otlp.StateFile)); err != nil || strings.Contains(string(data), "owners recorded") {
-		t.Fatalf("ForgetGone marked an earlier build's push.state as having its owners: %v\n%s", err, data)
-	}
 
 	// A removal that stopped part way: the session's directory is gone, but
 	// a round of it and a metrics request of another are still there, and

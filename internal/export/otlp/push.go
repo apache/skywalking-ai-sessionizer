@@ -319,11 +319,6 @@ func (p *Pusher) Pass() (*Stats, error) {
 	}
 	b := &batch{p: p, st: st, state: state, services: map[string]string{},
 		owner: OwnerOf(p.Endpoint, p.ServiceName, p.InstanceID), claimed: map[string]bool{}}
-	if !state.ownersRecorded {
-		if err := p.adopt(state, b.owner); err != nil {
-			return nil, err
-		}
-	}
 	if p.NoLogs {
 		sessions = nil
 	}
@@ -507,41 +502,6 @@ func (b *batch) claim(session string) bool {
 	}
 	b.claimed[session] = true
 	return true
-}
-
-// adopt gives owner to every session an earlier build sent: push.state holds
-// files of it and names no owner, because that build recorded none. It runs
-// once, at the first pass that loads such a file, before anything is sent,
-// and the file then says owners are recorded. From then on a session with no
-// owner was never sent, and takes one at its first request.
-//
-// A round's file names its conversation, and only its header names the
-// session, so the header of every sent round still there is read, this once.
-// A header that cannot be read fails the pass before anything is sent, and
-// the next pass tries again: guessing the conversation's id would leave the
-// round's own session with no owner, for good.
-func (p *Pusher) adopt(state *pushState, owner string) error {
-	for rel := range state.files {
-		session, ok := sessionOf(rel)
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(rel, conversationsDir+"/") {
-			if fileGone(p.Zone.Root(), rel) {
-				continue
-			}
-			s, ok := roundSession(filepath.Join(p.Zone.Root(), filepath.FromSlash(rel)), session)
-			if !ok {
-				return fmt.Errorf("%s: the round's header cannot be read, so the session it was sent for cannot be given its owner; nothing was sent", rel)
-			}
-			session = s
-		}
-		if state.owners[session] == "" {
-			state.owners[session] = owner
-		}
-	}
-	state.ownersRecorded = true
-	return state.save(p.statePath(), p.Now())
 }
 
 // pin records this pass's owner for every session that has none yet, and
@@ -1187,31 +1147,6 @@ func conversationDirs(root string) ([]string, error) {
 // written. It is not a failure: the next pass reads it whole.
 var errRoundUnfinished = errors.New("round is still being written")
 
-// roundSession reads the session a round's header names, as addRound does:
-// the conversation's own when the header names none. Only the first line is
-// read. ok is false when the header cannot be read.
-func roundSession(path, conv string) (string, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	line, err := readLine(bufio.NewReaderSize(f, 64<<10))
-	if err != nil {
-		return "", false
-	}
-	var hdr struct {
-		Session string `json:"session"`
-	}
-	if json.Unmarshal(line, &hdr) != nil {
-		return "", false
-	}
-	if hdr.Session == "" {
-		return conv, true
-	}
-	return hdr.Session, true
-}
-
 // errSessionHeld is a round of a session this pass holds.
 var errSessionHeld = errors.New("the round's session is held")
 
@@ -1279,11 +1214,8 @@ type pushState struct {
 	endpoints map[string]bool
 	rejected  map[string]bool
 	// owners is the owner each session was first sent under, recorded
-	// before that request went out (OwnerOf). ownersRecorded says every
-	// session the file holds files of has its owner line: false only for a
-	// file an earlier build wrote, until adopt runs.
-	owners         map[string]string
-	ownersRecorded bool
+	// before that request went out (OwnerOf).
+	owners map[string]string
 }
 
 // unknownEndpoint is the receiver of files that push.state records with no
@@ -1292,8 +1224,7 @@ type pushState struct {
 const unknownEndpoint = "unknown"
 
 func newPushState() *pushState {
-	return &pushState{files: map[string]string{}, endpoints: map[string]bool{}, rejected: map[string]bool{}, owners: map[string]string{},
-		ownersRecorded: true}
+	return &pushState{files: map[string]string{}, endpoints: map[string]bool{}, rejected: map[string]bool{}, owners: map[string]string{}}
 }
 
 func loadState(path string) (*pushState, error) {
@@ -1306,7 +1237,6 @@ func loadState(path string) (*pushState, error) {
 		return nil, err
 	}
 	defer f.Close()
-	s.ownersRecorded = false
 	br := bufio.NewReader(f)
 	for {
 		line, err := readLine(br)
@@ -1328,13 +1258,7 @@ func loadState(path string) (*pushState, error) {
 			s.rejected[fields[1]] = true
 		case len(fields) == 3 && fields[0] == "owner":
 			s.owners[fields[1]] = fields[2]
-		case len(fields) == 2 && fields[0] == "owners" && fields[1] == "recorded":
-			s.ownersRecorded = true
 		}
-	}
-	// A file that holds no sent file has no session to adopt.
-	if len(s.files) == 0 {
-		s.ownersRecorded = true
 	}
 	if len(s.files) > 0 && len(s.endpoints) == 0 {
 		s.endpoints[unknownEndpoint] = true
@@ -1358,7 +1282,7 @@ func (s *pushState) sessions() map[string]bool {
 // sessionOf names the session a file of push.state belongs to: a landed file
 // under the session's directory, or a metrics request named after it. For a
 // round it names the conversation, which is the session's own id in every
-// root asz builds; only the round's header says for certain (roundSession).
+// root asz builds.
 func sessionOf(rel string) (string, bool) {
 	first, rest, ok := strings.Cut(rel, "/")
 	if !ok || rest == "" {
@@ -1402,9 +1326,6 @@ func (s *pushState) save(path string, now time.Time) error {
 		fmt.Fprintf(bw, "schema 1\nupdated_at %s\n", now.UTC().Format(time.RFC3339Nano))
 		for _, e := range sortedKeys(s.endpoints) {
 			fmt.Fprintf(bw, "endpoint %s\n", e)
-		}
-		if s.ownersRecorded {
-			fmt.Fprintf(bw, "owners recorded\n")
 		}
 		for _, session := range sortedKeys(s.owners) {
 			fmt.Fprintf(bw, "owner %s %s\n", session, s.owners[session])
