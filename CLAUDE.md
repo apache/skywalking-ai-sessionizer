@@ -166,8 +166,8 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   cutter reads to decide a cut must be kept in the skeleton or the store, or bodies land
   differently; `pkg/skeleton` and `tests/chain` compare them byte for byte, under a budget too.
 - **Assembly reads the index, never the payloads.** Structure needs identifiers; text is read only
-  when a conversation is rendered. **The page reads `.sd`, `.sk` and `.sf` only**, never the index;
-  a test in `tests/boundary` fails if it does.
+  when a conversation is rendered. **The page reads `.sd`, `.sk`, `.sf` and the provider store
+  only**, never the index; a test in `tests/boundary` fails if it does.
 - **A prompt cycle id is not unique across streams.** Anything keyed on it must be scoped by stream.
 - **Never use a stop reason to find a call's last fragment.** A main transcript stamps it on every
   fragment. Line order is the only rule that works on both stream kinds.

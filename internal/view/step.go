@@ -18,6 +18,7 @@
 package view
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -36,6 +37,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
@@ -511,7 +513,12 @@ const maxFileBytes = 64 << 20
 //
 // A sequence with no landed file is left out rather than refused: the renderer
 // reports which files it did not get, and one missing file does not spoil the
-// rest. A file of any other kind is refused: a transcript served whole would
+// rest. A file retention removed is served as its skeleton, which keeps every
+// body's place, with what the session's store kept of it under "kept": the
+// body of a record kept as a chain tip, by the record's id, and each removed
+// piece a later body cites, by its SHA-256. The renderer rebuilds a body that
+// landed after the removal from them, as asz does, and says a body it cannot
+// was removed. A file of any other kind is refused: a transcript served whole would
 // carry what the document and the record endpoint withhold, and the Prompt
 // tab reads provider body files only. A reader that withholds anything is
 // served no file at all, since a request carries the system prompt and the
@@ -546,6 +553,10 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 	out := make([]map[string]any, 0, len(seqs))
 	seen := map[uint64]bool{}
 	var held int64
+	budget := s.MaxFileBytes
+	if budget <= 0 {
+		budget = maxFileBytes
+	}
 	for _, text := range seqs {
 		seq, perr := strconv.ParseUint(text, 10, 64)
 		if perr != nil || seq == 0 {
@@ -563,6 +574,14 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 			continue
 		}
 		body, kind, rerr := readProviderBody(path)
+		if os.IsNotExist(rerr) {
+			// A removal deleted the landed file after its path was found:
+			// its skeleton has its place now.
+			if again, err := c.rescan(seq); err == nil && again != path {
+				path = again
+				body, kind, rerr = readProviderBody(path)
+			}
+		}
 		if rerr == nil && kind != sessiondata.KindProviderBody {
 			fail(w, fmt.Errorf("view: sequence %d is a %s file. Only provider body files are served whole", seq, kind), http.StatusBadRequest)
 			return
@@ -587,19 +606,140 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 		}
 		// A landed file may be large and the whole answer is held in memory to
 		// be encoded, so the run stops at a budget rather than reading whatever
-		// is asked for. What is left out reads as missing, which the renderer
-		// already reports, and a smaller ask brings it.
-		if held+int64(len(body)) > maxFileBytes {
+		// is asked for. What is left out the page asks for again. What the
+		// store kept of a skeleton is measured by the sizes its records name,
+		// for what the store has, before any of it is read. A file that does
+		// not fit the budget on its own is served alone, first in its answer,
+		// so every file can be had.
+		size := int64(len(body))
+		var want keptWant
+		if sessiondata.IsSkeleton(path) {
+			if want, rerr = keptWanted(body, c.zone.BodyStore(c.Session)); rerr != nil {
+				fail(w, rerr, http.StatusInternalServerError)
+				return
+			}
+			size += want.bytes
+		}
+		if len(out) > 0 && held+size > budget {
 			break
 		}
-		held += int64(len(body))
-		out = append(out, map[string]any{
+		held += size
+		var kept map[string]map[string]string
+		if len(want.bodies)+len(want.pieces) > 0 {
+			if kept, rerr = c.keptOf(want); rerr != nil {
+				fail(w, rerr, http.StatusInternalServerError)
+				return
+			}
+		}
+		file := map[string]any{
 			"seq":   seq,
 			"file":  filepath.Base(path),
 			"bytes": base64.StdEncoding.EncodeToString(body),
-		})
+		}
+		if len(kept) > 0 {
+			file["kept"] = kept
+		}
+		out = append(out, file)
 	}
 	writeJSON(w, out)
+}
+
+// keptWant is what the store keeps of a skeleton's records: the body of each
+// record kept as a chain tip, by its id and digest, and each removed piece, by
+// digest, each once, with the bytes their records say they hold.
+type keptWant struct {
+	bodies map[string]string
+	pieces map[string]bool
+	bytes  int64
+}
+
+// keptHas says what the store has, without reading it.
+type keptHas interface {
+	HasTip(id string) (bool, error)
+	HasPiece(sha string) (bool, error)
+}
+
+// keptWanted reads a skeleton for what the store keeps of it.
+func keptWanted(skeleton []byte, store keptHas) (keptWant, error) {
+	want := keptWant{bodies: map[string]string{}, pieces: map[string]bool{}}
+	r, err := sessiondata.NewReader(bytes.NewReader(skeleton))
+	if err != nil {
+		return want, err
+	}
+	for {
+		rec, err := r.Next()
+		if errors.Is(err, io.EOF) {
+			return want, nil
+		}
+		if err != nil {
+			return want, err
+		}
+		if m, err := providerbody.ManifestOf(rec); err == nil {
+			if _, seen := want.bodies[rec.ID]; !seen {
+				has, err := store.HasTip(rec.ID)
+				if err != nil {
+					return want, err
+				}
+				if has {
+					want.bodies[rec.ID] = m.SHA256
+					want.bytes += int64(m.Bytes)
+				}
+			}
+		}
+		for _, p := range rec.Parts {
+			if p.Kind != sessiondata.PartData || p.State != model.ContentRemoved || p.SHA256 == "" || want.pieces[p.SHA256] {
+				continue
+			}
+			has, err := store.HasPiece(p.SHA256)
+			if err != nil {
+				return want, err
+			}
+			if has {
+				want.pieces[p.SHA256] = true
+				want.bytes += int64(p.Bytes)
+			}
+		}
+	}
+}
+
+// keptOf reads what the session's store keeps of what a skeleton wants: the
+// body of each record kept as a chain tip, by its id, and each removed piece a
+// later body cites, by its digest, each base64 and checked by the store
+// against its digest. What the store does not keep is left out; a stored file
+// that does not read is this server's problem.
+func (c *Conversation) keptOf(want keptWant) (map[string]map[string]string, error) {
+	store := c.zone.BodyStore(c.Session)
+	bodies, pieces := map[string]string{}, map[string]string{}
+	keep := func(into map[string]string, key string, b []byte, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		into[key] = base64.StdEncoding.EncodeToString(b)
+		return nil
+	}
+	for id, sha := range want.bodies {
+		b, err := store.Tip(id, sha)
+		if err := keep(bodies, id, b, err); err != nil {
+			return nil, err
+		}
+	}
+	for sha := range want.pieces {
+		b, err := store.Piece(sha)
+		if err := keep(pieces, sha, b, err); err != nil {
+			return nil, err
+		}
+	}
+	kept := map[string]map[string]string{}
+	if len(bodies) > 0 {
+		kept["bodies"] = bodies
+	}
+	if len(pieces) > 0 {
+		kept["pieces"] = pieces
+	}
+	return kept, nil
 }
 
 // errNoHeader says a landed file's header does not read, so what kind of file
@@ -611,18 +751,19 @@ var errNoHeader = errors.New("the file's header does not read")
 // names. A header that does not read is errNoHeader, so a file whose kind is
 // not known is never served: the files endpoint serves provider bodies and
 // nothing else.
+//
+// A skeleton is read through its compression, so what is served is Session
+// Data either way.
 func readProviderBody(path string) ([]byte, sessiondata.Kind, error) {
-	// A removed body keeps no bytes. It is left out as a file that is gone
-	// is, and the renderer says it did not get it.
-	if sessiondata.IsSkeleton(path) {
-		return nil, "", fmt.Errorf("view: %s was removed by retention: %w", filepath.Base(path), fs.ErrNotExist)
-	}
-	f, err := os.Open(path)
+	f, err := sessiondata.Open(path)
 	if err != nil {
 		return nil, "", err
 	}
 	defer f.Close()
-	r, err := sessiondata.NewReader(f)
+	// What the header read takes from the file is kept, so a body is read
+	// once, through the compression of a skeleton too.
+	var head bytes.Buffer
+	r, err := sessiondata.NewReader(io.TeeReader(f, &head))
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %w", errNoHeader, err)
 	}
@@ -630,11 +771,8 @@ func readProviderBody(path string) ([]byte, sessiondata.Kind, error) {
 	if kind != sessiondata.KindProviderBody {
 		return nil, kind, nil
 	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return nil, kind, err
-	}
-	body, err := io.ReadAll(f)
-	return body, kind, err
+	rest, err := io.ReadAll(f)
+	return append(head.Bytes(), rest...), kind, err
 }
 
 // record reads one landed record whole, with the kind of the file it landed

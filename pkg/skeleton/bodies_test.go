@@ -372,6 +372,7 @@ func TestAnOddManifestIsJudgedTheSameFromItsSkeleton(t *testing.T) {
 		accept bool
 	}{
 		"no segments":           {``, false},
+		"literals only":         {`,"segments":[{"lit":"{}"}]`, true},
 		"a literal and a piece": {`,"segments":[{"lit":"","piece":"` + missing + `"}]`, false},
 		"a literal and a copy":  {`,"segments":[{"lit":"x","copy":{"from":"gone","sha256":"` + missing + `","len":1}}]`, false},
 		"a literal in capitals": {`,"segments":[{"Lit":"secret body text"},{"part":0}]`, true},
@@ -401,6 +402,12 @@ func TestAnOddManifestIsJudgedTheSameFromItsSkeleton(t *testing.T) {
 			}
 			if kept := string(sk.Parts[1].Data); strings.Contains(strings.ToLower(kept), `"lit"`) || strings.Contains(kept, "secret") {
 				t.Fatalf("the skeleton kept a literal: %s", kept)
+			}
+			// A list that held only literals stays a list, empty; a manifest
+			// with none stays without one.
+			hadList := strings.Contains(c.keys, "segments")
+			if kept := string(sk.Parts[1].Data); strings.Contains(kept, `"segments":null`) == hadList {
+				t.Fatalf("the skeleton's segments are %s; the body had a list: %v", kept, hadList)
 			}
 			ix := index.New("s")
 			_, _, a := index.FromRecord(ix, bodyHeader, rec, 1, 1)

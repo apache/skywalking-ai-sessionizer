@@ -240,7 +240,7 @@ The page reads everything it shows from a JSON API on the same address:
 | `/api/conversations` | one row per conversation, for the list |
 | `/api/c/{id}/view` | the [asz.view](../formats/asz-view.md) document, less what this reader withholds, which the renderer draws alone |
 | `/api/c/{id}/record/{seq}/{row}` | one landed record, whole unless withheld. This is what the Evidence tab shows. |
-| `/api/c/{id}/files?session=&seq=` | provider body files whole, by sequence, at most 32 a request, as base64 in a JSON array. This is what the Prompt tab reads to rebuild a call's provider bodies. A sequence with no landed file is left out rather than refused. Any other file is refused. |
+| `/api/c/{id}/files?session=&seq=` | provider body files whole, by sequence, at most 32 and 64 MiB a request, as base64 in a JSON array. A file larger than that on its own is served alone, and the page asks again for what an answer left out. This is what the Prompt tab reads to rebuild a call's provider bodies. A sequence with no landed file is left out rather than refused. Any other file is refused. A file [retention](../formats/storage-root.md#retention) removed is served as its skeleton, without compression, with `kept`: `bodies`, the body of each record the session's store kept as a chain tip, by record id, and `pieces`, each removed piece of it a later body cites, by SHA-256, both base64. |
 | `/api/glossary` | what the runtime calls each name the model uses, as [glossary](../setup/command-line.md#glossary) prints it |
 
 There is no endpoint per talk. Beyond the document, a conversation page asks the API for three

@@ -64,6 +64,8 @@ html[data-appearance="light"] .logo-light { display: block; }
 .asz-wait progress { display: block; width: 100%; max-width: 360px; margin-top: 12px; accent-color: var(--sw-accent); }
 .asz-wait small { display: block; margin-top: 6px; color: var(--sw-fg-2); font-variant-numeric: tabular-nums; }
 .asz-error { color: var(--sw-err); }
+/* In the header row, so a conversation with removed files keeps the height every other has. */
+.asz-removed { flex: none; padding: 2px 8px; border-radius: 999px; background: var(--sw-warn-soft); color: var(--sw-warn); font-size: var(--sw-fs-xs); white-space: nowrap; cursor: help; }
 .asz-error code { font-family: var(--sw-mono); }
 </style>
 </head>
@@ -72,11 +74,70 @@ html[data-appearance="light"] .logo-light { display: block; }
   <header class="asz-header">
     <a class="asz-brand" href="/" aria-label="SkyWalking AI Sessionizer"><img class="logo-dark" src="/logo.svg" alt="SkyWalking"><img class="logo-light" src="/logo-blue.svg" alt="SkyWalking"><span>AI Sessionizer</span></a>
     <div class="asz-title" id="title"></div>
+    <span class="asz-removed" id="removed" role="note" hidden></span>
     <a class="asz-list" href="/">All conversations</a>
     <label>Theme<select id="theme" aria-label="Theme"></select></label>
   </header>
   <div id="conversation"><div class="asz-wait" id="wait">Loading the conversation…</div></div>
 </div>
+<script>
+// What the page makes of what asz serves, kept apart from the module below
+// so a test can run it without the renderer.
+var aszPage = {
+  // The note a conversation carries when retention took the text of some of
+  // its files out of the root, short and whole, or null when it took none.
+  // Retention does not wait for a receiver, so the note promises no copy.
+  removedNote: function (doc) {
+    var n = (doc.files || []).filter(function (f) { return f.state === "removed"; }).length;
+    if (!n) return null;
+    var files = n + " file" + (n === 1 ? "" : "s");
+    return {
+      label: files + " removed by retention",
+      text: "storage.retention removed the text of " + files + " of this conversation from this storage root. " +
+        "Their structure is kept here. Only a receiver that accepted them still has their text.",
+    };
+  },
+  // One file of the files endpoint's answer as the renderer takes it. Base64
+  // in, bytes out: the reader rebuilds a body from the record lines exactly
+  // as they landed, so nothing may be re-encoded. A removed file comes as its
+  // skeleton, with what the store kept of it: a body by its record's id, a
+  // piece by its digest.
+  storedFile: function (f) {
+    var bytesOf = function (b64) {
+      var raw = atob(b64);
+      var bytes = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return bytes;
+    };
+    var file = { seq: f.seq, file: f.file, bytes: bytesOf(f.bytes) };
+    if (f.kept) {
+      file.kept = {};
+      ["bodies", "pieces"].forEach(function (k) {
+        if (!f.kept[k]) return;
+        // No prototype, so a record id such as __proto__ is an entry too.
+        file.kept[k] = Object.create(null);
+        Object.keys(f.kept[k]).forEach(function (key) { file.kept[k][key] = bytesOf(f.kept[k][key]); });
+      });
+    }
+    return file;
+  },
+  // Hands every file of seqs to onFile, asking again for what an answer left
+  // out: the files route ends an answer at its budget, and serves at least
+  // one file each time. A sequence it has no file for is left out of every
+  // answer, so the asking ends when an answer brings nothing new.
+  loadAll: async function (ask, seqs, onFile) {
+    var rest = seqs.slice();
+    while (rest.length) {
+      var files = await ask(rest);
+      var got = Object.create(null);
+      files.forEach(function (f) { got[f.seq] = true; onFile(aszPage.storedFile(f)); });
+      var left = rest.filter(function (seq) { return !got[seq]; });
+      if (left.length === rest.length) return;
+      rest = left;
+    }
+  },
+};
+</script>
 <script type="module">
 import { mountConversationView, isSupportedDocument, makeFormatter } from "/assets/conversation-view/conversation-view.js";
 
@@ -185,6 +246,16 @@ try {
   code.textContent = doc.conversation;
   titleEl.append(code);
   document.title = title + " · SkyWalking AI Sessionizer";
+  // Retention took the text of some files of this conversation out of the
+  // root. The page draws their structure, and says where the text is.
+  const removed = aszPage.removedNote(doc);
+  if (removed) {
+    const note = document.getElementById("removed");
+    note.textContent = removed.label;
+    note.title = removed.text;
+    note.setAttribute("aria-label", removed.text);
+    note.hidden = false;
+  }
   host.innerHTML = "";
   const view = mountConversationView(host, {
     document: doc,
@@ -198,24 +269,15 @@ try {
     // The landed files a call's provider bodies are cut across. Without this
     // the Prompt tab is not offered at all, so the page beside the storage
     // root would show less than the SkyWalking UI does.
-    loadFiles: (req, onFile) => {
+    loadFiles: (req, onFile) => aszPage.loadAll(seqs => {
       const q = withHidden(new URLSearchParams());
       q.set("session", req.session);
-      for (const seq of req.seqs) q.append("seq", seq);
+      for (const seq of seqs) q.append("seq", seq);
       return fetch(api + "/files?" + q, { signal: req.signal }).then(res => {
         if (!res.ok) throw new Error("files: " + res.status);
         return res.json();
-      }).then(files => {
-        for (const f of files) {
-          // Base64 in, bytes out: the reader rebuilds a body from the record
-          // lines exactly as they landed, so nothing may be re-encoded.
-          const raw = atob(f.bytes);
-          const bytes = new Uint8Array(raw.length);
-          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-          onFile({ seq: f.seq, file: f.file, bytes });
-        }
       });
-    },
+    }, req.seqs, onFile),
     state: stateFromURL(),
     onStateChange: s => {
       if (same(s, stateFromURL())) return;

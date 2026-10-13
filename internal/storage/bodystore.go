@@ -115,6 +115,36 @@ func (s *BodyStore) Tip(id, sha string) ([]byte, error) {
 	return nil, fmt.Errorf("storage: no tip of %s: %w", id, fs.ErrNotExist)
 }
 
+// HasTip says whether the store keeps a tip of record id, in any generation,
+// without reading it. A file that cannot be looked at is an error, not one
+// the store does not keep.
+func (s *BodyStore) HasTip(id string) (bool, error) {
+	generations, err := s.Generations()
+	if err != nil {
+		return false, err
+	}
+	for _, g := range generations {
+		if ok, err := exists(filepath.Join(s.TipsDir(g), tipName(id))); ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+// HasPiece says whether the store keeps the piece with this SHA-256, without
+// reading it, as HasTip does.
+func (s *BodyStore) HasPiece(sha string) (bool, error) {
+	return exists(filepath.Join(s.PiecesDir(), sha+".gz"))
+}
+
+func exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // Piece reads the removed piece with this SHA-256.
 func (s *BodyStore) Piece(sha string) ([]byte, error) {
 	return readNamed(filepath.Join(s.PiecesDir(), sha+".gz"), sha)

@@ -19,11 +19,13 @@ package chain_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,6 +51,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/skeleton"
 )
 
 // What a scenario cannot express about retention: the same conversation
@@ -1468,4 +1471,227 @@ func TestAnSDBuildContinuesAfterARemoval(t *testing.T) {
 		t.Fatal("no provider body landed after a removal")
 	}
 	verified(t, kept.zone, b.Session)
+}
+
+// servedStore is the store a page holds from the files endpoint's answers:
+// the bodies kept of removed records, by id, and the removed pieces, by
+// digest.
+type servedStore struct{ bodies, pieces map[string][]byte }
+
+func (s servedStore) Tip(id, _ string) ([]byte, error) { return served(s.bodies, id) }
+func (s servedStore) Piece(sha string) ([]byte, error) { return served(s.pieces, sha) }
+
+func served(m map[string][]byte, key string) ([]byte, error) {
+	if b, ok := m[key]; ok {
+		return b, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+// The page serves a removed provider file as its skeleton, with the bytes the
+// store kept of it, so a reader that rebuilds bodies from the files endpoint
+// alone, as the renderer does, rebuilds every body that landed after the
+// removal, the ones that copy a removed tip or cite a removed piece included.
+//
+// With ASZ_PROMPT_FIXTURE set to a directory, the endpoint's answer and the
+// document are written there: the fixture of Horizon's prompt store tests.
+func TestThePageServesWhatABodyAfterARemovalNeeds(t *testing.T) {
+	r, b := removedThenContinued(t)
+	h := view.New(r.zone, nil).Handler()
+	get := func(path string) []byte {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body.String())
+		}
+		return w.Body.Bytes()
+	}
+	document := get("/api/c/" + b.Session + "/view")
+	var doc sessionview.Conversation
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	q := url.Values{"session": {b.Session}}
+	removedFiles := 0
+	for _, f := range doc.Files {
+		if f.Kind == string(sessiondata.KindProviderBody) && f.Seq != nil {
+			q.Add("seq", fmt.Sprint(*f.Seq))
+			if f.State == model.ContentRemoved {
+				removedFiles++
+			}
+		}
+	}
+	if removedFiles == 0 {
+		t.Fatal("no provider file was removed; the test needs some")
+	}
+	answer := get("/api/c/" + b.Session + "/files?" + q.Encode())
+	var files []struct {
+		Seq   uint64                       `json:"seq"`
+		File  string                       `json:"file"`
+		Bytes []byte                       `json:"bytes"`
+		Kept  map[string]map[string][]byte `json:"kept"`
+	}
+	if err := json.Unmarshal(answer, &files); err != nil {
+		t.Fatal(err)
+	}
+	if out := os.Getenv("ASZ_PROMPT_FIXTURE"); out != "" {
+		if err := os.WriteFile(filepath.Join(out, "provider-bodies-removed.files.json"), answer, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(out, "provider-bodies-removed.json"), document, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store := servedStore{bodies: map[string][]byte{}, pieces: map[string][]byte{}}
+	held := providerbody.NewSession()
+	held.Use(store)
+	type at struct {
+		rec     *sessiondata.Record
+		removed bool
+	}
+	var all []at
+	for _, f := range files {
+		for id, body := range f.Kept["bodies"] {
+			store.bodies[id] = body
+		}
+		for sha, piece := range f.Kept["pieces"] {
+			store.pieces[sha] = piece
+		}
+		_, recs, err := sessiondata.All(bytes.NewReader(f.Bytes))
+		if err != nil {
+			t.Fatalf("%s does not read as Session Data: %v", f.File, err)
+		}
+		for _, rec := range recs {
+			if err := held.Add(rec); err != nil && !errors.Is(err, providerbody.ErrRepeat) {
+				t.Fatalf("%s: %v", rec.ID, err)
+			}
+			all = append(all, at{rec, sessiondata.IsSkeleton(f.File)})
+		}
+	}
+	if len(store.bodies) == 0 || len(store.pieces) == 0 {
+		t.Fatalf("the answer kept %d bodies and %d pieces; the test needs both", len(store.bodies), len(store.pieces))
+	}
+	after, copies := 0, 0
+	for _, a := range all {
+		if a.removed {
+			continue
+		}
+		after++
+		body, err := held.Body(a.rec.ID)
+		if err != nil {
+			t.Fatalf("%s, landed after the removal, does not rebuild from what the page served: %v", a.rec.ID, err)
+		}
+		m, _ := providerbody.ManifestOf(a.rec)
+		if providerbody.Digest(body) != m.SHA256 {
+			t.Fatalf("%s rebuilds to other bytes", a.rec.ID)
+		}
+		for _, seg := range m.Segments {
+			if seg.Copy != nil {
+				if _, kept := store.bodies[seg.Copy.From]; kept {
+					copies++
+				}
+			}
+		}
+	}
+	if after == 0 || copies == 0 {
+		t.Fatalf("%d bodies after the removal, %d copying a kept tip; the test needs both", after, copies)
+	}
+}
+
+// removedThenContinued is provider-bodies-long removed at its first
+// checkpoint and collected to its end: provider files removed, and bodies
+// landed after the removal that copy a removed tip and cite removed pieces.
+func removedThenContinued(t *testing.T) (*sentRoot, *scenario.Built) {
+	t.Helper()
+	const name = "provider-bodies-long"
+	r := newSentRoot(t)
+	r.maxDelta = budgetOf(t, name)
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", name+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cps := sc.Checkpoints()
+	b := r.build(sc, scenario.Options{Through: cps[0]})
+	r.pipelineAt(landedAt(0))
+	if res := retentionOf(r).Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+		t.Fatalf("the removal: %+v", res)
+	}
+	r.build(sc, scenario.Options{})
+	r.pipelineAt(landedAt(1))
+	return r, b
+}
+
+// The files route serves a file that does not fit its budget on its own when
+// it is first in an answer, so every file can be had, and leaves the rest of
+// that answer for a later ask. A landed file a removal deletes after the
+// route found it is served as its skeleton.
+func TestTheFilesRouteServesEveryFile(t *testing.T) {
+	r, b := removedThenContinued(t)
+	files, err := storage.LandedFiles(r.zone, b.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seqs []string
+	var landed storage.LandedFile
+	for _, lf := range files {
+		if lf.Stream == "" && lf.RunID == "" {
+			seqs = append(seqs, fmt.Sprint(lf.Seq))
+			if !lf.Skeleton {
+				landed = lf
+			}
+		}
+	}
+	if len(seqs) < 2 || landed.Path == "" {
+		t.Fatalf("%d provider files, a landed one %q; the test needs both kinds", len(seqs), landed.Path)
+	}
+	ask := func(h http.Handler, seqs ...string) []map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		q := url.Values{"session": {b.Session}, "seq": seqs}
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/c/"+b.Session+"/files?"+q.Encode(), nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("files: %d %s", w.Code, w.Body.String())
+		}
+		var out []map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	srv := view.New(r.zone, nil)
+	srv.MaxFileBytes = 1
+	h := srv.Handler()
+	if got := ask(h, seqs...); len(got) != 1 || fmt.Sprint(got[0]["seq"]) != seqs[0] {
+		t.Fatalf("an answer over a budget no file fits holds %d files, want the first alone", len(got))
+	}
+	for _, seq := range seqs {
+		if got := ask(h, seq); len(got) != 1 {
+			t.Fatalf("seq %s asked alone is not served", seq)
+		}
+	}
+
+	// The page found the landed file before a removal deleted it.
+	h = view.New(r.zone, nil).Handler()
+	if got := ask(h, fmt.Sprint(landed.Seq)); len(got) != 1 || strings.HasSuffix(fmt.Sprint(got[0]["file"]), sessiondata.SkeletonExt) {
+		t.Fatalf("the landed file before the removal: %v", got)
+	}
+	data, err := os.ReadFile(landed.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sk bytes.Buffer
+	if err := skeleton.Write(&sk, data, sessiondata.Removed{Generation: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(storage.SkeletonPath(landed.Path), sk.Bytes(), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(landed.Path); err != nil {
+		t.Fatal(err)
+	}
+	if got := ask(h, fmt.Sprint(landed.Seq)); len(got) != 1 || !strings.HasSuffix(fmt.Sprint(got[0]["file"]), sessiondata.SkeletonExt) {
+		t.Fatalf("a file deleted after the page found it is served as %v, want its skeleton", got)
+	}
 }

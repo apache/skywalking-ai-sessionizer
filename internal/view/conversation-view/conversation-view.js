@@ -144,6 +144,8 @@ const MAX_DEPTH = 32;
 const CACHE_LIMIT = 32 * 1024 * 1024;
 const ROLE_REQUEST = "request";
 const ROLE_RESPONSE = "response";
+const STATE_TOO_LARGE = "too_large";
+const STATE_REMOVED = "removed";
 const PROMPT_SCHEMA = "provider_body/1";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -177,7 +179,9 @@ function readRecord(seq, row, node, line) {
   const read2 = parts.map((p, i) => ({
     kind: typeof p["k"] === "string" ? p["k"] : "",
     raw: raws[i] ?? null,
-    encoding: typeof p["encoding"] === "string" ? p["encoding"] : void 0
+    encoding: typeof p["encoding"] === "string" ? p["encoding"] : void 0,
+    state: typeof p["state"] === "string" ? p["state"] : void 0,
+    sha256: typeof p["sha256"] === "string" ? p["sha256"] : void 0
   }));
   const last = read2[read2.length - 1];
   if (last.kind !== "data" || last.raw === null) return null;
@@ -190,7 +194,7 @@ function readRecord(seq, row, node, line) {
   if (!wellFormed(manifest)) return null;
   const id = typeof node["id"] === "string" ? node["id"] : "";
   if (!id) return null;
-  return { id, seq, row, parts: read2, manifest };
+  return { id, seq, row, parts: read2, manifest, removed: last.state === STATE_REMOVED };
 }
 function wellFormed(m) {
   if (!m || typeof m !== "object") return false;
@@ -214,6 +218,10 @@ function wellFormed(m) {
   return true;
 }
 class PromptError extends Error {
+  constructor(message2, reason) {
+    super(message2);
+    this.reason = reason;
+  }
 }
 class PromptStore {
   constructor() {
@@ -224,6 +232,9 @@ class PromptStore {
     __publicField(this, "cache", /* @__PURE__ */ new Map());
     __publicField(this, "cacheOrder", []);
     __publicField(this, "cacheBytes", 0);
+    /** What hosts kept of removed bodies, by record id, and of removed pieces, by sha256. */
+    __publicField(this, "keptBodies", /* @__PURE__ */ new Map());
+    __publicField(this, "keptPieces", /* @__PURE__ */ new Map());
     /** The seqs whose files were added, so a reader knows what it still needs. */
     __publicField(this, "loaded", /* @__PURE__ */ new Set());
   }
@@ -239,12 +250,20 @@ class PromptStore {
    * reading the earlier file later must bring this one back, and it cannot if the file is held.
    */
   addFile(file) {
+    var _a, _b;
+    for (const [id, bytes] of Object.entries(((_a = file.kept) == null ? void 0 : _a.bodies) ?? {})) this.keptBodies.set(id, bytes);
+    for (const [sha, bytes] of Object.entries(((_b = file.kept) == null ? void 0 : _b.pieces) ?? {})) this.keptPieces.set(sha, bytes);
     let waiting = false;
     for (const record of readProviderFile(file.seq, file.bytes)) {
       if (this.add(record) === "unresolved") waiting = true;
     }
     if (waiting) this.loaded.delete(file.seq);
     else this.loaded.add(file.seq);
+  }
+  /** Whether the record at a landed position is a skeleton: its body was removed. */
+  removedAt(seq, row) {
+    var _a;
+    return ((_a = this.byPosition.get(`${seq}/${row}`)) == null ? void 0 : _a.removed) ?? false;
   }
   /** The manifest of the body at a landed position, or null when it is not held. */
   manifestAt(seq, row) {
@@ -263,9 +282,32 @@ class PromptStore {
     if (held) return held;
     const record = this.records.get(id);
     if (!record) throw new PromptError(`no body ${id}`);
-    const bytes = this.rebuild(record);
+    const bytes = record.removed ? this.removedBody(record) : this.rebuild(record);
     this.remember(id, bytes);
     return bytes;
+  }
+  /**
+   * A removed body, from what the host kept of it, checked against its digest. One the host did not
+   * keep and that holds or cites a piece too large to land could not be rebuilt before its removal
+   * either; any other was removed.
+   */
+  removedBody(record) {
+    var _a;
+    const kept = this.keptBodies.get(record.id);
+    if (kept) {
+      if (sha256Hex(kept) !== record.manifest.sha256) throw new PromptError(`the kept bytes of ${record.id} do not match its digest`);
+      return kept;
+    }
+    for (const seg of record.manifest.segments ?? []) {
+      let part;
+      if (seg.part != null) part = record.parts[seg.part];
+      else if (seg.piece) {
+        const at = this.pieces.get(seg.piece);
+        part = at ? (_a = this.records.get(at.id)) == null ? void 0 : _a.parts[at.part] : void 0;
+      }
+      if ((part == null ? void 0 : part.state) === STATE_TOO_LARGE) throw tooLarge();
+    }
+    throw new PromptError(`${record.id} was removed by retention`, STATE_REMOVED);
   }
   /** The record a response with that provider request id carries, or null. */
   responseOfRequestId(requestId) {
@@ -296,10 +338,12 @@ class PromptStore {
     const already = this.records.get(record.id);
     if (already) {
       if (already.manifest.sha256 !== m.sha256 || already.manifest.bytes !== m.bytes) return "refused";
-      try {
-        if (sha256Hex(this.rebuild(record)) !== m.sha256) return "refused";
-      } catch {
-        return "refused";
+      if (!record.removed) {
+        try {
+          if (sha256Hex(this.rebuild(record)) !== m.sha256) return "refused";
+        } catch (err) {
+          if (!(err instanceof PromptError && err.reason)) return "refused";
+        }
       }
       this.byPosition.set(`${record.seq}/${record.row}`, already);
       return "added";
@@ -308,9 +352,12 @@ class PromptStore {
     this.byPosition.set(`${record.seq}/${record.row}`, record);
     for (let i = 0; i < own; i++) {
       const part = record.parts[i];
-      if (part.kind !== "data" || part.raw === null) continue;
-      const d = sha256Hex(encoder.encode(part.raw));
-      if (!this.pieces.has(d)) this.pieces.set(d, { id: record.id, part: i });
+      if (part.kind !== "data") continue;
+      const held = part.raw !== null && part.state !== STATE_TOO_LARGE && part.state !== STATE_REMOVED;
+      const d = held ? sha256Hex(encoder.encode(part.raw)) : part.sha256;
+      if (!d) continue;
+      const at = this.pieces.get(d);
+      if (!at || landedBefore(record, this.records.get(at.id))) this.pieces.set(d, { id: record.id, part: i });
     }
     return "added";
   }
@@ -331,11 +378,11 @@ class PromptStore {
         if (seg.part < 0 || seg.part >= record.parts.length - 1) {
           throw new PromptError(`${record.id} names part ${seg.part} it does not have`);
         }
-        take(partBytes(record.parts[seg.part]));
+        take(this.partBytes(record.parts[seg.part]));
       } else if (seg.piece) {
         const at2 = this.pieces.get(seg.piece);
         if (!at2) throw new PromptError(`${record.id} names a piece no earlier record holds`);
-        take(partBytes(this.records.get(at2.id).parts[at2.part]));
+        take(this.partBytes(this.records.get(at2.id).parts[at2.part]));
       } else if (seg.copy) {
         const base = this.body(seg.copy.from);
         if (seg.copy.len < 0 || seg.copy.len > base.length) {
@@ -360,6 +407,24 @@ class PromptStore {
       this.cache.delete(old);
     }
   }
+  /** A part's bytes: its data as the line spells it, an unknown part's own bytes, or what the host kept
+   *  of a removed piece, checked against its sha256. */
+  partBytes(part) {
+    if (part.state === STATE_TOO_LARGE) throw tooLarge();
+    if (part.state === STATE_REMOVED) {
+      const kept = part.sha256 ? this.keptPieces.get(part.sha256) : void 0;
+      if (!kept) throw new PromptError("a piece it is built from was removed by retention", STATE_REMOVED);
+      if (sha256Hex(kept) !== part.sha256) throw new PromptError("the kept bytes of a removed piece do not match its digest");
+      return kept;
+    }
+    return partBytes(part);
+  }
+}
+function landedBefore(a, b) {
+  return a.seq < b.seq || a.seq === b.seq && a.row < b.row;
+}
+function tooLarge() {
+  return new PromptError("a piece it is built from was too large to land", STATE_TOO_LARGE);
 }
 function partBytes(part) {
   if (part.raw === null) throw new PromptError("a part without data");
@@ -1215,6 +1280,9 @@ const ENGLISH = {
   promptNoRequest: "The request of this call was not captured.",
   promptNoResponse: "The response of this call was not captured.",
   promptRebuildFailed: "This body did not come back whole.",
+  promptRemoved: "Retention removed this body from the stored files. Only a receiver that accepted it still has it.",
+  promptBuiltFromRemoved: "Retention removed a body or piece this body is built from, and kept no copy, so it cannot be rebuilt here.",
+  promptTooLarge: "A piece of this body was too large to be stored, so the body cannot be rebuilt from the stored files.",
   promptRequestModes: "How much of the request to show",
   promptWholeRequest: "Whole request",
   promptWholeBody: "The body",
@@ -2411,6 +2479,7 @@ function drawPrompt(ctx, body, e) {
   let read2 = null;
   let manifest = null;
   let failure = "";
+  let notice = "";
   let bytes = 0;
   if (ref) {
     manifest = store.manifestAt(ref.seq, ref.row);
@@ -2420,6 +2489,10 @@ function drawPrompt(ctx, body, e) {
       read2 = readBody(raw, role);
     } catch (err) {
       failure = err instanceof PromptError ? err.message : String(err);
+      if (err instanceof PromptError && err.reason === STATE_REMOVED) {
+        notice = store.removedAt(ref.seq, ref.row) ? s.promptRemoved : s.promptBuiltFromRemoved;
+      }
+      if (err instanceof PromptError && err.reason === STATE_TOO_LARGE) notice = s.promptTooLarge;
     }
   }
   const missing = absent.length ? `<div class="acv-warning">${esc(fill(s.promptFilesMissing, { seqs: absent.join(", ") }))}</div>` : "";
@@ -2437,7 +2510,7 @@ function drawPrompt(ctx, body, e) {
     </div>`;
   let panel;
   try {
-    panel = drawSide(ctx, e, read2, sides, store, ref, failure);
+    panel = notice ? `<div class="acv-warning">${esc(notice)}</div>` : drawSide(ctx, e, read2, sides, store, ref, failure);
   } catch (err) {
     panel = `<div class="acv-warning">${esc(s.promptRebuildFailed)}<br>${esc(err instanceof Error ? err.message : String(err))}</div>`;
   }
