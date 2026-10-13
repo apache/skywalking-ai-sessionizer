@@ -44,6 +44,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/skeleton"
 )
@@ -269,10 +270,8 @@ func (r *Remover) locked(id string, fn func() (int, error)) (int, error) {
 // when the pipeline derives them, and nothing new has landed for the whole
 // retention. Sending is not waited for: a receiver that is down longer than
 // the retention misses the files removed meanwhile, and asz does not repair
-// that. Two kinds of session are kept until later changes cover them: one
-// never sent, whose removal would start it again from its sources, and one
-// that holds provider bodies, whose later bodies are cut against the ones a
-// removal would take away.
+// that. A session never sent is kept until a later change covers it: its
+// removal would start it again from its sources.
 func (r *Remover) removable(id string, sent *otlp.Sent) (string, error) {
 	if sent.Owner(id) == "" {
 		return "never sent", nil
@@ -286,9 +285,6 @@ func (r *Remover) removable(id string, sent *otlp.Sent) (string, error) {
 	}
 	landed := false
 	for _, lf := range files {
-		if lf.Stream == "" && lf.RunID == "" {
-			return "holds provider bodies", nil
-		}
 		if !lf.Skeleton {
 			landed = true
 		}
@@ -341,6 +337,12 @@ func (r *Remover) remove(id string, sent *otlp.Sent) (int, error) {
 		if hdr.Removed != nil && hdr.Removed.Generation >= generation {
 			generation = hdr.Removed.Generation + 1
 		}
+	}
+	// The tips are kept before the intent is written. A tip that cannot be
+	// kept then keeps the session's files, and its collectors go on, where a
+	// removal in progress would hold them off until it finished.
+	if err := r.keepTips(id, files, generation); err != nil {
+		return 0, err
 	}
 	intent := &storage.Removing{Generation: generation, Through: files[len(files)-1].Seq, Phase: storage.RemovingSkeletons}
 	if err := storage.SaveRemoving(r.Zone.RemovingPath(id), intent); err != nil {
@@ -430,10 +432,101 @@ func (r *Remover) finish(id string, intent *storage.Removing, sent *otlp.Sent) (
 	if err := r.syncAll(changed, r.syncDir); err != nil {
 		return 0, err
 	}
+	later := false
+	for _, lf := range files {
+		if lf.Seq > intent.Through && !lf.Skeleton && lf.Stream == "" && lf.RunID == "" {
+			later = true
+		}
+	}
+	if err := r.reclaim(id, intent.Generation, later); err != nil {
+		return 0, err
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return 0, err
 	}
+	// The intent's deletion is made durable before a collector may land
+	// into the session again. A power loss that brought the intent back
+	// after a body landed would finish the removal again over that body.
+	if err := r.syncDir(r.Zone.SessionDir(id)); err != nil {
+		return 0, fmt.Errorf("the end of the removal may not survive a power loss: %w", err)
+	}
 	return len(landed), nil
+}
+
+// keepTips keeps, in the session's store under this removal's generation,
+// the bytes of every chain tip the session's provider bodies leave. A body
+// cut after the removal is compared with the same tips as with nothing
+// removed, so their bytes must outlive the files they are built from. The
+// bodies are read as a collector reads them, landed files and skeletons in
+// landing order, with the store.
+//
+// A tip that holds or cites a piece too large to land is not kept: it cannot
+// be rebuilt, and a collector passes it over as a base. Any other tip that
+// does not rebuild keeps the session's files.
+func (r *Remover) keepTips(id string, files []storage.LandedFile, generation int) error {
+	store := r.Zone.BodyStore(id)
+	held := providerbody.NewSession()
+	held.Use(store)
+	for _, lf := range files {
+		if lf.Stream != "" || lf.RunID != "" {
+			continue
+		}
+		f, err := storage.OpenLanded(lf.Path)
+		if err != nil {
+			return err
+		}
+		_, recs, err := sessiondata.All(f)
+		f.Close()
+		// A file that does not read whole holds nothing a collector refers
+		// to, and its skeleton cannot be written: the session keeps its
+		// files.
+		if err != nil {
+			return fmt.Errorf("%s does not read whole: %w", lf.Path, err)
+		}
+		for _, rec := range recs {
+			_ = held.Add(rec)
+		}
+	}
+	for _, tip := range held.Tips() {
+		b, err := held.Body(tip)
+		if errors.Is(err, providerbody.ErrTooLarge) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("the chain tip %s does not rebuild, so its bytes cannot be kept: %w", tip, err)
+		}
+		if err := store.PutTip(generation, tip, b, r.syncDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reclaim deletes what the session's store holds that nothing needs once its
+// landed bodies are removed: the tips of earlier removals, which only bodies
+// now removed were built from, and the pieces, which only bodies now removed
+// cited. A later body that cites a removed piece keeps it again. The pieces
+// stay when a body landed after the removed range: a removal finished again,
+// after a power loss brought its intent back, must not take what that body
+// cites.
+func (r *Remover) reclaim(id string, generation int, later bool) error {
+	store := r.Zone.BodyStore(id)
+	generations, err := store.Generations()
+	if err != nil {
+		return err
+	}
+	for _, g := range generations {
+		if g == generation {
+			continue
+		}
+		if err := os.RemoveAll(store.TipsDir(g)); err != nil {
+			return err
+		}
+	}
+	if later {
+		return nil
+	}
+	return os.RemoveAll(store.PiecesDir())
 }
 
 func (r *Remover) syncAll(dirs map[string]bool, sync func(string) error) error {

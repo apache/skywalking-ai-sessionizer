@@ -1676,8 +1676,10 @@ func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
 	}
 
 	// One session, fed file by file as the refs reach further, never past
-	// the file a ref names.
+	// the file a ref names. A body retention removed is held by its
+	// skeleton, and a later body built from it reads the session's store.
 	held := providerbody.NewSession()
+	held.Use(storage.NewZone(root).BodyStore(session))
 	next := 0
 	for _, r := range refs {
 		for next < len(provider) && provider[next].seq <= r.Ref.Seq {
@@ -1703,6 +1705,14 @@ func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
 			bad("%v", err)
 			continue
 		}
+		if m.Role != r.Role {
+			bad("%s is a %s, listed as a %s", rec.ID, m.Role, r.Role)
+			continue
+		}
+		// A removed body keeps no bytes to rebuild.
+		if rec.Parts[len(rec.Parts)-1].State == model.ContentRemoved {
+			continue
+		}
 		body, err := held.Body(rec.ID)
 		// A body that holds or names a piece too large to land cannot be
 		// rebuilt from the root. parts_keep_source_bytes rebuilds it from
@@ -1713,8 +1723,6 @@ func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
 			bad("%s does not rebuild from the files up to %d: %v", rec.ID, r.Ref.Seq, err)
 		case !tooLarge && (len(body) != m.Bytes || providerbody.Digest(body) != m.SHA256):
 			bad("%s rebuilds to other bytes than its manifest states", rec.ID)
-		case m.Role != r.Role:
-			bad("%s is a %s, listed as a %s", rec.ID, m.Role, r.Role)
 		}
 	}
 	return out, len(provider), nil

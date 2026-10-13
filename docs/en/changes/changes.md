@@ -245,11 +245,20 @@
   them, measured on 2026-10-13. `asz collect` and `asz server` remove at
   the end of a pass, after the send, the whole conversation's files at once, and only once its head
   round covers them and, with metrics derived, every file of it is derived. A conversation never
-  sent is kept, and so is one holding provider bodies, for now. See
-  [Retention](../formats/storage-root.md#retention).
+  sent is kept. See [Retention](../formats/storage-root.md#retention).
+- A provider body landed after a removal is cut exactly as with nothing removed. The cutter holds
+  each removed body by its skeleton, and the session's store, under `provider/`, keeps the bytes of
+  every chain tip at a removal and of each removed piece a later body cites, so the same pieces are
+  cited and the same tip is copied. A removal keeps the tips before it writes its intent, so a tip
+  it cannot keep leaves the session's collectors landing. A body's skeleton keeps every segment of
+  its manifest but the literal strings, so a body the session did not accept is not accepted from
+  its skeleton either, and the index reads the same keys from it. `asz verify` rebuilds every body
+  that is not removed from them, and reads the bodies again when a removal changed the session
+  while it read them. With every scenario run twice, once removing everything after each
+  send, bodies under a budget too small for a piece included, every body landed as the same record.
 - Each removed file is replaced by a skeleton, `<name>.sk`: Session Data, compressed with gzip,
   that keeps every record and part in its place with every identifier the index reads, and none of
-  the content, each part saying `removed`. Its header records the file's digest, size and record
+  the content, each part saying `removed`, or `too_large` where it was. Its header records the file's digest, size and record
   count, when and by which removal it was removed, and what the receiver confirmed of it. The index
   rebuilt from skeletons is the index rebuilt from the landed files, byte for byte, so a
   conversation that becomes active again continues the same chain. With every scenario run twice,
@@ -258,7 +267,8 @@
 - A removal writes `removing.json` first, then the skeletons, each synced with the error of its
   first sync checked, before it deletes a landed file, and only once its skeleton reads whole and
   records the file's digest. The directories the deletions changed are synced before the intent
-  goes. A crash or a power loss at any point is finished by the next pass before anything lands,
+  goes, and the session directory after it. A crash or a power loss at any point is finished by
+  the next pass before anything lands,
   and no collector lands into a session while its removal is unfinished. A skeleton takes its
   file's modification time. A removed file's metrics request goes once the receiver has it, on the
   first pass after it is sent while retention is on; its receipt stays, so a deriver whose state

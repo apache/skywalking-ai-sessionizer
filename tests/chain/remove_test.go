@@ -70,6 +70,9 @@ type sentRoot struct {
 	zone     *storage.Zone
 	rcv      *otlptest.Receiver
 	endpoint string
+	// maxDelta is the budget the collectors cut landed files at; zero is
+	// none. See budgetOf.
+	maxDelta int64
 }
 
 func newSentRoot(t *testing.T) *sentRoot {
@@ -93,6 +96,7 @@ func rootAt(t *testing.T, dir string, rcv *otlptest.Receiver, endpoint string) *
 func (r *sentRoot) build(sc *scenario.Scenario, opts scenario.Options) *scenario.Built {
 	r.t.Helper()
 	opts.At = time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
+	opts.MaxDelta = r.maxDelta
 	b, err := scenario.Build(sc, scenario.FormatClaudeCode, r.dir, opts)
 	if err != nil {
 		r.t.Fatal(err)
@@ -106,11 +110,11 @@ func (r *sentRoot) changesRoot() string { return filepath.Join(r.source, "plugin
 // just started does, and returns how many sources it landed from.
 func (r *sentRoot) collect() int {
 	r.t.Helper()
-	st, err := claudecode.New(r.source, r.zone, 0).CollectAll(nil)
+	st, err := claudecode.New(r.source, r.zone, r.maxDelta).CollectAll(nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	cs, err := claudecodechanges.New(r.changesRoot(), r.zone, 0).CollectAll(nil)
+	cs, err := claudecodechanges.New(r.changesRoot(), r.zone, r.maxDelta).CollectAll(nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -236,7 +240,9 @@ func (r *sentRoot) copyOf(t *testing.T) *sentRoot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rootAt(t, dir, r.rcv, r.endpoint)
+	c := rootAt(t, dir, r.rcv, r.endpoint)
+	c.maxDelta = r.maxDelta
+	return c
 }
 
 // in is what a build of the root this was copied from reports, with its

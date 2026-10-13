@@ -44,6 +44,10 @@ type SessionReport struct {
 	// Unbuilt the provider bodies that cannot be rebuilt for it. They are
 	// reported so they are visible, not because they are wrong.
 	TooLarge, Unbuilt int
+	// Removing counts the provider bodies of a removal in progress that no
+	// longer rebuild, because it deleted one they are built from first. The
+	// removal deletes them too, so they are not problems.
+	Removing int
 	// Bodies lists the provider bodies that do not rebuild. They are counted
 	// in Problems too.
 	Bodies []BodyProblem
@@ -108,9 +112,37 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			}
 		}
 	}
-	pr, bodies, err := Provider(z.ProviderDir(session))
-	if err != nil {
-		return nil, err
+	// The bodies are checked against one view of the session's removals. A
+	// removal that runs during the check deletes files the check reads, and a
+	// body built from one it found deleted is no damage. So the check runs
+	// again while the view it started from changed under it, and says it
+	// could not tell when the view kept changing.
+	var pr *StreamReport
+	var bodies []BodyProblem
+	for attempt := 1; ; attempt++ {
+		before, err := removalOf(z, session)
+		if err != nil {
+			return nil, err
+		}
+		if beforeScan != nil {
+			beforeScan()
+		}
+		pr, bodies, err = Provider(z.ProviderDir(session), z.BodyStore(session), before.through)
+		if err != nil {
+			return nil, err
+		}
+		after, err := removalOf(z, session)
+		if err != nil {
+			return nil, err
+		}
+		if after == before {
+			break
+		}
+		if attempt == scanAttempts {
+			bodies = []BodyProblem{{File: z.ProviderDir(session),
+				Why: fmt.Sprintf("removals of the session changed while its bodies were checked, %d times; the check is inconclusive, run it again", scanAttempts)}}
+			break
+		}
 	}
 	if pr.Files > 0 {
 		rep.Streams = append(rep.Streams, pr)
@@ -118,6 +150,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 		rep.Relanded += pr.Relanded
 		rep.TooLarge += pr.TooLarge
 		rep.Unbuilt += pr.Unbuilt
+		rep.Removing += pr.Removing
 		rep.Removed = append(rep.Removed, pr.Removed...)
 		rep.Bodies = bodies
 		rep.Problems += len(bodies)
@@ -144,3 +177,57 @@ func (r *SessionReport) Details() []string {
 	}
 	return out
 }
+
+// scanAttempts bounds how many times the bodies are checked while removals
+// keep changing the session. A removal changes what a reader sees three
+// times: its intent is written, its generation is saved, its intent goes. The
+// next removal of the session waits a whole retention. So the fourth check at
+// the latest runs with nothing changing.
+const scanAttempts = 4
+
+// beforeScan runs between reading the removals and checking the bodies.
+// Tests set it to run a removal there.
+var beforeScan func()
+
+// removals is what a reader sees of a session's removals at one moment: the
+// removal in progress, by its generation and the newest sequence it removes,
+// or otherwise the generation of the last one that deleted files.
+type removals struct {
+	generation int
+	inProgress bool
+	through    uint64
+}
+
+// removalOf reads the generation before the intent, as RemovalGeneration
+// does. A removal writes its intent first, its generation before it deletes,
+// and deletes its intent last, and each removal has its own generation. So
+// when a deletion falls between two reads, the later one sees a removal, or a
+// generation, the earlier did not.
+//
+// A read that finds an intent and then cannot load it saw a removal end
+// between the two, and reads again: that view names no removal at all.
+func removalOf(z *storage.Zone, session string) (removals, error) {
+	for {
+		generation, inProgress, err := storage.RemovalGeneration(z, session)
+		if err != nil {
+			return removals{}, err
+		}
+		if betweenReads != nil {
+			betweenReads()
+		}
+		intent, err := storage.LoadRemoving(z.RemovingPath(session))
+		if err != nil {
+			return removals{}, err
+		}
+		if intent != nil {
+			return removals{generation: intent.Generation, inProgress: true, through: intent.Through}, nil
+		}
+		if !inProgress {
+			return removals{generation: generation}, nil
+		}
+	}
+}
+
+// betweenReads runs between reading a session's generation and loading its
+// intent. Tests set it to end a removal there.
+var betweenReads func()

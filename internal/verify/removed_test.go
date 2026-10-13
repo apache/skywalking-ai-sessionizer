@@ -35,7 +35,8 @@ import (
 
 // A removed file is reported with what the receiver confirmed, and never
 // checked as verified: a stream's line and byte checks go on through its
-// skeleton, and a removed provider body is not rebuilt.
+// skeleton, a removed provider body is not rebuilt, and a part too large to
+// land is counted in either.
 func TestRemovedFilesAreReportedNotVerified(t *testing.T) {
 	for _, c := range []struct {
 		kind sessiondata.Kind
@@ -45,7 +46,10 @@ func TestRemovedFilesAreReportedNotVerified(t *testing.T) {
 		{sessiondata.KindTranscript, func(z *storage.Zone) string { return z.StreamDir("s", "main") },
 			func(dir string) (*verify.StreamReport, error) { return verify.Stream(dir, "transcript") }},
 		{sessiondata.KindProviderBody, func(z *storage.Zone) string { return z.ProviderDir("s") },
-			func(dir string) (*verify.StreamReport, error) { rep, _, err := verify.Provider(dir); return rep, err }},
+			func(dir string) (*verify.StreamReport, error) {
+				rep, _, err := verify.Provider(dir, nil, 0)
+				return rep, err
+			}},
 	} {
 		t.Run(string(c.kind), func(t *testing.T) {
 			z := storage.NewZone(t.TempDir())
@@ -61,7 +65,8 @@ func TestRemovedFilesAreReportedNotVerified(t *testing.T) {
 					t.Fatal(err)
 				}
 				if err := w.Write(&sessiondata.Record{Ord: seq, Off: (seq - 1) * 3, Bytes: 2, ID: "r",
-					Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Text: "hi", State: model.ContentAvailable, Bytes: 2}}}); err != nil {
+					Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Text: "hi", State: model.ContentAvailable, Bytes: 2},
+						{Kind: sessiondata.PartData, State: model.ContentTooLarge, Bytes: 5 << 20, SHA256: "feed"}}}); err != nil {
 					t.Fatal(err)
 				}
 				if err := w.Close(); err != nil {
@@ -90,6 +95,11 @@ func TestRemovedFilesAreReportedNotVerified(t *testing.T) {
 			}
 			if rep.Records != 2 || len(rep.OrdGaps) != 0 || len(rep.ByteGaps) != 0 {
 				t.Fatalf("%d records, gaps %v %v, want 2 and none", rep.Records, rep.OrdGaps, rep.ByteGaps)
+			}
+			// A part too large to land is counted in the skeleton too, which
+			// keeps its state, so a body built from it is not left unexplained.
+			if rep.TooLarge != 2 {
+				t.Fatalf("%d parts too large to land counted, want 2, the skeleton's included", rep.TooLarge)
 			}
 		})
 	}

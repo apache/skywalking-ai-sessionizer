@@ -48,7 +48,16 @@ func (p BodyProblem) String() string {
 // rebuilt, in landing order, and compared. A body landed twice with the same
 // digest is a repeat, as in a stream. A body that holds or refers to a piece
 // too large to land cannot be rebuilt, and is counted, not reported.
-func Provider(dir string) (*StreamReport, []BodyProblem, error) {
+//
+// A body retention removed is held by its skeleton, which is checked as the
+// body was and reported, not rebuilt: its bytes are gone. A body landed after
+// a removal is rebuilt with the bytes of the removed tips and pieces it is
+// built from, from store, and one that cannot be is a problem: the store must
+// keep what it needs. removing is the last sequence of a removal in progress,
+// or 0: a body up to it that no longer rebuilds because the removal deleted
+// one it is built from first is counted, not reported, since the removal
+// deletes it too.
+func Provider(dir string, store providerbody.Store, removing uint64) (*StreamReport, []BodyProblem, error) {
 	files, err := landedFiles(dir, string(sessiondata.KindProviderBody))
 	if err != nil {
 		return nil, nil, err
@@ -56,7 +65,11 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 	rep := &StreamReport{Dir: dir, Files: len(files)}
 	var problems []BodyProblem
 	s := providerbody.NewSession()
+	if store != nil {
+		s.Use(store)
+	}
 	for _, path := range files {
+		seq, _ := storage.LandedFileSeq(filepath.Base(path))
 		f, err := storage.OpenLanded(path)
 		if err != nil {
 			return nil, nil, err
@@ -66,19 +79,24 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 			f.Close()
 			return nil, nil, fmt.Errorf("verify: %s: %w", path, err)
 		}
-		// A removed body keeps no bytes to rebuild, so it is reported, not
-		// checked.
 		if rf := removedFile(path, r.Header()); rf != nil {
 			rep.Removed = append(rep.Removed, *rf)
-			for {
-				if _, rerr := r.Next(); rerr != nil {
-					if !errors.Is(rerr, io.EOF) {
-						f.Close()
-						return nil, nil, fmt.Errorf("verify: %s: %w", path, rerr)
-					}
+			for row := uint32(1); ; row++ {
+				rec, rerr := r.Next()
+				if errors.Is(rerr, io.EOF) {
 					break
 				}
+				if rerr != nil {
+					f.Close()
+					return nil, nil, fmt.Errorf("verify: %s: %w", path, rerr)
+				}
 				rep.Records++
+				rep.TooLarge += tooLarge(rec)
+				rep.FirstOrd, rep.LastOrd = 1, 1
+				// A skeleton is checked as its body was, and is not rebuilt.
+				if err := s.Add(rec); err != nil && !errors.Is(err, providerbody.ErrRepeat) {
+					problems = append(problems, BodyProblem{File: path, Row: row, Why: err.Error()})
+				}
 			}
 			f.Close()
 			continue
@@ -115,6 +133,8 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 			switch {
 			case errors.Is(err, providerbody.ErrTooLarge):
 				rep.Unbuilt++
+			case errors.Is(err, providerbody.ErrRemoved) && seq <= removing:
+				rep.Removing++
 			case err != nil:
 				problems = append(problems, BodyProblem{File: path, Row: row, Why: err.Error()})
 			}

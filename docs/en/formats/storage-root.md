@@ -12,6 +12,7 @@ session.
     .lock                                one collector per session
     removing.json                        a removal in progress, see Retention
     removal.state                        the generation of the last removal that deleted files
+    provider/                            the bytes of removed chain tips and pieces, see Retention
     metrics/                             immutable decisions of local metric derivation
       000001.json                        exact request and accounting for landed file 1
     streams/
@@ -427,7 +428,6 @@ them. A session keeps them while any of these holds:
 - Something landed for it within the retention.
 - Its head round does not reach its newest landed file, or its parse failed this pass.
 - With metrics derived, a landed file of it is not derived yet.
-- It holds provider bodies.
 
 Sending is not waited for. A receiver that is down for longer than the retention misses the files
 removed meanwhile, and asz does not send them again. A scenario root keeps its own removal, below,
@@ -441,7 +441,8 @@ active again continues the same chain, with the same rounds, as if nothing was r
 is kept only by the receiver it was sent to. A skeleton is never sent. Measured on 2026-10-13 on
 one machine's root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of them: 3.5%
 for transcripts, under 5% for workflow files, and 77% for child agents' sidecars, which are mostly
-identifiers.
+identifiers. Its 16 provider body files of 133 KB had skeletons of 13.6 KB, 10% of them, 0.7 KB of
+which is the segments each body's manifest keeps.
 
 Nothing else of the session changes: the index, the cursors, `session.state` and the chain stay. A
 skeleton takes its file's modification time, which the metrics grace period and the order sessions
@@ -451,20 +452,55 @@ retention off does no retention work at all, beyond finishing a removal in progr
 receipt under `metrics/` stays: a deriver whose `metrics.state` a power loss took back reads it to
 derive the file as before.
 
+A provider body landed after a removal is cut exactly as it would be with nothing removed. The
+cutter holds each removed body by its skeleton, which keeps its identity, its digest, its size, its
+depth, its place among the chain tips, the segments that name a part, a piece or an earlier body,
+and the digest of each of its pieces. So it cites the same pieces and compares a new request with
+the same tips, and a body it did not accept when it landed is not accepted from its skeleton
+either. Their bytes come from the session's store:
+
+```text
+<session-id>/provider/
+  tips/<generation>/<id>.gz     every chain tip at that removal, whole
+  pieces/<sha256>.gz            each removed piece a body landed since then cites
+```
+
+A removal keeps the bytes of every chain tip under its own generation. A collector keeps a removed
+piece a new body cites, from that body, before the body lands, unless a body landed earlier cites it
+already. A piece is named by the SHA-256 of what it holds. A tip is named by the SHA-256 of its
+record's id, `<id>` above, because an identical body under another id may be one that could not be
+rebuilt, and must not be read as kept. Each file is checked against the SHA-256 of what it holds
+when it is read. It is written through a temporary name and replaces a file an earlier attempt left,
+and its directory and each one above it up to the session's are synced, the errors checked: a later
+sync that succeeds does not say an earlier attempt's file reached the disk. A reader looks for a tip
+in every generation the store holds, the newest first: while a removal runs, a body not yet deleted
+can be built from a tip of the generation before. A tip that holds or cites a piece too large to
+land cannot be rebuilt, so no removal keeps it, and a collector passes it over as a base with or
+without a removal.
+
 A removal is written so that a crash or a power loss at any point leaves nothing lost:
 
-1. `removing.json` records the removal: its generation, the newest sequence it removes, and its
+1. The session's provider bodies are read as a collector reads them, and the bytes of each chain
+   tip that can be rebuilt are kept under this removal's generation. A tip that holds or cites a
+   piece too large to land is passed over. Any other tip that does not rebuild keeps the session's
+   files this pass, and its collectors go on landing.
+2. `removing.json` records the removal: its generation, the newest sequence it removes, and its
    phase, and its directory is synced.
-2. The skeleton of each landed file is written and its directory synced, and the error of that
+3. The skeleton of each landed file is written and its directory synced, and the error of that
    first sync is checked. A failed sync stops the removal. The next pass writes every skeleton
    again, since a later sync that succeeds does not say the data reached the disk. A skeleton
    takes its file's modification time, and is synced again after it.
-3. The phase becomes `delete`, and `removal.state` records the removal's generation. Each landed
+4. The phase becomes `delete`, and `removal.state` records the removal's generation. Each landed
    file is deleted once its skeleton reads whole and records the file's digest; a skeleton that
    does not stops the removal and the file is kept. Then the metrics requests the receiver has
    go, as above, and every directory of the removed files, with the spool, is synced, so a
    deletion an earlier attempt made is durable too.
-4. `removing.json` is deleted.
+5. The store loses the tips of earlier generations and every piece: only bodies now removed were
+   built from them. A body landed later that cites a removed piece keeps it again. The pieces stay
+   when a provider body landed after the removed range, which only a power loss that brought back
+   the intent of a finished removal leaves.
+6. `removing.json` is deleted, and the session directory is synced, the error checked, so a power
+   loss never brings the intent back after a collector landed into the session again.
 
 Every pass of a pipeline first finishes a removal that an earlier one left in progress, before
 anything lands, whatever `storage.retention` says now. Until a removal is finished, no collector
@@ -478,9 +514,15 @@ removed.
 A root with skeletons still verifies. `asz verify` checks lines and bytes through each skeleton,
 binds each round to the digest each file had, which its skeleton recorded, and reports every
 removed file with what the receiver confirmed of it, never as verified. `asz show` says a record
-was removed. The page draws a removed step with no text, its content state `removed`. `asz repack`
-refuses a session with skeletons or with a removal in progress: a skeleton keeps no records to
-re-cut.
+was removed. The page draws a removed step with no text, its content state `removed`. It does not
+yet draw a provider body landed after a removal that is built from a removed tip or piece: the
+page rebuilds a body from the landed files alone. `asz verify` rebuilds every body that is not
+removed, with the store. While a removal is in progress, a body not yet deleted that no longer
+rebuilds, because the removal deleted a body it is built from first, is counted and not reported:
+the removal deletes it too. When a removal of the session starts, saves its generation or ends
+while verify reads the bodies, verify reads them again, and after four reads that each raced one it
+reports the check as inconclusive rather than as damage. `asz repack` refuses a session with skeletons or with a removal in
+progress: a skeleton keeps no records to re-cut.
 
 ### Removing by hand
 

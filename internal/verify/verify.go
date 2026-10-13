@@ -102,6 +102,10 @@ type StreamReport struct {
 	// byte budget. They are counted so the loss is visible.
 	TooLarge int
 	Unbuilt  int
+	// Removing counts the provider bodies of a removal in progress that no
+	// longer rebuild: the removal deleted a body they are built from before
+	// them, and deletes them too. The next pass finishes it.
+	Removing int
 
 	// Removed lists the files retention removed: their skeletons keep every
 	// record's place, so the line and byte checks go on through them, but

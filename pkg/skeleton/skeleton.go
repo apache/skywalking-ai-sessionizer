@@ -94,12 +94,14 @@ func Write(w io.Writer, data []byte, removed sessiondata.Removed) error {
 //
 // A part keeps its kind, its size and whether it failed; a call keeps its id,
 // name and server, and a result the call it answers. Text, data and media go,
-// and the state says removed. Two kinds of data are cut down instead, each only
-// after its own decoder accepted it, so data that did not decode never becomes
-// data that does: a changes record keeps what the index counts and what the
-// page joins and orders it by, an execution record keeps what the page joins
-// and orders it by, and a provider body keeps its manifest without segments
-// and the digest of every piece.
+// and the state says removed. A part too large to land says so still: it held
+// nothing to remove, and a provider body cut later must not take its piece
+// for one the store can give. Three kinds of data are cut down instead, each
+// only after its own decoder accepted it, so data that did not decode never
+// becomes data that does: a changes record keeps what the index counts and
+// what the page joins and orders it by, an execution record keeps what the
+// page joins and orders it by, and a provider body keeps its manifest without
+// the literal strings and the digest of every piece.
 func Of(hdr *sessiondata.Header, rec *sessiondata.Record) *sessiondata.Record {
 	out := &sessiondata.Record{
 		Ord: rec.Ord, Off: rec.Off, Bytes: rec.Bytes,
@@ -116,11 +118,14 @@ func Of(hdr *sessiondata.Header, rec *sessiondata.Record) *sessiondata.Record {
 	if len(rec.Parts) == 0 {
 		return out
 	}
-	_, manifestErr := providerbody.ManifestOf(rec)
+	m, manifestErr := providerbody.ManifestOf(rec)
 	last := len(rec.Parts) - 1
 	out.Parts = make([]sessiondata.Part, len(rec.Parts))
 	for i, p := range rec.Parts {
 		q := sessiondata.Part{Kind: p.Kind, Bytes: p.Bytes, Failed: p.Failed, State: model.ContentRemoved, SHA256: p.SHA256}
+		if p.State == model.ContentTooLarge {
+			q.State = p.State
+		}
 		switch p.Kind {
 		case sessiondata.PartCall:
 			q.ID, q.Name, q.Server, q.ServerTool = p.ID, p.Name, p.Server, p.ServerTool
@@ -129,7 +134,7 @@ func Of(hdr *sessiondata.Header, rec *sessiondata.Record) *sessiondata.Record {
 		case sessiondata.PartData:
 			switch {
 			case body && i == last && manifestErr == nil:
-				q.Data = manifest(p.Data)
+				q.Data = manifest(m)
 			case body && i < last:
 				// A body's piece is known by the digest of its data, or by
 				// the digest a part too large to land kept.
@@ -149,28 +154,29 @@ func Of(hdr *sessiondata.Header, rec *sessiondata.Record) *sessiondata.Record {
 	return out
 }
 
-// manifestKeys are what a body's manifest keeps: everything but its segments.
-var manifestKeys = []string{"schema", "role", "src", "sha256", "bytes", "depth", "chain",
-	"request", "previous_request", "call", "session", "model"}
-
-// manifest is a body's manifest without its segments, each kept value in the
-// bytes it had.
-func manifest(data json.RawMessage) json.RawMessage {
-	var all map[string]json.RawMessage
-	if json.Unmarshal(data, &all) != nil {
-		return nil
-	}
-	kept := make(map[string]json.RawMessage, len(manifestKeys))
-	for _, k := range manifestKeys {
-		if v, ok := all[k]; ok {
-			kept[k] = v
+// manifest is a body's manifest without its literal strings, written from
+// the manifest as a reader decodes it, so the skeleton holds exactly what a
+// session checks the body by and the index reads, whatever spelling the
+// landed file used. A literal is text of the body, so each segment loses its
+// lit and keeps the part, the piece or the earlier body it names; a segment
+// left empty goes. A session holding the skeleton takes it or not as it did
+// the body.
+func manifest(m *providerbody.Manifest) json.RawMessage {
+	kept := *m
+	kept.Segments = nil
+	for _, seg := range m.Segments {
+		seg.Lit = ""
+		if seg.Part != nil || seg.Piece != "" || seg.Copy != nil {
+			kept.Segments = append(kept.Segments, seg)
 		}
 	}
-	out, err := json.Marshal(kept)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if enc.Encode(kept) != nil {
 		return nil
 	}
-	return out
+	return bytes.TrimSuffix(buf.Bytes(), []byte{'\n'})
 }
 
 // changesOf is what a changes record keeps: what tells it from another

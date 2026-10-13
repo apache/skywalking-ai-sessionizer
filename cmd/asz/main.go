@@ -539,7 +539,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return err
 	}
 
-	var sessions, streams, records, problems, relanded, tooLarge, unbuilt int
+	var sessions, streams, records, problems, relanded, tooLarge, unbuilt, removing int
 	removed := map[string]int{}
 	for _, d := range entries {
 		if !d.IsDir() || (want != "" && d.Name() != want) {
@@ -559,6 +559,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		relanded += rep.Relanded
 		tooLarge += rep.TooLarge
 		unbuilt += rep.Unbuilt
+		removing += rep.Removing
 		for _, rf := range rep.Removed {
 			removed[rf.Receiver]++
 		}
@@ -592,6 +593,12 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		// it, but the content is gone and is not verified here.
 		fmt.Printf("%d file(s) were removed by retention and are not verified: the receiver accepted %d, accepted %d with rejected records, and confirmed nothing of %d\n",
 			n, removed[sessiondata.ReceiverAccepted], removed[sessiondata.ReceiverRejected], n-removed[sessiondata.ReceiverAccepted]-removed[sessiondata.ReceiverRejected])
+	}
+
+	if removing > 0 {
+		// A removal stopped part way, as by a crash. It deletes these
+		// bodies too, and the next pass finishes it.
+		fmt.Printf("%d provider body(ies) of a removal in progress no longer rebuild: the removal deleted a body they are built from first, and the next pass deletes them too\n", removing)
 	}
 
 	// A conversation's rounds are checked too. They are a digest chain, so a

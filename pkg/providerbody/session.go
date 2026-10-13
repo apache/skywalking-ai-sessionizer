@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"unicode/utf8"
 
@@ -37,6 +38,22 @@ var ErrRepeat = errors.New("providerbody: the session already holds this body")
 // too large to land: its record, or an earlier one it refers to, holds the
 // piece's size and digest and not its bytes.
 var ErrTooLarge = errors.New("providerbody: a piece of the body was too large to land")
+
+// ErrRemoved reports a body that cannot be rebuilt because retention removed
+// a body or a piece it is built from, and the session's store does not keep
+// those bytes.
+var ErrRemoved = errors.New("providerbody: a body or piece it is built from was removed")
+
+// Store keeps the bytes a removal took out of a session's landed files that
+// later bodies may still be built from: the chain tips at the removal, and
+// the removed pieces a later body cites. A tip is found by the id of its
+// record, never by its bytes alone: an identical body under another id may
+// be one the removal could not keep. A piece is found by its SHA-256. A
+// missing one is an error that errors.Is fs.ErrNotExist.
+type Store interface {
+	Tip(id, sha256 string) ([]byte, error)
+	Piece(sha256 string) ([]byte, error)
+}
 
 // maxTips bounds how many chain tips a new body is compared against. A tip is
 // one per chain that is still growing: the main stream and each child running
@@ -68,11 +85,21 @@ type Session struct {
 	cache      map[string][]byte
 	cacheOrder []string
 	cacheBytes int
+
+	// store keeps the bytes of removed tips and pieces. See Use.
+	store Store
+	// keptBy names, for each removed piece a landed record cites, the first
+	// such record: the piece was kept in the store before that record
+	// landed, so later records need not keep it again.
+	keptBy map[string]string
 }
 
 type held struct {
 	rec *sessiondata.Record
 	m   *Manifest
+	// removed says rec is a skeleton: the record keeps its place and its
+	// pieces' digests, and none of its bytes.
+	removed bool
 }
 
 type pieceAt struct {
@@ -82,7 +109,8 @@ type pieceAt struct {
 
 // NewSession returns an empty session.
 func NewSession() *Session {
-	return &Session{records: map[string]*held{}, pieces: map[string]pieceAt{}, tips: map[string]string{}, cache: map[string][]byte{}}
+	return &Session{records: map[string]*held{}, pieces: map[string]pieceAt{}, tips: map[string]string{},
+		cache: map[string][]byte{}, keptBy: map[string]string{}}
 }
 
 // Budget makes Encode fit every record into a landed file of budget bytes on
@@ -95,6 +123,10 @@ func (s *Session) Budget(budget int64) {
 		s.maxRecord = max(budget-FileOverhead, 1)
 	}
 }
+
+// Use gives the session the store that keeps the bytes of its removed tips
+// and pieces.
+func (s *Session) Use(store Store) { s.store = store }
 
 // ManifestOf returns the manifest a provider_body record carries as its last part.
 func ManifestOf(rec *sessiondata.Record) (*Manifest, error) {
@@ -131,6 +163,14 @@ func (s *Session) Manifest(id string) (*Manifest, bool) {
 // checks that each reference points at something the session already holds,
 // and makes the record's pieces and body available to later records. A
 // record whose id the session holds with the same digest returns ErrRepeat.
+//
+// The record may be the skeleton retention left in a removed record's place.
+// A skeleton keeps the manifest with every segment but the literal strings,
+// and the digest of every piece, and none of the bytes. It is checked as the
+// record was, and takes the record's place: its identity, digest, size and
+// depth, its pieces and its place among the chain tips. So a body cut after a
+// removal is cut as it would be with nothing removed, and the bytes of a
+// removed tip or piece come from the store.
 func (s *Session) Add(rec *sessiondata.Record) error {
 	m, err := ManifestOf(rec)
 	if err != nil {
@@ -145,6 +185,7 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 	// References are checked first, so a record landed again is held to the
 	// same rules as the first copy before it may count as a repeat.
 	own := len(rec.Parts) - 1
+	removed := rec.Parts[own].State == model.ContentRemoved
 	copies := 0
 	for _, seg := range m.Segments {
 		switch {
@@ -178,25 +219,37 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 		}
 		// A repeat is a repeat only if it rebuilds to what it claims; a
 		// record that says so and does not is damage. One that cannot be
-		// rebuilt for a piece too large to land is still a repeat.
-		if _, err := s.rebuild(rec, m, nil); err != nil && !errors.Is(err, ErrTooLarge) {
-			return err
+		// rebuilt for a piece too large to land, or for one retention
+		// removed, is still a repeat, and so is a skeleton, which holds no
+		// bytes to rebuild from.
+		if !removed {
+			if _, err := s.rebuild(rec, m, nil); err != nil && !errors.Is(err, ErrTooLarge) && !errors.Is(err, ErrRemoved) {
+				return err
+			}
 		}
 		return ErrRepeat
 	}
-	s.records[rec.ID] = &held{rec: rec, m: m}
+	s.records[rec.ID] = &held{rec: rec, m: m, removed: removed}
 	for i, p := range rec.Parts[:own] {
 		if p.Kind != sessiondata.PartData {
 			continue
 		}
-		// A piece taken out is still a piece: a later body that holds it
-		// refers to it rather than taking it out again.
+		// A piece taken out, or removed, is still a piece: a later body that
+		// holds it refers to it rather than taking it out again. Its digest
+		// is the one the part keeps.
 		d := p.SHA256
-		if p.State != model.ContentTooLarge {
+		if p.State != model.ContentTooLarge && p.State != model.ContentRemoved {
 			d = digest(p.Data)
 		}
-		if !hasPiece(s.pieces, d) {
+		if d != "" && !hasPiece(s.pieces, d) {
 			s.pieces[d] = pieceAt{id: rec.ID, part: i}
+		}
+	}
+	if !removed {
+		for _, seg := range m.Segments {
+			if seg.Piece != "" && s.removedPiece(seg.Piece) && s.keptBy[seg.Piece] == "" {
+				s.keptBy[seg.Piece] = rec.ID
+			}
 		}
 	}
 	if m.Role == RoleRequest && m.Chain != "" {
@@ -206,6 +259,66 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 }
 
 func hasPiece(m map[string]pieceAt, d string) bool { _, ok := m[d]; return ok }
+
+// removedPiece says the piece with digest d is held by a part retention
+// removed.
+func (s *Session) removedPiece(d string) bool {
+	at, ok := s.pieces[d]
+	return ok && s.records[at.id].rec.Parts[at.part].State == model.ContentRemoved
+}
+
+// Tips names the latest request body of each chain the session holds, from
+// the chain updated longest ago: the bodies a new request is compared with.
+func (s *Session) Tips() []string {
+	out := make([]string, 0, len(s.tipOrder))
+	for _, c := range s.tipOrder {
+		out = append(out, s.tips[c])
+	}
+	return out
+}
+
+// RemovedPieces gives the bytes of every removed piece rec cites that no
+// landed record before it cites, read from body, the body rec was cut from.
+// The store must keep them before rec lands, or nothing could rebuild rec
+// later. A piece an earlier landed record cites was kept before that record
+// landed.
+func (s *Session) RemovedPieces(rec *sessiondata.Record, body []byte) (map[string][]byte, error) {
+	m, err := ManifestOf(rec)
+	if err != nil {
+		return nil, err
+	}
+	var want []string
+	for _, seg := range m.Segments {
+		if seg.Piece == "" || !s.removedPiece(seg.Piece) {
+			continue
+		}
+		if by := s.keptBy[seg.Piece]; by != "" && by != rec.ID {
+			continue
+		}
+		want = append(want, seg.Piece)
+	}
+	if len(want) == 0 {
+		return nil, nil
+	}
+	spans, _, err := pieces(body)
+	if err != nil {
+		return nil, err
+	}
+	have := map[string][]byte{}
+	for _, sp := range spans {
+		piece := body[sp.a:sp.z]
+		have[digest(piece)] = piece
+	}
+	out := make(map[string][]byte, len(want))
+	for _, d := range want {
+		b, ok := have[d]
+		if !ok {
+			return nil, fmt.Errorf("providerbody: %s cites piece %s, which its body does not hold", rec.ID, d)
+		}
+		out[d] = b
+	}
+	return out, nil
+}
 
 // setTip makes id the latest body of its chain, and forgets the chain
 // updated longest ago once more than maxTips are held.
@@ -269,11 +382,63 @@ func (s *Session) body(id string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("providerbody: no body %s", id)
 	}
-	b, err := s.rebuild(h.rec, h.m, nil)
+	var b []byte
+	var err error
+	if h.removed {
+		b, err = s.removedBody(h)
+	} else {
+		b, err = s.rebuild(h.rec, h.m, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
 	s.remember(id, b)
+	return b, nil
+}
+
+// removedBody reads a removed body from the store. One the store does not
+// keep that holds or cites a piece too large to land fails as it did before
+// its removal, with ErrTooLarge: it could not be rebuilt then, so no removal
+// kept it. A copy needs no check, since a body is only copied from one that
+// rebuilds.
+func (s *Session) removedBody(h *held) ([]byte, error) {
+	b, err := s.stored(func(sha string) ([]byte, error) { return s.store.Tip(h.rec.ID, sha) }, h.m.SHA256, "body "+h.rec.ID)
+	if !errors.Is(err, ErrRemoved) {
+		return b, err
+	}
+	for _, seg := range h.m.Segments {
+		var p *sessiondata.Part
+		switch {
+		case seg.Part != nil && *seg.Part >= 0 && *seg.Part < len(h.rec.Parts)-1:
+			p = &h.rec.Parts[*seg.Part]
+		case seg.Piece != "":
+			if at, ok := s.pieces[seg.Piece]; ok {
+				p = &s.records[at.id].rec.Parts[at.part]
+			}
+		}
+		if p != nil && p.State == model.ContentTooLarge {
+			return nil, fmt.Errorf("%w: %d bytes with digest %s", ErrTooLarge, p.Bytes, p.SHA256)
+		}
+	}
+	return nil, err
+}
+
+// stored reads bytes a removal kept from the store, and checks they are what
+// their digest says.
+func (s *Session) stored(get func(string) ([]byte, error), sha, what string) ([]byte, error) {
+	if s.store == nil {
+		return nil, fmt.Errorf("%w: %s, and the session has no store", ErrRemoved, what)
+	}
+	b, err := get(sha)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s is not kept", ErrRemoved, what)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if digest(b) != sha {
+		return nil, fmt.Errorf("providerbody: the stored bytes of %s do not match their digest", what)
+	}
 	return b, nil
 }
 
@@ -314,7 +479,7 @@ func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest, fill map[string]
 			if *seg.Part < 0 || *seg.Part >= len(rec.Parts)-1 {
 				return nil, fmt.Errorf("providerbody: %s names part %d it does not have", rec.ID, *seg.Part)
 			}
-			b, err := partBytes(rec.Parts[*seg.Part], fill)
+			b, err := s.partBytes(rec.Parts[*seg.Part], fill)
 			if err != nil {
 				return nil, err
 			}
@@ -327,7 +492,7 @@ func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest, fill map[string]
 			if !ok {
 				return nil, fmt.Errorf("providerbody: %s names piece %s, which no earlier record holds", rec.ID, seg.Piece)
 			}
-			b, err := partBytes(s.records[at.id].rec.Parts[at.part], fill)
+			b, err := s.partBytes(s.records[at.id].rec.Parts[at.part], fill)
 			if err != nil {
 				return nil, err
 			}
@@ -355,13 +520,25 @@ func (s *Session) rebuild(rec *sessiondata.Record, m *Manifest, fill map[string]
 	return out, nil
 }
 
-func partBytes(p sessiondata.Part, fill map[string][]byte) ([]byte, error) {
+// partBytes gives the bytes a part holds of a body. A piece too large to land
+// comes from fill, the body being encoded, when the caller has it. A removed
+// piece comes from fill too, and otherwise from the store, which kept it from
+// the first later body that cited it.
+func (s *Session) partBytes(p sessiondata.Part, fill map[string][]byte) ([]byte, error) {
 	switch {
 	case p.State == model.ContentTooLarge:
 		if b, ok := fill[p.SHA256]; ok {
 			return b, nil
 		}
 		return nil, fmt.Errorf("%w: %d bytes with digest %s", ErrTooLarge, p.Bytes, p.SHA256)
+	case p.State == model.ContentRemoved:
+		if p.SHA256 == "" {
+			return nil, fmt.Errorf("%w: a part with no digest", ErrRemoved)
+		}
+		if b, ok := fill[p.SHA256]; ok {
+			return b, nil
+		}
+		return s.stored(func(sha string) ([]byte, error) { return s.store.Piece(sha) }, p.SHA256, "piece "+p.SHA256)
 	case p.Kind == sessiondata.PartUnknown:
 		return p.Raw()
 	}
@@ -607,7 +784,7 @@ func (s *Session) fit(rec *sessiondata.Record, fill map[string][]byte) {
 	sort.SliceStable(order, func(a, b int) bool { return len(rec.Parts[order[a]].Data) > len(rec.Parts[order[b]].Data) })
 	for _, i := range order {
 		p := &rec.Parts[i]
-		b, err := partBytes(*p, fill)
+		b, err := s.partBytes(*p, fill)
 		if err != nil {
 			continue
 		}

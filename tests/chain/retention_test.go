@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,15 +35,18 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodechanges"
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecodeprovider"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
 	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
+	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
@@ -77,8 +81,8 @@ func (r *sentRoot) pipelineAt(now time.Time) {
 // removes none. The receivers must get the same files, rounds and metrics,
 // byte for byte; the chains and the indexes must be the same, the index
 // rebuilt from the skeletons too; and the root with skeletons must verify.
-// A scenario whose conversation holds provider bodies is collected without
-// them here, since a session with bodies is not removed yet.
+// Provider bodies are collected too, and a body landed after a removal is cut
+// exactly as with none.
 func TestRetentionChangesNothingSent(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "scenarios", "*.yaml"))
 	if err != nil {
@@ -96,6 +100,8 @@ func TestRetentionChangesNothingSent(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			plain, kept := newSentRoot(t), newSentRoot(t)
+			plain.maxDelta = budgetOf(t, name)
+			kept.maxDelta = plain.maxDelta
 			removed := 0
 			for k, cp := range append(sc.Checkpoints(), "") {
 				for _, r := range []*sentRoot{plain, kept} {
@@ -124,6 +130,20 @@ func TestRetentionChangesNothingSent(t *testing.T) {
 	if ran == 0 {
 		t.Fatal("no scenario ran")
 	}
+}
+
+// budgetOf is the budget a scenario's expectation file collects at, so a
+// test cuts its landed files as the scenario's own run does.
+func budgetOf(t *testing.T, name string) int64 {
+	t.Helper()
+	ex, err := expect.Load(filepath.Join("..", "scenarios", name+".expect.yaml"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ex.Collect.MaxDeltaBytes
 }
 
 // sameSent checks two receivers got the same files and rounds, each by its
@@ -411,9 +431,8 @@ func skeletons(t *testing.T, z *storage.Zone, session string) []sessiondata.Head
 }
 
 // A session keeps its files while any reason holds: it was never sent, it is
-// still active, a landed file is not parsed, its metrics are not derived, its
-// parse failed this pass, or it holds provider bodies. Once none holds, the
-// files go.
+// still active, a landed file is not parsed, its metrics are not derived, or
+// its parse failed this pass. Once none holds, the files go.
 func TestRetentionKeepsWhatItMust(t *testing.T) {
 	type setup func(r *sentRoot, k int)
 	full := func(r *sentRoot, k int) { r.pipelineAt(landedAt(k)) }
@@ -447,26 +466,6 @@ func TestRetentionKeepsWhatItMust(t *testing.T) {
 		}, nil},
 		{"busy", full, func(_ *sentRoot, rem *retention.Remover, session string) retention.Result {
 			return rem.Pass(retention.Input{Busy: map[string]bool{session: true}})
-		}},
-		{"provider bodies", full, func(r *sentRoot, rem *retention.Remover, session string) retention.Result {
-			dir := r.zone.ProviderDir(session)
-			if err := os.MkdirAll(dir, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			body := landedBody(t, session)
-			if err := os.WriteFile(filepath.Join(dir, storage.LandedName("provider_body", storage.Stamp(landedAt(0)), 99)), body, 0o444); err != nil {
-				t.Fatal(err)
-			}
-			// Everything else holds: the body is derived, parsed and sent. A
-			// file placed by hand is not in the index, so the index is built
-			// again from the landed files.
-			if err := os.RemoveAll(r.zone.IndexDir(session)); err != nil {
-				t.Fatal(err)
-			}
-			r.derive()
-			r.parse()
-			r.push()
-			return rem.Pass(retention.Input{})
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -629,9 +628,36 @@ func TestRetentionKeepsUnsentMetrics(t *testing.T) {
 // next pass's recovery, with retention off: every file removed, nothing lost,
 // and the index as it was.
 func TestRetentionFinishesAfterACrash(t *testing.T) {
+	// growth has transcripts only; provider-bodies-long has provider bodies
+	// too, whose removal keeps the chain tips first, and
+	// provider-bodies-too-large bodies none of which can be rebuilt.
+	for _, name := range []string{"growth", "provider-bodies-long", "provider-bodies-too-large"} {
+		t.Run(name, func(t *testing.T) { removalFinishesAfterACrash(t, name) })
+	}
+}
+
+// builtThrough builds a scenario through every checkpoint and its end,
+// running a pipeline pass after each build.
+func builtThrough(t *testing.T, r *sentRoot, name string) *scenario.Built {
+	t.Helper()
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", name+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.maxDelta = budgetOf(t, name)
+	var b *scenario.Built
+	for k, cp := range append(sc.Checkpoints(), "") {
+		b = r.build(sc, scenario.Options{Through: cp})
+		r.pipelineAt(landedAt(k))
+	}
+	return b
+}
+
+func removalFinishesAfterACrash(t *testing.T, name string) {
 	base := newSentRoot(t)
-	b := growthAt(t, base, 3, func(k int) { base.pipelineAt(landedAt(k)) })
+	b := builtThrough(t, base, name)
 	files, _ := storage.LandedFiles(base.zone, b.Session)
+	receiptsBefore, _ := filepath.Glob(filepath.Join(base.zone.SessionDir(b.Session), "metrics", "*.json"))
 	stops := []retention.Point{{Phase: storage.RemovingSkeletons, Done: 0}}
 	for i := 1; i <= len(files); i++ {
 		stops = append(stops, retention.Point{Phase: storage.RemovingSkeletons, Done: i})
@@ -656,6 +682,9 @@ func TestRetentionFinishesAfterACrash(t *testing.T) {
 			if intent, err := storage.LoadRemoving(r.zone.RemovingPath(b.Session)); err != nil || intent == nil {
 				t.Fatalf("a stopped removal left no intent: %v", err)
 			}
+			// The root verifies as the removal left it: a body not yet
+			// deleted rebuilds, or is one the removal deletes.
+			verified(t, r.zone, b.Session)
 			rec := (&retention.Remover{Zone: r.zone}).Recover()
 			if len(rec.Errors) > 0 {
 				t.Fatal(rec.Errors)
@@ -684,8 +713,8 @@ func TestRetentionFinishesAfterACrash(t *testing.T) {
 			if left := spoolOf(t, r.dir, b.Session); len(left) != 0 {
 				t.Fatalf("sent requests of removed files are left: %v", left)
 			}
-			if receipts, _ := filepath.Glob(filepath.Join(r.zone.SessionDir(b.Session), "metrics", "*.json")); len(receipts) != len(files) {
-				t.Fatalf("%d receipts after the removal of %d files, want each kept", len(receipts), len(files))
+			if receipts, _ := filepath.Glob(filepath.Join(r.zone.SessionDir(b.Session), "metrics", "*.json")); len(receipts) != len(receiptsBefore) {
+				t.Fatalf("%d receipts after the removal, %d before, want each kept", len(receipts), len(receiptsBefore))
 			}
 		})
 	}
@@ -910,41 +939,28 @@ func otlpSent(r *sentRoot) (*otlp.Sent, error) { return otlp.LoadSent(r.dir) }
 func (r *sentRoot) collectAt(now time.Time) {
 	r.t.Helper()
 	clock := func() time.Time { return now }
-	col := claudecode.New(r.source, r.zone, 0)
+	col := claudecode.New(r.source, r.zone, r.maxDelta)
 	col.Now = clock
 	st, err := col.CollectAll(nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	cc := claudecodechanges.New(r.changesRoot(), r.zone, 0)
+	cc := claudecodechanges.New(r.changesRoot(), r.zone, r.maxDelta)
 	cc.Now = clock
 	cs, err := cc.CollectAll(nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	if len(st.Errors) > 0 || len(cs.Errors) > 0 {
-		r.t.Fatalf("collect: %v %v", st.Errors, cs.Errors)
-	}
-}
-
-// landedBody is a landed provider body file of one record, enough for a
-// session to hold provider bodies.
-func landedBody(t *testing.T, session string) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	w, err := sessiondata.NewWriter(&buf, &sessiondata.Header{H: 1, Schema: sessiondata.Schema, Seq: 99, At: "2026-03-01T00:00:00Z",
-		Kind: sessiondata.KindProviderBody, Adapter: "test/0", Dialect: "test/1", Src: "bodies/1.json", Session: session})
+	// The provider bodies last, as the pipeline collects them.
+	pc := claudecodeprovider.New(filepath.Join(r.source, scenario.ProviderBodyDir), r.zone, r.maxDelta)
+	pc.Now = clock
+	ps, err := pc.CollectAll(func(string) claudecodeprovider.Verdict { return claudecodeprovider.Collect })
 	if err != nil {
-		t.Fatal(err)
+		r.t.Fatal(err)
 	}
-	if err := w.Write(&sessiondata.Record{Ord: 1, Bytes: 2, ID: "req_1",
-		Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Text: "{}", State: model.ContentAvailable, Bytes: 2}}}); err != nil {
-		t.Fatal(err)
+	if len(st.Errors) > 0 || len(cs.Errors) > 0 || len(ps.Errors) > 0 {
+		r.t.Fatalf("collect: %v %v %v", st.Errors, cs.Errors, ps.Errors)
 	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
 }
 
 // A skeleton keeps every call's usage and model, so metrics turned on only
@@ -1152,4 +1168,304 @@ func TestThePageKeepsNothingDuringARemoval(t *testing.T) {
 	if first, again := load(), load(); first != again {
 		t.Fatal("the page did not keep the conversation once the removal was finished")
 	}
+}
+
+// Provider bodies landed after a removal are cut against the removed ones as
+// with no removal: they copy the front of a removed tip, kept in the store,
+// and cite removed pieces, kept from the first body that cited them. Every
+// body that is not removed rebuilds, and the root verifies. provider-bodies-long
+// is the scenario whose requests share a front long enough to be copied; that
+// they are cut exactly as with no removal is TestRetentionChangesNothingSent.
+func TestProviderBodiesAreCutAcrossARemoval(t *testing.T) {
+	for _, name := range []string{"provider-bodies-long"} {
+		t.Run(name, func(t *testing.T) {
+			r := newSentRoot(t)
+			r.maxDelta = budgetOf(t, name)
+			sc, err := scenario.Load(filepath.Join("..", "scenarios", name+".yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var b *scenario.Built
+			for k, cp := range append(sc.Checkpoints(), "") {
+				b = r.build(sc, scenario.Options{Through: cp})
+				r.pipelineAt(landedAt(k))
+				if cp != "" {
+					if res := retentionOf(r).Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+						t.Fatalf("the removal at %s: %+v", cp, res)
+					}
+				}
+			}
+			files, err := storage.LandedFiles(r.zone, b.Session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			removed := map[string]bool{}
+			removedPieces := map[string]bool{}
+			copies, cites, after := 0, 0, 0
+			for _, lf := range files {
+				if lf.Stream != "" || lf.RunID != "" {
+					continue
+				}
+				f, err := sessiondata.Open(lf.Path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, recs, err := sessiondata.All(f)
+				f.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, rec := range recs {
+					if lf.Skeleton {
+						removed[rec.ID] = true
+						for _, p := range rec.Parts {
+							if p.State == model.ContentRemoved && p.SHA256 != "" {
+								removedPieces[p.SHA256] = true
+							}
+						}
+						continue
+					}
+					after++
+					m, err := providerbody.ManifestOf(rec)
+					if err != nil {
+						continue
+					}
+					for _, seg := range m.Segments {
+						if seg.Copy != nil && removed[seg.Copy.From] {
+							copies++
+						}
+						if removedPieces[seg.Piece] {
+							cites++
+						}
+					}
+				}
+			}
+			if len(removed) == 0 || after == 0 {
+				t.Fatalf("%d bodies removed and %d landed after; the test needs both", len(removed), after)
+			}
+			if copies == 0 {
+				t.Fatal("no body landed after the removal copies a removed tip; the tip store is not reached")
+			}
+			if cites == 0 {
+				t.Fatal("no body landed after the removal cites a removed piece; the piece store is not reached")
+			}
+			t.Logf("%d removed, %d after, %d copies of a removed tip, %d cited removed pieces", len(removed), after, copies, cites)
+			verified(t, r.zone, b.Session)
+			// Each removal keeps the tips of its own generation, and takes
+			// those of the one before.
+			generation, _, err := storage.RemovalGeneration(r.zone, b.Session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			kept, err := r.zone.BodyStore(b.Session).Generations()
+			if err != nil || len(kept) != 1 || kept[0] != generation {
+				t.Fatalf("the store keeps tips of %v after removal %d, want only its own: %v", kept, generation, err)
+			}
+		})
+	}
+}
+
+// A chain tip that cites a piece too large to land cannot be rebuilt, so no
+// removal keeps it. A later removal that finds it still the tip, because only
+// the transcript moved, passes over it as the first did rather than stop and
+// hold the session's collectors off.
+func TestATipTooLargeToRebuildDoesNotStopARemoval(t *testing.T) {
+	r := newSentRoot(t)
+	r.maxDelta = budgetOf(t, "provider-bodies-too-large")
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", "provider-bodies-too-large.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b *scenario.Built
+	for k, cp := range append(sc.Checkpoints(), "") {
+		b = r.build(sc, scenario.Options{Through: cp})
+		r.pipelineAt(landedAt(k))
+		if cp == "" {
+			continue
+		}
+		if k > 0 {
+			// Nothing but the transcript landed since the first removal.
+			files, _ := storage.LandedFiles(r.zone, b.Session)
+			for _, lf := range files {
+				if lf.Stream == "" && lf.RunID == "" && !lf.Skeleton {
+					t.Fatalf("%s landed after the first removal; the test needs the tip unchanged", lf.Path)
+				}
+			}
+		}
+		if res := retentionOf(r).Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+			t.Fatalf("the removal at %s: %+v", cp, res)
+		}
+	}
+	if g, err := r.zone.BodyStore(b.Session).Generations(); err != nil || len(g) != 0 {
+		t.Fatalf("the store keeps tips of generations %v, and no tip can be rebuilt: %v", g, err)
+	}
+	verified(t, r.zone, b.Session)
+}
+
+// A removal finished again, after a power loss brought its intent back once
+// a body had landed after it, keeps the pieces that body cites. The removal
+// syncs the session directory once its intent is gone, so this needs that
+// sync to have failed; reclaim does not count on it.
+func TestARemovalFinishedAgainKeepsWhatALaterBodyCites(t *testing.T) {
+	r := newSentRoot(t)
+	r.maxDelta = budgetOf(t, "provider-bodies-long")
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", "provider-bodies-long.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cps := sc.Checkpoints()
+	b := r.build(sc, scenario.Options{Through: cps[0]})
+	r.pipelineAt(landedAt(0))
+	rem := retentionOf(r)
+	var intent []byte
+	rem.Stop = func(p retention.Point) error {
+		if p.Phase == storage.RemovingDelete && p.Done == 0 {
+			intent, _ = os.ReadFile(r.zone.RemovingPath(b.Session))
+		}
+		return nil
+	}
+	if res := rem.Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+		t.Fatalf("the removal: %+v", res)
+	}
+	if len(intent) == 0 {
+		t.Fatal("the removal's intent was not read")
+	}
+	r.build(sc, scenario.Options{Through: cps[1]})
+	r.pipelineAt(landedAt(1))
+	store := r.zone.BodyStore(b.Session)
+	if kept, _ := os.ReadDir(store.PiecesDir()); len(kept) == 0 {
+		t.Fatal("no body after the removal cites a removed piece; the test needs one")
+	}
+	if err := os.WriteFile(r.zone.RemovingPath(b.Session), intent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := retentionOf(r).Recover(); len(res.Errors) > 0 {
+		t.Fatal(res.Errors)
+	}
+	if kept, _ := os.ReadDir(store.PiecesDir()); len(kept) == 0 {
+		t.Fatal("finishing the removal again took the pieces a later body cites")
+	}
+	verified(t, r.zone, b.Session)
+}
+
+// The end of a removal is made durable: once the intent is deleted, the
+// session directory is synced, and a failed sync is an error. Otherwise a
+// power loss could bring the intent back after a body landed.
+func TestTheEndOfARemovalIsSynced(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint("fail=", fail), func(t *testing.T) {
+			r := newSentRoot(t)
+			b := growthAt(t, r, 2, func(k int) { r.pipelineAt(landedAt(k)) })
+			rem := retentionOf(r)
+			seen, ended := false, false
+			rem.SyncDir = func(dir string) error {
+				_, err := os.Stat(r.zone.RemovingPath(b.Session))
+				seen = seen || err == nil
+				if dir == r.zone.SessionDir(b.Session) && seen && os.IsNotExist(err) {
+					ended = true
+					if fail {
+						return errCrash
+					}
+				}
+				return storage.SyncDir(dir)
+			}
+			res := rem.Pass(retention.Input{})
+			if !ended {
+				t.Fatal("the session directory was not synced once the intent was deleted")
+			}
+			if fail != (len(res.Errors) > 0) {
+				t.Fatalf("a failed sync at the end of the removal: errors %v", res.Errors)
+			}
+		})
+	}
+}
+
+// A tip that cannot be kept stops a removal before its intent is written, so
+// the session keeps its files and its collectors go on landing into it.
+// Here the store lost the tip a later body copies, as damage would.
+func TestATipThatCannotBeKeptLeavesNoIntent(t *testing.T) {
+	r := newSentRoot(t)
+	r.maxDelta = budgetOf(t, "provider-bodies-long")
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", "provider-bodies-long.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cps := sc.Checkpoints()
+	b := r.build(sc, scenario.Options{Through: cps[0]})
+	r.pipelineAt(landedAt(0))
+	if res := retentionOf(r).Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+		t.Fatalf("the first removal: %+v", res)
+	}
+	r.build(sc, scenario.Options{Through: cps[1]})
+	r.pipelineAt(landedAt(1))
+	if err := os.RemoveAll(filepath.Join(r.zone.SessionDir(b.Session), "provider", "tips")); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := storage.LandedFiles(r.zone, b.Session)
+	if res := retentionOf(r).Pass(retention.Input{}); len(res.Errors) == 0 {
+		t.Fatal("a removal went on without the tip a body is built from")
+	}
+	if _, err := os.Stat(r.zone.RemovingPath(b.Session)); !os.IsNotExist(err) {
+		t.Fatalf("the stopped removal left an intent: %v", err)
+	}
+	r.build(sc, scenario.Options{})
+	r.collectAt(landedAt(2))
+	if after, _ := storage.LandedFiles(r.zone, b.Session); len(after) <= len(before) {
+		t.Fatalf("nothing landed after the stopped removal: %d files, %d before", len(after), len(before))
+	}
+}
+
+// A scenario written as Session Data directly makes no scenario marker, so
+// retention can remove from it, and a later checkpoint is then written into a
+// root with skeletons. The writer holds them and reads the store as the
+// adapter does, so every body after a removal lands as the same record as
+// with nothing removed, and the root verifies.
+func TestAnSDBuildContinuesAfterARemoval(t *testing.T) {
+	const name = "provider-bodies-long"
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", name+".yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, kept := newSentRoot(t), newSentRoot(t)
+	opts := scenario.Options{At: time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC), MaxDelta: budgetOf(t, name)}
+	var b *scenario.Built
+	for _, cp := range append(sc.Checkpoints(), "") {
+		opts.Through = cp
+		for _, r := range []*sentRoot{plain, kept} {
+			if b, err = scenario.Build(sc, scenario.FormatSD, r.dir, opts); err != nil {
+				t.Fatal(err)
+			}
+			r.derive()
+			r.parse()
+			r.push()
+		}
+		if cp != "" {
+			if res := retentionOf(kept).Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+				t.Fatalf("the removal at %s: %+v", cp, res)
+			}
+		}
+	}
+	files, err := storage.LandedFiles(kept.zone, b.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := 0
+	for _, lf := range files {
+		if lf.Stream != "" || lf.RunID != "" || lf.Skeleton {
+			continue
+		}
+		rel, _ := filepath.Rel(kept.dir, lf.Path)
+		want, err := os.ReadFile(filepath.Join(plain.dir, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(lf.Path); !bytes.Equal(got, want) {
+			t.Fatalf("%s lands differently after a removal", rel)
+		}
+		after++
+	}
+	if after == 0 {
+		t.Fatal("no provider body landed after a removal")
+	}
+	verified(t, kept.zone, b.Session)
 }
