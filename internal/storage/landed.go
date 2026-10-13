@@ -20,13 +20,18 @@ package storage
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // LandedFile is one landed record file in the zone.
@@ -37,6 +42,11 @@ type LandedFile struct {
 	RunID  string // set for a workflow run's records
 	// Neither is set for a file at the session level: the provider bodies,
 	// which belong to no one stream or run.
+
+	// Skeleton says Path is the skeleton that took the landed file's place
+	// when retention removed it. The file keeps its identity: its name with
+	// the landed extension (LandedPath) and its digest (LandedDigest).
+	Skeleton bool
 }
 
 // LandedFiles lists every landed record file for a session, in sequence order.
@@ -61,14 +71,14 @@ func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
 		}
 		for _, it := range items {
 			name := it.Name()
-			if it.IsDir() || !strings.HasSuffix(name, ".sd") {
+			if it.IsDir() {
 				continue
 			}
 			seq, ok := LandedFileSeq(name)
 			if !ok {
 				continue
 			}
-			lf := LandedFile{Path: filepath.Join(dir, name), Seq: seq}
+			lf := LandedFile{Path: filepath.Join(dir, name), Seq: seq, Skeleton: sessiondata.IsSkeleton(name)}
 			if isRun {
 				lf.RunID = owner
 			} else {
@@ -105,14 +115,88 @@ func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
 		return nil, err
 	}
 
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
-	return out, nil
+	// A removal writes a file's skeleton before it deletes the file, so both
+	// can be there for a while. Each reads as the same index, and the landed
+	// file is read while it is there.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Seq != out[j].Seq {
+			return out[i].Seq < out[j].Seq
+		}
+		return !out[i].Skeleton && out[j].Skeleton
+	})
+	kept := out[:0]
+	for i, lf := range out {
+		if i > 0 && LandedPath(lf.Path) == LandedPath(out[i-1].Path) {
+			continue
+		}
+		kept = append(kept, lf)
+	}
+	return kept, nil
 }
 
-// landedNameRe matches "<kind>-<stamp>-<seq>.sd".
-var landedNameRe = regexp.MustCompile(`-(\d{6,})\.sd$`)
+// landedNameRe matches "<kind>-<stamp>-<seq>.sd", and the skeleton that takes
+// its place, "<kind>-<stamp>-<seq>.sk".
+var landedNameRe = regexp.MustCompile(`-(\d{6,})\.s[dk]$`)
 
-// LandedFileSeq extracts the sequence from a landed filename.
+// LandedPath is the path a file was landed under: a skeleton's path with the
+// landed extension. Everything that names a landed file, such as push.state,
+// metrics.state and a round's file list, names it by this path, so a file
+// keeps its name after retention removes it.
+func LandedPath(path string) string {
+	if sessiondata.IsSkeleton(path) {
+		return strings.TrimSuffix(path, sessiondata.SkeletonExt) + sessiondata.Ext
+	}
+	return path
+}
+
+// SkeletonPath is where the skeleton of the landed file at path is written.
+func SkeletonPath(path string) string {
+	return strings.TrimSuffix(path, sessiondata.Ext) + sessiondata.SkeletonExt
+}
+
+// OpenLanded opens a landed file for reading, or the skeleton that took its
+// place when a removal deleted the file after its path was listed. A reader
+// that holds no session lock, such as the page, lists a file a removal may
+// delete before it opens it.
+func OpenLanded(path string) (io.ReadCloser, error) {
+	f, err := sessiondata.Open(path)
+	if errors.Is(err, fs.ErrNotExist) && !sessiondata.IsSkeleton(path) {
+		return sessiondata.Open(SkeletonPath(path))
+	}
+	return f, err
+}
+
+// LandedDigest is the SHA-256 a landed file had: its own digest, or for a
+// skeleton the digest it recorded of the file it took the place of. A round
+// binds a file by this digest, before a removal and after.
+func LandedDigest(lf LandedFile) (string, error) {
+	path := lf.Path
+	if !lf.Skeleton {
+		d, err := FileDigest(path)
+		// A removal deleted the file after it was listed: its skeleton
+		// recorded the digest.
+		if !errors.Is(err, fs.ErrNotExist) {
+			return d, err
+		}
+		path = SkeletonPath(path)
+	}
+	f, err := sessiondata.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	r, err := sessiondata.NewReader(f)
+	if err != nil {
+		return "", fmt.Errorf("storage: skeleton %s: %w", lf.Path, err)
+	}
+	h := r.Header()
+	if h.Removed == nil || h.Removed.Digest == "" {
+		return "", fmt.Errorf("storage: skeleton %s does not say which file it took the place of", lf.Path)
+	}
+	return h.Removed.Digest, nil
+}
+
+// LandedFileSeq extracts the sequence from a landed filename or a skeleton's.
 func LandedFileSeq(name string) (uint64, bool) {
 	m := landedNameRe.FindStringSubmatch(name)
 	if m == nil {

@@ -58,6 +58,7 @@ pkg/model/                      the conversation vocabulary: node kinds, relatio
 pkg/sessionflow/                Session Flow: the round chain of conversation structure, `.sf`
 pkg/sessionview/                asz.view: one conversation as one document, version 1.0; never a file
 pkg/providerbody/               provider bodies: cuts a body against what its session holds, and rebuilds it byte for byte
+pkg/skeleton/                   the skeleton `.sk` that takes a landed file's place when retention removes it
 internal/index/                 derived lookup structure the assembler resolves against
 internal/assemble/              the eight-stage pipeline, index in and structure out
 internal/parse/                 one round: assemble, compare against the chain, publish the delta
@@ -68,6 +69,7 @@ internal/view/conversation-view/ Horizon's conversation renderer, built from the
 internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file, and the metrics spool
 internal/metrics/               derives the runtime's token metric from landed Session Data into the spool; collector side; testdata holds a redacted capture of the runtime's exporter
 internal/repack/                re-cuts landed files into a new root under another budget
+internal/retention/             removes idle sent conversations' landed files, a skeleton in each one's place (collector side)
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/claudecodeprovider/ the claude-code-provider adapter: the request and response bodies Claude Code writes, landed into their sessions
 internal/adapters/kiro/         the kiro-local adapter: the sessions Kiro's V3 engine writes, for kiro-cli and Kiro Crew
@@ -151,10 +153,14 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Landed files plus the round chain are the whole conversation.** Nothing else has to travel with
   them: the index rebuilds from the landed files, and the chain head is recovered by listing the
   rounds directory. An archive or a bundle can be read, verified and re-parsed with no source files
-  and no collector.
+  and no collector. A skeleton stands in for a removed file's structure, never its text.
+- **A skeleton keeps every field the index reads.** The index rebuilt from a `.sk` must equal the
+  index rebuilt from its `.sd`, byte for byte, or a conversation continues differently after a
+  removal. A new field the index reads goes into `skeleton.Of` too; `tests/chain` compares every
+  scenario with and without removals.
 - **Assembly reads the index, never the payloads.** Structure needs identifiers; text is read only
-  when a conversation is rendered. **The page reads `.sd` and `.sf` only**, never the index; a test
-  in `tests/boundary` fails if it does.
+  when a conversation is rendered. **The page reads `.sd`, `.sk` and `.sf` only**, never the index;
+  a test in `tests/boundary` fails if it does.
 - **A prompt cycle id is not unique across streams.** Anything keyed on it must be scoped by stream.
 - **Never use a stop reason to find a call's last fragment.** A main transcript stamps it on every
   fragment. Line order is the only rule that works on both stream kinds.
@@ -167,10 +173,12 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   and a reader may have taken the file) and is reported once per directory; failing it made a disk
   that kept failing land the same records on every pass. Retention, when it removes, must make a
   replacement durable, its directory synced and the error checked, before it deletes what it replaces.
-- **asz never removes a real session.** Only a session a scenario build marked is removed, by the
-  policy in its marker, and only once all of it was sent to the one receiver the pipeline sends to.
-  The product configuration has no removal setting. A removal renames each directory away before it
-  deletes it, so no reader sees half a session.
+- **asz never removes a real session whole.** Only a session a scenario build marked is removed
+  whole, by the policy in its marker, and only once all of it was sent to the one receiver the
+  pipeline sends to. A removal renames each directory away before it deletes it, so no reader sees
+  half a session. `storage.retention`, off by default, removes the landed files of an idle sent
+  conversation and keeps its structure: a skeleton in each file's place, and the index, cursors,
+  state and chain untouched. It never runs over a scenario root.
 - **A landed file is cut once.** A round addresses records by `{seq, row}` and binds to file
   digests, so a referenced file is never re-cut. A new budget applies to new files; an existing
   root is brought under it with `asz repack` into a new root, where the chains are built again.
@@ -188,7 +196,8 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   collector without a cut and a budget is a bug. `asz repack` carries records whole.
 - **Land before committing the cursor.** At-least-once is intentional; the reverse loses data.
 - **`next_seq` is monotonic across all streams in a session**, so a session is processed
-  single-threaded and under a lock. The filesystem is the authority on the counter.
+  single-threaded and under a lock. The filesystem is the authority on the counter, and a
+  skeleton's name counts: a sequence is never used twice, removed or not.
 - **Locks are taken in one order:** `_scenario`, `_root`, `_export`, `_metrics`, `_provider`, a
   session's, a chain's. Every command that writes to a root holds `_root` for its pass, so two
   commands never write the same root at once. The LangSmith receiver is the one writer outside a

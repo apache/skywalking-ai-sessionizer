@@ -126,7 +126,27 @@ func LandedName(prefix, stamp string, seq uint64) string {
 //
 // perm is applied before the rename, so a landed file is read-only from the
 // instant it becomes visible under its final name.
-func WriteAtomic(path string, perm os.FileMode, fn func(io.Writer) error) (err error) {
+func WriteAtomic(path string, perm os.FileMode, fn func(io.Writer) error) error {
+	if err := writeAtomic(path, perm, fn); err != nil {
+		return err
+	}
+	SyncAfterRename(filepath.Dir(path))
+	return nil
+}
+
+// WriteAtomicDurable is WriteAtomic for a file something is about to depend
+// on surviving a power loss: the directory is synced with sync, and a
+// failure is returned rather than reported. The first sync after a failed
+// writeback is the one that knows: a second one can succeed though the data
+// was lost.
+func WriteAtomicDurable(path string, perm os.FileMode, fn func(io.Writer) error, sync func(dir string) error) error {
+	if err := writeAtomic(path, perm, fn); err != nil {
+		return err
+	}
+	return syncWith(sync, filepath.Dir(path))
+}
+
+func writeAtomic(path string, perm os.FileMode, fn func(io.Writer) error) (err error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -155,11 +175,7 @@ func WriteAtomic(path string, perm os.FileMode, fn func(io.Writer) error) (err e
 	if err = os.Chmod(tmpName, perm); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	SyncAfterRename(dir)
-	return nil
+	return os.Rename(tmpName, path)
 }
 
 // ErrExists means a no-replace write found its target already present.
@@ -172,7 +188,35 @@ var ErrExists = errors.New("storage: target already exists")
 // first, then let the kernel install it only if the destination is absent.
 // A crash before that operation leaves only a temporary file, which readers
 // ignore. A crash after it leaves the complete, read-only round.
-func WriteExclusive(path string, perm os.FileMode, fn func(io.Writer) error) (err error) {
+func WriteExclusive(path string, perm os.FileMode, fn func(io.Writer) error) error {
+	if err := writeExclusive(path, perm, fn); err != nil {
+		return err
+	}
+	SyncAfterRename(filepath.Dir(path))
+	return nil
+}
+
+// WriteExclusiveDurable is WriteExclusive for a file something is about to
+// depend on surviving a power loss, as WriteAtomicDurable is.
+func WriteExclusiveDurable(path string, perm os.FileMode, fn func(io.Writer) error, sync func(dir string) error) error {
+	if err := writeExclusive(path, perm, fn); err != nil {
+		return err
+	}
+	return syncWith(sync, filepath.Dir(path))
+}
+
+// syncWith syncs dir with sync, or with SyncDir when sync is nil.
+func syncWith(sync func(string) error, dir string) error {
+	if sync == nil {
+		sync = SyncDir
+	}
+	if err := sync(dir); err != nil {
+		return fmt.Errorf("storage: %s may not survive a power loss: %w", dir, err)
+	}
+	return nil
+}
+
+func writeExclusive(path string, perm os.FileMode, fn func(io.Writer) error) (err error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -198,11 +242,7 @@ func WriteExclusive(path string, perm os.FileMode, fn func(io.Writer) error) (er
 	if err = f.Close(); err != nil {
 		return err
 	}
-	if err = RenameExclusive(tmpName, path); err != nil {
-		return err
-	}
-	SyncAfterRename(dir)
-	return nil
+	return RenameExclusive(tmpName, path)
 }
 
 // SyncAfterRename syncs a directory after a rename into it, an attempt to make

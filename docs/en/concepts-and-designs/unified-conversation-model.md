@@ -213,7 +213,7 @@ An exact identifier does not guarantee a unique match. Where several candidates 
 relation stays `exact_ambiguous` and the assembler must not choose one.
 
 **Content state** — for any referenced payload: `available`, `redacted`, `omitted`, `hash_only`,
-`size_only`, `truncated`, `unavailable`.
+`size_only`, `truncated`, `unavailable`, `too_large`, `removed`.
 
 ## Ownership versus causality
 

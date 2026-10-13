@@ -87,7 +87,7 @@ func landedSession(zone *storage.Zone, id string) (claudecode.Session, bool) {
 	s := claudecode.Session{ID: id}
 	seen := map[string]bool{}
 	for _, lf := range files {
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			continue
 		}

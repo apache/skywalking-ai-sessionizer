@@ -35,6 +35,16 @@ The pipeline. One pass does three things, in this order:
 The order matters. The push runs last so a pass sends the rounds it has just written, rather than
 leaving them for the next one.
 
+With `storage.retention` set, a pass then removes the landed files of every conversation that was
+sent and has been idle for longer, leaving a skeleton in each one's place. Before it lands
+anything, every pass finishes a removal an earlier one left in progress, whatever the setting says
+now. A scenario root keeps its own removal, and retention never runs there. See
+[Retention](../formats/storage-root.md#retention). The startup lines say the retention:
+
+```text
+retention: a sent conversation idle for 72h0m0s loses its landed files; a skeleton keeps its structure, and the receiver its text
+```
+
 In watch mode, the default, it repeats every `interval`; with `-once` or `mode: once` it makes one
 pass and exits. Every enabled local adapter is read in the same pass, so one watching source never
 keeps another from running. When the `langsmith-ingest` adapter is enabled, its receiver listens
@@ -57,6 +67,7 @@ One line per pass, and a quiet pass prints nothing:
 | `metrics` | spooled metrics requests sent |
 | `rejected` | records and points a receiver took and rejected, absent when 0. It also gives an `error:` line, because they are never sent again. |
 | `removed` | scenario sessions removed, absent when 0. See [A scenario root](#a-scenario-root). |
+| `retention` | landed files `storage.retention` removed, absent when 0. See [Retention](../formats/storage-root.md#retention). |
 | `errors` | listed on standard error after the line |
 
 `busy` is not an error. Running two pipelines on one root is supported, and the process that holds
@@ -166,10 +177,12 @@ the chains are rebuilt there, because a round addresses records by file and line
 references name positions that no longer exist. `DEST` must be a new or empty directory outside
 the storage root. A populated destination is refused before any session is written, because its
 chains bind to the original landed files. One inside the root is refused too, because every
-command would read it as a session of the root. If a repack is interrupted, retry into another empty directory. The repack holds the
-root lock of the root it reads, and waits for a pass that holds it. It holds `DEST`'s lock too,
-without waiting, and checks `DEST` again under it: a command that holds a new or empty root is
-writing into it. One row per session:
+command would read it as a session of the root. If a repack is interrupted, retry into another
+empty directory. The repack holds the root lock of the root it reads, and waits for a pass that
+holds it. It holds `DEST`'s lock too, without waiting, and checks `DEST` again under it: a command
+that holds a new or empty root is writing into it. A session retention removed files of is
+refused before anything is written, and so is one with a removal in progress: a skeleton keeps no
+records to re-cut. One row per session:
 
 ```text
 SESSION                               FILES IN  FILES OUT  RECORDS  BYTES
@@ -381,6 +394,15 @@ it exits non-zero when anything is wrong.
 checked 44 session(s), 5867 stream(s), 359292 records
 checked 44 conversation chain(s), 44 round(s)
 all landed data is contiguous and matches its digests
+```
+
+A file retention removed is not verified: only its skeleton is there. The checks go on through the
+skeleton, which keeps every record's line, byte and size, and a round is bound to the digest the
+file had, which the skeleton recorded. Removed files are counted on a line of their own, by what
+the receiver confirmed of them:
+
+```text
+12 file(s) were removed by retention and are not verified: the receiver accepted 11, accepted 0 with rejected records, and confirmed nothing of 1
 ```
 
 Contiguous means that, in every stream, the landed records continue the source's line numbers and

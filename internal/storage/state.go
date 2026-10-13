@@ -24,7 +24,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -102,9 +101,6 @@ func LoadSessionState(path, session string) (*SessionState, error) {
 	return s, nil
 }
 
-// landedSeqRe extracts the sequence from a landed filename.
-var landedSeqRe = regexp.MustCompile(`-(\d{6,})\.sd$`)
-
 // RecoverNextSeq raises NextSeq above the highest sequence already present in
 // sessionDir.
 //
@@ -129,11 +125,9 @@ func (s *SessionState) RecoverNextSeq(sessionDir string) error {
 		if d.IsDir() {
 			return nil
 		}
-		m := landedSeqRe.FindStringSubmatch(d.Name())
-		if m == nil {
-			return nil
-		}
-		if n, convErr := strconv.ParseUint(m[1], 10, 64); convErr == nil && n > highest {
+		// A skeleton keeps its landed file's sequence, so it counts too: a
+		// sequence is never used twice, removed or not.
+		if n, ok := LandedFileSeq(d.Name()); ok && n > highest {
 			highest = n
 		}
 		return nil

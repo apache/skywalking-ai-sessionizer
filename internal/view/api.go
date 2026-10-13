@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -224,7 +223,7 @@ func dialectOf(z *storage.Zone, session string) string {
 	}
 	var fallback string
 	for _, f := range files {
-		file, err := os.Open(f.Path)
+		file, err := storage.OpenLanded(f.Path)
 		if err != nil {
 			continue
 		}
@@ -649,7 +648,7 @@ func (c *Conversation) journalNames() map[string]string {
 		if lf.RunID == "" {
 			continue
 		}
-		f, err := os.Open(lf.Path)
+		f, err := storage.OpenLanded(lf.Path)
 		if err != nil {
 			continue
 		}

@@ -453,3 +453,25 @@ func TestARefusedViewKeySaysWhere(t *testing.T) {
 		}
 	}
 }
+
+// storage.retention keeps everything by default and for -1, takes a duration
+// or a number of days, and refuses anything else, including zero, which
+// would remove a conversation the moment it is sent.
+func TestRetentionDuration(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 0, "-1": 0, " -1 ": 0, "72h": 72 * time.Hour, "30d": 30 * 24 * time.Hour,
+		"90m": 90 * time.Minute, "106751d": 106751 * 24 * time.Hour} {
+		if d, err := (Storage{Retention: in}).RetentionDuration(); err != nil || d != want {
+			t.Errorf("storage.retention %q is %v, %v; want %v", in, d, err, want)
+		}
+	}
+	for _, in := range []string{"0", "0d", "-2", "-1h", "soon", "1x", "213504d", "99999999999d"} {
+		if d, err := (Storage{Retention: in}).RetentionDuration(); err == nil {
+			t.Errorf("storage.retention %q was taken as %v", in, d)
+		}
+	}
+	cfg := Default()
+	cfg.Storage.Retention = "soon"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "storage.retention") {
+		t.Fatalf("a configuration with storage.retention soon validates: %v", err)
+	}
+}

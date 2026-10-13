@@ -123,6 +123,9 @@ type WorkspaceChange struct {
 type ToolExecution struct {
 	Step string          `json:"step"`
 	Ref  sessionflow.Ref `json:"ref"`
+	// State is "removed" for a record retention removed, which keeps only
+	// its id, its tool and its time, and absent otherwise.
+	State string `json:"state,omitempty"`
 	execution.Record
 }
 
@@ -221,6 +224,10 @@ type File struct {
 	// when no record carries a time.
 	FromTime    *int64 `json:"from_time"`
 	ThroughTime *int64 `json:"through_time"`
+	// State is "removed" for a landed file retention removed from the local
+	// root, and absent otherwise. Lines, Bytes and Digest still describe the
+	// landed file, as its skeleton recorded them.
+	State string `json:"state,omitempty"`
 }
 
 // Stream is one execution stream, with the step that started it.

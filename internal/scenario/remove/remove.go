@@ -1360,7 +1360,7 @@ func sortedKeys(m map[string]bool) []string {
 // providerBodyFiles lists the body file each record of a landed provider file
 // came from. A file with no record names none, and is refused.
 func providerBodyFiles(path string) ([]string, error) {
-	f, err := os.Open(path)
+	f, err := sessiondata.Open(path)
 	if err != nil {
 		return nil, err
 	}

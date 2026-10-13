@@ -21,9 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -57,7 +57,7 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 	var problems []BodyProblem
 	s := providerbody.NewSession()
 	for _, path := range files {
-		f, err := os.Open(path)
+		f, err := storage.OpenLanded(path)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -65,6 +65,23 @@ func Provider(dir string) (*StreamReport, []BodyProblem, error) {
 		if err != nil {
 			f.Close()
 			return nil, nil, fmt.Errorf("verify: %s: %w", path, err)
+		}
+		// A removed body keeps no bytes to rebuild, so it is reported, not
+		// checked.
+		if rf := removedFile(path, r.Header()); rf != nil {
+			rep.Removed = append(rep.Removed, *rf)
+			for {
+				if _, rerr := r.Next(); rerr != nil {
+					if !errors.Is(rerr, io.EOF) {
+						f.Close()
+						return nil, nil, fmt.Errorf("verify: %s: %w", path, rerr)
+					}
+					break
+				}
+				rep.Records++
+			}
+			f.Close()
+			continue
 		}
 		for row := uint32(1); ; row++ {
 			rec, rerr := r.Next()

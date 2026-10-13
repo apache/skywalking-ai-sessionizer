@@ -540,6 +540,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 
 	var sessions, streams, records, problems, relanded, tooLarge, unbuilt int
+	removed := map[string]int{}
 	for _, d := range entries {
 		if !d.IsDir() || (want != "" && d.Name() != want) {
 			continue
@@ -558,6 +559,9 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		relanded += rep.Relanded
 		tooLarge += rep.TooLarge
 		unbuilt += rep.Unbuilt
+		for _, rf := range rep.Removed {
+			removed[rf.Receiver]++
+		}
 		if !rep.OK() {
 			fmt.Printf("%s: %d problem(s)\n", rep.Session, rep.Problems)
 			for _, line := range rep.Details() {
@@ -580,6 +584,14 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 			fmt.Printf("; %d provider body(ies) cannot be rebuilt for it", unbuilt)
 		}
 		fmt.Println()
+	}
+
+	if n := removed[sessiondata.ReceiverAccepted] + removed[sessiondata.ReceiverRejected] + removed[sessiondata.ReceiverUnconfirmed]; n > 0 {
+		// Removed on purpose, by storage.retention. A skeleton keeps every
+		// record's place and the file's digest, so the checks go on through
+		// it, but the content is gone and is not verified here.
+		fmt.Printf("%d file(s) were removed by retention and are not verified: the receiver accepted %d, accepted %d with rejected records, and confirmed nothing of %d\n",
+			n, removed[sessiondata.ReceiverAccepted], removed[sessiondata.ReceiverRejected], n-removed[sessiondata.ReceiverAccepted]-removed[sessiondata.ReceiverRejected])
 	}
 
 	// A conversation's rounds are checked too. They are a digest chain, so a
@@ -681,6 +693,17 @@ func cmdShow(cfg *config.Config, _ config.Adapter, _ bool) error {
 	return printEntry(z, session, e)
 }
 
+// receiverSays puts what a receiver confirmed of a removed file in words.
+func receiverSays(receiver string) string {
+	switch receiver {
+	case sessiondata.ReceiverAccepted:
+		return "the receiver accepted the file"
+	case sessiondata.ReceiverRejected:
+		return "the receiver accepted the file and rejected some of its records"
+	}
+	return "no receiver confirmed the file"
+}
+
 // printEntry locates one indexed record on disk and prints it.
 func printEntry(z *storage.Zone, session string, e *index.Entry) error {
 	// seq selects the landed file; row selects the line within it.
@@ -691,7 +714,7 @@ func printEntry(z *storage.Zone, session string, e *index.Entry) error {
 	fmt.Printf("   index : seq=%d row=%d\n", e.Seq, e.Row)
 	fmt.Printf("   file  : %s\n", strings.TrimPrefix(path, z.Root()+"/"))
 
-	f, err := os.Open(path)
+	f, err := storage.OpenLanded(path)
 	if err != nil {
 		return err
 	}
@@ -699,6 +722,9 @@ func printEntry(z *storage.Zone, session string, e *index.Entry) error {
 	r, err := sessiondata.NewReader(f)
 	if err != nil {
 		return err
+	}
+	if rm := r.Header().Removed; rm != nil {
+		fmt.Printf("   removed: %s by retention. Its content is gone from this root; %s\n", rm.At, receiverSays(rm.Receiver))
 	}
 	for row := uint32(1); ; row++ {
 		rec, rerr := r.Next()
@@ -787,6 +813,11 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	defer closeClient()
 	ref.pusher = pusher
+	keep, err := cfg.Storage.RetentionDuration()
+	if err != nil {
+		return err
+	}
+	ref.retain(keep)
 	if once || ref.base.Mode == config.ModeOnce {
 		// Nothing follows a single pass, so whatever it could not do is
 		// reported rather than left for a pass that never comes.

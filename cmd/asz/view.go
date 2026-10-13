@@ -166,6 +166,11 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	defer closeClient()
 	ref.pusher = pusher
+	keep, err := cfg.Storage.RetentionDuration()
+	if err != nil {
+		return err
+	}
+	ref.retain(keep)
 	if once || ref.base.Mode == config.ModeOnce {
 		// One pass and no loop after it, exactly as asz collect -once has:
 		// what another process was holding is reported, not deferred.
@@ -256,6 +261,9 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 			endpoint = o.Endpoint + " over HTTP"
 		}
 		fmt.Printf("export   : %s, at the end of every pass\n", endpoint)
+	}
+	if ref.retention != nil && ref.retention.Retention > 0 {
+		fmt.Printf("retention: a sent conversation idle for %s loses its landed files; a skeleton keeps its structure, and the receiver its text\n", ref.retention.Retention)
 	}
 	// A root a claude-code scenario build wrote. Only there does a pipeline
 	// remove anything, and only what a build marked.

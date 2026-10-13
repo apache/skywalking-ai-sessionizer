@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -194,6 +195,35 @@ type Storage struct {
 	// Root is where landed data is written. Default "./data", i.e. beside the
 	// binary; tests point it beside their fixtures so a case is self-contained.
 	Root string `yaml:"root"`
+	// Retention is how long a conversation may be idle before its landed
+	// files are removed from the root, each replaced by a skeleton. -1 or
+	// empty keeps everything, the default. See RetentionDuration.
+	Retention string `yaml:"retention"`
+}
+
+// RetentionDuration is the retention as a duration: zero for -1 or empty,
+// which keep everything, and a d suffix counts days, as a retention is
+// spoken of in days.
+func (s Storage) RetentionDuration() (time.Duration, error) {
+	v := strings.TrimSpace(s.Retention)
+	switch v {
+	case "", "-1":
+		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(v, "d"); ok {
+		n, err := strconv.Atoi(days)
+		// A number of days past what a duration holds would wrap around to
+		// a short one, and remove what was meant to be kept for years.
+		if err != nil || n <= 0 || int64(n) > int64(math.MaxInt64/(24*time.Hour)) {
+			return 0, fmt.Errorf("config: storage.retention %q is not a positive number of days a duration can hold", v)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("config: storage.retention %q is not -1 or a duration such as 72h or 7d", v)
+	}
+	return d, nil
 }
 
 // Adapter configures one collection source. The name identifies both the
@@ -345,7 +375,7 @@ const (
 // Default returns the configuration used when none is supplied.
 func Default() *Config {
 	return &Config{
-		Storage: Storage{Root: "./data"},
+		Storage: Storage{Root: "./data", Retention: "-1"},
 		Adapters: []Adapter{{
 			Name:    AdapterClaudeCodeLocal,
 			Enabled: true,
@@ -456,6 +486,9 @@ func Load(path string) (*Config, error) {
 	}
 	if loaded.Storage.Root != "" {
 		cfg.Storage.Root = loaded.Storage.Root
+	}
+	if loaded.Storage.Retention != "" {
+		cfg.Storage.Retention = loaded.Storage.Retention
 	}
 	if len(loaded.Adapters) > 0 {
 		cfg.Adapters = loaded.Adapters
@@ -657,6 +690,9 @@ func (c *Config) Validate() error {
 		return errors.New("config: export.otlp has both logs and metrics off; a push would send nothing")
 	}
 	if _, err := c.Metrics.LookbackDuration(); err != nil {
+		return err
+	}
+	if _, err := c.Storage.RetentionDuration(); err != nil {
 		return err
 	}
 	if err := sessiondata.CheckWithholdable(c.View.Hide); err != nil {

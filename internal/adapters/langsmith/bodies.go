@@ -121,7 +121,7 @@ func (c *Collector) loadHeld(session string) (*providerbody.Session, error) {
 		if lf.Stream != "" || lf.RunID != "" {
 			continue
 		}
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			continue
 		}

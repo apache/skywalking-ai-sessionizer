@@ -1174,7 +1174,7 @@ func landedRecords(root, session string) (map[string][]recordView, error) {
 	}
 	out := map[string][]recordView{}
 	for _, lf := range files {
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			return nil, err
 		}
@@ -1589,7 +1589,7 @@ func providerRecords(root, session string) map[[2]uint64]string {
 		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindProviderBody)+"-") {
 			continue
 		}
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			continue
 		}
@@ -1663,7 +1663,7 @@ func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
 		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindProviderBody)+"-") {
 			continue
 		}
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1774,7 +1774,7 @@ func foldIdentity(root, session string) (map[string]bool, error) {
 	type at struct{ seq, row uint64 }
 	source := map[at]string{}
 	for _, lf := range files {
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			return nil, err
 		}

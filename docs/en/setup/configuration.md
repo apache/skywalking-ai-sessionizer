@@ -17,6 +17,7 @@ curl -fsSL -o asz.yaml "https://raw.githubusercontent.com/apache/skywalking-ai-s
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `root` | `./data` | Where collected data lands and conversations are assembled. A relative path is resolved from the working directory. |
+| `retention` | `-1` | How long a conversation may be idle before its landed files are removed from the root, such as `72h` or `30d`. Each file is replaced by a skeleton that keeps the conversation's structure, so new activity continues it; its text is kept only by the receiver it was sent to. Only a conversation that was sent is removed. `-1` keeps everything. See [Retention](../formats/storage-root.md#retention). |
 
 ## adapters
 

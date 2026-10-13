@@ -9,7 +9,9 @@ how the metrics are derived.
 A file is sent whole: one log record whose body is the file's bytes, unchanged. A receiver
 stores it as it was landed, checks its digest at once, and has nothing to put back together.
 Every `{seq, row, block}` reference in a round still means what it meant, because a row is a
-line of the body it names.
+line of the body it names. A [skeleton](session-data.md#skeletons), which takes a landed file's
+place when retention removes it, is never sent: the receiver has the file it replaced, or the file
+was removed before it was sent.
 
 This is the second design. The first sent one record per line, and it was measured on one
 conversation of 306 files: 39,683 records, attributes 16% on top of the body even after
@@ -24,8 +26,7 @@ carrying it succeeded, so a failed request leaves it for the next pass.
 `push.state` also names the receivers the files went to, with one `endpoint` line each:
 `grpc://host:port`, `grpcs://host:port` with `tls: true`, or the HTTP base URL. A `rejected` line
 names each file of a request a receiver took while it rejected some of its records, as
-[Transport](#transport) describes. An `owner` line names the owner each session is sent under, and
-an `owners recorded` line says every session the file holds files of has one, as
+[Transport](#transport) describes. An `owner` line names the owner each session is sent under, as
 [One owner per session](#one-owner-per-session) describes. Every save writes every kind, so no
 line is lost at the next request. An older asz passes over the newer kinds, and drops them when it
 saves the file.
@@ -34,7 +35,6 @@ saves the file.
 schema 1
 updated_at 2026-09-11T10:00:00Z
 endpoint grpc://127.0.0.1:11800
-owners recorded
 owner <session-id> grpc:%2F%2F127.0.0.1:11800|Claude%20Code|me@laptop
 pushed <session-id>/streams/main/transcript-20260911T095959.000000000Z-000001.sd 9f2c…
 rejected <session-id>/streams/main/transcript-20260911T095959.000000000Z-000001.sd
@@ -59,15 +59,9 @@ instance changed, holds the session. None of its files, rounds or metrics are se
 recorded as sent. Every pass says which session waits and for which owner, and `asz push` then
 exits non-zero. Setting the three back sends what waited.
 
-A `push.state` that a build before this rule wrote has files and no `owners recorded` line. The
-first pass that loads it gives its owner to every session the file holds files of, before it sends
-anything, whether or not anything of that session goes out then. For a sent round, that is the
-session the round's header names. A sent round whose header cannot be read stops that pass before
-anything is sent, with an error that names the file, and the next pass tries again. The pass saves
-the file with `owners recorded`, so this happens once. After that, a session with no owner was never sent, and takes one at its first request. A
-removed [scenario session](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
-loses its owner line once nothing of it is left: not its directory, not its conversation's
-directory, and no line for any of its files.
+A removed [scenario session](../guides/scenario.md#removal-a-session-goes-once-it-is-sent) loses
+its owner line once nothing of it is left: not its directory, not its conversation's directory, and
+no line for any of its files.
 
 Removing a [scenario session](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
 depends on these lines. A session goes only when `push.state` names exactly one receiver, the one

@@ -20,13 +20,13 @@ package view
 import (
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
@@ -49,7 +49,7 @@ func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]u
 		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindExecution)+"-") {
 			continue
 		}
-		f, err := os.Open(lf.Path)
+		f, err := storage.OpenLanded(lf.Path)
 		if err != nil {
 			continue
 		}
@@ -73,8 +73,12 @@ func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]u
 				}
 				seen[r.ID] = true
 				block := b
+				state := p.State
+				if state == model.ContentAvailable {
+					state = ""
+				}
 				out = append(out, sessionview.ToolExecution{Step: stepOf[r.Tool],
-					Ref: sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block}, Record: *r})
+					Ref: sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block}, State: state, Record: *r})
 			}
 		}
 		f.Close()

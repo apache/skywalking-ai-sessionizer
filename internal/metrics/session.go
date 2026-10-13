@@ -105,11 +105,11 @@ func DerivedAll(z *storage.Zone, session string, files []storage.LandedFile) (bo
 		return false, err
 	}
 	for _, lf := range files {
-		rel, err := filepath.Rel(z.Root(), lf.Path)
+		rel, err := filepath.Rel(z.Root(), storage.LandedPath(lf.Path))
 		if err != nil {
 			return false, err
 		}
-		digest, err := storage.FileDigest(lf.Path)
+		digest, err := storage.LandedDigest(lf)
 		if err != nil {
 			return false, err
 		}

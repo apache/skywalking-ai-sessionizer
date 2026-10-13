@@ -19,6 +19,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,8 +38,30 @@ var ErrSessionBusy = errors.New("storage: session is locked by another collector
 // the assembler's single watermark would skip whichever it reached second.
 type SessionLock struct{ f *os.File }
 
-// LockSession takes the lock, returning ErrSessionBusy if it is already held.
-func LockSession(sessionDir string) (*SessionLock, error) { return lockDir(sessionDir) }
+// ErrRemovalInProgress means a removal of the session's files has not
+// finished. It is ErrSessionBusy to a collector: nothing lands into the
+// session until the pass that finishes the removal has run.
+var ErrRemovalInProgress = fmt.Errorf("%w: a removal of its files is in progress", ErrSessionBusy)
+
+// LockSession takes the lock, returning ErrSessionBusy if it is already held,
+// and ErrRemovalInProgress when a removal of the session's files has not
+// finished. A file landed beside an unfinished removal could take a sequence
+// the removal still counts on.
+func LockSession(sessionDir string) (*SessionLock, error) {
+	l, err := lockDir(sessionDir)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Lstat(filepath.Join(sessionDir, RemovingFile)); err == nil {
+		_ = l.Unlock()
+		return nil, ErrRemovalInProgress
+	}
+	return l, nil
+}
+
+// LockSessionToRemove takes a session's lock for the removal of its files,
+// whether or not one is in progress.
+func LockSessionToRemove(sessionDir string) (*SessionLock, error) { return lockDir(sessionDir) }
 
 // ErrChainBusy means another builder holds this conversation's chain.
 var ErrChainBusy = errors.New("storage: conversation chain is locked by another builder")
