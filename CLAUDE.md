@@ -153,11 +153,18 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Landed files plus the round chain are the whole conversation.** Nothing else has to travel with
   them: the index rebuilds from the landed files, and the chain head is recovered by listing the
   rounds directory. An archive or a bundle can be read, verified and re-parsed with no source files
-  and no collector. A skeleton stands in for a removed file's structure, never its text.
+  and no collector. A skeleton stands in for a removed file's structure, never its text. After a
+  removal, the session's `provider/` store travels with them too: later provider bodies are built
+  from the bytes it keeps.
 - **A skeleton keeps every field the index reads.** The index rebuilt from a `.sk` must equal the
   index rebuilt from its `.sd`, byte for byte, or a conversation continues differently after a
   removal. A new field the index reads goes into `skeleton.Of` too; `tests/chain` compares every
   scenario with and without removals.
+- **A provider body is cut after a removal exactly as with none.** `providerbody.Session.Add`
+  takes a removed body's skeleton in its place, and reads removed tips and pieces from the session's
+  store, kept by the removal and by the collector before a body that cites one lands. Anything the
+  cutter reads to decide a cut must be kept in the skeleton or the store, or bodies land
+  differently; `pkg/skeleton` and `tests/chain` compare them byte for byte, under a budget too.
 - **Assembly reads the index, never the payloads.** Structure needs identifiers; text is read only
   when a conversation is rendered. **The page reads `.sd`, `.sk` and `.sf` only**, never the index;
   a test in `tests/boundary` fails if it does.

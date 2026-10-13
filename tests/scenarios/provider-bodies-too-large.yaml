@@ -1,0 +1,100 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# One conversation whose first prompt is too large to land under the budget,
+# so every request cites a piece that was taken out, and none can be rebuilt
+# or copied. Between the two checkpoints only the transcript moves: the chain
+# tip a removal at the first checkpoint could not keep is the tip at the
+# second, and that removal must pass over it again rather than stop.
+title: provider bodies too large to rebuild across two removals
+provider_bodies: true
+steps:
+  - input: >-
+      We are moving the billing service to the new storage layer, and the migration has to keep
+      every invoice readable while both layers run side by side. Read the design notes below before
+      you change anything. The old layer writes one row per invoice line; the new layer writes one
+      document per invoice, with its lines inside it, and a reader must find either. We are moving
+      the billing service to the new storage layer, and the migration has to keep every invoice
+      readable while both layers run side by side. Read the design notes below before you change
+      anything. The old layer writes one row per invoice line; the new layer writes one document per
+      invoice, with its lines inside it, and a reader must find either. We are moving the billing
+      service to the new storage layer, and the migration has to keep every invoice readable while
+      both layers run side by side. Read the design notes below before you change anything. The old
+      layer writes one row per invoice line; the new layer writes one document per invoice, with its
+      lines inside it, and a reader must find either. We are moving the billing service to the new
+      storage layer, and the migration has to keep every invoice readable while both layers run side
+      by side. Read the design notes below before you change anything. The old layer writes one row
+      per invoice line; the new layer writes one document per invoice, with its lines inside it, and
+      a reader must find either. We are moving the billing service to the new storage layer, and the
+      migration has to keep every invoice readable while both layers run side by side. Read the
+      design notes below before you change anything. The old layer writes one row per invoice line;
+      the new layer writes one document per invoice, with its lines inside it, and a reader must
+      find either. We are moving the billing service to the new storage layer, and the migration has
+      to keep every invoice readable while both layers run side by side. Read the design notes below
+      before you change anything. The old layer writes one row per invoice line; the new layer
+      writes one document per invoice, with its lines inside it, and a reader must find either. We
+      are moving the billing service to the new storage layer, and the migration has to keep every
+      invoice readable while both layers run side by side. Read the design notes below before you
+      change anything. The old layer writes one row per invoice line; the new layer writes one
+      document per invoice, with its lines inside it, and a reader must find either. We are moving
+      the billing service to the new storage layer, and the migration has to keep every invoice
+      readable while both layers run side by side. Read the design notes below before you change
+      anything. The old layer writes one row per invoice line; the new layer writes one document per
+      invoice, with its lines inside it, and a reader must find either. We are moving the billing
+      service to the new storage layer, and the migration has to keep every invoice readable while
+      both layers run side by side. Read the design notes below before you change anything. The old
+      layer writes one row per invoice line; the new layer writes one document per invoice, with its
+      lines inside it, and a reader must find either. We are moving the billing service to the new
+      storage layer, and the migration has to keep every invoice readable while both layers run side
+      by side. Read the design notes below before you change anything. The old layer writes one row
+      per invoice line; the new layer writes one document per invoice, with its lines inside it, and
+      a reader must find either. We are moving the billing service to the new storage layer, and the
+      migration has to keep every invoice readable while both layers run side by side. Read the
+      design notes below before you change anything. The old layer writes one row per invoice line;
+      the new layer writes one document per invoice, with its lines inside it, and a reader must
+      find either. We are moving the billing service to the new storage layer, and the migration has
+      to keep every invoice readable while both layers run side by side. Read the design notes below
+      before you change anything. The old layer writes one row per invoice line; the new layer
+      writes one document per invoice, with its lines inside it, and a reader must find either. We
+      are moving the billing service to the new storage layer, and the migration has to keep every
+      invoice readable while both layers run side by side. Read the design notes below before you
+      change anything. The old layer writes one row per invoice line; the new layer writes one
+      document per invoice, with its lines inside it, and a reader must find either. We are moving
+      the billing service to the new storage layer, and the migration has to keep every invoice
+      readable while both layers run side by side. Read the design notes below before you change
+      anything. The old layer writes one row per invoice line; the new layer writes one document per
+      invoice, with its lines inside it, and a reader must find either. We are moving the billing
+      service to the new storage layer, and the migration has to keep every invoice readable while
+      both layers run side by side. Read the design notes below before you change anything. The old
+      layer writes one row per invoice line; the new layer writes one document per invoice, with its
+      lines inside it, and a reader must find either. We are moving the billing service to the new
+      storage layer, and the migration has to keep every invoice readable while both layers run side
+      by side. Read the design notes below before you change anything. The old layer writes one row
+      per invoice line; the new layer writes one document per invoice, with its lines inside it, and
+      a reader must find either.
+  - call:
+      text: Reading the notes.
+      tool:
+        name: Read
+        input: {file_path: /Users/dev/billing/MIGRATION.md}
+        result: {text: "Phase one moves the reads; phase two moves the writes.\n", after: 200ms}
+  - call: {text: "Phase one moves the reads, and phase two the writes."}
+    checkpoint: first
+  - input: thanks, that is enough for now
+    checkpoint: second
+  - input: one more question about phase two
+  - call: {text: "Phase two moves the writes once every reader is on the new layer."}

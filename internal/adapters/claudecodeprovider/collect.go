@@ -476,7 +476,7 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 		reindexed = true
 	}
 
-	held, err := c.loadSession(session)
+	held, store, err := c.loadSession(session)
 	if err != nil {
 		return err
 	}
@@ -550,6 +550,15 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 			st.Errors = append(st.Errors, fmt.Errorf("claudecodeprovider: %s: %w", f.name, err))
 			continue
 		}
+		// A removed piece the body cites is kept before the body lands, or
+		// nothing could rebuild the body later.
+		pieces, err := held.RemovedPieces(rec, f.body)
+		if err != nil {
+			return err
+		}
+		if err := store.PutPieces(pieces, nil); err != nil {
+			return err
+		}
 		// A file ends before a body that would take it past the budget, and
 		// the cutter fits a body larger than the budget on its own.
 		n := providerbody.RecordBytes(rec)
@@ -608,12 +617,18 @@ func (c *Collector) markLanded(sn *seen, f *file, session string) {
 // body is then cut only against what does, and lands whole where nothing
 // earlier is left to share, so a damaged or partly restored session still
 // takes new bodies. asz verify reports the damage itself.
-func (c *Collector) loadSession(session string) (*providerbody.Session, error) {
+//
+// A body retention removed is held by its skeleton, and the bytes of a removed
+// tip or piece come from the session's store, so a new body is cut as it
+// would be with nothing removed.
+func (c *Collector) loadSession(session string) (*providerbody.Session, *storage.BodyStore, error) {
 	held := providerbody.NewSession()
 	held.Budget(c.MaxDelta)
+	store := c.Zone.BodyStore(session)
+	held.Use(store)
 	files, err := storage.LandedFiles(c.Zone, session)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, lf := range files {
 		if lf.Stream != "" || lf.RunID != "" {
@@ -631,5 +646,5 @@ func (c *Collector) loadSession(session string) (*providerbody.Session, error) {
 			_ = held.Add(rec)
 		}
 	}
-	return held, nil
+	return held, store, nil
 }

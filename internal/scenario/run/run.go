@@ -271,19 +271,19 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 			if !scenario.HasChanges(sc.Steps) {
 				return nil, nil
 			}
-			return changesLeaveTheFold(sc, f, out, session, opts, ex.Parse.MaxRoundBytes)
+			return changesLeaveTheFold(sc, f, out, session, opts, ex.Collect.MaxDeltaBytes, ex.Parse.MaxRoundBytes)
 		}},
 		{"executions_leave_the_fold", ex.Properties.ExecutionsLeaveTheFold, func() ([]string, error) {
 			if !scenario.HasExecutions(sc.Steps) {
 				return nil, nil
 			}
-			return leavesTheFold("executions_leave_the_fold", "the execution records", sc.WithoutExecutions(), f, out, session, opts, ex.Parse.MaxRoundBytes)
+			return leavesTheFold("executions_leave_the_fold", "the execution records", sc.WithoutExecutions(), f, out, session, opts, ex.Collect.MaxDeltaBytes, ex.Parse.MaxRoundBytes)
 		}},
 		{"provider_bodies_leave_the_fold", ex.Properties.ProviderBodiesLeaveTheFold, func() ([]string, error) {
 			if !sc.ProviderBodies {
 				return nil, nil
 			}
-			return providerBodiesLeaveTheFold(sc, f, out, session, opts, ex.Parse.MaxRoundBytes)
+			return providerBodiesLeaveTheFold(sc, f, out, session, opts, ex.Collect.MaxDeltaBytes, ex.Parse.MaxRoundBytes)
 		}},
 		{"provider_bodies_rebuild", ex.Properties.ProviderBodiesRebuild, func() ([]string, error) {
 			if !sc.ProviderBodies {
@@ -494,20 +494,23 @@ func collectEvery(string) claudecodeprovider.Verdict { return claudecodeprovider
 // compares the folds: the nodes, the relations and the talks must be the
 // same, because a change record is evidence beside a step and never a
 // step. The chain's bytes differ, since a round binds the files it read.
-func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
-	return leavesTheFold("changes_leave_the_fold", "the changes", sc.WithoutChanges(), f, out, session, opts, maxRound)
+func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxDelta, maxRound int64) ([]string, error) {
+	return leavesTheFold("changes_leave_the_fold", "the changes", sc.WithoutChanges(), f, out, session, opts, maxDelta, maxRound)
 }
 
 // providerBodiesLeaveTheFold does the same for provider bodies: a body is
 // what a call sent and got back, joined to the call by a view, and no step.
-func providerBodiesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
-	return leavesTheFold("provider_bodies_leave_the_fold", "the provider bodies", sc.WithoutProviderBodies(), f, out, session, opts, maxRound)
+func providerBodiesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxDelta, maxRound int64) ([]string, error) {
+	return leavesTheFold("provider_bodies_leave_the_fold", "the provider bodies", sc.WithoutProviderBodies(), f, out, session, opts, maxDelta, maxRound)
 }
 
-func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxRound int64) ([]string, error) {
+// The plain build is cut at the scenario's budget, as the build it is
+// compared with: a record over a smaller budget lands alone, and a node named
+// by where its first record landed would differ for that alone.
+func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxDelta, maxRound int64) ([]string, error) {
 	plain := out + "-plain"
 	defer os.RemoveAll(plain)
-	built, err := scenario.Build(plainScenario, f, plain, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval})
+	built, err := scenario.Build(plainScenario, f, plain, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval, MaxDelta: maxDelta})
 	if err != nil {
 		return nil, err
 	}

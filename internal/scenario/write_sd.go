@@ -538,8 +538,13 @@ func (w *sdWriter) provider() error {
 	if err != nil {
 		return err
 	}
+	// A body retention removed is held by its skeleton, and the bytes of a
+	// removed tip or piece come from the session's store, as the adapter
+	// reads them.
 	held := providerbody.NewSession()
 	held.Budget(w.maxDelta)
+	store := w.z.BodyStore(w.p.Session)
+	held.Use(store)
 	files, err := storage.LandedFiles(w.z, w.p.Session)
 	if err != nil {
 		return err
@@ -569,6 +574,14 @@ func (w *sdWriter) provider() error {
 		rec, err := held.Encode(claudecodeprovider.BodyOf(b.Name, b.Bytes))
 		if err != nil {
 			return fmt.Errorf("scenario: provider body %s: %w", b.Name, err)
+		}
+		// A removed piece the body cites is kept before the body lands.
+		pieces, err := held.RemovedPieces(rec, b.Bytes)
+		if err != nil {
+			return err
+		}
+		if err := store.PutPieces(pieces, nil); err != nil {
+			return err
 		}
 		recs = append(recs, rec)
 	}

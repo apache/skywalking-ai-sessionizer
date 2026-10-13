@@ -109,13 +109,17 @@ func bodiesOf(items []placed, records [][]sessiondata.Record) []body {
 //
 // A file that does not read whole holds nothing a new body may refer to; the
 // new body then lands whole where nothing earlier is left to share, and asz
-// verify reports the damage itself.
-func (c *Collector) loadHeld(session string) (*providerbody.Session, error) {
+// verify reports the damage itself. A body retention removed is held by its
+// skeleton, and the bytes of a removed tip or piece come from the session's
+// store, so a new body is cut as it would be with nothing removed.
+func (c *Collector) loadHeld(session string) (*providerbody.Session, *storage.BodyStore, error) {
 	held := providerbody.NewSession()
 	held.Budget(c.MaxDeltaBytes)
+	store := c.Zone.BodyStore(session)
+	held.Use(store)
 	files, err := storage.LandedFiles(c.Zone, session)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, lf := range files {
 		if lf.Stream != "" || lf.RunID != "" {
@@ -151,7 +155,7 @@ func (c *Collector) loadHeld(session string) (*providerbody.Session, error) {
 			_ = held.Add(rec)
 		}
 	}
-	return held, nil
+	return held, store, nil
 }
 
 // landed says what landing one request's bodies did.
@@ -167,7 +171,7 @@ func (c *Collector) landBodies(session string, state *storage.SessionState,
 	if len(bodies) == 0 {
 		return out, nil
 	}
-	held, err := c.loadHeld(session)
+	held, store, err := c.loadHeld(session)
 	if err != nil {
 		return out, err
 	}
@@ -231,6 +235,15 @@ func (c *Collector) landBodies(session string, state *storage.SessionState,
 			// that would make the call's response ambiguous.
 			out.conflicts++
 			continue
+		}
+		// A removed piece the body cites is kept before the body lands, or
+		// nothing could rebuild the body later.
+		pieces, err := held.RemovedPieces(rec, b.bytes)
+		if err != nil {
+			return out, err
+		}
+		if err := store.PutPieces(pieces, nil); err != nil {
+			return out, err
 		}
 		n := providerbody.RecordBytes(rec)
 		if len(batch) > 0 && providerbody.FileOverhead+size+n > c.MaxDeltaBytes {

@@ -77,7 +77,8 @@ func intp(n int) *int { return &n }
 
 // A skeleton keeps every record, every part in its place and every field the
 // index reads, and nothing a person wrote: text, data, media and encoding go,
-// and each part says it was removed. Its header says what it replaced.
+// and each part says it was removed, or too large to land when it was. Its
+// header says what it replaced.
 func TestASkeletonKeepsStructureOnly(t *testing.T) {
 	failed := true
 	change := changes.Record{Schema: changes.Schema, ID: "toolu_1", CapturedBy: changes.CapturedByClaudeCode, Session: "s",
@@ -147,8 +148,12 @@ func TestASkeletonKeepsStructureOnly(t *testing.T) {
 	}
 	for i, p := range got.Parts {
 		o := rec.Parts[i]
-		if p.Kind != o.Kind || p.Bytes != o.Bytes || p.State != model.ContentRemoved {
-			t.Fatalf("part %d: kind %s bytes %d state %s, want %s, %d, removed", i, p.Kind, p.Bytes, p.State, o.Kind, o.Bytes)
+		state := model.ContentRemoved
+		if o.State == model.ContentTooLarge {
+			state = o.State
+		}
+		if p.Kind != o.Kind || p.Bytes != o.Bytes || p.State != state {
+			t.Fatalf("part %d: kind %s bytes %d state %s, want %s, %d, %s", i, p.Kind, p.Bytes, p.State, o.Kind, o.Bytes, state)
 		}
 		if p.Text != "" || p.Media != "" || p.Encoding != "" {
 			t.Fatalf("part %d kept content: %+v", i, p)
@@ -185,14 +190,17 @@ func TestASkeletonKeepsStructureOnly(t *testing.T) {
 	}
 }
 
-// A provider body keeps its manifest without the segments, its record
+// A provider body keeps its manifest without the literal strings, its record
 // digest, and every piece's identity: the digest of its data, or the one a
-// piece too large to land kept.
+// piece too large to land kept, with its state.
 func TestABodySkeletonKeepsItsManifestAndPieces(t *testing.T) {
 	m := providerbody.Manifest{Schema: providerbody.Schema, Role: providerbody.RoleRequest, Src: "x/1.json",
 		SHA256: strings.Repeat("a", 64), Bytes: 99, Depth: 1, Chain: "c0ffee", Model: "m-1", Session: "s",
 		Call: "c1", Request: "req_2", PreviousRequest: "req_1",
-		Segments: []providerbody.Segment{{Lit: "{"}, {Part: intp(0)}}}
+		Segments: []providerbody.Segment{
+			{Copy: &providerbody.Copy{From: "req_1", SHA256: strings.Repeat("b", 64), Len: 40}},
+			{Lit: `,"metadata":{"user_id":"a person's literal"},`}, {Part: intp(0)}, {Lit: ","}, {Piece: strings.Repeat("c", 64)},
+			{Part: intp(1)}, {Lit: "}"}}}
 	md, _ := json.Marshal(m)
 	piece := json.RawMessage(`"a long piece of a prompt"`)
 	rec := &sessiondata.Record{Ord: 1, Sha: "aaaaaaaaaaaa", Bytes: 99, ID: "req_2", Parts: []sessiondata.Part{
@@ -214,7 +222,7 @@ func TestABodySkeletonKeepsItsManifestAndPieces(t *testing.T) {
 	if got.Parts[0].SHA256 != hex.EncodeToString(sum[:]) || len(got.Parts[0].Data) != 0 {
 		t.Fatalf("the piece is %+v", got.Parts[0])
 	}
-	if got.Parts[1].SHA256 != "beef" {
+	if got.Parts[1].SHA256 != "beef" || got.Parts[1].State != model.ContentTooLarge {
 		t.Fatalf("the piece too large to land is %+v", got.Parts[1])
 	}
 	gm, err := providerbody.ManifestOf(got)
@@ -222,12 +230,12 @@ func TestABodySkeletonKeepsItsManifestAndPieces(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := m
-	want.Segments = nil
+	want.Segments = []providerbody.Segment{m.Segments[0], m.Segments[2], m.Segments[4], m.Segments[5]}
 	if mustJSON(t, *gm) != mustJSON(t, want) {
 		t.Fatalf("the manifest is %+v, want %+v", *gm, want)
 	}
-	if strings.Contains(string(got.Parts[2].Data), "segments") {
-		t.Fatalf("the manifest kept its segments: %s", got.Parts[2].Data)
+	if strings.Contains(string(got.Parts[2].Data), "literal") || strings.Contains(string(got.Parts[2].Data), `"lit"`) {
+		t.Fatalf("the manifest kept a literal string: %s", got.Parts[2].Data)
 	}
 }
 

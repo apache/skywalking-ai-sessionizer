@@ -73,7 +73,7 @@ func screenshotBody() []byte {
 func TestABodyThatCannotBeRebuiltForAPieceTooLargeIsCounted(t *testing.T) {
 	dir := t.TempDir()
 	landBodies(t, dir, 16<<10, nil, screenshotBody())
-	rep, problems, err := verify.Provider(dir)
+	rep, problems, err := verify.Provider(dir, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestABodyThatCannotBeRebuiltForAPieceTooLargeIsCounted(t *testing.T) {
 func TestABodyThatCannotBeRebuiltIsStillHeldToItsManifest(t *testing.T) {
 	dir := t.TempDir()
 	landBodies(t, dir, 16<<10, func(r *sessiondata.Record) { r.Bytes++ }, screenshotBody())
-	_, problems, err := verify.Provider(dir)
+	_, problems, err := verify.Provider(dir, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestARepeatIsStillHeldToItsManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "provider_body-20260101T000000.000000000Z-000002.sd"), buf.Bytes(), 0o444); err != nil {
 		t.Fatal(err)
 	}
-	rep, problems, err := verify.Provider(dir)
+	rep, problems, err := verify.Provider(dir, nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
