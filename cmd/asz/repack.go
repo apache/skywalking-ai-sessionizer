@@ -73,6 +73,21 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 		return err
 	}
 	defer func() { _ = lock.Unlock() }()
+	// A session retention removed files of cannot be repacked. It is
+	// refused before the destination is made, so nothing is written.
+	want := arg(1)
+	sessions, err := sessionDirs(srcRoot)
+	if err != nil {
+		return err
+	}
+	checked := sessions
+	if want != "" {
+		checked = []string{want}
+	}
+	src := storage.NewZone(srcRoot)
+	if err := repack.CheckSource(src, checked); err != nil {
+		return err
+	}
 	// The root written to is held too, and checked again under its lock,
 	// since another command could have started on it while this one waited.
 	// It is not waited for: a command that holds a new or empty root is
@@ -91,12 +106,7 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 	if err := repack.CheckDestination(dstRoot); err != nil {
 		return err
 	}
-	want := arg(1)
-	sessions, err := sessionDirs(srcRoot)
-	if err != nil {
-		return err
-	}
-	src, dst := storage.NewZone(srcRoot), storage.NewZone(dstRoot)
+	dst := storage.NewZone(dstRoot)
 	budget := ad.Collector.MaxDeltaBytes
 	fmt.Printf("from  : %s\nto    : %s\nbudget: %s per file\n\n", srcRoot, dstRoot, humanBytes(budget))
 

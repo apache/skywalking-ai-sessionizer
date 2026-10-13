@@ -26,3 +26,7 @@ var syncDir = syncDirEntries
 // syncDirEntries does nothing on Windows, where a directory cannot be synced
 // as a file is: the filesystem records a rename in its own journal.
 func syncDirEntries(string) error { return nil }
+
+// SyncFile does nothing on Windows, as syncDirEntries does: a power loss is
+// not what asz promises to survive there.
+func SyncFile(string) error { return nil }

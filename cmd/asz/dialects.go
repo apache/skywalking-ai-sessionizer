@@ -18,7 +18,6 @@
 package main
 
 import (
-	"os"
 	"sort"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -96,7 +95,7 @@ func dialectOf(zone *storage.Zone, session string) string {
 
 // headerOf reads one landed file's kind and dialect, and nothing else.
 func headerOf(path string) (sessiondata.Kind, string) {
-	file, err := os.Open(path)
+	file, err := storage.OpenLanded(path)
 	if err != nil {
 		return "", ""
 	}

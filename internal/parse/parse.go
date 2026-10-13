@@ -505,7 +505,10 @@ func inputDigestFor(z *storage.Zone, session, previous string, after, through ui
 		if f.Seq <= after || f.Seq > through {
 			continue
 		}
-		d, err := storage.FileDigest(f.Path)
+		// A removed file is bound by the digest it had, which its skeleton
+		// recorded, so a chain built after a removal binds what one built
+		// before it did.
+		d, err := storage.LandedDigest(f)
 		if err != nil {
 			return "", err
 		}

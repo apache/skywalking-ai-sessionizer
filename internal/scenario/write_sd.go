@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -629,7 +628,7 @@ func (w *sdWriter) provider() error {
 }
 
 func readAll(path string) (sessiondata.Header, []*sessiondata.Record, error) {
-	f, err := os.Open(path)
+	f, err := sessiondata.Open(path)
 	if err != nil {
 		return sessiondata.Header{}, nil, err
 	}

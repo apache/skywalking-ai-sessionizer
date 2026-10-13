@@ -30,6 +30,14 @@ storage:
   # ./data, is ignored by git so a checkout never stages private transcripts.
   root: ./data
 
+  # How long a conversation may be idle, with nothing new landed in any of
+  # its streams, before its landed files are removed from this root. Each
+  # file is replaced by a skeleton that keeps the conversation's structure, so
+  # new activity continues the same conversation; the text is kept only by
+  # the receiver it was sent to. Only a conversation that was sent is removed.
+  # A duration such as 72h, or days such as 30d. -1 keeps everything.
+  retention: -1
+
 adapters:
   - name: claude-code-local
     enabled: true

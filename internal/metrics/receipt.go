@@ -122,7 +122,7 @@ func loadReceipt(path string, lf storage.LandedFile) (*receipt, error) {
 	if r.Schema != 1 {
 		return nil, fmt.Errorf("metrics: receipt %s has unsupported schema %d", path, r.Schema)
 	}
-	digest, err := storage.FileDigest(lf.Path)
+	digest, err := storage.LandedDigest(lf)
 	if err != nil {
 		return nil, err
 	}

@@ -62,7 +62,7 @@ func partsKeepSourceBytes(root, session string, sources map[string]string) ([]st
 	type sourceKey struct{ adapter, path string }
 	newest := map[sourceKey]int{}
 	for _, lf := range files {
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			return nil, err
 		}

@@ -10,12 +10,15 @@ session.
   <session-id>/
     session.state                        next_seq, liveness (always unknown), last scan
     .lock                                one collector per session
+    removing.json                        a removal in progress, see Retention
+    removal.state                        the generation of the last removal that deleted files
     metrics/                             immutable decisions of local metric derivation
       000001.json                        exact request and accounting for landed file 1
     streams/
       main/
         transcript.cursor                how far the source has been read
         transcript-<collected-at>-<seq>.sd
+        transcript-<collected-at>-<seq>.sk  the skeleton of a landed file retention removed
         changes.cursor                   the plugin's change records for the stream, when
         changes-<collected-at>-<seq>.sd  the asz Claude Code plugin is installed
         execution.cursor                 the plugin's execution records for the stream: which
@@ -411,6 +414,75 @@ The store had also outlived its source: it held 48 sessions where the source dir
 44.
 
 ## Retention
+
+### storage.retention
+
+`storage.retention` removes the landed files of a conversation that has been idle for longer than
+it, by asz's clock: nothing new has landed in any of its streams since. It is `-1` by default, which
+keeps everything. A pipeline, `asz collect` or `asz server`, removes at the end of a pass, after the
+send. A session's files go together, every landed file of it through its newest, never some of
+them. A session keeps them while any of these holds:
+
+- Nothing of it was ever sent, or tried to be: `push.state` names no owner for it.
+- Something landed for it within the retention.
+- Its head round does not reach its newest landed file, or its parse failed this pass.
+- With metrics derived, a landed file of it is not derived yet.
+- It holds provider bodies.
+
+Sending is not waited for. A receiver that is down for longer than the retention misses the files
+removed meanwhile, and asz does not send them again. A scenario root keeps its own removal, below,
+and retention never runs over it.
+
+Each removed file is replaced by its skeleton, `<name>.sk` in the same directory, written once and
+read-only. A [skeleton](session-data.md#skeletons) keeps every record and every part in its place,
+with every field the index is built from, and none of the content: text, data and media go. The
+index rebuilt from a skeleton is the index rebuilt from its file, so a conversation that becomes
+active again continues the same chain, with the same rounds, as if nothing was removed. Its text
+is kept only by the receiver it was sent to. A skeleton is never sent. Measured on 2026-10-13 on
+one machine's root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of them: 3.5%
+for transcripts, under 5% for workflow files, and 77% for child agents' sidecars, which are mostly
+identifiers.
+
+Nothing else of the session changes: the index, the cursors, `session.state` and the chain stay. A
+skeleton takes its file's modification time, which the metrics grace period and the order sessions
+are sent in read. A removed file's metrics request goes once the receiver has it. A request that
+was not sent stays, and goes on the first pass after it is sent while retention is on. A pass with
+retention off does no retention work at all, beyond finishing a removal in progress. The file's
+receipt under `metrics/` stays: a deriver whose `metrics.state` a power loss took back reads it to
+derive the file as before.
+
+A removal is written so that a crash or a power loss at any point leaves nothing lost:
+
+1. `removing.json` records the removal: its generation, the newest sequence it removes, and its
+   phase, and its directory is synced.
+2. The skeleton of each landed file is written and its directory synced, and the error of that
+   first sync is checked. A failed sync stops the removal. The next pass writes every skeleton
+   again, since a later sync that succeeds does not say the data reached the disk. A skeleton
+   takes its file's modification time, and is synced again after it.
+3. The phase becomes `delete`, and `removal.state` records the removal's generation. Each landed
+   file is deleted once its skeleton reads whole and records the file's digest; a skeleton that
+   does not stops the removal and the file is kept. Then the metrics requests the receiver has
+   go, as above, and every directory of the removed files, with the spool, is synced, so a
+   deletion an earlier attempt made is durable too.
+4. `removing.json` is deleted.
+
+Every pass of a pipeline first finishes a removal that an earlier one left in progress, before
+anything lands, whatever `storage.retention` says now. Until a removal is finished, no collector
+lands into its session: each finds the session busy. While both a landed file and its skeleton
+are there, every reader reads the landed file, and one that finds the file gone after it listed it
+reads the skeleton. The two read as the same index. The page keeps what it read of a conversation
+for its chain head and the generation in `removal.state`, and keeps nothing while a removal is in
+progress, so a page in another process than the pipeline draws the skeletons once the files are
+removed.
+
+A root with skeletons still verifies. `asz verify` checks lines and bytes through each skeleton,
+binds each round to the digest each file had, which its skeleton recorded, and reports every
+removed file with what the receiver confirmed of it, never as verified. `asz show` says a record
+was removed. The page draws a removed step with no text, its content state `removed`. `asz repack`
+refuses a session with skeletons or with a removal in progress: a skeleton keeps no records to
+re-cut.
+
+### Removing by hand
 
 The session directory is the unit of retention: removing it purges everything collected for that
 session. Removing `index/` costs a rebuild. Removing a conversation's rounds loses the structure

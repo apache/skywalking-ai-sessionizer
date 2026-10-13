@@ -141,7 +141,7 @@ later agreeing observation.
 `proposed` · `unavailable`.
 
 **Content state** — for any referenced payload: `available` · `redacted` · `omitted` · `hash_only` ·
-`size_only` · `truncated` · `unavailable`.
+`size_only` · `truncated` · `unavailable` · `too_large` · `removed`.
 
 ## Storage
 
@@ -158,6 +158,12 @@ bytes are not valid UTF-8, all of them are kept as base64 (see
 runtime's shape. The digest still ties each record to its source.
 Write-once and read-only: temporary file, fsync, `chmod 0444`, rename. Never appended to.
 *Not:* a copy of the source record.
+
+**Skeleton** — what takes a landed file's place when retention removes it: a `.sk` file that keeps
+every record and part in its place, with every identifier the index reads, and no content (see
+[Skeletons](../formats/session-data.md#skeletons)). The index, and so the chain, are the same with
+it as with the landed file. Local and never sent.
+*Not:* a summary of the file, and not a landed file: its text is gone from the root.
 
 **Delta** — one file of landed records, covering a contiguous run of a source. A source becomes many
 deltas over time.

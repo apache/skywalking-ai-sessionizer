@@ -18,11 +18,9 @@
 package metrics
 
 import (
-	"encoding/hex"
 	"errors"
 	"hash"
 	"io"
-	"os"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -53,7 +51,7 @@ func executionKey(id string) string { return "execution:" + id }
 // that per tool, but measured on Claude Code 2.1.282 the declaration reaches
 // neither the model, nor the hooks, nor the transcript, so no label is made
 // up for it.
-func deriveExecutions(rd *sessiondata.Reader, f *os.File, h hash.Hash, hdr *sessiondata.Header, since time.Time, ss *sessionState, res *result) (*result, error) {
+func deriveExecutions(rd *sessiondata.Reader, f io.Reader, h hash.Hash, hdr *sessiondata.Header, since time.Time, ss *sessionState, res *result) (*result, error) {
 	source := SourceSubagent
 	if hdr.Stream == "main" {
 		source = SourceMain
@@ -106,7 +104,7 @@ func deriveExecutions(rd *sessiondata.Reader, f *os.File, h hash.Hash, hdr *sess
 	if _, err := io.Copy(io.Discard, f); err != nil {
 		return nil, err
 	}
-	res.digest = hex.EncodeToString(h.Sum(nil))
+	res.digest = fileDigest(hdr, h)
 	points := make([]point, 0, len(sums))
 	for k, v := range sums {
 		k.value = v

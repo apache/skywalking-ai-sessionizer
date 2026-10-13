@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -60,9 +59,10 @@ func Rebuild(z *storage.Zone, session string, ix *Index, afterSeq uint64) (int, 
 	return indexed, nil
 }
 
-// indexLandedFile indexes one landed file.
+// indexLandedFile indexes one landed file, or the skeleton that took its
+// place, which keeps every field read here and so gives the same entries.
 func indexLandedFile(ix *Index, lf storage.LandedFile) (int, error) {
-	f, err := os.Open(lf.Path)
+	f, err := sessiondata.Open(lf.Path)
 	if err != nil {
 		return 0, err
 	}

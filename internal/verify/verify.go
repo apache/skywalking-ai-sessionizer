@@ -103,6 +103,11 @@ type StreamReport struct {
 	TooLarge int
 	Unbuilt  int
 
+	// Removed lists the files retention removed: their skeletons keep every
+	// record's place, so the line and byte checks go on through them, but
+	// not their content, so a removed file is never verified, only reported.
+	Removed []RemovedFile
+
 	// Relanded counts records that repeat a range already landed.
 	//
 	// This is not a problem. The collector lands data BEFORE it commits the
@@ -167,7 +172,7 @@ func Stream(dir, kind string) (*StreamReport, error) {
 	first := true
 
 	for _, path := range files {
-		f, err := os.Open(path)
+		f, err := storage.OpenLanded(path)
 		if err != nil {
 			return nil, err
 		}
@@ -175,6 +180,9 @@ func Stream(dir, kind string) (*StreamReport, error) {
 		if err != nil {
 			f.Close()
 			return nil, fmt.Errorf("verify: %s: %w", path, err)
+		}
+		if rf := removedFile(path, r.Header()); rf != nil {
+			rep.Removed = append(rep.Removed, *rf)
 		}
 		for row := uint32(1); ; row++ {
 			rec, rerr := r.Next()
@@ -242,7 +250,25 @@ func tooLarge(rec *sessiondata.Record) int {
 	return n
 }
 
+// RemovedFile is a landed file retention removed: where its skeleton is, the
+// digest the landed file had, and what the receiver confirmed of it.
+type RemovedFile struct {
+	Path     string
+	Digest   string
+	Receiver string
+}
+
+// removedFile reports a skeleton's header, or nil for a landed file.
+func removedFile(path string, hdr sessiondata.Header) *RemovedFile {
+	if hdr.Removed == nil {
+		return nil
+	}
+	return &RemovedFile{Path: path, Digest: hdr.Removed.Digest, Receiver: hdr.Removed.Receiver}
+}
+
 // landedFiles lists a directory's landed files of one kind, in sequence order.
+// A file retention removed is listed by its skeleton; while a removal is in
+// progress both are there, and the landed file is listed.
 func landedFiles(dir, kind string) ([]string, error) {
 	items, err := os.ReadDir(dir)
 	if err != nil {
@@ -258,10 +284,11 @@ func landedFiles(dir, kind string) ([]string, error) {
 	var out []sf
 	for _, it := range items {
 		name := it.Name()
-		if it.IsDir() || !strings.HasPrefix(name, kind+"-") || !strings.HasSuffix(name, ".sd") {
+		ext := filepath.Ext(name)
+		if it.IsDir() || !strings.HasPrefix(name, kind+"-") || (ext != sessiondata.Ext && ext != sessiondata.SkeletonExt) {
 			continue
 		}
-		base := strings.TrimSuffix(name, ".sd")
+		base := strings.TrimSuffix(name, ext)
 		i := strings.LastIndex(base, "-")
 		if i < 0 {
 			continue
@@ -272,10 +299,18 @@ func landedFiles(dir, kind string) ([]string, error) {
 		}
 		out = append(out, sf{filepath.Join(dir, name), seq})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
-	paths := make([]string, len(out))
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].seq != out[j].seq {
+			return out[i].seq < out[j].seq
+		}
+		return !sessiondata.IsSkeleton(out[i].path) && sessiondata.IsSkeleton(out[j].path)
+	})
+	var paths []string
 	for i, x := range out {
-		paths[i] = x.path
+		if i > 0 && storage.LandedPath(x.path) == storage.LandedPath(out[i-1].path) {
+			continue
+		}
+		paths = append(paths, x.path)
 	}
 	return paths, nil
 }

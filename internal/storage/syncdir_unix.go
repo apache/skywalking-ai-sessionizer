@@ -63,3 +63,19 @@ func unsupported(err error) bool {
 	}
 	return false
 }
+
+// SyncFile makes a file's data and metadata, such as a time set on it after
+// it was written, survive a power loss, and says when it could not. It opens
+// the file for reading, so a read-only file is synced as it is. A filesystem
+// that cannot sync it is not an error, as for a directory.
+func SyncFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil && !unsupported(err) {
+		return err
+	}
+	return nil
+}

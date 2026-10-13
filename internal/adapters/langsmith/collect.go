@@ -938,11 +938,14 @@ func nextPosition(streamDir string) (uint64, uint64, error) {
 	var highest uint64
 	for _, it := range items {
 		name := it.Name()
-		if it.IsDir() || !strings.HasPrefix(name, "transcript-") || !strings.HasSuffix(name, ".sd") {
+		if it.IsDir() || !strings.HasPrefix(name, "transcript-") {
 			continue
 		}
+		// A skeleton keeps every record's ordinal, offset and size, so the
+		// position goes on from a removed file as from a landed one. Both
+		// are there for a while during a removal, and read the same.
 		seq, ok := storage.LandedFileSeq(name)
-		if !ok || seq < highest {
+		if !ok || seq < highest || (seq == highest && sessiondata.IsSkeleton(name)) {
 			continue
 		}
 		highest, newest = seq, name
@@ -950,7 +953,12 @@ func nextPosition(streamDir string) (uint64, uint64, error) {
 	if newest == "" {
 		return 1, 0, nil
 	}
-	data, err := os.ReadFile(filepath.Join(streamDir, newest))
+	f, err := sessiondata.Open(filepath.Join(streamDir, newest))
+	if err != nil {
+		return 0, 0, err
+	}
+	data, err := io.ReadAll(f)
+	f.Close()
 	if err != nil {
 		return 0, 0, err
 	}

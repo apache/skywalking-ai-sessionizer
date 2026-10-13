@@ -237,6 +237,44 @@
   window now grows until it holds the line's end, and stops growing when the source was cut short
   while it was read.
 
+## Retention
+
+- A storage root no longer only grows. `storage.retention`, `-1` and off by default, removes the
+  landed files of a conversation that was sent and has had nothing new land for that long, such as
+  `72h` or `30d`. On one root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of
+  them, measured on 2026-10-13. `asz collect` and `asz server` remove at
+  the end of a pass, after the send, the whole conversation's files at once, and only once its head
+  round covers them and, with metrics derived, every file of it is derived. A conversation never
+  sent is kept, and so is one holding provider bodies, for now. See
+  [Retention](../formats/storage-root.md#retention).
+- Each removed file is replaced by a skeleton, `<name>.sk`: Session Data, compressed with gzip,
+  that keeps every record and part in its place with every identifier the index reads, and none of
+  the content, each part saying `removed`. Its header records the file's digest, size and record
+  count, when and by which removal it was removed, and what the receiver confirmed of it. The index
+  rebuilt from skeletons is the index rebuilt from the landed files, byte for byte, so a
+  conversation that becomes active again continues the same chain. With every scenario run twice,
+  once removing everything after each send, the receiver got the same files, rounds and metrics,
+  byte for byte. A skeleton is never sent. See [Skeletons](../formats/session-data.md#skeletons).
+- A removal writes `removing.json` first, then the skeletons, each synced with the error of its
+  first sync checked, before it deletes a landed file, and only once its skeleton reads whole and
+  records the file's digest. The directories the deletions changed are synced before the intent
+  goes. A crash or a power loss at any point is finished by the next pass before anything lands,
+  and no collector lands into a session while its removal is unfinished. A skeleton takes its
+  file's modification time. A removed file's metrics request goes once the receiver has it, on the
+  first pass after it is sent while retention is on; its receipt stays, so a deriver whose state
+  a power loss took back derives the file as before.
+- Every reader takes a skeleton. `asz verify` checks lines and bytes through it, binds rounds to
+  the digest it recorded, and reports removed files apart, never as verified. `asz show` says a
+  record was removed. The page keeps what it read for the chain head and the removal generation,
+  in the new `removal.state`, so one served by another process sees a removal too. It lists a
+  removed file with `state: removed` and the size and digest it had, and draws its steps with no
+  text and the state `removed`. A change record keeps its step, its identity, its time and each
+  file's path, operation and lines, with no diff, and an execution record its step, identity, time
+  and outcome, so the page lists both in their places, `removed`. Metrics
+  turned on after a
+  removal count the tokens a skeleton keeps, and no MCP call, whose record it does not keep.
+  LangSmith's next position goes on from a skeleton. `asz repack` refuses a session with skeletons.
+
 ## Configuration
 
 - The `view` section is read strictly. A key it does not have is refused, where every other section

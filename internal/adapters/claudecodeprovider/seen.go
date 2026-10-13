@@ -218,7 +218,7 @@ func rebuildSeen(z *storage.Zone) (*seen, error) {
 
 // readLanded calls fn for every record of a landed provider_body file.
 func readLanded(path string, fn func(sessiondata.Header, *sessiondata.Record)) error {
-	f, err := os.Open(path)
+	f, err := sessiondata.Open(path)
 	if err != nil {
 		return err
 	}

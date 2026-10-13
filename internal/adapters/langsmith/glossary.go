@@ -121,6 +121,7 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.ContentSizeOnly, Note: "no equivalent"},
 	model.Term{Unified: model.ContentTruncated, Note: "no equivalent: nothing measured arrived truncated"},
 	model.Term{Unified: model.ContentTooLarge, Note: "no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget"},
+	model.Term{Unified: model.ContentRemoved, Note: "no equivalent: asz removes the payloads of a conversation idle longer than storage.retention from its own root"},
 	model.Term{Unified: model.ContentUnavailable, Note: "a run that arrived unfinished: its content is not there yet"},
 
 	// ---- what began a turn ----

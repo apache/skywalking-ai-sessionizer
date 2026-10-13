@@ -55,6 +55,37 @@ type slot struct {
 	files  []storage.LandedFile
 }
 
+// CheckSource refuses a root with a session retention removed files of, before
+// any session is written. A skeleton keeps no records to re-cut, and a chain
+// built again in the new root would have nothing to bind them to. A removal
+// in progress is refused too: the next pipeline pass finishes it.
+func CheckSource(src *storage.Zone, sessions []string) error {
+	for _, session := range sessions {
+		files, err := storage.LandedFiles(src, session)
+		if err != nil {
+			return err
+		}
+		if err := checkRemoved(src, session, files); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkRemoved(src *storage.Zone, session string, files []storage.LandedFile) error {
+	if r, err := storage.LoadRemoving(src.RemovingPath(session)); err != nil {
+		return err
+	} else if r != nil {
+		return fmt.Errorf("repack: a removal of session %s is in progress; run a pipeline pass to finish it first", session)
+	}
+	for _, lf := range files {
+		if lf.Skeleton {
+			return fmt.Errorf("repack: retention removed files of session %s; a removed file keeps no records to re-cut, so this root cannot be repacked", session)
+		}
+	}
+	return nil
+}
+
 // CheckDestination refuses a populated root before any session is written.
 // A prior chain binds to its original landed bytes and cannot be reused.
 // The root lock's directory is not content: the repack holds it while it
@@ -93,6 +124,9 @@ func Session(src, dst *storage.Zone, session string, budget int64, now time.Time
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("repack: session %s has no landed files", session)
+	}
+	if err := checkRemoved(src, session, files); err != nil {
+		return nil, err
 	}
 	srcDir, dstDir := src.SessionDir(session), dst.SessionDir(session)
 	// Reserve a new session directory even when Session is called without
@@ -179,7 +213,7 @@ func repackSlot(s *slot, outDir string, budget int64, state *storage.SessionStat
 		return err
 	}
 	for _, lf := range s.files {
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			return 0, err
 		}

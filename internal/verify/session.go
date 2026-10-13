@@ -47,6 +47,9 @@ type SessionReport struct {
 	// Bodies lists the provider bodies that do not rebuild. They are counted
 	// in Problems too.
 	Bodies []BodyProblem
+	// Removed lists the files retention removed. They are reported so it is
+	// visible what the root no longer holds, not because they are wrong.
+	Removed []RemovedFile
 }
 
 // OK reports whether every stream in the session is contiguous and intact.
@@ -71,6 +74,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 			rep.Records += sr.Records
 			rep.Relanded += sr.Relanded
 			rep.TooLarge += sr.TooLarge
+			rep.Removed = append(rep.Removed, sr.Removed...)
 			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps)
 			if sr.End != nil {
 				rep.Problems++
@@ -114,6 +118,7 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 		rep.Relanded += pr.Relanded
 		rep.TooLarge += pr.TooLarge
 		rep.Unbuilt += pr.Unbuilt
+		rep.Removed = append(rep.Removed, pr.Removed...)
 		rep.Bodies = bodies
 		rep.Problems += len(bodies)
 	}

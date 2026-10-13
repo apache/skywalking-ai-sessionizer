@@ -327,8 +327,9 @@ form of the configured name, so "claude.ai Claude Docs" is `claude_ai_Claude_Doc
 server was configured with is in the call's execution record, when there is one.
 
 Every part carries `state` and `bytes`. `state` is one of `available`, `truncated`, `redacted`,
-`omitted`, `unavailable` or `too_large`, and `bytes` is the size of the original even when the part
-holds less. A reader is always told how much of the original it has.
+`omitted`, `unavailable` or `too_large`, or `removed` in a [skeleton](#skeletons), and `bytes` is
+the size of the original even when the part holds less. A reader is always told how much of the
+original it has.
 
 ### Too large to land
 
@@ -504,6 +505,51 @@ Claude Code deletes its own transcripts, and a storage root outlives them (see
 [Storage Root](storage-root.md#size)). An `unknown` part can be interpreted again from its original
 bytes in the store. A part that keeps the source's JSON can also be interpreted again, subject to
 the whitespace and older-file limits in [What data holds](#what-data-holds).
+
+## Skeletons
+
+When `storage.retention` removes a landed file, a skeleton takes its place: the same name with the
+extension `.sk`, in the same directory, written once and read-only. A skeleton is Session Data
+compressed with gzip, and it is local: it is never sent. It keeps what a conversation's structure is
+built from and none of the content, so the index rebuilt from it is the index rebuilt from the
+landed file. [Retention](storage-root.md#retention) says when a file is removed.
+
+- **The header**, whole, with one more key, `removed`:
+
+  ```json
+  {"digest":"9f2c…","size":204811,"records":118,"at":"2026-10-13T10:00:00Z","generation":1,
+   "receiver":"accepted","owner":"grpc:%2F%2Foap:11800||me@laptop"}
+  ```
+
+  `digest`, `size` and `records` describe the landed file: the SHA-256 of its whole bytes, which a
+  round's input digest binds, its size in bytes and its number of records. `at` is when it was
+  removed, and `generation` which removal of the session removed it, counting from 1. `receiver`
+  says what the receiver confirmed of it: `accepted`, `rejected` when it took the file and rejected
+  some of its records, or `unconfirmed` when no answer confirmed it. `owner` is the owner its
+  session is sent under, as `push.state` records it.
+- **Every record, in order**, with `ord`, `off`, `bytes`, `id`, `parent`, `call`, `run`,
+  `continues`, `tool`, `child`, `batch`, `label`, `started_by`, `from`, `time`, `trigger`,
+  `flags`, `usage`, `model` and `dropped`. A provider body keeps `sha` too; any other record
+  drops it.
+- **Every part, in its place**, because a part's position is its block number. Each keeps `k`,
+  `bytes`, `failed` and `sha256`, and its `state` is `removed`. A `call` keeps `id`, `name`,
+  `server` and `server_tool`, and a `result` keeps `of`. `text`, `data`, `media` and `encoding`
+  go, with three exceptions, each made only when the data decoded:
+  - A `changes/1` record, in any data part, keeps `schema`, `id`, `captured_by`, `tool`,
+    `tool_name`, `time`, `basis`, `root`, `coverage` and `changed_files`, and for each file in
+    `changes` its `path`, `operation`, `before`, `after`, `attribution`, `additions` and
+    `deletions`: what the page groups and counts the files by. `hunks`, `windows`, `policy`,
+    `window`, `outcome`, `gaps` and `overlaps` go, and a `diff` that was `available` says
+    `unavailable`, since its lines are not kept.
+  - An [execution record](#execution-records) keeps `schema`, `id`, `tool`, `time` and `outcome`:
+    its own identity, the step it joins to, its place in time and how the call ended.
+  - A provider body keeps its manifest without `segments`. Each other data part keeps the SHA-256
+    of its data in `sha256`, which is the piece's identity, or the one it had when it was too large
+    to land.
+- **Its own closing line**, with its own record count and digest.
+
+A reader opens a `.sk` through gzip and reads it as any other Session Data. While a removal is in
+progress, a landed file and its skeleton can both be there; read the landed file.
 
 ## Producing Session Data
 

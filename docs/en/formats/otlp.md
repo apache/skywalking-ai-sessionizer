@@ -9,7 +9,9 @@ how the metrics are derived.
 A file is sent whole: one log record whose body is the file's bytes, unchanged. A receiver
 stores it as it was landed, checks its digest at once, and has nothing to put back together.
 Every `{seq, row, block}` reference in a round still means what it meant, because a row is a
-line of the body it names.
+line of the body it names. A [skeleton](session-data.md#skeletons), which takes a landed file's
+place when retention removes it, is never sent: the receiver has the file it replaced, or the file
+was removed before it was sent.
 
 This is the second design. The first sent one record per line, and it was measured on one
 conversation of 306 files: 39,683 records, attributes 16% on top of the body even after

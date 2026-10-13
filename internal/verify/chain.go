@@ -91,7 +91,9 @@ func LandedDigests(z *storage.Zone, session string) (map[uint64]string, error) {
 	}
 	out := map[uint64]string{}
 	for _, lf := range files {
-		d, err := storage.FileDigest(lf.Path)
+		// A removed file is checked against the digest its skeleton
+		// recorded: the file itself is gone, and only the receiver holds it.
+		d, err := storage.LandedDigest(lf)
 		if err != nil {
 			return nil, err
 		}

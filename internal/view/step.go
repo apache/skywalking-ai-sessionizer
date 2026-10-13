@@ -23,17 +23,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
@@ -100,7 +101,14 @@ func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]ui
 		if err != nil {
 			continue
 		}
-		f, err := os.Open(path)
+		f, err := sessiondata.Open(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			// A removal deleted the landed file after its path was found:
+			// its skeleton has its place now.
+			if path, err = c.rescan(seq); err == nil {
+				f, err = sessiondata.Open(path)
+			}
+		}
 		if err != nil {
 			continue
 		}
@@ -247,9 +255,13 @@ func fill(s *step, rec *sessiondata.Record, block *int) {
 		s.Text = clip(readable(rec))
 		// A step that stands on a whole record reads every part of it, so
 		// one part too large to land, such as a screenshot pasted beside a
-		// sentence, makes the step say so. Its text is what landed.
+		// sentence, makes the step say so. Its text is what landed. A
+		// removed record says it was removed, which covers every part.
 		for _, part := range rec.Parts {
-			if part.State == model.ContentTooLarge {
+			switch {
+			case part.State == model.ContentRemoved:
+				s.State = model.ContentRemoved
+			case part.State == model.ContentTooLarge && s.State != model.ContentRemoved:
 				s.State = model.ContentTooLarge
 			}
 		}
@@ -600,6 +612,11 @@ var errNoHeader = errors.New("the file's header does not read")
 // not known is never served: the files endpoint serves provider bodies and
 // nothing else.
 func readProviderBody(path string) ([]byte, sessiondata.Kind, error) {
+	// A removed body keeps no bytes. It is left out as a file that is gone
+	// is, and the renderer says it did not get it.
+	if sessiondata.IsSkeleton(path) {
+		return nil, "", fmt.Errorf("view: %s was removed by retention: %w", filepath.Base(path), fs.ErrNotExist)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, "", err
@@ -631,7 +648,14 @@ func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, sessiondata
 	if err != nil {
 		return nil, "", err
 	}
-	f, err := os.Open(path)
+	f, err := sessiondata.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		// A removal deleted the landed file after its path was found: its
+		// skeleton has its place now.
+		if path, err = c.rescan(seq); err == nil {
+			f, err = sessiondata.Open(path)
+		}
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -655,8 +679,6 @@ func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, sessiondata
 	}
 }
 
-var seqSuffix = regexp.MustCompile(`-(\d{6,})\.sd$`)
-
 // scanPaths walks the session once and maps every landed sequence to its file.
 //
 // The sequence is monotonic across every stream and run in a session, so it
@@ -675,16 +697,32 @@ func (c *Conversation) scanPaths() map[uint64]string {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		m := seqSuffix.FindStringSubmatch(d.Name())
-		if m == nil {
+		// A removed file is found by its skeleton, which keeps its sequence.
+		// While a removal is in progress both are there, and the landed file
+		// is read.
+		n, ok := storage.LandedFileSeq(d.Name())
+		if !ok {
 			return nil
 		}
-		if n, cerr := strconv.ParseUint(m[1], 10, 64); cerr == nil {
+		if have, found := out[n]; !found || sessiondata.IsSkeleton(have) {
 			out[n] = p
 		}
 		return nil
 	})
 	return out
+}
+
+// rescan finds a sequence's file again at once, for a path that was found
+// and is gone: a removal replaced the landed file with its skeleton.
+func (c *Conversation) rescan(seq uint64) (string, error) {
+	c.pathsMu.Lock()
+	defer c.pathsMu.Unlock()
+	c.pathsScan = time.Now()
+	c.paths = c.scanPaths()
+	if p, ok := c.paths[seq]; ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("view: no landed file with sequence %d", seq)
 }
 
 // landedPath finds the landed file carrying a sequence.

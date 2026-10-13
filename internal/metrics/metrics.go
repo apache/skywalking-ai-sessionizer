@@ -39,6 +39,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -251,7 +252,7 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		// waiting file's windows follow theirs, as after a saved pass. A receipt
 		// that cannot be read is reported when the loop reaches its file.
 		for _, lf := range files {
-			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
+			rel, _ := filepath.Rel(d.Zone.Root(), storage.LandedPath(lf.Path))
 			if state.Derived[filepath.ToSlash(rel)] != "" {
 				continue
 			}
@@ -261,7 +262,7 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		}
 		pending := false
 		for i, lf := range files {
-			rel, _ := filepath.Rel(d.Zone.Root(), lf.Path)
+			rel, _ := filepath.Rel(d.Zone.Root(), storage.LandedPath(lf.Path))
 			rel = filepath.ToSlash(rel)
 			if state.Derived[rel] != "" {
 				continue
@@ -361,6 +362,18 @@ type point struct {
 
 // result is what deriving one file found, held until its request is on
 // disk and then committed to the session's state.
+// fileDigest is the digest of the file h read: the SHA-256 of its bytes, or
+// for a skeleton the digest it recorded of the landed file. A skeleton keeps
+// every call's usage and model, so its tokens are counted as the landed
+// file's were; it keeps no execution record's data, so a file removed before
+// it was derived counts no MCP call.
+func fileDigest(hdr *sessiondata.Header, h hash.Hash) string {
+	if hdr.Removed != nil {
+		return hdr.Removed.Digest
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 type result struct {
 	points  []point
 	counted []string
@@ -380,7 +393,7 @@ type result struct {
 // that never overlaps the series' last: a minute already passed by an
 // earlier point follows that point instead.
 func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since time.Time, ss *sessionState) (*result, error) {
-	f, err := os.Open(lf.Path)
+	f, err := sessiondata.Open(lf.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +419,7 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 		if _, err := io.Copy(h, f); err != nil {
 			return nil, err
 		}
-		res.digest = hex.EncodeToString(h.Sum(nil))
+		res.digest = fileDigest(&hdr, h)
 		return res, nil
 	}
 	source := SourceSubagent
@@ -446,7 +459,7 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 	if _, err := io.Copy(io.Discard, f); err != nil {
 		return nil, err
 	}
-	res.digest = hex.EncodeToString(h.Sum(nil))
+	res.digest = fileDigest(&hdr, h)
 	if tail && last != nil && !ss.Calls[last.id] {
 		res.openTail = lf.Path
 		for _, next := range following {
@@ -564,7 +577,7 @@ func (c *call) take(rec *sessiondata.Record, t time.Time, ok bool) {
 // may continue in another file; matched says this file held a fragment.
 // Metadata and workspace changes do not interrupt a transcript's call.
 func continueIn(path string, c *call) (more, matched bool, err error) {
-	f, err := os.Open(path)
+	f, err := sessiondata.Open(path)
 	if err != nil {
 		return false, false, err
 	}

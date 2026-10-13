@@ -145,6 +145,9 @@ type Conversation struct {
 	// Keeping what was folded, rather than what was listed, makes the next
 	// read try again instead of serving the short fold for good.
 	head uint64
+	// generation is the removal generation the session's files were read
+	// at (storage.RemovalGeneration).
+	generation int
 }
 
 // Load folds a conversation and builds its lookups, once per round.
@@ -162,9 +165,13 @@ type Conversation struct {
 func (s *Server) Load(id string) (*Conversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A removal replaces landed files with skeletons and leaves the chain
+	// as it is, so what was kept is good only for the removal generation it
+	// was read at, and nothing is kept while a removal is in progress.
+	generation, removing, gerr := storage.RemovalGeneration(s.zone, id)
 	if c, ok := s.loaded[id]; ok {
 		head, err := sessionflow.OpenChain(s.zone.Root(), id).Head()
-		if err == nil && head == c.head {
+		if err == nil && gerr == nil && !removing && head == c.head && generation == c.generation {
 			return c, nil
 		}
 		delete(s.loaded, id)
@@ -184,7 +191,7 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		return nil, fmt.Errorf("view: no rounds for %s; run asz parse", id)
 	}
 	c := &Conversation{
-		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems, head: v.Round,
+		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems, head: v.Round, generation: generation,
 		at:    map[[2]uint64]int64{},
 		lanes: map[uint64]string{},
 		named: map[string]int{},
@@ -390,7 +397,7 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 		case lf.RunID != "":
 			lanes[lf.Seq] = "run/" + lf.RunID
 		}
-		f, err := os.Open(lf.Path)
+		f, err := storage.OpenLanded(lf.Path)
 		if err != nil {
 			continue
 		}

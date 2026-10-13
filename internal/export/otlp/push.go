@@ -338,6 +338,11 @@ func (p *Pusher) Pass() (*Stats, error) {
 			if b.stop != nil || held {
 				break
 			}
+			// A skeleton is local and never sent. The file whose place it
+			// took went before it was removed, or was removed unsent.
+			if lf.Skeleton {
+				continue
+			}
 			rel, _ := filepath.Rel(p.Zone.Root(), lf.Path)
 			rel = filepath.ToSlash(rel)
 			if state.pushed(rel) {
@@ -583,9 +588,7 @@ func (p *Pusher) sessionsOldestFirst() ([]session, error) {
 		}
 		s := session{id: id, files: files}
 		if len(files) > 0 {
-			if fi, err := os.Stat(files[0].Path); err == nil {
-				s.landed = fi.ModTime()
-			}
+			s.landed = landedAt(files[0])
 		}
 		out = append(out, s)
 	}
@@ -733,7 +736,7 @@ func (p *Pusher) serviceOf(session string, files []storage.LandedFile) string {
 	}
 	var fallback string
 	for _, lf := range files {
-		f, err := os.Open(lf.Path)
+		f, err := sessiondata.Open(lf.Path)
 		if err != nil {
 			continue
 		}
@@ -1001,7 +1004,7 @@ func (b *batch) sessionLatest(session string, files []storage.LandedFile) uint64
 	}
 	var hi int64
 	for _, lf := range files {
-		data, err := os.ReadFile(lf.Path)
+		data, err := readLanded(lf)
 		if err != nil {
 			continue
 		}
@@ -1011,6 +1014,29 @@ func (b *batch) sessionLatest(session string, files []storage.LandedFile) uint64
 	}
 	b.latest[session] = uint64(hi)
 	return uint64(hi)
+}
+
+// readLanded reads a landed file, or a skeleton through its compression. A
+// skeleton keeps every record's time.
+func readLanded(lf storage.LandedFile) ([]byte, error) {
+	f, err := sessiondata.Open(lf.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
+
+// landedAt is when a session's first file landed: its modification time,
+// since a landed file is never written again. A skeleton takes its file's
+// modification time, so a removal does not move its session in the order
+// sessions are sent.
+func landedAt(lf storage.LandedFile) time.Time {
+	fi, err := os.Stat(lf.Path)
+	if err != nil {
+		return time.Time{}
+	}
+	return fi.ModTime()
 }
 
 // timeRange is the earliest and the latest record time in a landed file,

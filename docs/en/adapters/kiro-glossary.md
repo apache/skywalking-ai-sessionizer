@@ -90,6 +90,7 @@ not there.
 | `notification` | — | derived here | no equivalent |
 | `omitted` | — | derived here | no equivalent |
 | `parent` | — | derived here | no equivalent: a record names no record before it |
+| `removed` | — | derived here | no equivalent: asz removes the payloads of a conversation idle longer than storage.retention from its own root |
 | `reports` | — | derived here | no equivalent |
 | `retries` | — | derived here | no equivalent |
 | `runtime.notification` | — | derived here | no equivalent: a subagent's end is the result of its call |

@@ -175,6 +175,10 @@ const (
 	// would not fit a landed file's byte budget on its own. Its size and
 	// digest stay.
 	ContentTooLarge = "too_large"
+	// ContentRemoved is a payload retention removed from the local root after
+	// its conversation was idle. Its place, kind and size stay, and the
+	// receiver holds the content when it was sent.
+	ContentRemoved = "removed"
 )
 
 // StreamRole distinguishes lineages within one session.

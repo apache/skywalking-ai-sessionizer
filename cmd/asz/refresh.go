@@ -35,6 +35,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
+	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/remove"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
@@ -163,6 +164,10 @@ type refresher struct {
 	// only while this pipeline holds the scenario lock. A root no build wrote
 	// has no marker, so nothing there is ever removed.
 	remover *remove.Remover
+	// retention removes the landed files of conversations idle longer than
+	// storage.retention, and finishes a removal an earlier pass left in
+	// progress. It never runs over a scenario root, which has its own.
+	retention *retention.Remover
 	// scenarioLock is held for the life of the process once the root is a
 	// scenario root. scenarioWait is how long a single pass waits for it.
 	scenarioLock *storage.SessionLock
@@ -429,6 +434,24 @@ func present(dir string, optional bool) (bool, error) {
 	return true, nil
 }
 
+// retain sets the retention: how long a conversation may be idle before its
+// landed files are removed. Zero removes nothing, though a removal an
+// earlier pass left in progress is still finished.
+func (r *refresher) retain(keep time.Duration) {
+	r.retention = &retention.Remover{Zone: r.zone, Retention: keep, Metrics: r.deriver != nil}
+}
+
+// forget drops what the page cached of sessions whose files were removed,
+// so it reads their skeletons from then on.
+func (r *refresher) forget(sessions []string) {
+	if r.srv == nil {
+		return
+	}
+	for _, id := range sessions {
+		r.srv.Forget(id)
+	}
+}
+
 // holdRoot takes the root lock for one pass, or returns nil when this pass
 // does nothing. Every command that writes to the root holds it for a pass,
 // so two commands never write the same root at once. A single pass waits for
@@ -498,6 +521,14 @@ func (r *refresher) pass() error {
 	var landed, records, sessionsSeen, pending, conflicts, busy int
 	var waiting, unreadable int
 	changed := map[string]bool{}
+
+	// A removal an earlier pass left in progress is finished first, before
+	// anything lands into its session.
+	if r.retention != nil && r.scenarioLock == nil {
+		res := r.retention.Recover()
+		errs = append(errs, res.Errors...)
+		r.forget(res.Removed)
+	}
 
 	var cs *claudecode.Stats
 	// collected says a collector reached its source this pass. The first
@@ -788,6 +819,16 @@ func (r *refresher) pass() error {
 			r.derive[id] = true
 		}
 	}
+	// Remove what has been idle for longer than the retention. It runs after
+	// the push, so what a session sends this pass goes before its files are
+	// removed. A scenario root has its own removal, above.
+	retained := 0
+	if r.retention != nil && r.scenarioLock == nil {
+		res := r.retention.Pass(retention.Input{Busy: r.removeInput().Busy})
+		errs = append(errs, res.Errors...)
+		retained = res.Files
+		r.forget(res.Removed)
+	}
 	if r.last && len(r.retry) > 0 {
 		// No pass follows, so these are not deferred, they are unparsed.
 		errs = append(errs, fmt.Errorf("%d session(s) were held by another builder and are not parsed", len(r.retry)))
@@ -818,6 +859,9 @@ func (r *refresher) pass() error {
 	// any that changed, removed or failed are.
 	if removed > 0 {
 		pushed += fmt.Sprintf(" removed=%d", removed)
+	}
+	if retained > 0 {
+		pushed += fmt.Sprintf(" retention=%d", retained)
 	}
 	bodies := waiting != r.waiting || unreadable != r.unreadable
 	r.waiting, r.unreadable = waiting, unreadable

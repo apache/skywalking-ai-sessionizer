@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -392,7 +393,7 @@ func (c *Conversation) files(landed []storage.LandedFile) ([]sessionview.File, m
 	out := make([]sessionview.File, 0, len(landed))
 	digests := map[uint64]string{}
 	for _, lf := range landed {
-		data, err := os.ReadFile(lf.Path)
+		data, err := readLanded(lf)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -401,13 +402,18 @@ func (c *Conversation) files(landed []storage.LandedFile) ([]sessionview.File, m
 			_ = json.Unmarshal(data[:i], &hdr)
 		}
 		seq := lf.Seq
-		digest := digestOf(data)
-		digests[seq] = digest
 		f := sessionview.File{
-			File: c.relPath(lf.Path), Format: "sd", Kind: string(hdr.Kind), Seq: &seq,
+			File: c.relPath(storage.LandedPath(lf.Path)), Format: "sd", Kind: string(hdr.Kind), Seq: &seq,
 			Stream: strPtr(lf.Stream), Run: strPtr(lf.RunID),
-			Lines: countByte(data, '\n'), Bytes: int64(len(data)), Digest: digest,
+			Lines: countByte(data, '\n'), Bytes: int64(len(data)), Digest: digestOf(data),
 		}
+		// A removed file is described as it landed, from what its skeleton
+		// recorded, so the chain check binds the digest a round bound: the
+		// header and the closing line around its records.
+		if r := hdr.Removed; r != nil {
+			f.Lines, f.Bytes, f.Digest, f.State = r.Records+2, r.Size, r.Digest, model.ContentRemoved
+		}
+		digests[seq] = f.Digest
 		if s, ok := spans[lf.Seq]; ok {
 			from, to := Millis(s.from), Millis(s.to)
 			f.FromTime, f.ThroughTime = &from, &to
@@ -415,6 +421,16 @@ func (c *Conversation) files(landed []storage.LandedFile) ([]sessionview.File, m
 		out = append(out, f)
 	}
 	return out, digests, nil
+}
+
+// readLanded reads a landed file whole, or a skeleton through its compression.
+func readLanded(lf storage.LandedFile) ([]byte, error) {
+	f, err := storage.OpenLanded(lf.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }
 
 func (c *Conversation) relPath(path string) string {

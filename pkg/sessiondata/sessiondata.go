@@ -230,6 +230,10 @@ type Header struct {
 	Session string `json:"session"`
 	Stream  string `json:"stream,omitempty"`
 	Batch   string `json:"batch,omitempty"`
+
+	// Removed is set on a skeleton only: what it says about the landed file
+	// whose place it took.
+	Removed *Removed `json:"removed,omitempty"`
 }
 
 // Record is one source record, converted.

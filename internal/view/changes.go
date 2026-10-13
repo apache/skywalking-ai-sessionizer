@@ -20,7 +20,6 @@ package view
 import (
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -91,7 +90,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindChanges)+"-") {
 			continue
 		}
-		f, err := os.Open(lf.Path)
+		f, err := storage.OpenLanded(lf.Path)
 		if err != nil {
 			continue
 		}
