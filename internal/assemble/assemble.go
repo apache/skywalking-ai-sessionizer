@@ -368,7 +368,7 @@ func ref(e *index.Entry) sessionflow.Ref {
 }
 
 // blockRef points at one content block within a landed record.
-func blockRef(e *index.Entry, ord uint16) sessionflow.Ref {
+func blockRef(e *index.Entry, ord uint32) sessionflow.Ref {
 	o := int(ord)
 	return sessionflow.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row), Block: &o}
 }

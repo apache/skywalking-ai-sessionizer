@@ -18,13 +18,20 @@
 package view
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/skeleton"
 )
 
 // A step that stands on a whole record says too_large when a part of the
@@ -76,11 +83,44 @@ func TestAWholeRecordStepSaysItWasRemoved(t *testing.T) {
 	}
 }
 
-// A removed provider body keeps no bytes, so it is left out of what the
-// files endpoint serves, as a file that is gone is.
-func TestARemovedBodyIsNotServed(t *testing.T) {
-	_, _, err := readProviderBody(filepath.Join(t.TempDir(), "provider_body-20261001T000000.000000000Z-000003.sk"))
-	if !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("a removed body read as %v, want a file that is gone", err)
+// A removed provider body file is served as its skeleton, read through its
+// compression, byte for byte the Session Data the skeleton holds; a skeleton
+// that is gone is left out, as a landed file that is gone is.
+func TestARemovedBodyFileIsServedAsItsSkeleton(t *testing.T) {
+	var landed bytes.Buffer
+	w, err := sessiondata.NewWriter(&landed, &sessiondata.Header{H: 1, Schema: sessiondata.Schema, Seq: 3,
+		At: "2026-10-01T00:00:00Z", Kind: sessiondata.KindProviderBody, Adapter: "test/0", Dialect: "test/1", Src: ".", Session: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := json.RawMessage(`{"schema":"provider_body/1","role":"request","sha256":"` + strings.Repeat("a", 64) + `","bytes":2,"depth":0,"segments":[{"lit":"{}"}]}`)
+	if err := w.Write(&sessiondata.Record{Ord: 1, ID: "r1", Parts: []sessiondata.Part{{Kind: sessiondata.PartData, Data: m}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var sk bytes.Buffer
+	if err := skeleton.Write(&sk, landed.Bytes(), sessiondata.Removed{Generation: 1}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "provider_body-20261001T000000.000000000Z-000003.sk")
+	if err := os.WriteFile(path, sk.Bytes(), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	zr, err := gzip.NewReader(bytes.NewReader(sk.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, kind, err := readProviderBody(path)
+	if err != nil || kind != sessiondata.KindProviderBody || !bytes.Equal(got, want) {
+		t.Fatalf("the skeleton was served as %d bytes of %s, %v; want its %d bytes of Session Data", len(got), kind, err, len(want))
+	}
+	if _, _, err := readProviderBody(path + ".gone.sk"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a skeleton that is gone read as %v", err)
 	}
 }

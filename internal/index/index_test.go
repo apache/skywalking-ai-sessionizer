@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
@@ -347,5 +348,41 @@ func TestThroughKeepsTheBlocksAndBodiesOfItsEntries(t *testing.T) {
 		&index.Body{Role: index.BodyRoleRequest})
 	if ix.Entries[1].Record != in.ID("b") || ix.Blocks[1].Kind != index.BlockOther || ix.Bodies[1].Role != index.BodyRoleResponse {
 		t.Fatal("appending to the prefix wrote over the index it came from")
+	}
+}
+
+// A landed record bounds neither a label's length nor how many parts it has,
+// so the index does not either: a title of 64 KiB or more is written and read
+// back, and the part after the 65,536th keeps its own position rather than
+// wrapping to the first one's.
+func TestALongLabelAndManyPartsSurviveTheRoundTrip(t *testing.T) {
+	label := strings.Repeat("a title ", 70000/8)
+	parts := make([]sessiondata.Part, 65538)
+	for i := range parts {
+		parts[i] = sessiondata.Part{Kind: sessiondata.PartText, Text: "x"}
+	}
+	hdr := &sessiondata.Header{Kind: sessiondata.KindTranscript, Session: "sess-1", Stream: "main"}
+	ix := index.New("sess-1")
+	e, blocks, body := index.FromRecord(ix, hdr, &sessiondata.Record{Ord: 1, ID: "m1", Label: label, Parts: parts}, 1, 1)
+	ix.AppendRecord(e, blocks, body)
+
+	dir := t.TempDir()
+	if err := ix.Write(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := index.Load(dir, "sess-1")
+	if err != nil || !ok {
+		t.Fatalf("Load: ok=%v err=%v", ok, err)
+	}
+	if l := got.Strings.String(got.Entries[0].Label); l != label {
+		t.Fatalf("the label read back is %d bytes, want %d", len(l), len(label))
+	}
+	if len(got.Blocks) != len(parts) {
+		t.Fatalf("%d blocks read back, want %d", len(got.Blocks), len(parts))
+	}
+	for i, b := range got.Blocks {
+		if int(b.Ord) != i {
+			t.Fatalf("block %d reads back at position %d", i, b.Ord)
+		}
 	}
 }

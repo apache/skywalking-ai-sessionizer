@@ -236,6 +236,19 @@
   and landed every line up to the last one in the same file: one 4.6 MB line made an 8 MB file. The
   window now grows until it holds the line's end, and stops growing when the source was cut short
   while it was read.
+- No landed line nests deeper than 256 objects and lists, which a reader may refuse and the OAP
+  does, dropping every later record of the file. A part whose data nests deeper than its 253 levels
+  of the line is taken out as a payload too large to carry is, whatever its size: `too_large`, or
+  `truncated` while its text is left, with its size and SHA-256 kept. A change or execution record
+  is never taken out whole: it is written again in its own format, without the field its format
+  does not name, and says `truncated`. A provider body's piece, which is a whole tool or a long
+  string, is taken out the same way. asz used to land data up to Go's own limit of about 10,000
+  levels.
+- The index takes a label or an identifier of any length, and a record of any number of parts. A
+  string of 64 KiB or more, such as a long title, stopped the session's index from being written,
+  so the session never parsed again; and the 65,537th part of a record took the first part's
+  position, so its step replaced the first one's. The index schema moved to 16, and an older index
+  is built again from the landed files.
 - The OTLP exporter over HTTP keeps its own connections. It shared the process's default HTTP
   transport, so closing it closed every other HTTP client's idle connections, and anything else that
   closed them, such as a test receiver shutting down, could break a request the exporter had just

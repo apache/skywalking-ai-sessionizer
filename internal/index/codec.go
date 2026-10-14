@@ -20,7 +20,6 @@ package index
 import (
 	"bufio"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -34,7 +33,7 @@ var magic = [4]byte{'A', 'S', 'I', 'X'}
 const (
 	// seq row stream batch kind trigger flags ts  record parent call run continues tool child started_by label  ord first count
 	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*9 + 8 + 4 + 4 // 80
-	blockWidth = 4 + 2 + 1 + 4 + 4 + 4 + 4 + 4 + 4               // 31
+	blockWidth = 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 4               // 33
 	// entry role request previous
 	bodyWidth = 4 + 1 + 4 + 4 // 13
 )
@@ -74,11 +73,10 @@ func (ix *Index) Write(dir string) error {
 	if err := writeU32(w, uint32(len(strs))); err != nil {
 		return err
 	}
+	// A string's length takes four bytes, as a landed record does not bound
+	// a label or an identifier: a title of 64 KiB or more is still one.
 	for _, s := range strs {
-		if len(s) > 0xffff {
-			return fmt.Errorf("index: identifier too long (%d bytes)", len(s))
-		}
-		if err := binary.Write(w, le, uint16(len(s))); err != nil {
+		if err := writeU32(w, uint32(len(s))); err != nil {
 			return err
 		}
 		if _, err := w.WriteString(s); err != nil {
@@ -167,10 +165,10 @@ func Load(dir, session string) (ix *Index, ok bool, err error) {
 	nStr := int(le.Uint32(b))
 	strs := make([]string, nStr)
 	for i := 0; i < nStr; i++ {
-		if b, err = read(2); err != nil {
+		if b, err = read(4); err != nil {
 			return nil, false, err
 		}
-		l := int(le.Uint16(b))
+		l := int(le.Uint32(b))
 		if b, err = read(l); err != nil {
 			return nil, false, err
 		}
@@ -292,26 +290,26 @@ func decodeEntry(b []byte, e *Entry) {
 
 func encodeBlock(b []byte, k *Block) {
 	le.PutUint32(b[0:], k.Entry)
-	le.PutUint16(b[4:], k.Ord)
-	b[6] = byte(k.Kind)
-	le.PutUint32(b[7:], k.ToolID)
-	le.PutUint32(b[11:], k.Name)
-	le.PutUint32(b[15:], k.Adds)
-	le.PutUint32(b[19:], k.Dels)
-	le.PutUint32(b[23:], k.Server)
-	le.PutUint32(b[27:], k.ServerTool)
+	le.PutUint32(b[4:], k.Ord)
+	b[8] = byte(k.Kind)
+	le.PutUint32(b[9:], k.ToolID)
+	le.PutUint32(b[13:], k.Name)
+	le.PutUint32(b[17:], k.Adds)
+	le.PutUint32(b[21:], k.Dels)
+	le.PutUint32(b[25:], k.Server)
+	le.PutUint32(b[29:], k.ServerTool)
 }
 
 func decodeBlock(b []byte, k *Block) {
 	k.Entry = le.Uint32(b[0:])
-	k.Ord = le.Uint16(b[4:])
-	k.Kind = BlockKind(b[6])
-	k.ToolID = le.Uint32(b[7:])
-	k.Name = le.Uint32(b[11:])
-	k.Adds = le.Uint32(b[15:])
-	k.Dels = le.Uint32(b[19:])
-	k.Server = le.Uint32(b[23:])
-	k.ServerTool = le.Uint32(b[27:])
+	k.Ord = le.Uint32(b[4:])
+	k.Kind = BlockKind(b[8])
+	k.ToolID = le.Uint32(b[9:])
+	k.Name = le.Uint32(b[13:])
+	k.Adds = le.Uint32(b[17:])
+	k.Dels = le.Uint32(b[21:])
+	k.Server = le.Uint32(b[25:])
+	k.ServerTool = le.Uint32(b[29:])
 }
 
 // LoadFor loads a session's index only if it agrees with its saved state.

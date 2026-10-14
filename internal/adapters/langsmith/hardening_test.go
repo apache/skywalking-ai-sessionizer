@@ -20,6 +20,8 @@ package langsmith
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -30,6 +32,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -1174,20 +1177,20 @@ func linksTo(t *testing.T, zone *storage.Zone, session, child string) (flagged, 
 	return flagged, plain
 }
 
-// TestARequestThatCannotLandWholeLandsNothing.
+// TestDataNestedTooDeepLandsTakenOut.
 //
-// A field can be valid JSON on its own and impossible to write inside a
-// record: one nested to within a few levels of the depth limit gains three
-// containers when it is placed in a part. The writer found that part way
-// through a request, after the streams before it were already on disk. The
-// request was then set aside, and those files were never indexed and their
-// sessions never reported. Now every record is encoded to nowhere before any
-// file is written, and a request that cannot land whole lands nothing.
+// A field nested to within a few levels of Go's depth limit gains three
+// containers when it is placed in a part, and the writer once refused the
+// record part way through a request, so the request was set aside whole. A
+// line may hold no more than 256 levels, which a reader may refuse and the
+// OAP does, so data nested deeper is taken out as a payload too large to
+// carry is, and the request lands: every stream, with the field's part
+// saying too_large and keeping its size and digest.
 //
 // The field arrives as a multipart part of its own, which is how a client
 // sends one and the only way it passes the receiver: validated alone it is
-// under the limit, and the receiver reads it as valid JSON, which it is.
-func TestARequestThatCannotLandWholeLandsNothing(t *testing.T) {
+// under Go's limit, and the receiver reads it as valid JSON, which it is.
+func TestDataNestedTooDeepLandsTakenOut(t *testing.T) {
 	_, zone, base := started(t, "")
 	const trace = "81818181-8181-7181-8181-818181818180"
 	const toolID = "81818181-8181-7181-8181-818181818181"
@@ -1198,8 +1201,7 @@ func TestARequestThatCannotLandWholeLandsNothing(t *testing.T) {
 	deep := strings.Repeat("[", 9998) + strings.Repeat("]", 9998)
 
 	// Two streams: main, and the tool's. The stream that sorts first lands
-	// first, and the unencodable field is on a record in the one that sorts
-	// second.
+	// first, and the deep field is on a record in the one that sorts second.
 	parts := [][2]string{
 		{"post." + trace, `{"id":"` + trace + `","trace_id":"` + trace + `","dotted_order":"` + root + `",` +
 			`"run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",` +
@@ -1226,18 +1228,47 @@ func TestARequestThatCannotLandWholeLandsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if landed.Unreadable != 1 {
-		t.Errorf("%d unreadable, want 1", landed.Unreadable)
+	if landed.Unreadable != 0 || landed.Files == 0 || len(landed.Sessions) != 1 {
+		t.Fatalf("unreadable=%d files=%d sessions=%v; want the request landed", landed.Unreadable, landed.Files, landed.Sessions)
 	}
-	if landed.Files != 0 || len(landed.Sessions) != 0 {
-		t.Errorf("%d files landed in %v from a request that could not land whole", landed.Files, landed.Sessions)
+	if !deepTakenOut(t, zone, landed.Sessions[0], deep) {
+		t.Fatal("no landed part kept the deep field's size and digest as too_large")
 	}
-	sessions, _ := os.ReadDir(zone.Root())
-	for _, d := range sessions {
-		if strings.HasPrefix(d.Name(), "ls-") {
-			t.Errorf("a session directory %s exists with files nothing will index", d.Name())
+}
+
+// deepTakenOut says a landed part of the session took deep out: too_large,
+// with its size and SHA-256, and that no landed line nests past the limit.
+func deepTakenOut(t *testing.T, zone *storage.Zone, session, deep string) bool {
+	t.Helper()
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(deep))
+	found := false
+	for _, lf := range files {
+		data, err := os.ReadFile(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range bytes.Split(bytes.TrimSpace(data), []byte("\n")) {
+			if d := sessiondata.Depth(line); d > sessiondata.MaxLineDepth {
+				t.Fatalf("%s holds a line of %d levels", lf.Path, d)
+			}
+		}
+		_, recs, err := sessiondata.All(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range recs {
+			for _, p := range r.Parts {
+				if p.State == model.ContentTooLarge && p.SHA256 == hex.EncodeToString(sum[:]) && p.Bytes == len(deep) {
+					found = true
+				}
+			}
 		}
 	}
+	return found
 }
 
 // multipartOf builds a body the way the client does, one JSON part per name.
@@ -1255,14 +1286,12 @@ func multipartOf(parts [][2]string) ([]byte, string) {
 	return b.Bytes(), "multipart/form-data; boundary=" + boundary
 }
 
-// TestARequestWithTwoSessionsLandsNeitherWhenOneCannotLand.
+// TestTwoSessionsOfOneRequestLandWhenOneHoldsDataTooDeep.
 //
-// One request can carry runs of two conversations. Checking each session as
-// it was landed let the first land and then set the request aside on the
-// second: the first's files were on disk and indexed, but the collector
-// returned an error, so the session was never reported and never parsed
-// that pass. Every session is checked before any is landed.
-func TestARequestWithTwoSessionsLandsNeitherWhenOneCannotLand(t *testing.T) {
+// One request can carry runs of two conversations, and every session is
+// checked before any is landed. Data nested too deep no longer stops the
+// check: it is taken out, so both sessions land.
+func TestTwoSessionsOfOneRequestLandWhenOneHoldsDataTooDeep(t *testing.T) {
 	_, zone, base := started(t, "")
 	const good = "91919191-9191-7191-8191-919191919191"
 	const bad = "91919191-9191-7191-8191-919191919192"
@@ -1273,7 +1302,6 @@ func TestARequestWithTwoSessionsLandsNeitherWhenOneCannotLand(t *testing.T) {
 			`"end_time":"2026-09-20T10:00:01Z","session_name":"asz",` +
 			`"extra":{"metadata":{"thread_id":"` + thread + `"}}}`
 	}
-	// Session "a" sorts before session "b", so "a" would have landed first.
 	body, contentType := multipartOf([][2]string{
 		{"post." + good, run(good, "a-fine")},
 		{"post." + good + ".inputs", `{"messages":[{"role":"user","content":"hello"}]}`},
@@ -1290,14 +1318,16 @@ func TestARequestWithTwoSessionsLandsNeitherWhenOneCannotLand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if landed.Unreadable != 1 || landed.Files != 0 || len(landed.Sessions) != 0 {
-		t.Errorf("unreadable=%d files=%d sessions=%v; want the request set aside and nothing landed",
-			landed.Unreadable, landed.Files, landed.Sessions)
+	if landed.Unreadable != 0 || len(landed.Sessions) != 2 {
+		t.Fatalf("unreadable=%d sessions=%v; want both sessions landed", landed.Unreadable, landed.Sessions)
 	}
-	entries, _ := os.ReadDir(zone.Root())
-	for _, d := range entries {
-		if strings.HasPrefix(d.Name(), "ls-") {
-			t.Errorf("session %s was created from a request that could not land whole", d.Name())
+	held := 0
+	for _, session := range landed.Sessions {
+		if deepTakenOut(t, zone, session, deep) {
+			held++
 		}
+	}
+	if held != 1 {
+		t.Fatalf("%d sessions took the deep field out, want the one that held it", held)
 	}
 }
