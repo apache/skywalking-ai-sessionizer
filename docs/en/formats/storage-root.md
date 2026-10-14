@@ -512,17 +512,21 @@ progress, so a page in another process than the pipeline draws the skeletons onc
 removed.
 
 A root with skeletons still verifies. `asz verify` checks lines and bytes through each skeleton,
-binds each round to the digest each file had, which its skeleton recorded, and reports every
-removed file with what the receiver confirmed of it, never as verified. `asz show` says a record
-was removed. The page draws a removed step with no text, its content state `removed`. It does not
-yet draw a provider body landed after a removal that is built from a removed tip or piece: the
-page rebuilds a body from the landed files alone. `asz verify` rebuilds every body that is not
-removed, with the store. While a removal is in progress, a body not yet deleted that no longer
-rebuilds, because the removal deleted a body it is built from first, is counted and not reported:
-the removal deletes it too. When a removal of the session starts, saves its generation or ends
-while verify reads the bodies, verify reads them again, and after four reads that each raced one it
-reports the check as inconclusive rather than as damage. `asz repack` refuses a session with skeletons or with a removal in
-progress: a skeleton keeps no records to re-cut.
+binds each round to the digest each file had, which its skeleton recorded, and reports every removed
+file with what the receiver confirmed of it, never as verified. `asz show` says a record was
+removed. The page draws a removed step with no text, its content state `removed`, and says in its
+header how many of the conversation's files retention removed. Retention does not wait for the
+receiver, so only a receiver that accepted them still has their text. Its Prompt tab rebuilds a
+provider body landed after a removal from the skeletons and from what the store kept, which the
+page's files route serves with each skeleton. It says a body that was removed, or that is built from
+one, cannot be rebuilt when nothing of it was kept, and that a body with a piece too large to be
+stored cannot be rebuilt. `asz verify` rebuilds every body that is not removed, with the store.
+While a removal is in progress, a body not yet deleted that no longer rebuilds, because the removal
+deleted a body it is built from first, is counted and not reported: the removal deletes it too. When
+a removal of the session starts, saves its generation or ends while verify reads the bodies, verify
+reads them again, and after four reads that each raced one it reports the check as inconclusive
+rather than as damage. `asz repack` refuses a session with skeletons or with a removal in progress:
+a skeleton keeps no records to re-cut.
 
 ### Removing by hand
 

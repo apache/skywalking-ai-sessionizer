@@ -48,6 +48,10 @@ import (
 type Server struct {
 	zone *storage.Zone
 
+	// MaxFileBytes bounds what one answer of the files route holds; zero is
+	// maxFileBytes. Tests set it.
+	MaxFileBytes int64
+
 	mu     sync.Mutex
 	loaded map[string]*Conversation
 

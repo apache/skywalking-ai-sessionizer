@@ -236,6 +236,11 @@
   and landed every line up to the last one in the same file: one 4.6 MB line made an 8 MB file. The
   window now grows until it holds the line's end, and stops growing when the source was cut short
   while it was read.
+- The OTLP exporter over HTTP keeps its own connections. It shared the process's default HTTP
+  transport, so closing it closed every other HTTP client's idle connections, and anything else that
+  closed them, such as a test receiver shutting down, could break a request the exporter had just
+  started: `transport connection broken: http: CloseIdleConnections called`, seen in CI with
+  scenarios pushing in parallel.
 
 ## Retention
 
@@ -284,6 +289,16 @@
   turned on after a
   removal count the tokens a skeleton keeps, and no MCP call, whose record it does not keep.
   LangSmith's next position goes on from a skeleton. `asz repack` refuses a session with skeletons.
+- The page says in its header how many of a conversation's files retention removed, and that only
+  a receiver that accepted them still has their text. Its Prompt tab draws a provider body landed
+  after a removal. It says that a removed body, or one built from it, cannot be rebuilt when nothing
+  of it was kept, or that a piece of a body was too large to be stored, rather than that the body
+  failed. The files route serves a removed file as its skeleton, with what the session's store kept
+  of it under `kept`, and a file a removal deletes while the route reads as its skeleton too. A
+  file that does not fit the route's budget on its own is served alone, and the page asks again for
+  what an answer left out. The renderer is Horizon's, now pinned at
+  apache/skywalking-horizon-ui#192, whose prompt store holds skeletons, takes a piece by the SHA-256
+  a removed or too large part keeps, from the record that landed first, and reads kept bytes.
 
 ## Configuration
 

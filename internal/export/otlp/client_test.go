@@ -18,9 +18,11 @@
 package otlp_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -135,5 +137,68 @@ func TestARedirectIsNotFollowed(t *testing.T) {
 	}
 	if n := followed.Load(); n != 0 {
 		t.Fatalf("the redirect's target was requested %d times", n)
+	}
+}
+
+// The client keeps its own connections. Closing it leaves another client's
+// idle connection open, and closing the default transport's idle connections,
+// as an httptest server does when it closes, leaves the client's open: the
+// receiver sees each go on over the connection it had.
+func TestTheClientKeepsItsOwnConnections(t *testing.T) {
+	var mu sync.Mutex
+	var from []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		from = append(from, r.RemoteAddr)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	last := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return from[len(from)-1]
+	}
+	other := &http.Client{Transport: http.DefaultTransport}
+	get := func() string {
+		t.Helper()
+		resp, err := other.Get(srv.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return last()
+	}
+	export := func(c otlp.Client) string {
+		t.Helper()
+		if _, err := c.Export(&collogspb.ExportLogsServiceRequest{}); err != nil {
+			t.Fatal(err)
+		}
+		return last()
+	}
+
+	before := get()
+	c, err := otlp.NewClient(otlp.Options{Protocol: otlp.ProtocolHTTP, Endpoint: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	export(c)
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if after := get(); after != before {
+		t.Fatalf("closing the client closed another client's connection: %s, then %s", before, after)
+	}
+
+	c, err = otlp.NewClient(otlp.Options{Protocol: otlp.ProtocolHTTP, Endpoint: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	first := export(c)
+	http.DefaultTransport.(interface{ CloseIdleConnections() }).CloseIdleConnections()
+	if again := export(c); again != first {
+		t.Fatalf("closing the default transport's idle connections closed the client's: %s, then %s", first, again)
 	}
 }

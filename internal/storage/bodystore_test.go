@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -111,6 +112,14 @@ func TestABodyStoreFindsATipInAnyGeneration(t *testing.T) {
 	if _, err := store.Tip("c", old); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("the tip of another record with the same bytes: %v", err)
 	}
+	for id, want := range map[string]bool{"a": true, "b": true, "c": false} {
+		if has, err := store.HasTip(id); err != nil || has != want {
+			t.Fatalf("HasTip(%s) is %v, %v; want %v", id, has, err, want)
+		}
+	}
+	if has, err := store.HasPiece(named("none")); err != nil || has {
+		t.Fatalf("HasPiece of a piece not kept is %v, %v", has, err)
+	}
 	// A damaged copy in the newest generation, and a whole one before it.
 	if err := store.PutTip(2, "a", []byte("damaged"), nil); err != nil {
 		t.Fatal(err)
@@ -149,4 +158,33 @@ func TestABodyStoreFindsATipInAnyGeneration(t *testing.T) {
 func named(b string) string {
 	sum := sha256.Sum256([]byte(b))
 	return hex.EncodeToString(sum[:])
+}
+
+// A store that cannot be looked at says so: a tip or a piece it cannot stat
+// is an error, never one it does not keep, so a reader is not told a body was
+// removed when the disk failed it.
+func TestABodyStoreThatCannotBeLookedAtSaysSo(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("a directory's permissions do not stop this reader")
+	}
+	z := storage.NewZone(t.TempDir())
+	store := z.BodyStore("s")
+	if err := store.PutTip(1, "a", []byte("tip"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutPiece(named("piece"), []byte("piece"), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{store.TipsDir(1), store.PiecesDir()} {
+		if err := os.Chmod(dir, 0); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(dir, 0o755)
+	}
+	if has, err := store.HasTip("a"); err == nil {
+		t.Fatalf("HasTip in a directory that cannot be read is %v with no error", has)
+	}
+	if has, err := store.HasPiece(named("piece")); err == nil {
+		t.Fatalf("HasPiece in a directory that cannot be read is %v with no error", has)
+	}
 }

@@ -163,7 +163,13 @@ func Of(hdr *sessiondata.Header, rec *sessiondata.Record) *sessiondata.Record {
 // the body.
 func manifest(m *providerbody.Manifest) json.RawMessage {
 	kept := *m
+	// A body whose segments were all literal keeps an empty list, not none:
+	// a reader that requires the list, as Horizon's renderer does, refuses a
+	// manifest without one, and must judge the skeleton as it judged the body.
 	kept.Segments = nil
+	if m.Segments != nil {
+		kept.Segments = []providerbody.Segment{}
+	}
 	for _, seg := range m.Segments {
 		seg.Lit = ""
 		if seg.Part != nil || seg.Piece != "" || seg.Copy != nil {

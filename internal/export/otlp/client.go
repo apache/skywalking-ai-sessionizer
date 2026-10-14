@@ -204,8 +204,22 @@ func newHTTP(o Options) (Client, error) {
 	return &httpClient{
 		base:    strings.TrimRight(o.Endpoint, "/"),
 		headers: o.Headers,
-		http:    &http.Client{Timeout: o.timeout(), CheckRedirect: noRedirect},
+		http:    &http.Client{Transport: ownTransport(), Timeout: o.timeout(), CheckRedirect: noRedirect},
 	}, nil
+}
+
+// ownTransport is a transport for one client, set as the default one is. On
+// the shared default transport, closing the client closed the idle
+// connections of every other HTTP client of the process, and anything that
+// closes the default transport's idle connections, as an httptest server does
+// when it closes, closed this client's: a request that had just taken one
+// failed with "CloseIdleConnections called". Measured in CI, with scenarios
+// pushing in parallel.
+func ownTransport() http.RoundTripper {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		return t.Clone()
+	}
+	return &http.Transport{Proxy: http.ProxyFromEnvironment}
 }
 
 func (c *httpClient) Export(req *collogspb.ExportLogsServiceRequest) (int64, error) {

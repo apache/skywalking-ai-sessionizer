@@ -544,12 +544,12 @@ landed file. [Retention](storage-root.md#retention) says when a file is removed.
     `unavailable`, since its lines are not kept.
   - An [execution record](#execution-records) keeps `schema`, `id`, `tool`, `time` and `outcome`:
     its own identity, the step it joins to, its place in time and how the call ended.
-  - A provider body keeps its manifest without the literal strings, which are text of the body:
-    each segment loses its `lit` and keeps the rest, in order, and a segment left empty goes. So
-    every `part`, `piece` and `copy` stays, a reader holding the skeleton checks it as it checked
-    the body and accepts it or not as before, and a manifest with no `segments` keeps none. Each
-    other data part keeps the SHA-256 of its data in `sha256`, which is the piece's identity, or the
-    one it had when it was too large to land.
+  - A provider body keeps its manifest without the literal strings, which are text of the body: each
+    segment loses its `lit` and keeps the rest, in order, and a segment left empty goes. So every
+    `part`, `piece` and `copy` stays, a reader holding the skeleton checks it as it checked the body
+    and accepts it or not as before. A list that held only literals stays, empty, and a manifest
+    with no `segments` keeps none. Each other data part keeps the SHA-256 of its data in `sha256`,
+    which is the piece's identity, or the one it had when it was too large to land.
 - **Its own closing line**, with its own record count and digest.
 
 A reader opens a `.sk` through gzip and reads it as any other Session Data. While a removal is in

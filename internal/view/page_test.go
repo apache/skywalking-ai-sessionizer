@@ -306,3 +306,100 @@ func TestListSkipsAConversationWithOnlyATemporaryRound(t *testing.T) {
 		t.Fatalf("listed %v, %v; want no conversation", ids, err)
 	}
 }
+
+// The conversation page notes a removal, and hands the renderer a removed
+// file with what the store kept of it, as bytes. Its helpers are run under
+// node, since a check of their text passes with them broken; without node the
+// test is skipped.
+func TestThePageNotesARemovalAndHandsOnWhatWasKept(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("the page's script runs under node, which is not installed")
+	}
+	h := view.New(storage.NewZone(t.TempDir()), nil).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/c/some-conversation", nil))
+	page := rec.Body.String()
+	var helpers string
+	for _, m := range regexp.MustCompile(`(?s)<script>(.*?)</script>`).FindAllStringSubmatch(page, -1) {
+		if strings.Contains(m[1], "var aszPage") {
+			helpers = m[1]
+		}
+	}
+	if helpers == "" {
+		t.Fatal("the page has no aszPage helpers")
+	}
+	for _, use := range []string{"aszPage.removedNote(doc)", "loadFiles: (req, onFile) => aszPage.loadAll(", "}, req.seqs, onFile)", `id="removed" role="note" hidden`} {
+		if !strings.Contains(page, use) {
+			t.Fatalf("the page does not use %s", use)
+		}
+	}
+	run := helpers + `
+const out = {
+  none: aszPage.removedNote({ files: [{ state: undefined }] }),
+  some: aszPage.removedNote({ files: [{ state: "removed" }, { state: "removed" }, {}] }),
+  one: aszPage.removedNote({ files: [{ state: "removed" }] }),
+};
+// As the page parses the answer: JSON.parse makes "__proto__" an own key.
+const answer = JSON.parse('{"seq":3,"file":"p.sk","bytes":"' + Buffer.from("skeleton").toString("base64") + '","kept":{"bodies":{"req-1":"' +
+  Buffer.from("body").toString("base64") + '","__proto__":"' + Buffer.from("proto").toString("base64") + '"},"pieces":{"ab":"' +
+  Buffer.from("piece").toString("base64") + '"}}}');
+const f = aszPage.storedFile(answer);
+out.file = { seq: f.seq, file: f.file, bytes: Buffer.from(f.bytes).toString(), body: Buffer.from(f.kept.bodies["req-1"]).toString(),
+  piece: Buffer.from(f.kept.pieces["ab"]).toString(), typed: f.bytes instanceof Uint8Array && f.kept.bodies["req-1"] instanceof Uint8Array,
+  ids: Object.entries(f.kept.bodies).map(([k, v]) => k + "=" + Buffer.from(v).toString()).sort() };
+out.plain = aszPage.storedFile({ seq: 4, file: "p.sd", bytes: "" }).kept === undefined;
+// A server that answers one file at a time, as one over its budget does, and
+// has no file for seq 9: every file comes, and the asking ends.
+const asked = [];
+const handed = [];
+aszPage.loadAll(seqs => {
+  asked.push(seqs.join(","));
+  const have = seqs.filter(seq => seq !== 9).slice(0, 1);
+  return Promise.resolve(have.map(seq => ({ seq, file: seq + ".sd", bytes: "" })));
+}, [1, 2, 9, 3], f => handed.push(f.seq)).then(() => {
+  out.asked = asked;
+  out.handed = handed;
+  process.stdout.write(JSON.stringify(out));
+});
+`
+	script := filepath.Join(t.TempDir(), "helpers.js")
+	if err := os.WriteFile(script, []byte(run), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, script).Output()
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	type note struct{ Label, Text string }
+	var got struct {
+		None      *note
+		Some, One note
+		File      struct {
+			Seq                      int
+			File, Bytes, Body, Piece string
+			Typed                    bool
+			IDs                      []string
+		}
+		Plain  bool
+		Asked  []string
+		Handed []int
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("node wrote %q: %v", out, err)
+	}
+	if got.None != nil || got.Some.Label != "2 files removed by retention" || got.One.Label != "1 file removed by retention" ||
+		!strings.Contains(got.Some.Text, "removed the text of 2 files") || !strings.Contains(got.Some.Text, "Only a receiver that accepted them") {
+		t.Fatalf("the note is %+v with none removed, %+v with two and %+v with one", got.None, got.Some, got.One)
+	}
+	if f := got.File; f.Seq != 3 || f.File != "p.sk" || f.Bytes != "skeleton" || f.Body != "body" || f.Piece != "piece" || !f.Typed || !got.Plain {
+		t.Fatalf("the file handed on is %+v, plain %v", got.File, got.Plain)
+	}
+	if strings.Join(got.Asked, " ") != "1,2,9,3 2,9,3 9,3 9" || fmt.Sprint(got.Handed) != "[1 2 3]" {
+		t.Fatalf("the files were asked for as %v and handed on as %v", got.Asked, got.Handed)
+	}
+	// A record id is any string, __proto__ too.
+	if ids := strings.Join(got.File.IDs, ","); ids != "__proto__=proto,req-1=body" {
+		t.Fatalf("the kept bodies handed on are %s", ids)
+	}
+}
