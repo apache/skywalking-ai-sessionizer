@@ -58,18 +58,125 @@ const endLineMax = len(`{"t":"end","records":,"digest":""}`) + 20 + 64 + 1
 //
 // A record that is still too large with every payload taken out lands as it
 // is: its identifiers, label and part list remain.
+//
+// Data nested deeper than a line may hold, MaxDataDepth, is taken out the
+// same way first, under any limit: a reader may refuse the line otherwise. A
+// change or execution record is written again in its own format instead,
+// which leaves out the fields its format does not name.
 func Fit(r *Record, limit int) (int, error) {
-	_, n, err := fit(r, limit)
+	_, n, err := fit(r, limit, true)
 	return n, err
 }
 
+// MaxLineDepth is the most objects and lists a landed line holds open at
+// once. A reader may refuse a deeper line, and the OAP does, so no line is
+// landed deeper: a part whose data nests deeper than its share of the line is
+// taken out as a payload too large to carry is, whatever its size.
+const MaxLineDepth = 256
+
+// MaxDataDepth is a part's data's share of a line: the record, its parts
+// and the part itself hold three of its levels.
+const MaxDataDepth = MaxLineDepth - 3
+
+// Depth is how many objects and lists data holds open at once at its
+// deepest: 0 for a string, a number or a literal.
+func Depth(data []byte) int {
+	deepest, open, inString, escaped := 0, 0, false, false
+	for _, c := range data {
+		switch {
+		case escaped:
+			escaped = false
+		case inString:
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+		case c == '"':
+			inString = true
+		case c == '[' || c == '{':
+			open++
+			deepest = max(deepest, open)
+		case c == ']' || c == '}':
+			open--
+		}
+	}
+	return deepest
+}
+
+// level takes out the data of every part nested deeper than MaxDataDepth,
+// in place, and adds the parts it changed to changed. It changes r only when
+// the record then encodes, so a record that cannot be written stays as the
+// caller gave it.
+func level(r *Record, changed map[int]bool) error {
+	parts := append([]Part(nil), r.Parts...)
+	deep := map[int]bool{}
+	for i := range parts {
+		if len(parts[i].Data) > 0 && Depth(parts[i].Data) > MaxDataDepth {
+			if !reencode(&parts[i]) {
+				omit(&parts[i])
+			}
+			deep[i] = true
+		}
+	}
+	if len(deep) == 0 {
+		return nil
+	}
+	leveled := *r
+	leveled.Parts = parts
+	if _, err := encodeRecord(&leveled); err != nil {
+		return err
+	}
+	copy(r.Parts, parts)
+	for i := range deep {
+		changed[i] = true
+	}
+	return nil
+}
+
+// reencode writes a change record or an execution record again in its own
+// format, as its decoder reads it, so a field its format does not name, nested
+// however deep, goes and the record stays: neither is ever taken out whole,
+// since a step joins to it by its tool call. Its part says truncated, with the
+// size and the digest of what it held. It reports false for any other data,
+// and for a record its format cannot write shallow enough.
+func reencode(p *Part) bool {
+	if p.Kind != PartData {
+		return false
+	}
+	var data []byte
+	var err error
+	if rec, ok := changes.Decode(p.Data); ok {
+		data, err = rec.Marshal()
+	} else if rec, ok := execution.Decode(p.Data); ok {
+		data, err = rec.Marshal()
+	} else {
+		return false
+	}
+	if err != nil || Depth(data) > MaxDataDepth {
+		return false
+	}
+	remember(p)
+	p.Data, p.State = data, model.ContentTruncated
+	return true
+}
+
 // fit is Fit, also returning the record's line, so a writer encodes it once.
-func fit(r *Record, limit int) ([]byte, int, error) {
+// It takes out data nested too deep first, unless leveled is false: a
+// provider body's cutter does that itself, knowing which of its parts later
+// bodies refer to.
+func fit(r *Record, limit int, leveled bool) ([]byte, int, error) {
+	changed := map[int]bool{}
+	if leveled {
+		if err := level(r, changed); err != nil {
+			return nil, 0, err
+		}
+	}
 	line, err := encodeRecord(r)
 	if err != nil || limit <= 0 {
-		return line, 0, err
+		return line, len(changed), err
 	}
-	changed := map[int]bool{}
 	for len(line) > limit {
 		i := largest(r.Parts)
 		if i < 0 {
@@ -230,11 +337,11 @@ func NewCut(h *Header, budget int64) (*Cut, error) {
 // the file stays within the budget. A record not taken starts the next file.
 func (c *Cut) Take(r *Record) (bool, error) {
 	if c.limit <= 0 {
-		_, _, err := fit(r, 0)
+		_, _, err := fit(r, 0, true)
 		return err == nil, err
 	}
 	// A line alone in its file takes its newline too, as Writer.Budget counts.
-	line, _, err := fit(r, max(c.limit-1, 1))
+	line, _, err := fit(r, max(c.limit-1, 1), true)
 	if err != nil {
 		return false, err
 	}

@@ -770,11 +770,19 @@ func manifestPart(m *Manifest) sessiondata.Part {
 // out keeps its place and its size, and its sha256 is the piece's digest, so
 // every segment still names it and later bodies refer to it as to any piece.
 // The body then cannot be rebuilt, and a reader is told why with ErrTooLarge.
+//
+// A part whose data nests deeper than a landed line may hold is taken out the
+// same way first, whatever the budget: a reader may refuse the line otherwise.
 func (s *Session) fit(rec *sessiondata.Record, fill map[string][]byte) {
+	own := len(rec.Parts) - 1
+	for i := range rec.Parts[:own] {
+		if len(rec.Parts[i].Data) > 0 && sessiondata.Depth(rec.Parts[i].Data) > sessiondata.MaxDataDepth {
+			s.takeOut(&rec.Parts[i], fill)
+		}
+	}
 	if s.maxRecord <= 0 || RecordBytes(rec) <= s.maxRecord {
 		return
 	}
-	own := len(rec.Parts) - 1
 	order := make([]int, 0, own)
 	for i := range rec.Parts[:own] {
 		if len(rec.Parts[i].Data) > 0 {
@@ -783,19 +791,25 @@ func (s *Session) fit(rec *sessiondata.Record, fill map[string][]byte) {
 	}
 	sort.SliceStable(order, func(a, b int) bool { return len(rec.Parts[order[a]].Data) > len(rec.Parts[order[b]].Data) })
 	for _, i := range order {
-		p := &rec.Parts[i]
-		b, err := s.partBytes(*p, fill)
-		if err != nil {
-			continue
-		}
-		d := digest(b)
-		fill[d] = b
-		p.Data, p.Encoding = nil, ""
-		p.State, p.SHA256, p.Bytes = model.ContentTooLarge, d, len(b)
-		if RecordBytes(rec) <= s.maxRecord {
+		if s.takeOut(&rec.Parts[i], fill) && RecordBytes(rec) <= s.maxRecord {
 			return
 		}
 	}
+}
+
+// takeOut takes a part's bytes out of a record, keeping its place, its size
+// and the digest of the piece, and adds the bytes to fill. It reports false
+// for a part whose bytes it cannot read.
+func (s *Session) takeOut(p *sessiondata.Part, fill map[string][]byte) bool {
+	b, err := s.partBytes(*p, fill)
+	if err != nil {
+		return false
+	}
+	d := digest(b)
+	fill[d] = b
+	p.Data, p.Encoding = nil, ""
+	p.State, p.SHA256, p.Bytes = model.ContentTooLarge, d, len(b)
+	return true
 }
 
 // roundTrip writes the record with the Session Data writer, reads it back,

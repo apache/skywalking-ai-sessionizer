@@ -251,3 +251,43 @@ func TestWithoutABudgetNothingIsOmitted(t *testing.T) {
 		t.Fatalf("Body did not give the body back: %v", err)
 	}
 }
+
+// A piece nested deeper than a landed line may hold is taken out with no
+// budget at all, as a reader may refuse the line otherwise: the line stays
+// within MaxLineDepth, the body cannot be rebuilt from what landed, and it can
+// from its source. A tool is a piece whole, so a tool whose schema nests that
+// deep is one; deep JSON anywhere else lands inside a literal string.
+func TestAPieceNestedTooDeepIsTakenOut(t *testing.T) {
+	s := NewSession()
+	deep := strings.Repeat("[", 300) + `"x"` + strings.Repeat("]", 300)
+	req := []byte(`{"messages":[{"role":"user","content":` + deep + `}],"model":"m","tools":[{"name":"t","input_schema":` + deep + `}]}`)
+	rec, err := encode(s, "00000000-0000-4000-8000-000000000002.request.json", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(omitted(rec)); n != 1 {
+		t.Fatalf("%d part(s) taken out, want the deep one", n)
+	}
+	var buf bytes.Buffer
+	w, err := sessiondata.NewWriter(&buf, &sessiondata.Header{Kind: sessiondata.KindProviderBody, Session: "s1", Src: ".", Dialect: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
+		if d := sessiondata.Depth(line); d > sessiondata.MaxLineDepth {
+			t.Fatalf("a line holds %d levels, past %d", d, sessiondata.MaxLineDepth)
+		}
+	}
+	if _, err := s.Body(rec.ID); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("the body rebuilt from what landed: %v", err)
+	}
+	if got, err := s.BodyFrom(rec.ID, req); err != nil || !bytes.Equal(got, req) {
+		t.Fatalf("the body does not rebuild from its source: %v", err)
+	}
+}

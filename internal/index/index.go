@@ -33,7 +33,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry, Block or Body
 // changes; a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 15
+const Schema = 16
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -279,7 +279,7 @@ const (
 // they exist to serve.
 type Block struct {
 	Entry  uint32 // index into Index.Entries
-	Ord    uint16 // position within the record's content array
+	Ord    uint32 // position within the record's content array
 	Kind   BlockKind
 	ToolID uint32 // interned tool_use id
 	Name   uint32 // interned tool name, for tool_use; the record's identity, for changes

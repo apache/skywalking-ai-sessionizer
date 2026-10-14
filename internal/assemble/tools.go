@@ -39,9 +39,9 @@ type toolUse struct {
 	// addresses, where the adapter could split the name exactly.
 	Server, ServerTool string
 	Use                *index.Entry
-	UseOrd             uint16
+	UseOrd             uint32
 	Result             *index.Entry
-	ResOrd             uint16
+	ResOrd             uint32
 	Stream             *streamInfo
 	NodeID             string
 

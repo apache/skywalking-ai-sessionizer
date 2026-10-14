@@ -19,13 +19,17 @@ package sessiondata_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -134,7 +138,6 @@ func TestWriterRejectsInvalidDataWithoutWritingARecord(t *testing.T) {
 		{"raw tab", "\"a\tb\""},
 		{"raw nul", "\"a\x00b\""},
 		{"byte order mark", "\ufeff{}"},
-		{"excessive nesting", strings.Repeat("[", 10001) + "0" + strings.Repeat("]", 10001)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,35 +183,86 @@ func TestWriterRejectsInvalidDataWithoutWritingARecord(t *testing.T) {
 	}
 }
 
-// Data has three enclosing containers: the record, its parts, and the part.
-// Reject a record the reader cannot decode even when its data is valid alone.
-func TestWriterRejectsDataTooDeepForRecord(t *testing.T) {
-	for _, depth := range []int{9997, 9998} {
-		var file bytes.Buffer
-		w, err := sessiondata.NewWriter(&file, header())
-		if err != nil {
-			t.Fatal(err)
-		}
-		data := json.RawMessage(strings.Repeat("[", depth) + "0" + strings.Repeat("]", depth))
-		err = w.Write(&sessiondata.Record{Ord: 1, Parts: []sessiondata.Part{{Kind: sessiondata.PartData, Data: data}}})
-		if depth == 9997 {
+// No landed line holds more than MaxLineDepth objects and lists open at
+// once, since a reader may refuse it and the OAP does. Data is inside three
+// of them, the record, its parts and the part, so data nested deeper than
+// MaxDataDepth is taken out as a payload too large to carry is: the part
+// keeps its place and kind, says too_large, or truncated while its text is
+// left, and keeps the size and the SHA-256 of what it held. Data at the
+// limit lands as it is, and so does data past Go's own decoder's limit, taken
+// out the same way.
+func TestDataNestedTooDeepForALineIsTakenOut(t *testing.T) {
+	nested := func(depth int) json.RawMessage {
+		return json.RawMessage(strings.Repeat("[", depth) + "0" + strings.Repeat("]", depth))
+	}
+	for _, depth := range []int{sessiondata.MaxDataDepth, sessiondata.MaxDataDepth + 1, 10001} {
+		t.Run(fmt.Sprint(depth), func(t *testing.T) {
+			data := nested(depth)
+			var file bytes.Buffer
+			w, err := sessiondata.NewWriter(&file, header())
 			if err != nil {
 				t.Fatal(err)
 			}
-		} else if err == nil {
-			t.Fatal("writer accepted data that is too deep inside a record")
-		}
-		if err := w.Close(); err != nil {
-			t.Fatal(err)
-		}
-		got := readRecords(t, file.Bytes())
-		if depth == 9997 {
-			if len(got) != 1 || !bytes.Equal(got[0].Parts[0].Data, data) {
-				t.Fatal("writer changed valid data at the depth limit")
+			rec := &sessiondata.Record{Ord: 1, Parts: []sessiondata.Part{
+				{Kind: sessiondata.PartData, Data: data},
+				{Kind: sessiondata.PartResult, Of: "toolu_1", Text: "readable", Data: data},
+			}}
+			if err := w.Write(rec); err != nil {
+				t.Fatal(err)
 			}
-		} else if len(got) != 0 || !bytes.Equal(file.Bytes(), writeRecords(t)) {
-			t.Fatal("rejected record changed the file or its closing digest")
-		}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range bytes.Split(bytes.TrimSpace(file.Bytes()), []byte("\n")) {
+				if d := sessiondata.Depth(line); d > sessiondata.MaxLineDepth {
+					t.Fatalf("a line holds %d levels, past %d", d, sessiondata.MaxLineDepth)
+				}
+			}
+			got := readRecords(t, file.Bytes())
+			if len(got) != 1 {
+				t.Fatalf("read %d records, want 1", len(got))
+			}
+			whole, result := got[0].Parts[0], got[0].Parts[1]
+			if depth <= sessiondata.MaxDataDepth {
+				if !bytes.Equal(whole.Data, data) || whole.State != "" || !bytes.Equal(result.Data, data) {
+					t.Fatalf("data at the limit did not land as it was: %+v", whole)
+				}
+				return
+			}
+			sum := sha256.Sum256(data)
+			if len(whole.Data) != 0 || whole.State != model.ContentTooLarge || whole.Bytes != len(data) ||
+				whole.SHA256 != hex.EncodeToString(sum[:]) || whole.Kind != sessiondata.PartData {
+				t.Fatalf("the deep data part is %+v", whole)
+			}
+			if len(result.Data) != 0 || result.State != model.ContentTruncated || result.Text != "readable" || result.Of != "toolu_1" {
+				t.Fatalf("the deep result part is %+v", result)
+			}
+			if len(rec.Parts[0].Data) != 0 || rec.Parts[0].State != model.ContentTooLarge {
+				t.Fatal("the caller's record does not say what landed")
+			}
+		})
+	}
+}
+
+// A record that cannot be written is left as the caller gave it, though one
+// of its parts was too deep and another is not JSON.
+func TestARecordThatCannotBeWrittenIsNotLeveled(t *testing.T) {
+	deep := json.RawMessage(strings.Repeat("[", 300) + "0" + strings.Repeat("]", 300))
+	rec := &sessiondata.Record{Ord: 1, Parts: []sessiondata.Part{
+		{Kind: sessiondata.PartData, Data: deep},
+		{Kind: sessiondata.PartData, Data: json.RawMessage(`{"x":`)},
+	}}
+	before := append([]sessiondata.Part(nil), rec.Parts...)
+	var file bytes.Buffer
+	w, err := sessiondata.NewWriter(&file, header())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(rec); err == nil {
+		t.Fatal("a record with data that is not JSON was written")
+	}
+	if !reflect.DeepEqual(rec.Parts, before) || w.Count() != 0 {
+		t.Fatal("a record that was not written was changed, or counted")
 	}
 }
 

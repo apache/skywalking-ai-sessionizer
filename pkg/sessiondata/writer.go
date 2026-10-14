@@ -103,7 +103,7 @@ func (w *Writer) Budget(budget int64) {
 // Write appends one record. Under a Budget, it may first omit the record's
 // largest payloads, in place, so the caller's index sees what landed.
 func (w *Writer) Write(r *Record) error {
-	enc, _, err := fit(r, w.max)
+	enc, _, err := fit(r, w.max, w.kind != KindProviderBody)
 	if err != nil {
 		return fmt.Errorf("sessiondata: encode record %d: %w", r.Ord, err)
 	}

@@ -191,8 +191,14 @@ decode, such as one whose `off` is a string, as it stops at a line that is not J
 record after it in the file.
 
 A reader may count a line that holds more than 256 objects and lists open at once as one that does
-not decode, and the OAP does. No landed line comes near that. Measured over 423,944 lines of 94 real
-conversations, the deepest held 16, a model request carrying a tool's JSON Schema in its data.
+not decode, and the OAP does, so no landed line holds more. A part's data is inside three of them,
+the record, its parts and the part, so data nested deeper than 253 is taken out as a payload too
+large to carry is, whatever its size: its `state` is `too_large`, or `truncated` while its text is
+left, and its `bytes` and `sha256` are kept (see [Too large to land](#too-large-to-land)). A
+`changes/1` or `execution/1` record is never taken out whole: it is written again in its own format,
+which leaves out a field the format does not name, and says `truncated`. Real lines come nowhere
+near it. Measured over 423,944 lines of 94 real conversations, the deepest held 16, a model request
+carrying a tool's JSON Schema in its data.
 
 A `time` is written as RFC 3339: a four-digit year, the letter `T`, the time of day to the
 second with a fraction of up to nine digits or none, and `Z` or an offset such as `+08:00`. Times

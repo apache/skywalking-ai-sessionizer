@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 )
 
@@ -365,5 +366,42 @@ func TestACutRecordAloneFitsItsFile(t *testing.T) {
 		if buf.Len() > budget {
 			t.Fatalf("a text of %d bytes made a file of %d bytes", n, buf.Len())
 		}
+	}
+}
+
+// A change record or an execution record that carries a field nested deeper
+// than a line may hold is never taken out whole: a step joins to it by its
+// tool call. It is written again in its own format, which leaves out the field
+// its format does not name, and says truncated, with the size and the digest
+// of what it held.
+func TestADeepFieldLeavesAChangeOrExecutionRecordInPlace(t *testing.T) {
+	deep := strings.Repeat("[", 300) + "0" + strings.Repeat("]", 300)
+	change := changeRecord(t, 1, 2)
+	observed := `{"schema":"execution/1","id":"e1","observed_by":"asz-plugin","boundary":"mcp","session":"s","stream":"main","tool":"toolu_1","protocol":"mcp","time":"2026-01-01T00:00:00Z","outcome":"returned"}`
+	for name, data := range map[string]json.RawMessage{
+		"change":    json.RawMessage(strings.TrimSuffix(string(change), "}") + `,"extra":` + deep + `}`),
+		"execution": json.RawMessage(strings.TrimSuffix(observed, "}") + `,"extra":` + deep + `}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := &Record{Ord: 1, Tool: "toolu_1", Parts: []Part{{Kind: PartData, Data: data}}}
+			line, n, err := fit(r, 0, true)
+			if err != nil || n != 1 {
+				t.Fatalf("fit changed %d part(s), %v", n, err)
+			}
+			if d := Depth(line); d > MaxLineDepth {
+				t.Fatalf("the line holds %d levels", d)
+			}
+			p := r.Parts[0]
+			if p.State != model.ContentTruncated || p.SHA256 != hexDigest(data) || p.Bytes != len(data) || strings.Contains(string(p.Data), "extra") {
+				t.Fatalf("the record is %s with digest %q and %d bytes: %s", p.State, p.SHA256, p.Bytes, p.Data)
+			}
+			if name == "change" {
+				if rec, ok := changes.Decode(p.Data); !ok || rec.ID != "c1" || rec.Tool != "toolu_1" || len(rec.Changes) != 1 {
+					t.Fatalf("the change record lost its identity or files: %s", p.Data)
+				}
+			} else if rec, ok := execution.Decode(p.Data); !ok || rec.ID != "e1" || rec.Tool != "toolu_1" || rec.Outcome != "returned" {
+				t.Fatalf("the execution record lost its identity: %s", p.Data)
+			}
+		})
 	}
 }

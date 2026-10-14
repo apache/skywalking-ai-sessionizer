@@ -68,7 +68,7 @@ func FromRecord(ix *Index, hdr *sessiondata.Header, rec *sessiondata.Record,
 		// per part is all a round needs to count them.
 		blocks := make([]Block, len(rec.Parts))
 		for i := range blocks {
-			blocks[i] = Block{Ord: uint16(i), Kind: BlockOther}
+			blocks[i] = Block{Ord: uint32(i), Kind: BlockOther}
 		}
 		return e, blocks, bodyOf(in, rec)
 	}
@@ -198,7 +198,7 @@ func blocksOf(in *Interner, rec *sessiondata.Record) []Block {
 	}
 	out := make([]Block, 0, len(rec.Parts))
 	for i, p := range rec.Parts {
-		b := Block{Ord: uint16(i)}
+		b := Block{Ord: uint32(i)}
 		switch p.Kind {
 		case sessiondata.PartCall:
 			b.Kind, b.ToolID, b.Name = BlockToolUse, in.ID(p.ID), in.ID(p.Name)
