@@ -200,6 +200,7 @@ function wellFormed(m) {
   if (!m || typeof m !== "object") return false;
   if (m.schema !== PROMPT_SCHEMA || typeof m.sha256 !== "string" || typeof m.role !== "string") return false;
   if (!Number.isSafeInteger(m.bytes) || !Number.isSafeInteger(m.depth)) return false;
+  if (m.segments === void 0 || m.segments === null) m.segments = [];
   if (!Array.isArray(m.segments)) return false;
   for (const name of ["src", "chain", "why", "model", "session", "run", "call", "request", "previous_request"]) {
     if (m[name] !== void 0 && typeof m[name] !== "string") return false;
@@ -737,6 +738,7 @@ const LANE_H = 36;
 function observationOf(r) {
   if (r.basis === "skipped_read_only") return "skipped";
   if (r.changes && r.changes.length > 0) return "files";
+  if (r.changed_files !== null && r.changed_files > 0) return "files";
   if (r.changed_files === null || r.coverage === "partial") return "unknown";
   return "none";
 }
@@ -754,9 +756,26 @@ function groupChanges(records) {
     preferred: list.find((r) => r.captured_by === CAPTURED_BY_RUNTIME) ?? list[0]
   }));
 }
-function tallyChanges(records) {
+function countFiles(records) {
   var _a;
   const seen = /* @__PURE__ */ new Set();
+  let listed = 0;
+  let listless = 0;
+  let most = 0;
+  for (const r of records) {
+    if (r.changes && r.changes.length > 0) {
+      listed++;
+      for (const c of r.changes) seen.add(`${((_a = r.root) == null ? void 0 : _a.path) ?? ""}|${c.path}`);
+    } else if (r.changed_files !== null && r.changed_files > 0) {
+      listless++;
+      most = Math.max(most, r.changed_files);
+    }
+  }
+  if (listless === 0) return { files: seen.size, floor: false };
+  if (listless === 1 && listed === 0) return { files: most, floor: false };
+  return { files: Math.max(seen.size, most), floor: true };
+}
+function tallyChanges(records) {
   let observation = "skipped";
   let incomplete = false;
   const rank = { skipped: 0, none: 1, unknown: 2, files: 3 };
@@ -764,11 +783,12 @@ function tallyChanges(records) {
     const o = observationOf(r);
     if (rank[o] > rank[observation]) observation = o;
     if (incompleteObservation(r)) incomplete = true;
-    for (const c of r.changes ?? []) seen.add(`${((_a = r.root) == null ? void 0 : _a.path) ?? ""}|${c.path}`);
   }
+  const counted = countFiles(records);
+  if (counted.floor) incomplete = true;
   const withFiles = records.filter((r) => {
-    var _a2;
-    return (((_a2 = r.changes) == null ? void 0 : _a2.length) ?? 0) > 0;
+    var _a;
+    return (((_a = r.changes) == null ? void 0 : _a.length) ?? 0) > 0;
   });
   let additions = null;
   let deletions = null;
@@ -783,7 +803,7 @@ function tallyChanges(records) {
       deletions = (deletions ?? 0) + c.deletions;
     }
   }
-  return { files: seen.size, incomplete, additions, deletions, observation };
+  return { files: counted.files, incomplete, additions, deletions, observation };
 }
 function changeRoots(records) {
   var _a;
@@ -1260,6 +1280,7 @@ const ENGLISH = {
   measuredTime: "Measured time",
   measuredTimeText: "The time the runtime measured around the call. It includes any waiting before the call started, so it is not the server's own time.",
   notReported: "not reported",
+  executionRemoved: "Retention removed this record from the stored files; its time and outcome are kept.",
   sentToServer: "Sent to the server",
   cameBack: "Came back",
   sizeAndDigest: "{bytes} B · SHA-256 {digest}",
@@ -1327,6 +1348,7 @@ const ENGLISH = {
   basisUnattributed: "found by a later scan; no observed tool window covers it",
   changedFilesUnknown: "how many files changed is unknown",
   changedFilesNone: "a complete observation found no changed file",
+  changedFilesNotKept: "{n} file(s) changed; the list was taken out to fit the record in its stored file",
   coveragePartial: "Partial coverage: a scan stopped early, so changes may be missing. Gaps:",
   overlapsNote: "Other windows were open on this root at the same time:",
   sharedWith: "shared with {windows}",
@@ -1334,6 +1356,7 @@ const ENGLISH = {
   outsideWindow: "outside any observed window",
   diffBinary: "binary — path and hashes only, no diff",
   diffTooLarge: "too large to diff — path and hashes only",
+  diffTooLargeCounted: "diff taken out to fit its stored file — line counts, path and hashes only",
   diffUnavailable: "no diff available",
   noNewlineBefore: "before: no newline at end of file",
   noNewlineAfter: "after: no newline at end of file",
@@ -1429,7 +1452,8 @@ function sizes(ctx, c) {
 function diffHtml(ctx, key, c) {
   const { s, f, state } = ctx;
   if (c.diff !== "available") {
-    const why = c.diff === "binary" ? s.diffBinary : c.diff === "too_large" ? s.diffTooLarge : s.diffUnavailable;
+    const counted = c.additions != null || c.deletions != null;
+    const why = c.diff === "binary" ? s.diffBinary : c.diff === "too_large" ? counted ? s.diffTooLargeCounted : s.diffTooLarge : s.diffUnavailable;
     const sha = (side) => side.sha256 ? `<span title="${esc(side.sha256)}">${esc(side.sha256.slice(0, 12))}…</span>` : "∅";
     return `<div class="acv-diff-note">${esc(why)}<span class="acv-hashes">sha256 ${sha(c.before)} → ${sha(c.after)}</span></div>`;
   }
@@ -1468,6 +1492,7 @@ function fileRow(ctx, stepId, r, c) {
   </div>`;
 }
 function observationNote(s, r) {
+  var _a;
   switch (observationOf(r)) {
     case "skipped":
       return `<div class="acv-change-note">${icon(ICON_READONLY)} ${esc(s.basisSkipped)}</div>`;
@@ -1476,6 +1501,9 @@ function observationNote(s, r) {
     case "none":
       return `<div class="acv-change-note">${esc(s.changedFilesNone)}</div>`;
     default:
+      if (!(((_a = r.changes) == null ? void 0 : _a.length) ?? 0) && r.changed_files) {
+        return `<div class="acv-change-note">${esc(fill(s.changedFilesNotKept, { n: String(r.changed_files) }))}</div>`;
+      }
       return "";
   }
 }
@@ -1605,26 +1633,47 @@ function drawChangesPanel(ctx) {
   const { s, f, model: m } = ctx;
   const body = ctx.q(".acv-changes-body");
   const all = m.workspaceChanges;
-  const files = /* @__PURE__ */ new Set();
-  for (const r of all) for (const c of r.changes ?? []) files.add(`${((_a = r.root) == null ? void 0 : _a.path) ?? ""}|${c.path}`);
-  const floor = all.some(incompleteObservation) ? "+" : "";
-  ctx.q(".acv-changes-title").textContent = `${s.changesPanelTitle} · ${fill(s.recordsAndFiles, { records: f.number(all.length), files: `${f.number(files.size)}${floor}` })}`;
+  const counted = countFiles(all);
+  const floor = counted.floor || all.some(incompleteObservation) ? "+" : "";
+  ctx.q(".acv-changes-title").textContent = `${s.changesPanelTitle} · ${fill(s.recordsAndFiles, { records: f.number(all.length), files: `${f.number(counted.files)}${floor}` })}`;
   const attributed = all.filter((r) => r.basis !== "unattributed").map((r) => ({ ...r, changes: (r.changes ?? []).filter((c) => c.attribution !== "outside_any_window") }));
-  const entry = (r, c) => {
+  const link = (r) => {
     const step = m.step(r.step);
     const when = Number.isFinite(Date.parse(r.time)) ? f.time(Date.parse(r.time)) : r.time;
     const who = step ? step.name ?? step.kind : [r.tool_name, s.noStepForRecord].filter(Boolean).join(" · ");
     const label = `${who} · ${r.captured_by} · ${when}`;
-    const target = step ? `<button type="button" class="acv-linkish" data-goto="${esc(step.id)}" title="${esc(s.goToStep)}">${esc(label)} →</button>` : `<span class="acv-faint">${esc(label)}</span>`;
-    return `<div class="acv-panel-entry">${target} ${counts(ctx, c.additions, c.deletions)}${marks(s, c)}</div>`;
+    return step ? `<button type="button" class="acv-linkish" data-goto="${esc(step.id)}" title="${esc(s.goToStep)}">${esc(label)} →</button>` : `<span class="acv-faint">${esc(label)}</span>`;
   };
+  const entry = (r, c) => `<div class="acv-panel-entry">${link(r)} ${counts(ctx, c.additions, c.deletions)}${marks(s, c)}</div>`;
+  const allListless = all.filter((r) => {
+    var _a2;
+    return !(((_a2 = r.changes) == null ? void 0 : _a2.length) ?? 0) && r.changed_files !== null && r.changed_files > 0;
+  });
+  const listless = allListless.filter((r) => r.basis !== "unattributed");
+  const countOnly = (r, prefix = "") => `<div class="acv-panel-file"><div class="acv-panel-file-head"><span class="acv-faint">${esc(prefix)}${esc(
+    fill(s.changedFilesNotKept, { n: String(r.changed_files) })
+  )}</span></div><div class="acv-panel-entry">${link(r)}</div></div>`;
+  const shortened = (root) => listless.filter((r) => {
+    var _a2;
+    return (((_a2 = r.root) == null ? void 0 : _a2.path) ?? "") === root;
+  }).map((r) => countOnly(r)).join("");
+  const heading = (root) => `<div class="acv-change-root">${esc(s.workspaceRoot)} <span class="mono">${esc(root || "—")}</span></div>`;
+  const drawn = /* @__PURE__ */ new Set();
   let html = attributed.some((r) => m.step(r.step)) ? `<div class="acv-panel-hint">${esc(s.changesPanelHint)}</div>` : "";
   for (const root of changeRoots(attributed)) {
-    html += `<div class="acv-change-root">${esc(s.workspaceRoot)} <span class="mono">${esc(root.root || "—")}</span></div>`;
+    drawn.add(root.root);
+    html += heading(root.root);
     for (const fl of root.files) {
       const op = fl.entries[fl.entries.length - 1].change.operation;
       html += `<div class="acv-panel-file"><div class="acv-panel-file-head"><span class="acv-op ${esc(op)}">${esc(op)}</span><span class="acv-file-path">${esc(fl.path)}</span></div>${fl.entries.map((e) => entry(e.record, e.change)).join("")}</div>`;
     }
+    html += shortened(root.root);
+  }
+  for (const root of new Set(listless.map((r) => {
+    var _a2;
+    return ((_a2 = r.root) == null ? void 0 : _a2.path) ?? "";
+  }))) {
+    if (!drawn.has(root)) html += heading(root) + shortened(root);
   }
   const outside = [];
   for (const r of all) {
@@ -1632,13 +1681,15 @@ function drawChangesPanel(ctx) {
       if (r.basis === "unattributed" || c.attribution === "outside_any_window") outside.push({ record: r, change: c });
     }
   }
-  if (outside.length) {
+  const outsideListless = allListless.filter((r) => r.basis === "unattributed");
+  if (outside.length || outsideListless.length) {
     html += `<div class="acv-change-root acv-warn">${esc(s.outsideWindowsHeading)}</div><div class="acv-loose-note">${esc(s.outsideWindowsNote)}</div>`;
     for (const e of outside) {
       html += `<div class="acv-panel-file"><div class="acv-panel-file-head"><span class="acv-op ${esc(e.change.operation)}">${esc(e.change.operation)}</span><span class="acv-file-path">${esc(
-        ((_b = e.record.root) == null ? void 0 : _b.path) ? `${e.record.root.path}/` : ""
+        ((_a = e.record.root) == null ? void 0 : _a.path) ? `${e.record.root.path}/` : ""
       )}${esc(e.change.path)}</span></div>${entry(e.record, e.change)}</div>`;
     }
+    for (const r of outsideListless) html += countOnly(r, ((_b = r.root) == null ? void 0 : _b.path) ? `${r.root.path} · ` : "");
   }
   body.innerHTML = html || `<div class="acv-empty">—</div>`;
   body.querySelectorAll("[data-goto]").forEach(
@@ -1860,6 +1911,14 @@ function drawExecutionTab(ctx, body, step) {
   let html = "";
   for (const r of m.executionsOf(step.id)) {
     const ended = Date.parse(r.time);
+    if (r.state === "removed") {
+      html += `<div class="acv-kicker" style="margin-top:14px">${esc(s.executionRemoved)}</div>`;
+      html += `<dl class="acv-definition">`;
+      html += row(s.outcomeWord, esc(r.outcome), true);
+      html += row(s.observedAt, Number.isFinite(ended) ? esc(f.dateTime(ended)) : esc(r.time));
+      html += `</dl>`;
+      continue;
+    }
     html += `<div class="acv-kicker" style="margin-top:14px">${esc(s.observedBy)} <span class="mono">${esc(r.observed_by)} · ${esc(r.boundary)}</span></div>`;
     html += `<dl class="acv-definition">`;
     html += row(s.mcpServer, r.server ? esc(r.server.name) : "—", true);
