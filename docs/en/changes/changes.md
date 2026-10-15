@@ -181,6 +181,14 @@
   every copy button did nothing and said nothing. Each copy button of the Prompt tab now sits in the
   title of what it copies, so the whole body and the settings copy while their section is closed.
   The renderer is Horizon's, now pinned at `e55f329` (apache/skywalking-horizon-ui#190).
+- The page draws every shape asz lands for a record cut short or removed. A change record whose
+  file list a budget cut short says how many files changed, and that their names were not kept,
+  where it said no file changed. The Changes tab and the panel count its files, and a count over
+  several records that cannot be exact is shown as at least that many. A removed execution record
+  shows its time and outcome, where it said they were not reported. A provider body whose manifest
+  has no segment list, which a third-party adapter may write, is read as having none, where the
+  Prompt tab dropped the body. The renderer is Horizon's, now pinned at `1401336`
+  (apache/skywalking-horizon-ui#198).
 
 ## Collection
 
