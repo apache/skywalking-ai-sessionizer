@@ -793,6 +793,26 @@ func mentions(t *testing.T, zone *storage.Zone, session, text string) bool {
 	return false
 }
 
+// landedAnywhere reports whether any landed file of any session holds the
+// text, or whether a session of that name exists.
+func landedAnywhere(t *testing.T, zone *storage.Zone, text string) bool {
+	t.Helper()
+	items, err := os.ReadDir(zone.Root())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		name := it.Name()
+		if !it.IsDir() || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if name == text || mentions(t, zone, name, text) {
+			return true
+		}
+	}
+	return false
+}
+
 // TestAChildThatOvertookItsParentIsNotGivenToIt.
 //
 // The client drains its queue with several threads at once, so a batch can

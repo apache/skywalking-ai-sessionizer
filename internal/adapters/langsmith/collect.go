@@ -91,6 +91,12 @@ type Landed struct {
 	// Placed counts the requests landed after waiting as long as they may,
 	// with whatever ancestry did arrive.
 	Placed int
+	// Dropped counts the arrivals not collected because their run's
+	// conversation could not be told once their request had waited as long
+	// as it may: an update whose start was never seen or was forgotten, and a
+	// run whose conversation would come from a run above it that is not known.
+	// Two updates of one run count twice.
+	Dropped int
 }
 
 // Collect converts every waiting request, oldest first.
@@ -167,7 +173,8 @@ func (c *Collector) Collect() (Landed, error) {
 					}
 					// It has been tried again and the ancestry is still not
 					// here. It waits for another pass, and is landed anyway
-					// once it has waited as long as it may.
+					// once it has waited as long as it may, without the runs
+					// whose conversation is still not known.
 					if open.held(name) {
 						out.Waiting++
 						if err := open.save(pendingPath, c.Now()); err != nil {
@@ -202,8 +209,8 @@ func (c *Collector) Collect() (Landed, error) {
 			// What this request taught is written down BEFORE the request
 			// is removed. Either order loses something if the two are not
 			// separated: saving afterwards loses a run's start to a crash in
-			// between, and the bare update that follows it lands under a
-			// name saying its identity was not supplied; saving beforehand
+			// between, and the bare update that follows it is not collected,
+			// its conversation no longer known; saving beforehand
 			// would lose a completion to a replay, if a completion were ever
 			// forgotten here. Nothing is: a run is forgotten only by age, so
 			// what is written is only ever more than it was.
@@ -221,6 +228,7 @@ func (c *Collector) Collect() (Landed, error) {
 			out.Files += landed.Files
 			out.Records += landed.Records
 			out.Unassigned += landed.Unassigned
+			out.Dropped += landed.Dropped
 			out.Bodies += landed.Bodies
 			out.BodyConflicts += landed.BodyConflicts
 			for _, s := range landed.Sessions {
@@ -245,12 +253,13 @@ type unreadable struct{ err error }
 func (u *unreadable) Error() string { return u.err.Error() }
 func (u *unreadable) Unwrap() error { return u.err }
 
-// unplaceable marks a request whose runs name ancestors that have not
-// arrived. It is not a failure: it is a request that is too early.
+// unplaceable marks a request that is too early: a run names an ancestor that
+// has not arrived, or its conversation waits for a start or an ancestor that
+// may still come. It is not a failure.
 type unplaceable struct{ run string }
 
 func (u *unplaceable) Error() string {
-	return "run " + u.run + " names a run that has not arrived"
+	return "run " + u.run + " waits for a run that has not arrived"
 }
 
 // placed is one arrival with the records it became, kept together because the
@@ -285,8 +294,9 @@ func (c *Collector) convert(request Waiting, open *pending) (Landed, error) {
 }
 
 // convertAnyway is convert for a request that has waited as long as it may.
-// What is still unknown is placed in the parent lineage, which is what the
-// adapter page says happens and why.
+// A run whose place in its conversation is still unknown is placed in the
+// parent lineage, which is what the adapter page says happens and why. A run
+// whose conversation is still unknown is not collected.
 func (c *Collector) convertAnyway(request Waiting, open *pending) (Landed, error) {
 	return c.convertWith(request, open, false)
 }
@@ -313,8 +323,8 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 	// decides for a first that named none, as it does when it waits in a
 	// request of its own. unsupplied marks a run that named none.
 	unsupplied := make([]bool, len(operations))
-	// partial marks a run that named a thread before its project was known,
-	// in this arrival or an earlier one; see pendingRun.Partial.
+	// partial marks a run that named a thread before the rest of its key was
+	// known, in this arrival or an earlier one; see pendingRun.Partial.
 	partial := make([]bool, len(operations))
 	follows := make([]int, len(operations))
 	first := map[string]int{}
@@ -340,7 +350,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 			follows[i], decides = j, j
 			if unsupplied[j] || partial[j] {
 				if session, missing := c.sessionOf(op, completed); !missing {
-					sessions[j], unsupplied[j], partial[j] = session, false, c.projectUnknown(completed)
+					sessions[j], unsupplied[j], partial[j] = session, false, c.partialOf(op, completed)
 				}
 			}
 		default:
@@ -349,7 +359,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 			if unsupplied[i] {
 				partial[i] = known.Partial
 			} else {
-				partial[i] = c.projectUnknown(completed)
+				partial[i] = c.partialOf(op, completed)
 			}
 		}
 		// A run that supplied no conversation is not remembered in one yet.
@@ -372,47 +382,73 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		if partial[decides] {
 			open.partial(op.RunID)
 		}
+		// A start can follow its update in the same request. Every start is
+		// recorded here, before any conversation is decided.
+		if op.Op == "post" {
+			open.created(op.RunID)
+		}
 		open.sawRun(completed, c.Now())
 	}
 
-	// Every run of this request is now remembered, so an ancestor still
-	// missing is one that has not arrived at all.
-	if wait {
-		for i := range operations {
-			if !open.placeable(runs[i]) {
-				return Landed{}, &unplaceable{run: runs[i].ID}
-			}
-		}
-	}
-
+	// Which conversation each run belongs to, decided once for its first
+	// arrival in this request, which a later arrival of it follows. Every run
+	// of the request is now remembered, so a run above one that is still
+	// missing has not arrived at all.
+	//
 	// A run that supplied no conversation takes the one the nearest run it
 	// ran inside supplied, as pending.inherited reads its dotted order.
 	// LangSmith JS passes a decorated function's metadata to none of the
 	// runs inside it, so a model call the function makes names no thread,
 	// although the function names one and the call's dotted order says it
-	// ran there. Only when no run above it supplied one does it land
-	// unassigned, under its trace. The count is of runs, not arrivals.
+	// ran there. It lands unassigned, under its trace, only when every run
+	// above it is known and none supplied one. The count is of runs, not
+	// arrivals.
+	//
+	// A conversation that depends on something not yet seen is open: the
+	// start of an update that names none, the rest of the key for a thread
+	// named before it, or a run above that would decide. Each may still come, as
+	// a missing ancestor may, so the request waits for it. Once the request
+	// has waited as long as it may, a run whose conversation is still open
+	// is dropped: what would say it is gone, and guessing put one
+	// conversation's evidence in another.
+	undecided := make([]bool, len(operations))
 	unassigned := 0
-	for i := range operations {
-		if !unsupplied[i] {
+	for i, op := range operations {
+		if follows[i] >= 0 {
 			continue
 		}
-		// An earlier arrival named a thread of its own, with no project,
-		// and this one names none. Its own is not replaced by another's: it
-		// lands unassigned, as it did before a thread was taken from above.
-		if partial[i] {
-			unassigned++
-			continue
+		switch {
+		case !unsupplied[i] && !partial[i]:
+		case partial[i]:
+			// A thread of its own, with the rest of its key not known yet.
+			// Its own is not replaced by another's, so it neither inherits nor
+			// lands unassigned. It waits for what completes it.
+			undecided[i] = true
+		case op.Op != "post" && !open.Runs[op.RunID].Create:
+			// An update that names no conversation, whose start has not been
+			// seen. The start says where it belongs.
+			undecided[i] = true
+		default:
+			switch session, by := open.inherited(runs[i]); by {
+			case inheritedResolved:
+				sessions[i] = session
+			case inheritedNone:
+				unassigned++
+			default:
+				undecided[i] = true
+			}
 		}
-		if session := open.inherited(runs[i]); session != "" {
-			sessions[i] = session
-			continue
-		}
-		unassigned++
 	}
 	for i, j := range follows {
 		if j >= 0 {
-			sessions[i] = sessions[j]
+			sessions[i], undecided[i] = sessions[j], undecided[j]
+		}
+	}
+	if wait {
+		for i := range operations {
+			if undecided[i] || !open.placeable(runs[i]) {
+				return Landed{}, &unplaceable{run: runs[i].ID}
+			}
 		}
 	}
 
@@ -440,6 +476,12 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 	for i, op := range operations {
 		envelope := runs[i]
 		session := sessions[i]
+		if undecided[i] {
+			// Nor is it remembered in the conversation it fell back to: its
+			// start, if it comes later, would take that one over its own.
+			out.Dropped++
+			continue
+		}
 		// A run may be updated after it ends as well as before, and that
 		// update carries none of this. So a run is remembered whether or not
 		// it has finished, and is forgotten only by age. Forgetting it here
@@ -508,23 +550,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 // in a session whose name says the identity was not supplied, and the second
 // return says so. The caller then looks for a run above it that supplied one.
 func (c *Collector) sessionOf(op Operation, envelope Run) (string, bool) {
-	// The client splits extra out of the envelope only when it is large
-	// enough to be worth a part of its own, so both places have to be read.
-	// Reading the envelope's extra as though it were already the metadata
-	// was the bug this comment exists to keep fixed: it put the whole extra
-	// object where the metadata belonged, no supplied key was ever found,
-	// and every conversation landed as one whose identity was not supplied.
-	var extra struct {
-		Metadata map[string]any `json:"metadata"`
-	}
-	if raw, ok := op.Fields["extra"]; ok {
-		_ = json.Unmarshal(raw, &extra)
-	} else {
-		var inline map[string]any
-		unmarshalInto(op.Envelope, "extra", &inline)
-		extra.Metadata, _ = inline["metadata"].(map[string]any)
-	}
-	owner, ok := c.Ownership.Owner(envelope.Session, extra.Metadata)
+	owner, ok := c.Ownership.Owner(envelope.Session, c.metadataOf(op))
 	if !ok {
 		// Its own trace, or its own run when it has no trace either. A
 		// client can create a run with neither, and naming them all after
@@ -534,11 +560,51 @@ func (c *Collector) sessionOf(op Operation, envelope Run) (string, bool) {
 	return StorageID(owner), false
 }
 
-// projectUnknown reports whether a run's conversation would be named before
-// its project is known, when the project is one of the dimensions that own
-// it. An update names no project, and can arrive before the run's start.
-func (c *Collector) projectUnknown(run Run) bool {
-	return run.Session == "" && slices.Contains(c.Ownership.Scope, "project")
+// metadataOf is an arrival's run metadata.
+//
+// The client splits extra out of the envelope only when it is large enough to
+// be worth a part of its own, so both places have to be read. Reading the
+// envelope's extra as though it were already the metadata was the bug this
+// comment exists to keep fixed: it put the whole extra object where the
+// metadata belonged, no supplied key was ever found, and every conversation
+// landed as one whose identity was not supplied.
+func (c *Collector) metadataOf(op Operation) map[string]any {
+	if raw, ok := op.Fields["extra"]; ok {
+		var extra struct {
+			Metadata map[string]any `json:"metadata"`
+		}
+		_ = json.Unmarshal(raw, &extra)
+		return extra.Metadata
+	}
+	var inline map[string]any
+	unmarshalInto(op.Envelope, "extra", &inline)
+	metadata, _ := inline["metadata"].(map[string]any)
+	return metadata
+}
+
+// partialOf reports whether an arrival names a thread but not the rest of its
+// conversation's key. The project is missing when no arrival of the run has
+// carried it yet: an update can name none, and can arrive before the run's
+// start. A metadata dimension is missing only from an update, which carries
+// what changed. A start carries its whole metadata, so a dimension it leaves
+// out is supplied empty.
+func (c *Collector) partialOf(op Operation, run Run) bool {
+	if run.Session == "" && slices.Contains(c.Ownership.Scope, "project") {
+		return true
+	}
+	if op.Op == "post" {
+		return false
+	}
+	metadata := c.metadataOf(op)
+	for _, dimension := range c.Ownership.Scope {
+		if dimension == "project" || dimension == "thread" {
+			continue
+		}
+		if s, _ := metadata[dimension].(string); s == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // traceOrRun is what identifies a run that supplied no conversation: its

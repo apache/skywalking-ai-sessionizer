@@ -62,6 +62,15 @@ a run belonging to no conversation and of no kind. So the runs that have started
 are remembered, and an update is completed from what its own start said. Nothing is invented:
 every field comes from an earlier arrival about the same run.
 
+A run is remembered by when it was last seen, and forgotten 24 hours after that, or sooner when
+more than 50,000 runs are remembered, the oldest first. A run that keeps arriving stays remembered.
+An update that names no conversation of its own, whose start is not remembered because it was
+forgotten or never came, cannot be given back its conversation. It waits, as a run waits for its
+ancestry, in case its start is still on its way, and once it has waited as long as it may it is
+not collected. Each pass that drops an arrival says how many, as `runs_not_collected`. An update that
+carries the whole key names its conversation itself, and lands as a start does: all 11 updates in
+the captures, from the Python client, carry the project and the thread.
+
 ## The mapping
 
 | Model | LangChain |
@@ -134,9 +143,10 @@ Placing such a run would be a guess, and the guess is always the parent lineage,
 independent agent's model context and its answers to its caller. That is not a thin conversation
 but a wrong one. So a request whose ancestry has not arrived waits: it is tried again at the end
 of the same pass, because the batch that overtook it is very often already further down the same
-inbox, and then for up to three more passes. After that it is landed with whatever ancestry did
-arrive, because a trace that never completes must not hold its evidence out of the conversation
-for ever.
+inbox, and then for up to three more passes. After that a run whose conversation is known is
+landed with whatever ancestry did arrive, because a trace that never completes must not hold its
+evidence out of the conversation for ever. A run whose conversation is still not known is not
+collected, as [Ownership is a namespace](#ownership-is-a-namespace) says.
 
 ### A graph's own runs land trimmed
 
@@ -314,10 +324,14 @@ landed apart from the question it answered.
 
 The order runs arrive in does not decide it. A run waits for its ancestry, as
 [A nested agent is its own stream](#a-nested-agent-is-its-own-stream) says, and its conversation is
-decided when the ancestry has arrived. A run above it that supplied nothing, or landed unassigned,
-is passed over. A run above it that is not known, because it has not arrived when the run has
-waited as long as it may or was forgotten after 24 hours, stops the search: it may have supplied a
-thread of its own, so the one further up is not taken, and the run lands as one that supplied none.
+decided when the ancestry has arrived. A run above it whose start was seen and that supplied
+nothing is passed over. A run above it that is not known stops the search: one that has not
+arrived, one that was forgotten, and one known only from updates that did not name its whole
+conversation, whose start would have said.
+It may have supplied a thread of its own, so the one further up is not taken, and the run's
+conversation is not known. The run waits for it, and once it has waited as long as it may it is not
+collected. Landing it as a run that supplied none put it in a conversation of its own, where the
+run above may have named another.
 A run's own key decides from the first of its arrivals that brings one, as long as the run has not
 landed yet; once it has, every later arrival of the same run lands where it did, while the receiver
 remembers the run, so one run is not split across two conversations.
@@ -326,12 +340,17 @@ An update carries only what changed, so it can name a thread with no project, an
 run's start, which carries the project. A thread named before the run's project is known is not a
 whole conversation. It does not decide while the run waits, so a later arrival that carries the
 project still does. The run does not take a conversation from a run above it in place of its own
-thread, and a run below it does not pass over it to take one from further up. If it lands before
-any arrival carries the project, it lands under its thread with an empty project. All 11 updates in
-the captures carry their project with their metadata, so none of them has met this.
+thread, and a run below it does not pass over it to take one from further up. If no arrival has
+carried the project once it has waited as long as it may, it is not collected. All 11 updates in
+the captures carry their project with their metadata, so none of them has met this. A dimension
+the metadata names, configured in `scope`, is missing the same way only from an update, which
+carries what changed. A start carries its whole metadata, so a dimension it leaves out is supplied
+empty.
 
-A trace with no supplied key anywhere is not given one. It lands under a name that says the
-identity was not supplied, and nothing merges it with anything else.
+A trace with no supplied key anywhere is not given one. When every run of it is known, with its
+start seen, it lands under a name that says the identity was not supplied, and nothing merges it
+with anything else. A later update of one of its runs that carries a key stays there: one run is
+one conversation.
 
 ## What the wire cannot supply
 

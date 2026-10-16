@@ -520,6 +520,9 @@ func (r *refresher) pass() error {
 	var errs []error
 	var landed, records, sessionsSeen, pending, conflicts, busy int
 	var waiting, unreadable int
+	// dropped counts the LangSmith runs not collected this pass because their
+	// conversation could not be told.
+	var dropped int
 	changed := map[string]bool{}
 
 	// A removal an earlier pass left in progress is finished first, before
@@ -665,6 +668,7 @@ func (r *refresher) pass() error {
 		landed += landedRuns.Files
 		records += landedRuns.Records
 		sessionsSeen += len(landedRuns.Sessions)
+		dropped = landedRuns.Dropped
 		for _, id := range landedRuns.Sessions {
 			changed[id] = true
 		}
@@ -865,7 +869,7 @@ func (r *refresher) pass() error {
 	}
 	bodies := waiting != r.waiting || unreadable != r.unreadable
 	r.waiting, r.unreadable = waiting, unreadable
-	if first || landed > 0 || rounds > 0 || busy > 0 || pushed != "" || len(errs) > 0 || bodies {
+	if first || landed > 0 || rounds > 0 || busy > 0 || pushed != "" || len(errs) > 0 || bodies || dropped > 0 {
 		contended := ""
 		if busy > 0 {
 			// Two writers on one root is a supported setup, so this is a
@@ -877,6 +881,12 @@ func (r *refresher) pass() error {
 			// Provider bodies no session claims yet, and files that are not a
 			// body. Neither fails the pass, and both are said.
 			contended += fmt.Sprintf(" bodies_waiting=%d bodies_unreadable=%d", waiting, unreadable)
+		}
+		if dropped > 0 {
+			// Runs whose conversation was forgotten or never came, said every
+			// pass that drops one: none is an error, and each is evidence
+			// that is not kept.
+			contended += fmt.Sprintf(" runs_not_collected=%d", dropped)
 		}
 		fmt.Printf("[%s] refreshed: sessions=%d landed=%d records=%d rounds=%d%s%s (%s)\n",
 			now.Format("15:04:05"), sessionsSeen, landed, records, rounds, contended, pushed,

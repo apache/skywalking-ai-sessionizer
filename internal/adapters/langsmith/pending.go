@@ -41,14 +41,21 @@ import (
 // an arrival that leaves those fields out is completed from what its own
 // start said. Nothing is invented: every field comes from an earlier arrival
 // about the same run.
+//
+// What is remembered is forgotten by age and by count. An update that names
+// no conversation of its own, and comes after its run was forgotten or with no
+// start ever seen, cannot be given back its conversation, and it is not
+// collected: landing it under a name saying its identity was not supplied put
+// evidence of one conversation under another.
 
 // pendingFile holds the runs that were started and have not ended.
 const pendingFile = "open.json"
 
 // pendingVersion is bumped when the file's meaning changes. An older file is
-// discarded rather than migrated, which costs the completion of whatever was
-// in flight at the time and nothing else.
-const pendingVersion = 1
+// discarded rather than migrated: every run it remembered is forgotten once,
+// as if a day had passed. Version 2 records whether a run's start was seen,
+// which version 1 did not.
+const pendingVersion = 2
 
 // pendingLimit bounds the file. A run that never ends would otherwise be
 // remembered for ever, and a client that crashes mid-trace leaves many. When
@@ -76,11 +83,15 @@ type pendingRun struct {
 	// resolved. It is kept rather than derived again because the update
 	// carries none of what deriving it needs.
 	Session string `json:"session,omitempty"`
-	// Partial records that an arrival named a thread before the run's
-	// project was known, so the conversation it named is not whole. Such a
-	// run neither takes a conversation from a run above it nor gives one to
-	// a run below it.
+	// Partial records that an arrival named a thread before the rest of the
+	// conversation's key was known: the project, or a metadata key the scope
+	// names. The conversation it named is not whole. Such a run neither takes
+	// a conversation from a run above it nor gives one to a run below it.
 	Partial bool `json:"partial,omitempty"`
+	// Create records that the run's start was seen. An update is remembered
+	// too, for the ancestry it carries, so being remembered proves no start,
+	// and neither does a session or a start time an update brought.
+	Create bool `json:"create,omitempty"`
 	// At is when this was remembered, for the eviction above.
 	At string `json:"at,omitempty"`
 }
@@ -218,6 +229,13 @@ func (p *pending) started(run Run, method, session string, now time.Time) {
 	p.Runs[run.ID] = known
 }
 
+// created records that a run's start was seen.
+func (p *pending) created(id string) {
+	known := p.Runs[id]
+	known.Create = true
+	p.Runs[id] = known
+}
+
 // complete fills in what this arrival left out, from what the run's own
 // start said. A field the arrival carries is never overwritten.
 func (p *pending) complete(run Run) (Run, pendingRun, bool) {
@@ -249,33 +267,48 @@ func (p *pending) complete(run Run) (Run, pendingRun, bool) {
 	return run, known, true
 }
 
+// inheritance is what the runs above one say about its conversation.
+type inheritance int
+
+const (
+	// inheritedNone: every run above it is remembered with its start seen,
+	// and none supplied a conversation. It lands in its own, unassigned.
+	inheritedNone inheritance = iota
+	// inheritedResolved: the nearest run above it that decides supplied one.
+	inheritedResolved
+	// inheritedUnknown: a run above it that would decide is not known, so
+	// neither is its conversation.
+	inheritedUnknown
+)
+
 // inherited is the conversation of the nearest run this one ran inside whose
 // conversation was supplied, by that run or by one above it. A run supplied
 // nothing when its own is empty or unassigned, and is passed over. Every
 // arrival is remembered as it is read, before its request lands or waits, so
 // a run of this request or of one still waiting is here.
 //
-// The walk stops at a run that is not remembered: one that has not arrived,
-// or was forgotten by age. What it supplied is not known, and passing over it
-// could give this run a thread from further up that the run in between
-// replaced. Nothing, then, as when no run above supplied one.
-//
-// A run that named a thread before its project was known stops it too: it
-// supplied a conversation, but not a whole one.
-func (p *pending) inherited(run Run) string {
+// The walk stops at the first run that does not say: one that is not
+// remembered, because it has not arrived or was forgotten; one remembered only
+// from updates that named no conversation of their own, whose start would
+// have said; and one that named a thread before the rest of its key was known,
+// which supplied a conversation but not a whole one. An update that named its
+// run's whole conversation decides, as a start does. What such a run supplied is not known, and passing over it could give
+// this run a thread from further up that the run in between replaced, or a
+// conversation that run's start did not name.
+func (p *pending) inherited(run Run) (string, inheritance) {
 	for _, id := range ancestors(run.Dotted, run.ID) {
 		known, ok := p.Runs[id]
 		if !ok {
-			return ""
+			return "", inheritedUnknown
 		}
 		if assigned(id, known) {
-			return known.Session
+			return known.Session, inheritedResolved
 		}
-		if known.Partial {
-			return ""
+		if known.Partial || !known.Create {
+			return "", inheritedUnknown
 		}
 	}
-	return ""
+	return "", inheritedNone
 }
 
 // partial records that a run named a thread before its project was known.
