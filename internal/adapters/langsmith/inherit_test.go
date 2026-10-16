@@ -145,22 +145,30 @@ func TestATraceThatSuppliedNoThreadIsNotGivenOne(t *testing.T) {
 	}
 }
 
-// TestARunLandedUnassignedStaysWhereItLanded. A call whose function never
-// arrived while it waited is landed under its trace. When the function and
-// an update to the call arrive later, the update stays with the call's first
-// arrival: one run is never split across two conversations.
-func TestARunLandedUnassignedStaysWhereItLanded(t *testing.T) {
+// TestARunWhoseRunAboveNeverCameIsNotCollected. A call that names no thread
+// waits for the function it ran inside, which would say its conversation.
+// When the function has not come once the call has waited as long as it may,
+// the call is not collected: landing it under its trace put it in a
+// conversation of its own, although the function may have named another, a
+// retired one too. When the function and an update to the call arrive later,
+// the update lands in the function's conversation, and nothing of the call is
+// left unassigned.
+func TestARunWhoseRunAboveNeverCameIsNotCollected(t *testing.T) {
 	_, zone, base := started(t, "")
 	collector := collectorOver(zone)
 	start := strings.Replace(inheritCall(``), `"end_time":"2026-09-20T10:00:02Z",`, ``, 1)
 	postBatch(t, base, `{"post":[`+start+`]}`)
+	dropped := 0
 	for pass := 0; pass <= deferLimit; pass++ {
-		if _, err := collector.Collect(); err != nil {
+		landed, err := collector.Collect()
+		if err != nil {
 			t.Fatal(err)
 		}
+		dropped += landed.Dropped
 	}
-	if !mentions(t, zone, UnassignedID(inheritRoot), inheritChild) {
-		t.Fatal("the call was not landed under its trace once it had waited as long as it may")
+	if dropped != 1 || landedAnywhere(t, zone, inheritChild) {
+		t.Fatalf("%d dropped, landed %v: the call must not be collected once it has waited as long as it may",
+			dropped, landedAnywhere(t, zone, inheritChild))
 	}
 	update := `{"id":"` + inheritChild + `","trace_id":"` + inheritRoot + `",` +
 		`"dotted_order":"` + inheritOrder + `.20260920T100001000000Z` + inheritChild + `",` +
@@ -170,17 +178,21 @@ func TestARunLandedUnassignedStaysWhereItLanded(t *testing.T) {
 	if _, err := collector.Collect(); err != nil {
 		t.Fatal(err)
 	}
-	if !mentions(t, zone, UnassignedID(inheritRoot), "the late answer") {
-		t.Error("the call's update left the conversation its start landed in")
+	if !mentions(t, zone, StorageID(Owner{Values: []string{"asz", "t-late"}, Thread: "t-late"}), "the late answer") {
+		t.Error("the call's update is not in the function's conversation")
+	}
+	if landedAnywhere(t, zone, UnassignedID(inheritRoot)) || mentions(t, zone, UnassignedID(inheritRoot), "the late answer") {
+		t.Error("something of the call landed unassigned")
 	}
 }
 
-// TestAnUnassignedRunAboveIsPassedOver. The step a call ran inside supplied
-// no thread and landed unassigned, because the function above it did not
-// arrive while it waited. The function supplied a thread when it came, and the
-// call arriving with it takes that thread: the step's unassigned name was
-// never supplied by anyone, so it is not inherited.
-func TestAnUnassignedRunAboveIsPassedOver(t *testing.T) {
+// TestADroppedRunAboveIsPassedOver. The step a call ran inside supplied no
+// thread and was not collected, because the function above it did not arrive
+// while it waited. Its start was seen and named no thread, so when the
+// function supplies one, the call arriving with it takes that thread past the
+// step. The conversation the step fell back to was never remembered as its
+// own, so it is not inherited.
+func TestADroppedRunAboveIsPassedOver(t *testing.T) {
 	_, zone, base := started(t, "")
 	collector := collectorOver(zone)
 	const step = "14141414-1414-7414-8414-141414141412"
@@ -188,13 +200,8 @@ func TestAnUnassignedRunAboveIsPassedOver(t *testing.T) {
 	postBatch(t, base, `{"post":[{"id":"`+step+`","trace_id":"`+inheritRoot+`","parent_run_id":"`+inheritRoot+`",`+
 		`"dotted_order":"`+stepOrder+`","run_type":"chain","name":"step","start_time":"2026-09-20T10:00:00.5Z",`+
 		`"end_time":"2026-09-20T10:00:02.5Z","session_name":"asz","extra":{"metadata":{}},"outputs":{"done":true}}]}`)
-	for pass := 0; pass <= deferLimit; pass++ {
-		if _, err := collector.Collect(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if !mentions(t, zone, UnassignedID(inheritRoot), step) {
-		t.Fatal("the step was not landed under its trace once it had waited as long as it may")
+	if dropped := passes(t, collector, deferLimit+1); dropped != 1 || !inboxEmpty(t, zone) || landedAnywhere(t, zone, step) {
+		t.Fatalf("%d dropped: the step must not be collected once it has waited as long as it may", dropped)
 	}
 	call := strings.Replace(inheritCall(``), `"parent_run_id":"`+inheritRoot+`","dotted_order":"`+inheritOrder,
 		`"parent_run_id":"`+step+`","dotted_order":"`+stepOrder, 1)
@@ -208,6 +215,9 @@ func TestAnUnassignedRunAboveIsPassedOver(t *testing.T) {
 	}
 	if !mentions(t, zone, landed.Sessions[0], "the call's own answer") {
 		t.Error("the call's answer is not in the function's conversation")
+	}
+	if landedAnywhere(t, zone, `"name":"step"`) {
+		t.Error("the step was collected once the function came, although it was dropped")
 	}
 }
 
@@ -254,12 +264,14 @@ func TestOneRunInOneRequestIsOneConversation(t *testing.T) {
 	}
 }
 
-// TestARunAboveThatArrivedWithNoKindIsStillRead. An update arrives for a run
-// whose start never came, with no kind, and between the call and the function
-// that supplied the thread. It supplied none, so it is passed over, as it is
-// when it landed in an earlier request; it is not taken for a run that has not
-// arrived, which would stop the walk.
-func TestARunAboveThatArrivedWithNoKindIsStillRead(t *testing.T) {
+// TestARunAboveKnownOnlyFromAnUpdateStopsInheriting. An update arrives for a
+// run whose start never came, with no kind and no thread, between the call
+// and the function that supplied one. Its start would have said whether it
+// named a thread of its own, so the call cannot take the function's past it.
+// The request waits for that start. Once it has waited as long as it may, the
+// function lands in its conversation, and the call and the update, whose
+// conversations cannot be told, are not collected.
+func TestARunAboveKnownOnlyFromAnUpdateStopsInheriting(t *testing.T) {
 	_, zone, base := started(t, "")
 	const step = "14141414-1414-7414-8414-141414141413"
 	stepOrder := inheritOrder + ".20260920T100000500000Z" + step
@@ -267,12 +279,27 @@ func TestARunAboveThatArrivedWithNoKindIsStillRead(t *testing.T) {
 		`"end_time":"2026-09-20T10:00:02.5Z","outputs":{"done":true}}`
 	call := strings.Replace(inheritCall(``), `"dotted_order":"`+inheritOrder, `"dotted_order":"`+stepOrder, 1)
 	postBatch(t, base, `{"post":[`+inheritFunction("t-kind")+`,`+call+`],"patch":[`+update+`]}`)
-	landed, err := collectorOver(zone).Collect()
+	collector := collectorOver(zone)
+	landed, err := collector.Collect()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if landed.Unassigned != 0 || !mentions(t, zone, StorageID(Owner{Values: []string{"asz", "t-kind"}, Thread: "t-kind"}), "the call's own answer") {
-		t.Fatalf("sessions %v, %d unassigned, want the call in the function's conversation", landed.Sessions, landed.Unassigned)
+	if landed.Waiting != 1 || landedAnywhere(t, zone, "the call's own answer") {
+		t.Fatalf("%d waiting: the request must wait for the step's start", landed.Waiting)
+	}
+	dropped := 0
+	for pass := 0; pass < deferLimit; pass++ {
+		if landed, err = collector.Collect(); err != nil {
+			t.Fatal(err)
+		}
+		dropped += landed.Dropped
+	}
+	function := StorageID(Owner{Values: []string{"asz", "t-kind"}, Thread: "t-kind"})
+	if !mentions(t, zone, function, "what changed in the docs") {
+		t.Error("the function is not in its own conversation")
+	}
+	if dropped != 2 || landedAnywhere(t, zone, "the call's own answer") || landedAnywhere(t, zone, step) {
+		t.Errorf("%d dropped: the call and the step's update must not be collected", dropped)
 	}
 }
 
@@ -307,26 +334,37 @@ func TestARunThatSuppliedAThreadWithNoKindIsRemembered(t *testing.T) {
 }
 
 // TestInheritingStopsAtARunNotKnown. The run between the call and the
-// function was forgotten, or has not arrived. It may have supplied a thread of
-// its own, so the function's further up is not taken over it. A run between
-// that supplied nothing, by either unassigned name, is passed over.
+// function was forgotten, or has not arrived, or is known only from updates.
+// It may have supplied a thread of its own, so the function's further up is
+// not taken over it, and the call's conversation is not known. A run between
+// whose start was seen and that supplied nothing, by either unassigned name,
+// is passed over.
 func TestInheritingStopsAtARunNotKnown(t *testing.T) {
 	const step = "14141414-1414-7414-8414-141414141415"
 	call := Run{ID: inheritChild, TraceID: inheritRoot,
 		Dotted: inheritOrder + ".20260920T100000500000Z" + step + ".20260920T100001000000Z" + inheritChild}
-	memory := &pending{Runs: map[string]pendingRun{inheritRoot: {Trace: inheritRoot, Session: "ls-function"}}}
-	if got := memory.inherited(call); got != "" {
-		t.Errorf("took %q past a run that is not known", got)
+	memory := &pending{Runs: map[string]pendingRun{inheritRoot: {Trace: inheritRoot, Session: "ls-function", Create: true}}}
+	if got, by := memory.inherited(call); got != "" || by != inheritedUnknown {
+		t.Errorf("took %q (%d) past a run that is not known", got, by)
+	}
+	memory.Runs[step] = pendingRun{Trace: inheritRoot, Session: UnassignedID(inheritRoot)}
+	if got, by := memory.inherited(call); got != "" || by != inheritedUnknown {
+		t.Errorf("took %q (%d) past a run known only from its updates", got, by)
 	}
 	for _, name := range []string{UnassignedID(inheritRoot), UnassignedID(step)} {
-		memory.Runs[step] = pendingRun{Trace: inheritRoot, Session: name}
-		if got := memory.inherited(call); got != "ls-function" {
-			t.Errorf("a run between landed as %q: took %q, want the function's", name, got)
+		memory.Runs[step] = pendingRun{Trace: inheritRoot, Session: name, Create: true}
+		if got, by := memory.inherited(call); got != "ls-function" || by != inheritedResolved {
+			t.Errorf("a run between landed as %q: took %q (%d), want the function's", name, got, by)
 		}
 	}
 	memory.Runs[step] = pendingRun{Trace: inheritRoot, Session: "ls-step"}
-	if got := memory.inherited(call); got != "ls-step" {
-		t.Errorf("took %q, want the nearest supplied, the step's", got)
+	if got, by := memory.inherited(call); got != "ls-step" || by != inheritedResolved {
+		t.Errorf("took %q (%d), want the nearest supplied, the step's", got, by)
+	}
+	memory.Runs[inheritRoot] = pendingRun{Trace: inheritRoot, Session: UnassignedID(inheritRoot), Create: true}
+	memory.Runs[step] = pendingRun{Trace: inheritRoot, Create: true}
+	if got, by := memory.inherited(call); got != "" || by != inheritedNone {
+		t.Errorf("took %q (%d), want none: every run above is known and supplied nothing", got, by)
 	}
 }
 
@@ -346,12 +384,12 @@ func landInOrder(t *testing.T, bodies ...string) *storage.Zone {
 }
 
 // TestTheOrderOfRequestsDoesNotDecide. The same runs, sent as requests in
-// different orders and batched differently, land the same. A step with no
-// kind and no thread sits between the call and the function: while its
-// request waited it was not remembered, and the call, placed first, stopped
-// at it as at a run that had not arrived. And a call's start that names no
-// thread, with an update that names its own: the update decided when the two
-// waited apart, and the start when they came together.
+// different orders and batched differently, land the same. A step known only
+// from an update, with no kind and no thread, sits between the call and the
+// function: in every order the call waits for the step's start, and is not
+// collected once it has waited as long as it may. And a call's start that
+// names no thread, with an update that names its own: the update decided
+// when the two waited apart, and the start when they came together.
 func TestTheOrderOfRequestsDoesNotDecide(t *testing.T) {
 	const step = "14141414-1414-7414-8414-141414141416"
 	stepOrder := inheritOrder + ".20260920T100000500000Z" + step
@@ -366,8 +404,17 @@ func TestTheOrderOfRequestsDoesNotDecide(t *testing.T) {
 		"call and step, function": {`{"post":[` + call + `],"patch":[` + stepUpdate + `]}`, function},
 	} {
 		zone := landInOrder(t, bodies...)
-		if !mentions(t, zone, thread, "the call's own answer") {
-			t.Errorf("%s: the call is not in the function's conversation", name)
+		if landedAnywhere(t, zone, "the call's own answer") {
+			t.Errorf("%s: the call landed before the step's start came", name)
+		}
+		if dropped := passes(t, collectorOver(zone), deferLimit+1); dropped != 2 || !inboxEmpty(t, zone) {
+			t.Errorf("%s: %d dropped, want the call and the step's update", name, dropped)
+		}
+		if !mentions(t, zone, thread, "what changed in the docs") {
+			t.Errorf("%s: the function is not in its conversation", name)
+		}
+		if landedAnywhere(t, zone, "the call's own answer") {
+			t.Errorf("%s: the call was collected, although the step above it is known only from an update", name)
 		}
 	}
 
@@ -456,5 +503,30 @@ func TestAThreadNamedBeforeItsProjectIsNotWhole(t *testing.T) {
 		if mentions(t, zone, outer, text) {
 			t.Errorf("%s landed in the function's conversation, although the call named a thread of its own", text)
 		}
+	}
+	// The start brought the project, and the update, still waiting for it, is
+	// read again with it: the call's thread is now whole, so the call and the
+	// run below it land there, where they used to land unassigned.
+	for _, text := range []string{"the patched answer", "the tool's own result"} {
+		if !mentions(t, zone, own, text) {
+			t.Errorf("%s is not in the call's own conversation", text)
+		}
+	}
+
+	// The same with no run below the call, so nothing else in the start's
+	// request waits: the call itself waits for its own thread to be whole,
+	// rather than taking the function's.
+	_, zone, base = started(t, "")
+	collector = collectorOver(zone)
+	postBatch(t, base, `{"patch":[`+update+`]}`)
+	if _, err := collector.Collect(); err != nil {
+		t.Fatal(err)
+	}
+	postBatch(t, base, `{"post":[`+inheritFunction("t-outer")+`,`+keyless+`]}`)
+	if _, err := collector.Collect(); err != nil {
+		t.Fatal(err)
+	}
+	if mentions(t, zone, outer, `"FakeListChatModel"`) || !mentions(t, zone, own, `"FakeListChatModel"`) {
+		t.Error("alone: the call took the function's thread in place of its own")
 	}
 }

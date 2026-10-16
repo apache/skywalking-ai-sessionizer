@@ -29,6 +29,24 @@
 
 ## LangChain and LangGraph
 
+- A run whose conversation cannot be told because what would say it is gone is not collected. It
+  landed under a name saying its identity was not supplied, which put one conversation's evidence
+  in another. Two cases do this, and each waits first, as a run waits for its ancestry:
+  - an update that names no conversation of its own, whose start was forgotten, after a day or
+    past 50,000 remembered runs, or never came;
+  - a run that names no thread under a run above it that is not known: one that never came, was
+    forgotten, or is known only from updates that named no conversation of its own. It used to
+    take a thread from further up past such a run in the last case, although that run's start may
+    have named another. An update that named its run's whole conversation still gives it to the
+    runs below.
+
+  A run remembered only from its updates no longer proves that it named no thread. A thread named
+  before its project is known no longer lands with an empty project. An update that carries its
+  conversation's whole key still lands with no start seen, as every captured update from the Python
+  client does, and a trace whose runs are all known and name no thread still lands unassigned. Each
+  pass that drops an arrival says how many, as `runs_not_collected`. The receiver's memory of runs
+  moves to version 2, which records whether a run's start was seen, so every run it remembered is
+  forgotten once.
 - Two records that could carry a system prompt unnamed are named. An unfinished model call whose
   client put the prompt among its parameters, in the `extra` that lands whole with the envelope, is
   named `system_prompt` by that shape, as its tools already were. A graph's first input whose
@@ -56,7 +74,7 @@
   no answer. A run that supplies its own key keeps it, and a trace that supplied none anywhere still
   lands unassigned. The conversation is decided once the run's ancestry has arrived, so the order
   runs arrive in does not change it. A run above that is not known stops the search, and the run
-  lands unassigned. A run's own key decides from the first of its arrivals that brings one before
+  waits for it, as the first entry here says. A run's own key decides from the first of its arrivals that brings one before
   the run lands, and once it has landed its later arrivals follow it, while the receiver remembers
   it. A thread an update names before the run's project is known does not decide while the run
   waits, and the run neither takes a thread from above in its place nor passes one below.
