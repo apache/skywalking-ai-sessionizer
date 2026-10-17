@@ -24,8 +24,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/kiro"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -340,5 +342,166 @@ func TestLateMetricsAreSaidByThePipelineAndByPush(t *testing.T) {
 	})
 	if !strings.Contains(out, line) {
 		t.Fatalf("asz push did not say it:\n%s", out)
+	}
+}
+
+// retiredRoot is a root whose growth conversation a pipeline collected and
+// parsed, then retired, with nothing left of it but its marker. Its source
+// is still there.
+func retiredRoot(t *testing.T) (string, string, *refresher) {
+	t.Helper()
+	root, b := scenarioRoot(t, "growth.yaml")
+	if err := os.RemoveAll(filepath.Join(root, storage.ScenarioDir)); err != nil {
+		t.Fatal(err)
+	}
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	stdoutOf(t, func() {
+		if err := ref.pass(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	zone := storage.NewZone(root)
+	if err := os.MkdirAll(filepath.Join(root, storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zone.RetiredPath(b.Session), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{zone.SessionDir(b.Session), filepath.Join(root, "_conversations", b.Session)} {
+		if err := storage.DeleteTree(dir, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root, b.Session, ref
+}
+
+// A pass says once a process that it found a retired session in its sources
+// and did not collect it, and the next pass does not say it again.
+func TestAPassSaysARetiredSessionOnce(t *testing.T) {
+	root, session, ref := retiredRoot(t)
+	line := "  retired: " + session + ": found and not collected"
+	var out string
+	stdoutOf(t, func() {
+		out = stderrOf(t, func() {
+			if err := ref.pass(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	if n := strings.Count(out, line); n != 1 {
+		t.Fatalf("the pass said it %d times, want once:\n%s", n, out)
+	}
+	stdoutOf(t, func() {
+		out = stderrOf(t, func() {
+			if err := ref.pass(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	if strings.Contains(out, line) {
+		t.Fatalf("the next pass said it again:\n%s", out)
+	}
+	if _, err := os.Stat(storage.NewZone(root).SessionDir(session)); !os.IsNotExist(err) {
+		t.Fatalf("the pass made the retired session's directory again: %v", err)
+	}
+}
+
+// asz verify says how many sessions are retired, asz sources names a source
+// session that is retired, and asz repack refuses a root that holds one,
+// whichever session it is asked for, before it makes anything.
+func TestCommandsSayWhatIsRetired(t *testing.T) {
+	root, session, _ := retiredRoot(t)
+	saved := positional
+	t.Cleanup(func() { positional = saved })
+	cfg := config.Default()
+	cfg.Storage.Root = root
+
+	positional = nil
+	out := stdoutOf(t, func() {
+		if err := cmdVerify(cfg, config.Adapter{}, false); err != nil {
+			t.Fatalf("verify: %v", err)
+		}
+	})
+	if !strings.Contains(out, "1 session(s) are retired: nothing of them is kept, and none is collected again") {
+		t.Errorf("verify does not say the session is retired:\n%s", out)
+	}
+
+	ad := config.Adapter{Name: config.AdapterClaudeCodeLocal, Enabled: true, SourceRoot: filepath.Join(root, "_source")}
+	out = stdoutOf(t, func() {
+		if err := cmdSources(cfg, ad, false); err != nil {
+			t.Fatalf("sources: %v", err)
+		}
+	})
+	if !strings.Contains(out, "1 session(s) are retired in "+root+" and are not collected again:\n  "+session) {
+		t.Errorf("sources does not name the retired session:\n%s", out)
+	}
+
+	for _, want := range []string{"", "another-session"} {
+		dest := filepath.Join(t.TempDir(), "dest")
+		positional = []string{dest}
+		if want != "" {
+			positional = append(positional, want)
+		}
+		var err error
+		stdoutOf(t, func() { err = cmdRepack(cfg, config.Adapter{}, false) })
+		if err == nil || !strings.Contains(err.Error(), "retired session") {
+			t.Errorf("a repack of a root holding a retired session, asked for %q, returned %v", want, err)
+		}
+		if pathExists(dest) {
+			t.Errorf("a refused repack, asked for %q, made its destination", want)
+		}
+	}
+}
+
+// Each adapter's asz sources names a session of its source that is retired.
+func TestEverySourcesListNamesARetiredSession(t *testing.T) {
+	saved := positional
+	t.Cleanup(func() { positional = saved })
+	kiroSource := filepath.Join("..", "..", "internal", "adapters", "kiro", "testdata")
+	kiroSessions, _, _, err := kiro.Discover(kiroSource)
+	if err != nil || len(kiroSessions) == 0 {
+		t.Fatalf("%v: no Kiro fixture to list", err)
+	}
+	for _, c := range []struct {
+		name     string
+		scenario string
+		adapter  func(root string) config.Adapter
+		session  func(b string) string
+	}{
+		{"changes", "all-kinds.yaml", func(root string) config.Adapter {
+			return config.Adapter{Name: config.AdapterChanges, Enabled: true, SourceRoot: filepath.Join(root, "_source", "plugins", "data")}
+		}, func(b string) string { return b }},
+		{"provider", "provider-bodies-long.yaml", func(root string) config.Adapter {
+			return config.Adapter{Name: config.AdapterClaudeCodeProvider, Enabled: true, SourceRoot: filepath.Join(root, "_source", scenario.ProviderBodyDir)}
+		}, func(b string) string { return b }},
+		{"kiro", "", func(string) config.Adapter {
+			return config.Adapter{Name: config.AdapterKiroLocal, Enabled: true, SourceRoot: kiroSource}
+		}, func(string) string { return kiroSessions[0].ID }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root, built := t.TempDir(), ""
+			if c.scenario != "" {
+				r, b := scenarioRoot(t, c.scenario)
+				root, built = r, b.Session
+			}
+			session := c.session(built)
+			zone := storage.NewZone(root)
+			if err := os.MkdirAll(filepath.Join(root, storage.RetiredDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(zone.RetiredPath(session), nil, 0o444); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Default()
+			cfg.Storage.Root = root
+			out := stdoutOf(t, func() {
+				if err := cmdSources(cfg, c.adapter(root), false); err != nil {
+					t.Fatalf("sources: %v", err)
+				}
+			})
+			if !strings.Contains(out, "are retired in "+root+" and are not collected again:\n  "+session) {
+				t.Errorf("sources does not name the retired session %s:\n%s", session, out)
+			}
+		})
 	}
 }

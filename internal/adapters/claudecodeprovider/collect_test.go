@@ -25,6 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -558,5 +559,161 @@ func TestAnIndexAheadOfItsStateIsBuiltAgain(t *testing.T) {
 	}
 	if len(seen) != 3 {
 		t.Fatalf("%d records indexed, want the 3 bodies landed", len(seen))
+	}
+}
+
+// retireAll marks a session retired and takes its directory away, as a
+// finished retirement leaves it.
+func (f *fixture) retireAll(session string) {
+	f.t.Helper()
+	if err := os.MkdirAll(filepath.Join(f.zone.Root(), storage.RetiredDir), 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(f.zone.RetiredPath(session), nil, 0o444); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := storage.DeleteTree(f.zone.SessionDir(session), nil); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// TestARetiredSessionsBodiesAreNotReadAgain. Claude Code never deletes a
+// body file, so a retired session's bodies stay in the source directory. A
+// pass marks their lines retired without reading them, every pass after it
+// passes them over the same way, and a new request naming the session is
+// retired too. None of them lands, and the session's directory is not made
+// again.
+func TestARetiredSessionsBodiesAreNotReadAgain(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("a file that cannot be read needs a user that is not root, and not Windows")
+	}
+	f := newFixture(t)
+	old := f.request(sessionA, "", 2)
+	f.pass(all)
+	f.retireAll(sessionA)
+	// Not to be read: a pass that read it would fail.
+	if err := os.Chmod(filepath.Join(f.src, old), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(f.src, old), 0o644) })
+	for pass := 0; pass < 2; pass++ {
+		st := f.pass(all)
+		if st.SourcesLanded != 0 || len(st.Retired) != 1 || st.Retired[0] != sessionA {
+			t.Fatalf("pass %d: landed %d, retired %v; want nothing landed and %s retired", pass, st.SourcesLanded, st.Retired, sessionA)
+		}
+	}
+	added := f.request(sessionA, "", 3)
+	if st := f.pass(all); st.SourcesLanded != 0 {
+		t.Fatalf("a new request of a retired session landed %d", st.SourcesLanded)
+	}
+	if _, err := os.Stat(f.zone.SessionDir(sessionA)); !os.IsNotExist(err) {
+		t.Fatalf("the retired session's directory was made again: %v", err)
+	}
+	seen, err := os.ReadFile(f.zone.ProviderStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{old, added} {
+		if !strings.Contains(string(seen), name+"\t") || !strings.Contains(lineOf(string(seen), name), "\tretired\t") {
+			t.Errorf("%s: its line is %q, want it retired", name, lineOf(string(seen), name))
+		}
+	}
+}
+
+func lineOf(table, name string) string {
+	for _, line := range strings.Split(table, "\n") {
+		if strings.HasPrefix(line, name+"\t") {
+			return line
+		}
+	}
+	return ""
+}
+
+// TestWhatIsLeftOfARetiredSessionIsNotWritten. A retirement that has not
+// finished leaves the session's directory, here with no index, which a pass
+// would build again for a session it lands into. It is not built. A response
+// that comes after the retirement, for a request the retired session's
+// request names, is known to be retired by that request, and does not wait.
+func TestWhatIsLeftOfARetiredSessionIsNotWritten(t *testing.T) {
+	f := newFixture(t)
+	f.request(sessionA, "req_9", 2)
+	f.pass(all)
+	if err := os.MkdirAll(filepath.Join(f.zone.Root(), storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.zone.RetiredPath(sessionA), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.DeleteTree(f.zone.IndexDir(sessionA), nil); err != nil {
+		t.Fatal(err)
+	}
+	f.pass(all)
+	if _, err := os.Stat(f.zone.IndexDir(sessionA)); !os.IsNotExist(err) {
+		t.Fatalf("the retired session's index was built again: %v", err)
+	}
+	resp := f.response("req_9", "msg_9")
+	if st := f.pass(all); st.SourcesLanded != 0 || st.Waiting != 0 {
+		t.Fatalf("the response landed %d and waits %d; want it retired", st.SourcesLanded, st.Waiting)
+	}
+	seen, err := os.ReadFile(f.zone.ProviderStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lineOf(string(seen), resp), "\tretired\t") {
+		t.Errorf("the response's line is %q, want it retired", lineOf(string(seen), resp))
+	}
+}
+
+// TestAMarkerThatCannotBeReadChangesNothing. While a session's marker cannot
+// be read, the session is not written, and nothing is recorded of it: its
+// landed body keeps its line, and a new body waits unrecorded. Once the
+// marker reads again, the new body lands, and the landed one still reports a
+// change to its bytes, as a live session's body does.
+func TestAMarkerThatCannotBeReadChangesNothing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a file where a directory should be reads as not there on Windows")
+	}
+	f := newFixture(t)
+	old := f.request(sessionA, "", 2)
+	f.pass(all)
+	before, err := os.ReadFile(f.zone.ProviderStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(f.zone.Root(), storage.RetiredDir)
+	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	added := f.request(sessionA, "", 3)
+	st, err := f.col.CollectAll(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Errors) == 0 || st.SourcesLanded != 0 {
+		t.Fatalf("errors %v, landed %d: a marker that cannot be read must be an error, and nothing land", st.Errors, st.SourcesLanded)
+	}
+	after, err := os.ReadFile(f.zone.ProviderStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("the table changed while the marker could not be read:\nbefore %s\nafter  %s", before, after)
+	}
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	if st := f.pass(all); st.SourcesLanded != 1 {
+		t.Fatalf("landed %d once the marker read again, want the new body", st.SourcesLanded)
+	}
+	if _, ok := f.landed(sessionA)[added]; !ok {
+		t.Fatal("the new body did not land")
+	}
+	f.write(old, []byte(`{"changed":true}`))
+	st, err = f.col.CollectAll(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Conflicts == 0 {
+		t.Fatal("a landed body changed after the marker could not be read is no longer reported")
 	}
 }

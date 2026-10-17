@@ -91,6 +91,9 @@ type Stats struct {
 	// interrupted after landing but before the index was written.
 	Reindexed int
 	Errors    []error
+	// Retired names the sessions discovery found that are retired. Their
+	// sources are not read, and nothing of them is written.
+	Retired []string
 	// Changed lists the sessions whose landed data or index moved this pass.
 	// A caller that assembles structure afterwards needs only these; parsing
 	// every session again measured 3.3 s on a 43-session corpus with nothing
@@ -128,6 +131,15 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 		// it again.
 		c.setChecked(s.ID, false)
 		if filter != nil && !filter(s) {
+			continue
+		}
+		// Before its lock, which would make its directory again.
+		if retired, err := storage.Retired(c.Zone, s.ID); err != nil || retired {
+			if err != nil {
+				st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+			} else {
+				st.Retired = append(st.Retired, s.ID)
+			}
 			continue
 		}
 		st.Sessions++

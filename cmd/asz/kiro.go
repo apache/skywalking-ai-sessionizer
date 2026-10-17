@@ -30,7 +30,7 @@ import (
 
 // cmdSourcesKiro lists the Kiro sessions the adapter can see, and what it
 // sees and does not collect.
-func cmdSourcesKiro(_ *config.Config, ad config.Adapter, _ bool) error {
+func cmdSourcesKiro(cfg *config.Config, ad config.Adapter, _ bool) error {
 	root, err := kiro.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err
@@ -76,7 +76,11 @@ func cmdSourcesKiro(_ *config.Config, ad config.Adapter, _ bool) error {
 		return err
 	}
 	fmt.Printf("\n%d V3 session(s)\n", len(sessions))
-	return nil
+	ids := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		ids = append(ids, s.ID)
+	}
+	return sayRetired(cfg, ids)
 }
 
 // notCollected says, one line each, what Kiro wrote that this adapter does

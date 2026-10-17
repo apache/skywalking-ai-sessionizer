@@ -69,6 +69,10 @@ type Collector struct {
 	Zone       *storage.Zone
 	MaxDelta   int64
 	Now        func() time.Time
+
+	// retired holds, for one pass, what the marker of each session asked
+	// about said.
+	retired map[string]retirement
 }
 
 // Stats summarises one collection pass. The fields the local adapter reports
@@ -92,6 +96,9 @@ type Stats struct {
 	// that names a session, is never claimed.
 	Waiting    int
 	Unreadable int
+	// Retired names the retired sessions bodies were found for. None of
+	// them lands.
+	Retired []string
 }
 
 // Complete reports whether the pass collected everything it could.
@@ -146,6 +153,7 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 		return nil, err
 	}
 	now := c.Now()
+	c.retired = map[string]retirement{}
 
 	// A line whose file is gone and whose session is gone describes nothing
 	// any more: a body pruned from the directory after its session was
@@ -178,6 +186,21 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 		st.SourcesSeen++
 		f := &file{name: it.Name(), path: filepath.Join(c.SourceRoot, it.Name()), size: info.Size(), mtime: info.ModTime().UnixNano()}
 		f.e = sn.entries[f.name]
+		// A body of a retired session is not read again, whatever became of
+		// its file: its session's directory is gone, so a landed line would
+		// otherwise land it again.
+		if f.e != nil && f.e.session != "" {
+			switch c.retiredOf(f.e.session, st) {
+			case retired:
+				if f.e.state != stateRetired {
+					f.e.state = stateRetired
+					sn.dirty = true
+				}
+				continue
+			case unknown:
+				continue
+			}
+		}
 		if f.e != nil && f.e.size == f.size && f.e.mtime == f.mtime {
 			switch f.e.state {
 			case stateLanded:
@@ -215,7 +238,7 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 			continue
 		}
 		checked[e.session] = true
-		if _, fresh := bySession[e.session]; !fresh && c.indexBehind(e.session) {
+		if _, fresh := bySession[e.session]; !fresh && c.retiredOf(e.session, st) == live && c.indexBehind(e.session) {
 			bySession[e.session] = nil
 		}
 	}
@@ -236,6 +259,40 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 		}
 	}
 	return st, nil
+}
+
+// retirement is what a session's retired marker says.
+type retirement int
+
+const (
+	live retirement = iota
+	retired
+	// unknown is a marker that could not be read. Nothing of the session
+	// is written that pass, and nothing is recorded of it either: taking it
+	// for retired would mark its bodies retired, and they would land no
+	// more once the marker reads again.
+	unknown
+)
+
+// retiredOf says whether a session is retired, asking its marker once a pass.
+func (c *Collector) retiredOf(session string, st *Stats) retirement {
+	if r, asked := c.retired[session]; asked {
+		return r
+	}
+	if c.retired == nil {
+		c.retired = map[string]retirement{}
+	}
+	r := live
+	switch is, err := storage.Retired(c.Zone, session); {
+	case err != nil:
+		st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", session, err))
+		r = unknown
+	case is:
+		st.Retired = append(st.Retired, session)
+		r = retired
+	}
+	c.retired[session] = r
+	return r
 }
 
 // indexBehind reports whether a session's index covers less than its landed
@@ -342,7 +399,9 @@ func (c *Collector) attribute(fresh []*file, sn *seen, filter Filter, st *Stats)
 	}
 	var requests []near
 	for _, e := range sn.entries {
-		if e.state == stateLanded && RoleOf(e.name) == providerbody.RoleRequest {
+		// A retired request still names its session for the response it
+		// was answered with, so the response is known to be retired too.
+		if (e.state == stateLanded || e.state == stateRetired) && RoleOf(e.name) == providerbody.RoleRequest {
 			addNamed(e.keys.PreviousRequest, e.session)
 			requests = append(requests, near{e.session, e.mtime})
 		}
@@ -401,6 +460,18 @@ func (c *Collector) attribute(fresh []*file, sn *seen, filter Filter, st *Stats)
 			}
 		}
 		state := stateWaiting
+		if session != "" {
+			switch c.retiredOf(session, st) {
+			case retired:
+				sn.entries[f.name] = &entry{name: f.name, size: f.size, mtime: f.mtime, sha: providerbody.Digest(f.body)[:12],
+					state: stateRetired, session: session, keys: f.keys}
+				sn.dirty = true
+				continue
+			case unknown:
+				// Left as it was, and read again next pass.
+				continue
+			}
+		}
 		if session != "" {
 			switch filter(session) {
 			case Collect:

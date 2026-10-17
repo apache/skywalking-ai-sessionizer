@@ -85,6 +85,9 @@ type Stats struct {
 	// Skipped is what discovery found and does not collect.
 	Skipped Skipped
 	Errors  []error
+	// Retired names the sessions found that are retired. Their files, the
+	// sub-executions included, are not read, and nothing of them is written.
+	Retired []string
 	// Changed lists the sessions whose landed data or index moved this pass.
 	Changed []string
 }
@@ -114,6 +117,16 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	st.Errors = append(st.Errors, warnings...)
 	for _, s := range sessions {
 		if filter != nil && !filter(s) {
+			continue
+		}
+		// Before its lock, which would make its directory again. A
+		// sub-execution carries its parent's id, so it goes with it.
+		if retired, err := storage.Retired(c.Zone, s.ID); err != nil || retired {
+			if err != nil {
+				st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+			} else {
+				st.Retired = append(st.Retired, s.ID)
+			}
 			continue
 		}
 		st.Sessions++

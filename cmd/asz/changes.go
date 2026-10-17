@@ -36,7 +36,7 @@ func changesMatch(ad config.Adapter) func(claudecodechanges.Session) bool {
 }
 
 // cmdSourcesChanges lists the sessions the changes adapter can see.
-func cmdSourcesChanges(_ *config.Config, ad config.Adapter, _ bool) error {
+func cmdSourcesChanges(cfg *config.Config, ad config.Adapter, _ bool) error {
 	root, err := claudecodechanges.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err
@@ -70,5 +70,9 @@ func cmdSourcesChanges(_ *config.Config, ad config.Adapter, _ bool) error {
 		return err
 	}
 	fmt.Printf("\n%d session(s) with change records\n", len(sessions))
-	return nil
+	ids := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		ids = append(ids, s.ID)
+	}
+	return sayRetired(cfg, ids)
 }

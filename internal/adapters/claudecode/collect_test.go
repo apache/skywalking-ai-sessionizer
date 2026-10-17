@@ -321,3 +321,53 @@ func TestSourceUnderNewInodeResumes(t *testing.T) {
 		t.Fatalf("third pass: landed=%d records=%d err=%v", st.SourcesLanded, st.Records, err)
 	}
 }
+
+// TestARetiredSessionIsNotCollectedOrMarked. A session that was retired
+// while what is left of it is still there grows in its source, as a resumed
+// session does, and is not collected. Its source then goes, and its cursor
+// is not moved to say so: nothing of a retired session is written.
+func TestARetiredSessionIsNotCollectedOrMarked(t *testing.T) {
+	src, root := t.TempDir(), t.TempDir()
+	zone := storage.NewZone(root)
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	mk(t, main, "{\"uuid\":\"m1\"}\n")
+	col := claudecode.New(src, zone, 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zone.RetiredPath(tSess), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	cursor := filepath.Join(root, tSess, "streams", "main", "transcript.cursor")
+	before, err := os.ReadFile(cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("{\"uuid\":\"m2\"}\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	st, err := claudecode.New(src, zone, 0).CollectAll(nil)
+	if err != nil || len(st.Errors) > 0 {
+		t.Fatalf("%v %v", err, st.Errors)
+	}
+	if st.SourcesLanded != 0 || len(st.Retired) != 1 || st.Retired[0] != tSess {
+		t.Fatalf("landed %d, retired %v; want nothing landed and %s retired", st.SourcesLanded, st.Retired, tSess)
+	}
+	if err := os.Remove(main); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claudecode.New(src, zone, 0).CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := os.ReadFile(cursor); err != nil || string(after) != string(before) {
+		t.Fatalf("the retired session's cursor changed: %v\nbefore %s\nafter  %s", err, before, after)
+	}
+}

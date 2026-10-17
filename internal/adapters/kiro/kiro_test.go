@@ -955,3 +955,40 @@ func TestImagesTooLargeToLandAreLeftOut(t *testing.T) {
 		t.Fatal("no step says too_large")
 	}
 }
+
+// TestARetiredSessionIsNotCollected. A Kiro session is retired and its
+// directory is gone, while its files, its sub-executions included, are still
+// in Kiro's. A pass lands nothing of it and does not make its directory
+// again. The other sessions are collected as before.
+func TestARetiredSessionIsNotCollected(t *testing.T) {
+	r := newRoot(t, fixtures)
+	st := r.collect()
+	id := ""
+	for _, s := range st.Changed {
+		if strings.HasPrefix(s, subagents) {
+			id = s
+		}
+	}
+	if id == "" {
+		t.Fatalf("the subagents fixture did not land: %v", st.Changed)
+	}
+	if err := storage.DeleteTree(r.zone.SessionDir(id), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(r.zone.Root(), storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(r.zone.RetiredPath(id), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	again := r.collect()
+	if len(again.Retired) != 1 || again.Retired[0] != id {
+		t.Fatalf("retired %v, want %s", again.Retired, id)
+	}
+	if _, err := os.Stat(r.zone.SessionDir(id)); !os.IsNotExist(err) {
+		t.Fatalf("the retired session's directory was made again: %v", err)
+	}
+	if again.Sessions != st.Sessions-1 {
+		t.Errorf("%d sessions collected, want the other %d", again.Sessions, st.Sessions-1)
+	}
+}
