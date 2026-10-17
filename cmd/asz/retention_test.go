@@ -25,7 +25,9 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
+	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -201,5 +203,142 @@ func TestShowAndVerifySayWhatWasRemoved(t *testing.T) {
 	})
 	if !strings.Contains(out, "were removed by retention and are not verified: the receiver accepted") {
 		t.Fatalf("verify does not report the removed files:\n%s", out)
+	}
+}
+
+// TestUnreadObservationsAreSaidBySession. What a deriver could not derive
+// is said once a session, in session order, and nothing when it is empty.
+func TestUnreadObservationsAreSaidBySession(t *testing.T) {
+	out := stderrOf(t, func() { sayUnread(map[string]int{"s-b": 2, "s-a": 1}) })
+	want := "  metrics: s-a: 1 execution observations lack retained details; their MCP metrics cannot be derived\n" +
+		"  metrics: s-b: 2 execution observations lack retained details; their MCP metrics cannot be derived\n"
+	if out != want {
+		t.Errorf("said %q, want %q", out, want)
+	}
+	if out := stderrOf(t, func() { sayUnread(nil) }); out != "" {
+		t.Errorf("said %q for nothing unread", out)
+	}
+}
+
+// unsentRemovedRoot is a root whose conversation a pipeline with no endpoint
+// collected and then kept only the metadata of. Nothing was sent, so no
+// metrics were derived either.
+func unsentRemovedRoot(t *testing.T, scenarioName string) (string, string) {
+	t.Helper()
+	root, b := scenarioRoot(t, scenarioName)
+	if err := os.RemoveAll(filepath.Join(root, storage.ScenarioDir)); err != nil {
+		t.Fatal(err)
+	}
+	zone := storage.NewZone(root)
+	ref, err := newRefresher(view.New(zone, nil), zone, bothAdapters(root, ""), pipelineMetrics(&config.Config{Metrics: allMetrics}), 2<<20, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ref.close)
+	ref.retain(time.Nanosecond)
+	stdoutOf(t, func() {
+		if err := ref.pass(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if sk, landed := skeletonsOf(t, root, b.Session); sk == 0 || landed != 0 {
+		t.Fatalf("a pipeline with no endpoint kept %d landed files and wrote %d skeletons", landed, sk)
+	}
+	return root, b.Session
+}
+
+// A pipeline with no endpoint keeps only the metadata of an idle
+// conversation it never sent. asz show says no receiver confirmed the file,
+// and asz verify counts it among the removed.
+func TestAPipelineWithNoEndpointKeepsOnlyMetadata(t *testing.T) {
+	root, session := unsentRemovedRoot(t, "growth.yaml")
+	saved := positional
+	t.Cleanup(func() { positional = saved })
+	cfg := config.Default()
+	cfg.Storage.Root = root
+	files, err := storage.LandedFiles(storage.NewZone(root), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := sessiondata.Open(files[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, recs, err := sessiondata.All(f)
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := ""
+	for _, r := range recs {
+		if r.ID != "" {
+			id = r.ID
+			break
+		}
+	}
+	positional = []string{session, id}
+	out := stdoutOf(t, func() {
+		if err := cmdShow(cfg, config.Adapter{}, false); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "no receiver confirmed the file") {
+		t.Errorf("show output does not say no receiver confirmed the file:\n%s", out)
+	}
+	positional = nil
+	out = stdoutOf(t, func() {
+		if err := cmdVerify(cfg, config.Adapter{}, false); err != nil {
+			t.Fatalf("verify over a root with nothing sent: %v", err)
+		}
+	})
+	if !strings.Contains(out, "accepted 0, accepted 0 with rejected records, and confirmed nothing of") {
+		t.Fatalf("verify does not report the removed files as confirmed by no receiver:\n%s", out)
+	}
+}
+
+// Metrics turned on after a conversation kept only its metadata: the first
+// pass of a pipeline says how many of its execution observations their
+// metrics cannot be derived for, and the pass after it does not. asz push,
+// a process of its own, says it again.
+func TestLateMetricsAreSaidByThePipelineAndByPush(t *testing.T) {
+	root, session := unsentRemovedRoot(t, "mcp-calls.yaml")
+	line := "  metrics: " + session + ": "
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	var out string
+	stdoutOf(t, func() {
+		out = stderrOf(t, func() {
+			if err := ref.pass(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	if !strings.Contains(out, line) || !strings.Contains(out, " execution observations lack retained details; their MCP metrics cannot be derived") {
+		t.Fatalf("the first pass with metrics on said:\n%s", out)
+	}
+	stdoutOf(t, func() {
+		out = stderrOf(t, func() {
+			if err := ref.pass(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	if strings.Contains(out, line) {
+		t.Fatalf("the next pass said it again:\n%s", out)
+	}
+
+	rcv := receiver(t)
+	cfg := &config.Config{Metrics: allMetrics}
+	cfg.Storage.Root = root
+	o := rcv.Options(otlp.ProtocolGRPC)
+	cfg.Export.OTLP.Protocol, cfg.Export.OTLP.Endpoint, cfg.Export.OTLP.ServiceName = o.Protocol, o.Endpoint, "Push Test"
+	stdoutOf(t, func() {
+		out = stderrOf(t, func() {
+			if err := cmdPush(cfg, config.Adapter{}, false); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	if !strings.Contains(out, line) {
+		t.Fatalf("asz push did not say it:\n%s", out)
 	}
 }

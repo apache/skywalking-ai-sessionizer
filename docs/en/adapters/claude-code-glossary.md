@@ -92,7 +92,7 @@ than a plausible word that would send a reader looking for a field that does not
 | `in_segment` | the activity window a Talk falls in |
 | `input_of` | unavailable; the serialized provider request is not written locally |
 | `omitted` | deliberately not carried |
-| `removed` | no equivalent: asz removes the payloads of a conversation idle longer than storage.retention from its own root; Claude Code keeps its transcript as before |
+| `removed` | no equivalent: asz removes the payloads of a conversation idle longer than storage.retention.metadata_only_after from its own root; Claude Code keeps its transcript as before |
 | `retries` | unavailable; retry identity is not recorded |
 | `segment` | an activity window |
 | `size_only` | only the length was kept |

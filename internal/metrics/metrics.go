@@ -174,6 +174,10 @@ type Stats struct {
 	// continuation or could not be derived. A watching pipeline must carry
 	// them even when only other sessions land new records.
 	PendingSessions []string
+	// Unread counts, by session, the execution observations kept in its
+	// skeletons that no pass counted. A process says a session once, in the
+	// first pass whose state it saved.
+	Unread map[string]int
 }
 
 // Deriver derives from the landed files of a root that no earlier pass
@@ -188,6 +192,9 @@ type Stats struct {
 type Deriver struct {
 	Zone *storage.Zone
 	Options
+	// reported names the sessions this process has said Unread for, in a
+	// pass whose state was saved.
+	reported map[string]bool
 }
 
 // Pass derives what is new in the sessions named, or in every session when
@@ -226,6 +233,7 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			return nil, err
 		}
 	}
+	var scanned []string
 	for _, session := range sessions {
 		// A session the first pass did not finish keeps that pass's look-back
 		// until it is finished. It is kept per session, not per file: a file
@@ -308,6 +316,25 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 			state.Derived[rel] = receipt.Digest
 			st.Files++
 		}
+		if !d.reported[session] {
+			// A file that cannot be read now may be readable later, so the
+			// session is kept for another pass, as a file that could not
+			// be derived is.
+			n, err := unread(files, ss)
+			switch {
+			case err != nil:
+				st.Errors = append(st.Errors, err)
+				pending = true
+			case n > 0:
+				if st.Unread == nil {
+					st.Unread = map[string]int{}
+				}
+				st.Unread[session] = n
+				scanned = append(scanned, session)
+			default:
+				scanned = append(scanned, session)
+			}
+		}
 		if pending {
 			st.PendingSessions = append(st.PendingSessions, session)
 		} else {
@@ -316,6 +343,14 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 	}
 	if err := state.save(filepath.Join(spool.Dir(), StateFile), d.Now()); err != nil {
 		return nil, err
+	}
+	// Only now: a pass whose state was not saved returns nothing, so what it
+	// counted was never said, and the next pass counts it again.
+	if d.reported == nil {
+		d.reported = map[string]bool{}
+	}
+	for _, session := range scanned {
+		d.reported[session] = true
 	}
 	return st, nil
 }

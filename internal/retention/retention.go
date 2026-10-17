@@ -15,9 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package retention removes the landed files of conversations that have been
-// idle for longer than storage.retention, and leaves a skeleton in the place
-// of each. A skeleton keeps every field the index is built from, so the
+// Package retention keeps only the metadata of conversations that have been
+// idle for longer than storage.retention.metadata_only_after: it removes their
+// landed files, and leaves a skeleton in the place of each. A skeleton keeps every field the index is built from, so the
 // conversation's index, and so its chain, go on as if nothing was removed.
 //
 // It is collector side: it reads the round chain by its format alone, as the
@@ -52,10 +52,11 @@ import (
 // Remover removes idle conversations' landed files from one storage root.
 type Remover struct {
 	Zone *storage.Zone
-	// Retention is how long a conversation must be idle before its landed
-	// files are removed. Zero removes nothing, though Recover still finishes
-	// a removal an earlier pass left in progress.
-	Retention time.Duration
+	// MetadataOnlyAfter is how long a conversation must be idle before its
+	// landed files are removed, whether it was sent or not. Zero removes
+	// nothing, though Recover still finishes a removal an earlier pass left in
+	// progress.
+	MetadataOnlyAfter time.Duration
 	// Metrics says the pipeline derives metrics, so every file's derivation
 	// must be committed before the file is removed: a removed file keeps no
 	// execution record to derive from.
@@ -170,7 +171,7 @@ func (r *Remover) Recover() Result {
 // what metrics derived from a removed file once the receiver has it.
 func (r *Remover) Pass(in Input) Result {
 	var res Result
-	if r.Retention <= 0 {
+	if r.MetadataOnlyAfter <= 0 {
 		return res
 	}
 	sessions, err := sessionDirs(r.Zone.Root())
@@ -185,16 +186,14 @@ func (r *Remover) Pass(in Input) Result {
 			return
 		}
 		for _, id := range sessions {
-			// A session never sent is passed over before its locks are
-			// taken; removable asks again under them.
-			if in.Busy[id] || sent.Owner(id) == "" {
+			if in.Busy[id] {
 				continue
 			}
 			n, err := r.locked(id, func() (int, error) {
 				if err := r.tidy(id, sent, requests); err != nil {
 					return 0, err
 				}
-				why, err := r.removable(id, sent)
+				why, err := r.removable(id)
 				if err != nil || why != "" {
 					return 0, err
 				}
@@ -268,14 +267,11 @@ func (r *Remover) locked(id string, fn func() (int, error)) (int, error) {
 //
 // A session goes once every file of it is parsed, its metrics are derived
 // when the pipeline derives them, and nothing new has landed for the whole
-// retention. Sending is not waited for: a receiver that is down longer than
-// the retention misses the files removed meanwhile, and asz does not repair
-// that. A session never sent is kept until a later change covers it: its
-// removal would start it again from its sources.
-func (r *Remover) removable(id string, sent *otlp.Sent) (string, error) {
-	if sent.Owner(id) == "" {
-		return "never sent", nil
-	}
+// retention. Sending is neither waited for nor needed: a receiver that is down
+// longer than the retention misses the files removed meanwhile, a session
+// never sent loses its content everywhere, and asz repairs neither. Its
+// skeletons keep its structure, so new activity continues it either way.
+func (r *Remover) removable(id string) (string, error) {
 	files, err := storage.LandedFiles(r.Zone, id)
 	if err != nil {
 		return "", err
@@ -297,7 +293,7 @@ func (r *Remover) removable(id string, sent *otlp.Sent) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if r.now().Sub(at) < r.Retention {
+	if r.now().Sub(at) < r.MetadataOnlyAfter {
 		return "active", nil
 	}
 	through, ok, err := chainThrough(r.Zone.Root(), id)

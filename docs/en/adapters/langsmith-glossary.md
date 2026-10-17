@@ -88,7 +88,7 @@ not there.
 | `notification` | — | derived here | no equivalent |
 | `omitted` | — | derived here | a graph's own run: its repeated message list is not landed |
 | `redacted` | — | derived here | no equivalent: nothing on the wire says it redacted anything |
-| `removed` | — | derived here | no equivalent: asz removes the payloads of a conversation idle longer than storage.retention from its own root |
+| `removed` | — | derived here | no equivalent: asz removes the payloads of a conversation idle longer than storage.retention.metadata_only_after from its own root |
 | `reports` | — | derived here | derived |
 | `retries` | — | derived here | no equivalent yet: the client does not say a run retried another |
 | `runtime.notification` | — | derived here | no equivalent |

@@ -143,8 +143,8 @@ step.
 
 The pipeline removes only over the storage root the build wrote, `DIR` itself, where the build
 creates `_scenario/`. The `DIR/asz.yaml` the build writes sets `storage.root` to `DIR`. A pipeline
-with another `storage.root` lands and sends the sessions but never removes them, and prints no line
-about it.
+with another `storage.root` lands and sends the sessions but never removes them whole, and prints
+no line about it.
 
 A duration counts from the session's last record, never from when it landed, so the same landed
 data always gives the same answer. A feed stamps each session so its last record falls when it was
@@ -152,10 +152,12 @@ written, so a feed's session stays about that long after it was written. A one-s
 old `--at` is already past its duration, and goes as soon as it is sent. `d` counts whole days, as
 `metrics.lookback` does. One run applies one policy to every session it writes.
 
-The policy belongs to the scenario, never to the product. The configuration has no removal
-setting, and a session no build marked, which is every real Claude Code session, is never removed.
-An sd build writes no source and no marker, so its sessions are never removed, and `--remove` with
-`--format sd` is refused.
+The policy belongs to the scenario, never to the product. The configuration has no setting that
+removes a session whole, and a session no build marked, which is every real Claude Code session, is
+never removed whole. An sd build writes no source and no marker, so its sessions are never removed
+whole, and `--remove` with `--format sd` is refused. `storage.retention`, a separate setting, keeps
+only the metadata of an idle conversation in an unmarked root, an sd build's included. It never
+runs over a root with `_scenario/`, which keeps its own removal.
 
 Nothing is removed that the pipeline cannot prove sent. Each of these keeps every marked session,
 and the pass says why once, on standard error, as `kept: every marked session: <reason>`:

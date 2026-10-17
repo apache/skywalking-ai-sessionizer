@@ -69,7 +69,7 @@ internal/view/conversation-view/ Horizon's conversation renderer, built from the
 internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file, and the metrics spool
 internal/metrics/               derives the runtime's token metric from landed Session Data into the spool; collector side; testdata holds a redacted capture of the runtime's exporter
 internal/repack/                re-cuts landed files into a new root under another budget
-internal/retention/             removes idle sent conversations' landed files, a skeleton in each one's place (collector side)
+internal/retention/             keeps only idle conversations' metadata: removes landed files, a skeleton in each one's place (collector side)
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/claudecodeprovider/ the claude-code-provider adapter: the request and response bodies Claude Code writes, landed into their sessions
 internal/adapters/kiro/         the kiro-local adapter: the sessions Kiro's V3 engine writes, for kiro-cli and Kiro Crew
@@ -183,9 +183,9 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **asz never removes a real session whole.** Only a session a scenario build marked is removed
   whole, by the policy in its marker, and only once all of it was sent to the one receiver the
   pipeline sends to. A removal renames each directory away before it deletes it, so no reader sees
-  half a session. `storage.retention`, off by default, removes the landed files of an idle sent
-  conversation and keeps its structure: a skeleton in each file's place, and the index, cursors,
-  state and chain untouched. It never runs over a scenario root.
+  half a session. `storage.retention.metadata_only_after`, off by default, removes the landed
+  files of an idle conversation, sent or not, and keeps its structure: a skeleton in each file's
+  place, and the index, cursors, state and chain untouched. It never runs over a scenario root.
 - **A landed file is cut once.** A round addresses records by `{seq, row}` and binds to file
   digests, so a referenced file is never re-cut. A new budget applies to new files; an existing
   root is brought under it with `asz repack` into a new root, where the chains are built again.

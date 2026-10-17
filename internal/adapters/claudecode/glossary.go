@@ -132,7 +132,7 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.ContentSizeOnly, Note: "only the length was kept"},
 	model.Term{Unified: model.ContentTruncated, Note: "part of the bytes, with the full length reported"},
 	model.Term{Unified: model.ContentTooLarge, Note: "no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget, such as a pasted screenshot"},
-	model.Term{Unified: model.ContentRemoved, Note: "no equivalent: asz removes the payloads of a conversation idle longer than storage.retention from its own root; Claude Code keeps its transcript as before"},
+	model.Term{Unified: model.ContentRemoved, Note: "no equivalent: asz removes the payloads of a conversation idle longer than storage.retention.metadata_only_after from its own root; Claude Code keeps its transcript as before"},
 	model.Term{Unified: model.ContentUnavailable, Note: "the runtime never wrote it, or the source was pruned"},
 
 	model.Term{Unified: model.TriggerExternal, Native: "origin.kind == \"human\"", Where: "record",

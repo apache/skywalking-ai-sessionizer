@@ -588,7 +588,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	}
 
 	if n := removed[sessiondata.ReceiverAccepted] + removed[sessiondata.ReceiverRejected] + removed[sessiondata.ReceiverUnconfirmed]; n > 0 {
-		// Removed on purpose, by storage.retention. A skeleton keeps every
+		// Removed on purpose, by retention. A skeleton keeps every
 		// record's place and the file's digest, so the checks go on through
 		// it, but the content is gone and is not verified here.
 		fmt.Printf("%d file(s) were removed by retention and are not verified: the receiver accepted %d, accepted %d with rejected records, and confirmed nothing of %d\n",
@@ -820,7 +820,7 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	defer closeClient()
 	ref.pusher = pusher
-	keep, err := cfg.Storage.RetentionDuration()
+	keep, err := cfg.Storage.Retention.MetadataOnlyAfterDuration()
 	if err != nil {
 		return err
 	}

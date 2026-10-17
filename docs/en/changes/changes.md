@@ -283,13 +283,21 @@
 
 ## Retention
 
-- A storage root no longer only grows. `storage.retention`, `-1` and off by default, removes the
-  landed files of a conversation that was sent and has had nothing new land for that long, such as
-  `72h` or `30d`. On one root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of
-  them, measured on 2026-10-13. `asz collect` and `asz server` remove at
-  the end of a pass, after the send, the whole conversation's files at once, and only once its head
-  round covers them and, with metrics derived, every file of it is derived. A conversation never
-  sent is kept. See [Retention](../formats/storage-root.md#retention).
+- A storage root no longer only grows. `storage.retention.metadata_only_after`, `-1` and off by
+  default, keeps only the metadata of a conversation that has had nothing new land for that long,
+  such as `72h` or `30d`, to save disk: it removes the landed files, and a skeleton of each keeps
+  who did what, when, in what order and at what cost. It applies whether the conversation was sent
+  or not, and whether an endpoint is set or not; the content of one never sent is then gone
+  everywhere. On one root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of them,
+  measured on 2026-10-13. `asz collect` and `asz server` remove at the end of a pass, after the
+  send, the whole conversation's files at once, and only once its head round covers them and, with
+  metrics derived, every file of it is derived. See [Retention](../formats/storage-root.md#retention).
+- Metrics turned on after a conversation kept only its metadata count its tokens from the
+  skeletons, which keep no execution record's protocol or server, so no MCP call is derived from
+  them. The first pass of a process that saves its state says, for each session, how many distinct
+  execution observations its skeletons keep that no pass counted, as `metrics: <session>: <n>
+  execution observations lack retained details`. The count does not say how many were MCP calls, or
+  why one was not counted. Only execution files are read for it.
 - A provider body landed after a removal is cut exactly as with nothing removed. The cutter holds
   each removed body by its skeleton, and the session's store, under `provider/`, keeps the bytes of
   every chain tip at a removal and of each removed piece a later body cites, so the same pieces are

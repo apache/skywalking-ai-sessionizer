@@ -418,27 +418,32 @@ The store had also outlived its source: it held 48 sessions where the source dir
 
 ### storage.retention
 
-`storage.retention` removes the landed files of a conversation that has been idle for longer than
-it, by asz's clock: nothing new has landed in any of its streams since. It is `-1` by default, which
-keeps everything. A pipeline, `asz collect` or `asz server`, removes at the end of a pass, after the
-send. A session's files go together, every landed file of it through its newest, never some of
-them. A session keeps them while any of these holds:
+`storage.retention` says how long an idle conversation keeps what in the root. A conversation is
+idle for as long as nothing new has landed in any of its streams, by asz's clock: the time is read
+from the header of its newest landed file. Whether it was sent, and whether an endpoint is set, does
+not change that. Each setting is `-1`, off, by default, and only off keeps everything.
 
-- Nothing of it was ever sent, or tried to be: `push.state` names no owner for it.
+`storage.retention.metadata_only_after` keeps only the metadata of a conversation idle for longer
+than it, to save disk: it removes the landed files and keeps a skeleton of each. A pipeline, `asz
+collect` or `asz server`, removes at the end of a pass, after the send. A session's files go
+together, every landed file of it through its newest, never some of them. A session keeps them
+while any of these holds:
+
 - Something landed for it within the retention.
 - Its head round does not reach its newest landed file, or its parse failed this pass.
 - With metrics derived, a landed file of it is not derived yet.
 
-Sending is not waited for. A receiver that is down for longer than the retention misses the files
-removed meanwhile, and asz does not send them again. A scenario root keeps its own removal, below,
-and retention never runs over it.
+Sending is neither waited for nor needed. A receiver that is down for longer than the retention
+misses the files removed meanwhile, and asz does not send them again. The content of a conversation
+never sent is gone everywhere once its files are removed, and its skeletons say that no receiver
+confirmed them. A scenario root keeps its own removal, below, and retention never runs over it.
 
 Each removed file is replaced by its skeleton, `<name>.sk` in the same directory, written once and
 read-only. A [skeleton](session-data.md#skeletons) keeps every record and every part in its place,
 with every field the index is built from, and none of the content: text, data and media go. The
 index rebuilt from a skeleton is the index rebuilt from its file, so a conversation that becomes
 active again continues the same chain, with the same rounds, as if nothing was removed. Its text
-is kept only by the receiver it was sent to. A skeleton is never sent. Measured on 2026-10-13 on
+is kept only by a receiver that accepted it. A skeleton is never sent. Measured on 2026-10-13 on
 one machine's root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of them: 3.5%
 for transcripts, under 5% for workflow files, and 77% for child agents' sidecars, which are mostly
 identifiers. Its 16 provider body files of 133 KB had skeletons of 13.6 KB, 10% of them, 0.7 KB of
@@ -561,10 +566,12 @@ with a `no rounds` error, and so does the request for the document behind the pa
 
 ### A scenario root
 
-asz removes a collected session on its own in one case only: a session a `claude-code` scenario
-build wrote. [Scenarios](../guides/scenario.md#removal-a-session-goes-once-it-is-sent) describes
-the policy. A real Claude Code session is never removed. Only the build writes the marker a removal
-needs, and the product configuration has no removal setting.
+asz removes a collected session whole on its own in one case only: a session a `claude-code`
+scenario build wrote. [Scenarios](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
+describes the policy. A real session is never removed whole. Only the build writes the marker a
+whole removal needs. [Retention](#retention), when it is set, removes the landed content of an idle
+conversation, and keeps its structure, in any root but one with `_scenario/`: an sd build's
+included.
 
 The build writes one marker for each session, `DIR/_source/.asz-scenario/<session-id>.json`, and a
 pipeline reads it under the `source_root` of `claude-code-local`. The build writes it after every
