@@ -31,6 +31,9 @@ import (
 // cmdSourcesKiro lists the Kiro sessions the adapter can see, and what it
 // sees and does not collect.
 func cmdSourcesKiro(cfg *config.Config, ad config.Adapter, _ bool) error {
+	if err := printSourceRetention(cfg, ad); err != nil {
+		return err
+	}
 	root, err := kiro.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err

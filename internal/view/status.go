@@ -42,6 +42,8 @@ type Status struct {
 	Refreshing  bool  `json:"refreshing"`
 	// LastError is empty when the last pass was clean.
 	LastError string `json:"last_error,omitempty"`
+	// RetentionWarning stays visible after a pass succeeds.
+	RetentionWarning string `json:"retention_warning,omitempty"`
 	// Counts from the last completed pass.
 	Landed  int   `json:"landed"`
 	Records int   `json:"records"`

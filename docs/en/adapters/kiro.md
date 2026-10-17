@@ -38,6 +38,7 @@ not read : kiro-local: 24 session(s) of kiro-cli's V2 engine under sessions/cli;
 Kiro keeps a session until a person or Kiro Crew deletes it. A session retired by
 `storage.retention.retire_after` is never collected again, its sub-executions included, even when
 Kiro resumes it. See [Retirement](../formats/storage-root.md#retirement).
+asz warns whenever `kiro-local` is enabled and `retire_after` is set because Kiro keeps a session until it is deleted.
 
 ## What is read
 

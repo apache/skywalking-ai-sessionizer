@@ -294,6 +294,9 @@ func cmdSources(cfg *config.Config, ad config.Adapter, once bool) error {
 	if ad.Name == config.AdapterKiroLocal {
 		return cmdSourcesKiro(cfg, ad, once)
 	}
+	if err := printSourceRetention(cfg, ad); err != nil {
+		return err
+	}
 	root, err := claudecode.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err

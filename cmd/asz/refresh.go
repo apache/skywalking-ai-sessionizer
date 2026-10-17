@@ -90,6 +90,14 @@ func sameDir(a, b string) bool {
 // next; with none, asz collect prints the same numbers and nothing else
 // changes. The page itself never writes.
 type refresher struct {
+	// adapters are the sources the pipeline was built for, which the
+	// retention warning compares retire_after with.
+	adapters []config.Adapter
+	// retentionWarnings are said at startup, once in the pass log, and on
+	// every status the page shows, so a person who sees only one of them
+	// still learns that a resumed session may not be collected.
+	retentionWarnings     []string
+	saidRetentionWarnings bool
 	// saidRetired names the retired sessions this process has said it found
 	// evidence of, so each is said once.
 	saidRetired map[string]bool
@@ -197,7 +205,7 @@ type refresher struct {
 // appears later has to be picked up without a restart; every pass looks
 // again.
 func newRefresher(srv *view.Server, zone *storage.Zone, ads []config.Adapter, mc config.Metrics, maxRound int64, once bool) (*refresher, error) {
-	r := &refresher{srv: srv, zone: zone, maxRound: maxRound, full: true, retry: map[string]bool{}, unparsed: map[string]bool{}}
+	r := &refresher{srv: srv, zone: zone, adapters: ads, maxRound: maxRound, full: true, retry: map[string]bool{}, unparsed: map[string]bool{}}
 
 	// One pipeline serves every adapter, so it needs one mode and one
 	// period, and both have to be settled before anything is built: the
@@ -443,6 +451,8 @@ func present(dir string, optional bool) (bool, error) {
 // still finished.
 func (r *refresher) retain(metadataOnly, retire time.Duration) {
 	r.retention = &retention.Remover{Zone: r.zone, MetadataOnlyAfter: metadataOnly, RetireAfter: retire, Metrics: r.deriver != nil}
+	r.retentionWarnings = retentionWarnings(r.adapters, retire)
+	r.setStatus(r.base)
 }
 
 // forget drops what the page cached of sessions whose files were removed,
@@ -503,8 +513,13 @@ func (r *refresher) holdRoot() (*storage.SessionLock, error) {
 // than leave a backfill half done without saying so. A watching pass logs
 // the same and goes round again.
 func (r *refresher) pass() error {
-	// Before anything else. Over a scenario root, a pass that cannot hold
-	// the root lands, parses and sends nothing.
+	if !r.saidRetentionWarnings {
+		for _, line := range r.retentionWarnings {
+			fmt.Fprintf(os.Stderr, "  warning: %s\n", line)
+		}
+		r.saidRetentionWarnings = true
+	}
+	// A pass that cannot hold a scenario root lands, parses and sends nothing.
 	if held, err := r.holdScenario(); !held {
 		return err
 	}
@@ -937,6 +952,7 @@ func (r *refresher) pass() error {
 // setStatus records the pass for the page, when there is one.
 func (r *refresher) setStatus(st view.Status) {
 	if r.srv != nil {
+		st.RetentionWarning = strings.Join(r.retentionWarnings, "\n")
 		r.srv.SetStatus(st)
 	}
 }

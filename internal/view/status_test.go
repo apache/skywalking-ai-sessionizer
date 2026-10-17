@@ -61,6 +61,7 @@ func TestStatusRoundTrips(t *testing.T) {
 		Mode: "watch", Adapter: "claude-code-local", Source: "/src",
 		IntervalMS: 5000, LastRefresh: 1000, NextRefresh: 6000,
 		Landed: 2, Records: 7, Rounds: 1, TookMS: 42, LastError: "x: y",
+		RetentionWarning: "An inspected value.\nEffective retention was not determined.",
 	}
 	s.SetStatus(want)
 	if got := getStatus(t, s); got != want {

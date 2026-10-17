@@ -271,8 +271,10 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 			fmt.Printf("retention: a conversation idle for %s is retired: everything of it is removed, and it is never collected again, even when its runtime resumes it\n", rt.RetireAfter)
 		}
 	}
-	// A root a claude-code scenario build wrote. Only there does a pipeline
-	// remove a session whole, and only one a build marked.
+	for _, line := range ref.retentionWarnings {
+		fmt.Printf("warning  : %s\n", line)
+	}
+	// A scenario root keeps the removal policy its build chose.
 	if fi, err := os.Stat(filepath.Join(ref.zone.Root(), storage.ScenarioDir)); err == nil && fi.IsDir() {
 		fmt.Printf("scenario : %s\n", ref.removalSays())
 	}

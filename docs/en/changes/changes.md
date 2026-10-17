@@ -372,6 +372,12 @@
   but still sends its waiting metrics requests, and `asz repack`, an sd scenario build and the
   scenario runner refuse it. The pass log says once a process that a retired session's source was
   found and not collected, `asz sources` names it, and `asz verify` counts the retired sessions.
+- With `retire_after` set, asz reports what it could inspect in Claude Code's settings.
+  It says that effective retention was not determined. It names invalid or unreadable settings
+  and assumes no value for them. It warns when retirement is shorter than the inspected value or the reported
+  default of 30 days. Kiro always warns when retirement is set. These lines appear at startup,
+  in `asz sources`, in the list page's status, and on standard error in the first pass only.
+  See [Retirement](../formats/storage-root.md#retirement) for the inspection's limits.
 
 ## Configuration
 

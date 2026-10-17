@@ -267,11 +267,13 @@ function poll() {
       el.hidden = true;
     } else {
       el.hidden = false;
-      el.title = `${s.adapter} · ${s.source}` + (s.last_error ? `\n${s.last_error}` : "");
+      el.title = `${s.adapter} · ${s.source}` + (s.last_error ? `\n${s.last_error}` : "")
+        + (s.retention_warning ? `\n${s.retention_warning}` : "");
       el.innerHTML = (s.refreshing ? `<i class="dot busy"></i><span>refreshing…</span>` : `<i class="dot"></i>`)
         + `<span>last refresh <strong>${clock(s.last_refresh)}</strong></span>`
         + (s.next_refresh ? `<span>next <strong>${clock(s.next_refresh)}</strong></span>` : "")
-        + (s.last_error ? `<span class="warn">last pass had errors</span>` : "");
+        + (s.last_error ? `<span class="warn">last pass had errors</span>` : "")
+        + (s.retention_warning ? `<span class="warn">retention warning</span>` : "");
     }
     if (seenRefresh >= 0 && s.last_refresh !== seenRefresh) load();
     seenRefresh = s.last_refresh;
