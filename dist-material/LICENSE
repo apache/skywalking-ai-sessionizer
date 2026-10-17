@@ -188,9 +188,9 @@ BSD-3-Clause licenses
 ========================================================================
 
     github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 BSD-3-Clause
-    golang.org/x/net v0.58.0 BSD-3-Clause
-    golang.org/x/sys v0.47.0 BSD-3-Clause
-    golang.org/x/text v0.41.0 BSD-3-Clause
+    golang.org/x/net v0.60.0 BSD-3-Clause
+    golang.org/x/sys v0.48.0 BSD-3-Clause
+    golang.org/x/text v0.42.0 BSD-3-Clause
     google.golang.org/protobuf v1.36.12 BSD-3-Clause
 
 ========================================================================
