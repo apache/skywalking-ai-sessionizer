@@ -296,9 +296,12 @@ func checkFormat(sc *scenario.Scenario, ex *expect.File, f scenario.Format, out 
 			// Two parses of identical landed evidence must produce identical
 			// rounds. The chain in out was cut at checkpoints, so it is not
 			// the comparison; two fresh copies of the landed files are.
-			a, b := out+"-twin-a", out+"-twin-b"
-			defer os.RemoveAll(a)
-			defer os.RemoveAll(b)
+			twins, err := os.MkdirTemp(filepath.Dir(out), filepath.Base(out)+"-twins-")
+			if err != nil {
+				return nil, err
+			}
+			defer os.RemoveAll(twins)
+			a, b := filepath.Join(twins, "a"), filepath.Join(twins, "b")
 			for _, twin := range []string{a, b} {
 				if err := copyLanded(out, twin); err != nil {
 					return nil, err
@@ -559,7 +562,20 @@ func parseAll(root, session string, maxRound int64) (*parse.Round, error) {
 
 // copyLanded copies a session's landed files, and nothing else: no index, no
 // state, no chain. What a bundle would carry.
+//
+// A root that holds a retired session is refused, as repack refuses it: the
+// copy would carry what is left of it into a root without its marker. The
+// destination must not be there yet, so the copy never adds a session to a
+// root whose marker says it is retired.
 func copyLanded(from, to string) error {
+	if retired, err := storage.RetiredSessions(storage.NewZone(from)); err != nil {
+		return err
+	} else if len(retired) > 0 {
+		return fmt.Errorf("%s holds %d retired session(s), and a copy of it would collect them again", from, len(retired))
+	}
+	if err := os.Mkdir(to, 0o755); err != nil {
+		return fmt.Errorf("a copy goes to a new directory: %w", err)
+	}
 	return filepath.WalkDir(from, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

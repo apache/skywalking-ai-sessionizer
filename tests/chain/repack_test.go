@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 
@@ -88,5 +89,45 @@ func TestRepackRefusesAnOrphanDestinationChain(t *testing.T) {
 	data, err := os.ReadFile(sentinel)
 	if err != nil || string(data) != "original" {
 		t.Fatalf("chain changed: %q, %v", data, err)
+	}
+}
+
+// TestRepackRefusesARetiredSession. repack.Session, called directly as the
+// scenario runner calls it, refuses a source that holds a retired session,
+// whichever it is asked for, and a destination where the session is retired,
+// and a source whose markers cannot be read. Each refusal makes nothing.
+func TestRepackRefusesARetiredSession(t *testing.T) {
+	mark := func(z *storage.Zone, session string) {
+		if err := os.MkdirAll(filepath.Join(z.Root(), storage.RetiredDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(z.RetiredPath(session), nil, 0o444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := map[string]func(src, dst *storage.Zone, session string){
+		"another session retired in the source":  func(src, _ *storage.Zone, _ string) { mark(src, "another") },
+		"the session retired in the destination": func(_, dst *storage.Zone, session string) { mark(dst, session) },
+	}
+	if runtime.GOOS != "windows" {
+		cases["markers that cannot be read"] = func(src, _ *storage.Zone, _ string) {
+			if err := os.WriteFile(filepath.Join(src.Root(), storage.RetiredDir), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for name, set := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := newStage(t, growing)
+			s.through("one")
+			dst := storage.NewZone(t.TempDir())
+			set(s.zone, dst, s.session)
+			if _, err := repack.Session(s.zone, dst, s.session, 1024, time.Now()); err == nil {
+				t.Fatal("the repack was taken")
+			}
+			if _, err := os.Stat(dst.SessionDir(s.session)); !os.IsNotExist(err) {
+				t.Fatalf("a refused repack made the session's directory: %v", err)
+			}
+		})
 	}
 }

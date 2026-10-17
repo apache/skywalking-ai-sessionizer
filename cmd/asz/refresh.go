@@ -90,6 +90,9 @@ func sameDir(a, b string) bool {
 // next; with none, asz collect prints the same numbers and nothing else
 // changes. The page itself never writes.
 type refresher struct {
+	// saidRetired names the retired sessions this process has said it found
+	// evidence of, so each is said once.
+	saidRetired map[string]bool
 	// srv is the page to keep current, or nil when nothing is served.
 	srv     *view.Server
 	pusher  *otlp.Pusher
@@ -523,6 +526,8 @@ func (r *refresher) pass() error {
 	// dropped counts the LangSmith runs not collected this pass because their
 	// conversation could not be told.
 	var dropped int
+	// retired names the retired sessions a collector found evidence of.
+	var retired []string
 	changed := map[string]bool{}
 
 	// A removal an earlier pass left in progress is finished first, before
@@ -561,6 +566,7 @@ func (r *refresher) pass() error {
 		for _, id := range cs.Changed {
 			changed[id] = true
 		}
+		retired = append(retired, cs.Retired...)
 	}
 	// Each recorder directory is collected on its own: one that is absent,
 	// or fails, leaves the others collected.
@@ -588,6 +594,7 @@ func (r *refresher) pass() error {
 		for _, id := range ch.Changed {
 			changed[id] = true
 		}
+		retired = append(retired, ch.Retired...)
 	}
 
 	// Kiro may not be installed, or not have run on its V3 engine yet, and
@@ -616,6 +623,7 @@ func (r *refresher) pass() error {
 		for _, id := range ks.Changed {
 			changed[id] = true
 		}
+		retired = append(retired, ks.Retired...)
 		// Sessions that are there and are not read are said once, and
 		// again when the count changes, not on every pass.
 		if said := strings.Join(notCollected(ks.Skipped), "\n"); said != r.kiroSkipped {
@@ -654,6 +662,7 @@ func (r *refresher) pass() error {
 		conflicts += ps.Conflicts
 		busy += ps.Busy
 		waiting, unreadable = ps.Waiting, ps.Unreadable
+		retired = append(retired, ps.Retired...)
 		for _, id := range ps.Changed {
 			changed[id] = true
 		}
@@ -672,7 +681,9 @@ func (r *refresher) pass() error {
 		for _, id := range landedRuns.Sessions {
 			changed[id] = true
 		}
+		retired = append(retired, landedRuns.Retired...)
 	}
+	r.sayRetired(retired)
 
 	// What this pass landed, plus whatever an earlier pass could not take
 	// the lock for or failed to parse.
@@ -957,5 +968,23 @@ func sayUnread(unread map[string]int) {
 	for _, id := range sessions {
 		fmt.Fprintf(os.Stderr, "  metrics: %s: %d execution observations lack retained details; their MCP metrics cannot be derived\n",
 			id, unread[id])
+	}
+}
+
+// sayRetired says, once a process for each retired session, that a collector
+// found evidence of it and did not collect it. A source the runtime still
+// holds is found on every pass, and the same line on every pass would make
+// the other lines of the log hard to find.
+func (r *refresher) sayRetired(retired []string) {
+	sort.Strings(retired)
+	for _, id := range retired {
+		if r.saidRetired[id] {
+			continue
+		}
+		if r.saidRetired == nil {
+			r.saidRetired = map[string]bool{}
+		}
+		r.saidRetired[id] = true
+		fmt.Fprintf(os.Stderr, "  retired: %s: found and not collected; a retired session is never collected again\n", id)
 	}
 }

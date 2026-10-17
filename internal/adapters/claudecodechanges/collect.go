@@ -57,6 +57,9 @@ type Stats struct {
 	Indexed       int
 	Reindexed     int
 	Errors        []error
+	// Retired names the sessions found that are retired. Their records are
+	// not read, and nothing of them is written, a cursor included.
+	Retired []string
 	// Changed lists the sessions whose landed data or index moved this pass.
 	Changed []string
 }
@@ -87,6 +90,16 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	st.Errors = append(st.Errors, warnings...)
 	for _, s := range sessions {
 		if filter != nil && !filter(s) {
+			continue
+		}
+		// Before anything: claiming an older cursor saves it without
+		// landing a record, and taking the lock makes the directory.
+		if retired, err := storage.Retired(c.Zone, s.ID); err != nil || retired {
+			if err != nil {
+				st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+			} else {
+				st.Retired = append(st.Retired, s.ID)
+			}
 			continue
 		}
 		st.Sessions++

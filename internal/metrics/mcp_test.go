@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -407,5 +408,38 @@ func TestTheCountReadsWhatItShould(t *testing.T) {
 	}
 	if st.Unread["s1"] != 1 {
 		t.Fatalf("unread %v, want 1: the observation landed twice, and nothing else", st.Unread)
+	}
+}
+
+// TestNothingOfARetiredSessionIsDerived. A session is retired while a file of
+// it is still there, not yet derived. A pass over every session, and one
+// that names it, derive nothing of it and keep no state of it.
+func TestNothingOfARetiredSessionIsDerived(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	landExecutions(t, z, 1, observed("toolu_a", "mcp__status__lookup", "status", 100, execution.OutcomeReturned))
+	if err := os.MkdirAll(filepath.Join(z.Root(), storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(z.RetiredPath("s1"), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range [][]string{nil, {"s1"}} {
+		st, err := unreadDeriver(z).Pass(scope)
+		if err != nil || len(st.Errors) > 0 {
+			t.Fatalf("%v %v", err, st)
+		}
+		if st.Files != 0 || st.Requests != 0 {
+			t.Fatalf("scope %v: derived %d file(s) and %d request(s) of a retired session", scope, st.Files, st.Requests)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(z.SessionDir("s1"), "metrics")); !os.IsNotExist(err) {
+		t.Fatalf("a receipt of a retired session was written: %v", err)
+	}
+	state, err := os.ReadFile(filepath.Join(z.Root(), storage.SpoolDir, metrics.StateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(state), "s1") {
+		t.Fatalf("the state keeps the retired session: %s", state)
 	}
 }

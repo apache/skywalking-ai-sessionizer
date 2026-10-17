@@ -356,6 +356,38 @@ func cmdSources(cfg *config.Config, ad config.Adapter, once bool) error {
 			fmt.Println(m)
 		}
 	}
+	ids := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		ids = append(ids, s.ID)
+	}
+	return sayRetired(cfg, ids)
+}
+
+// sayRetired lists the sessions a source holds that are retired in the
+// storage root. They are not collected again, whatever the source holds of
+// them, and a person reading the source's list would not otherwise know.
+func sayRetired(cfg *config.Config, ids []string) error {
+	zoneRoot, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
+	}
+	zone := storage.NewZone(zoneRoot)
+	var retired []string
+	for _, id := range ids {
+		if ok, err := storage.Retired(zone, id); err != nil {
+			return err
+		} else if ok {
+			retired = append(retired, id)
+		}
+	}
+	if len(retired) == 0 {
+		return nil
+	}
+	sort.Strings(retired)
+	fmt.Printf("\n%d session(s) are retired in %s and are not collected again:\n", len(retired), zoneRoot)
+	for _, id := range retired {
+		fmt.Printf("  %s\n", id)
+	}
 	return nil
 }
 
@@ -599,6 +631,15 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 		// A removal stopped part way, as by a crash. It deletes these
 		// bodies too, and the next pass finishes it.
 		fmt.Printf("%d provider body(ies) of a removal in progress no longer rebuild: the removal deleted a body they are built from first, and the next pass deletes them too\n", removing)
+	}
+
+	// A retired session keeps nothing to verify, only its marker. What is
+	// left of one whose retirement has not finished is checked above, as
+	// any session is.
+	if retired, err := storage.RetiredSessions(storage.NewZone(zoneRoot)); err != nil {
+		return err
+	} else if len(retired) > 0 {
+		fmt.Printf("%d session(s) are retired: nothing of them is kept, and none is collected again\n", len(retired))
 	}
 
 	// A conversation's rounds are checked too. They are a digest chain, so a

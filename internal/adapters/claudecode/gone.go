@@ -199,6 +199,14 @@ func (c *Collector) markLostSessions(found map[string]bool, filter func(Session)
 		if !it.IsDir() || found[id] || !IsSessionID(id) || c.wasChecked(id) {
 			continue
 		}
+		// What is left of a retired session while its retirement finishes is
+		// not written to.
+		if retired, err := storage.Retired(c.Zone, id); err != nil || retired {
+			if err != nil {
+				st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", id, err))
+			}
+			continue
+		}
 		done, err := c.markLostSession(id, filter, st, now)
 		if err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", id, err))

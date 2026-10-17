@@ -118,7 +118,7 @@ func landedSession(zone *storage.Zone, id string) (claudecode.Session, bool) {
 
 // cmdSourcesProvider says what the provider adapter can see: the directory,
 // how many bodies it holds, and which sessions the requests name.
-func cmdSourcesProvider(_ *config.Config, ad config.Adapter, _ bool) error {
+func cmdSourcesProvider(cfg *config.Config, ad config.Adapter, _ bool) error {
 	root, err := claudecodeprovider.ResolveSourceRoot(ad.SourceRoot)
 	if err != nil {
 		return err
@@ -158,7 +158,7 @@ func cmdSourcesProvider(_ *config.Config, ad config.Adapter, _ bool) error {
 	if n := len(ids); n > 0 {
 		fmt.Printf("\n%d session(s) named by requests; a response is joined to its session when collected\n", n)
 	}
-	return nil
+	return sayRetired(cfg, ids)
 }
 
 // sessionOf reads the session a request body names, or nothing.

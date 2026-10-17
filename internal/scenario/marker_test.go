@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
 // everyKindOfFile is one session holding every kind of file a removal
@@ -267,6 +269,38 @@ func TestAnSDBuildWritesNoMarker(t *testing.T) {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("an sd build made %s", p)
 		}
+	}
+}
+
+// TestAnSDBuildRefusesARetiredSession. An sd root has no _scenario/, so
+// retention runs over it as over a real root. A build of a session retired
+// there would start it again at sequence 1, under an id a receiver may still
+// hold, so it is refused, and nothing of the session is made.
+func TestAnSDBuildRefusesARetiredSession(t *testing.T) {
+	sc, err := Load(filepath.Join("..", "..", "tests", "scenarios", "assembly.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	b, err := Build(sc, FormatSD, out, Options{At: markerAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zone := storage.NewZone(b.Out)
+	if err := storage.DeleteTree(zone.SessionDir(b.Session), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b.Out, storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zone.RetiredPath(b.Session), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(sc, FormatSD, out, Options{At: markerAt}); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("a build of a retired session returned %v", err)
+	}
+	if _, err := os.Stat(zone.SessionDir(b.Session)); !os.IsNotExist(err) {
+		t.Fatalf("the refused build made the session's directory: %v", err)
 	}
 }
 

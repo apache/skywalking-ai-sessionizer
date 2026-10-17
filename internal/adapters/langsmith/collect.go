@@ -97,6 +97,9 @@ type Landed struct {
 	// run whose conversation would come from a run above it that is not known.
 	// Two updates of one run count twice.
 	Dropped int
+	// Retired names the retired conversations runs arrived for. None of
+	// them lands.
+	Retired []string
 }
 
 // Collect converts every waiting request, oldest first.
@@ -229,6 +232,11 @@ func (c *Collector) Collect() (Landed, error) {
 			out.Records += landed.Records
 			out.Unassigned += landed.Unassigned
 			out.Dropped += landed.Dropped
+			for _, s := range landed.Retired {
+				if !slices.Contains(out.Retired, s) {
+					out.Retired = append(out.Retired, s)
+				}
+			}
 			out.Bodies += landed.Bodies
 			out.BodyConflicts += landed.BodyConflicts
 			for _, s := range landed.Sessions {
@@ -444,9 +452,29 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 			sessions[i], undecided[i] = sessions[j], undecided[j]
 		}
 	}
+	// A run whose conversation is decided and retired is not collected. It
+	// is decided before the wait, so it never holds back a run that is: only
+	// a decided conversation is asked about, never one a run fell back to
+	// while it waits.
+	retired := make([]bool, len(operations))
+	asked := map[string]bool{}
+	for i := range operations {
+		if undecided[i] {
+			continue
+		}
+		known, ok := asked[sessions[i]]
+		if !ok {
+			var err error
+			if known, err = storage.Retired(c.Zone, sessions[i]); err != nil {
+				return Landed{}, err
+			}
+			asked[sessions[i]] = known
+		}
+		retired[i] = known
+	}
 	if wait {
 		for i := range operations {
-			if undecided[i] || !open.placeable(runs[i]) {
+			if !retired[i] && (undecided[i] || !open.placeable(runs[i])) {
 				return Landed{}, &unplaceable{run: runs[i].ID}
 			}
 		}
@@ -480,6 +508,15 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 			// Nor is it remembered in the conversation it fell back to: its
 			// start, if it comes later, would take that one over its own.
 			out.Dropped++
+			continue
+		}
+		if retired[i] {
+			// Remembered in its conversation, so a later arrival of it, or
+			// of a run inside it, is known to be retired too.
+			open.started(envelope, methodOf(op), session, c.Now())
+			if !slices.Contains(out.Retired, session) {
+				out.Retired = append(out.Retired, session)
+			}
 			continue
 		}
 		// A run may be updated after it ends as well as before, and that

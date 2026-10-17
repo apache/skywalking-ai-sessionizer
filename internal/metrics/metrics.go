@@ -235,6 +235,12 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 	}
 	var scanned []string
 	for _, session := range sessions {
+		// Nothing of a retired session is derived, nor any state of it kept,
+		// a session named by the caller included.
+		retired, rerr := storage.Retired(d.Zone, session)
+		if rerr == nil && retired {
+			continue
+		}
 		// A session the first pass did not finish keeps that pass's look-back
 		// until it is finished. It is kept per session, not per file: a file
 		// the pass never reached, after an error, must not export the old
@@ -242,6 +248,13 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		// later hold newer records, which the look-back does not remove.
 		if !since.IsZero() {
 			state.PendingSince[session] = since
+		}
+		// A marker that cannot be read leaves the session for another pass,
+		// with the look-back it would have had kept for it.
+		if rerr != nil {
+			st.Errors = append(st.Errors, fmt.Errorf("%s: %w", session, rerr))
+			st.PendingSessions = append(st.PendingSessions, session)
+			continue
 		}
 		sessionSince := state.PendingSince[session]
 		files, err := storage.LandedFiles(d.Zone, session)

@@ -46,6 +46,14 @@ import (
 // parser reads it like any other root.
 func writeSD(p *Plan, root string, now time.Time, maxDelta int64) ([]string, error) {
 	z := storage.NewZone(root)
+	// An sd root has no _scenario/, so retention runs over it as over a
+	// real one. A build of a retired id would start it again at sequence 1,
+	// a second chain under an id the receiver may still hold.
+	if retired, err := storage.Retired(z, p.Session); err != nil {
+		return nil, err
+	} else if retired {
+		return nil, fmt.Errorf("scenario: session %s is retired in %s, and is never written again", p.Session, root)
+	}
 	sessionDir := z.SessionDir(p.Session)
 	if err := mkdirAll(sessionDir); err != nil {
 		return nil, err

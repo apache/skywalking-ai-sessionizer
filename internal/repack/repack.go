@@ -59,7 +59,14 @@ type slot struct {
 // any session is written. A skeleton keeps no records to re-cut, and a chain
 // built again in the new root would have nothing to bind them to. A removal
 // in progress is refused too: the next pipeline pass finishes it.
+//
+// A root that holds a retired session is refused whole, whichever sessions
+// are named: a new root without its marker would collect it again under the
+// id a receiver may still hold.
 func CheckSource(src *storage.Zone, sessions []string) error {
+	if err := checkRetired(src); err != nil {
+		return err
+	}
 	for _, session := range sessions {
 		files, err := storage.LandedFiles(src, session)
 		if err != nil {
@@ -68,6 +75,19 @@ func CheckSource(src *storage.Zone, sessions []string) error {
 		if err := checkRemoved(src, session, files); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkRetired refuses a root that holds a retired session.
+func checkRetired(src *storage.Zone) error {
+	retired, err := storage.RetiredSessions(src)
+	if err != nil {
+		return err
+	}
+	if len(retired) > 0 {
+		return fmt.Errorf("repack: the root holds %d retired session(s) under %s; a new root without their markers would collect them again, so this root cannot be repacked",
+			len(retired), storage.RetiredDir)
 	}
 	return nil
 }
@@ -127,6 +147,17 @@ func Session(src, dst *storage.Zone, session string, budget int64, now time.Time
 	}
 	if err := checkRemoved(src, session, files); err != nil {
 		return nil, err
+	}
+	// Also when Session is called without the command's whole-root check,
+	// as the scenario runner calls it. A destination that retired the
+	// session never writes it again either.
+	if err := checkRetired(src); err != nil {
+		return nil, err
+	}
+	if retired, err := storage.Retired(dst, session); err != nil {
+		return nil, err
+	} else if retired {
+		return nil, fmt.Errorf("repack: session %s is retired in the destination, and is never written again", session)
 	}
 	srcDir, dstDir := src.SessionDir(session), dst.SessionDir(session)
 	// Reserve a new session directory even when Session is called without

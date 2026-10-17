@@ -327,13 +327,21 @@ func (p *Pusher) Pass() (*Stats, error) {
 		if b.stop != nil {
 			break
 		}
+		retired, err := b.isRetired(s.id)
+		if err != nil {
+			st.Errors = append(st.Errors, fmt.Errorf("%s: %w", s.id, err))
+			sent[s.id] = true
+			continue
+		}
 		// A session's records are attributed to the runtime that produced
 		// them, which its landed headers name.
-		b.services[s.id] = p.serviceOf(s.id, s.files)
-		// A held session's files wait. Its conversation's rounds are asked
-		// one by one, by the session each header names, which need not be
-		// this one.
-		held := !b.claim(s.id)
+		if !retired {
+			b.services[s.id] = p.serviceOf(s.id, s.files)
+		}
+		// A held session's files wait, and a retired one's never go. Its
+		// conversation's rounds are asked one by one, by the session each
+		// header names, which need not be this one.
+		held := retired || !b.claim(s.id)
 		for _, lf := range s.files {
 			if b.stop != nil || held {
 				break
@@ -556,8 +564,9 @@ func (b *batch) addRounds(conv string) {
 				b.st.Deferred++
 				continue
 			}
-			// A held session is listed once, in Held, not once per round.
-			if errors.Is(err, errSessionHeld) {
+			// A held session is listed once, in Held, not once per round,
+			// and a retired one is not sent at all.
+			if errors.Is(err, errSessionHeld) || errors.Is(err, errSessionRetired) {
 				continue
 			}
 			b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", rel, err))
@@ -630,6 +639,29 @@ type batch struct {
 	// latest is the latest record time of each session, read once per pass
 	// when a file without timed records needs a timestamp.
 	latest map[string]uint64
+
+	// retired is what each session's retired marker said, asked once a
+	// pass.
+	retired map[string]bool
+}
+
+// isRetired reports whether a session is retired. None of its landed files
+// and none of its rounds goes: a receiver that still holds its first chain
+// must not be sent a second. Its metrics requests still go, to its owner, as
+// any other session's do.
+func (b *batch) isRetired(session string) (bool, error) {
+	if retired, asked := b.retired[session]; asked {
+		return retired, nil
+	}
+	retired, err := storage.Retired(b.p.Zone, session)
+	if err != nil {
+		return false, err
+	}
+	if b.retired == nil {
+		b.retired = map[string]bool{}
+	}
+	b.retired[session] = retired
+	return retired, nil
 }
 
 type pendingFile struct{ rel, digest, session string }
@@ -918,6 +950,11 @@ func (b *batch) addRound(rel, path, conv string) error {
 	}
 	// A round goes under the session its header names, which need not be
 	// the conversation's directory, so that session is the one asked.
+	if retired, err := b.isRetired(session); err != nil {
+		return err
+	} else if retired {
+		return errSessionRetired
+	}
 	if !b.claim(session) {
 		return errSessionHeld
 	}
@@ -1175,6 +1212,9 @@ var errRoundUnfinished = errors.New("round is still being written")
 
 // errSessionHeld is a round of a session this pass holds.
 var errSessionHeld = errors.New("the round's session is held")
+
+// errSessionRetired is a round of a retired session, which is never sent.
+var errSessionRetired = errors.New("the round's session is retired")
 
 // roundIsFinished reports whether a round file holds every byte it will.
 //

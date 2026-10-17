@@ -20,6 +20,7 @@ package metrics_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -398,5 +399,38 @@ func TestFailedSpoolWriteDoesNotRecordLaterReceipts(t *testing.T) {
 	got, _ := points(t, z)
 	if n := total(got["subagent/output/m#s1"]); n != 60 {
 		t.Fatalf("spool recovery counted one completed call as %v tokens, want 60", n)
+	}
+}
+
+// A marker that cannot be read on the first pass leaves the session for the
+// next, and keeps the look-back it would have had: the retry derives the
+// recent minute only, not the history the first pass was asked to leave out.
+func TestAMarkerThatCannotBeReadKeepsTheLookback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a file where a directory should be reads as not there on Windows")
+	}
+	z := storage.NewZone(t.TempDir())
+	land(t, z, "s1", "main", 1, []call{
+		{id: "old", model: "m", at: base.Add(-48 * time.Hour), frags: 1, in: 100, out: 100},
+		{id: "recent", model: "m", at: base, frags: 1, in: 4, out: 60},
+	})
+	blocked := filepath.Join(z.Root(), storage.RetiredDir)
+	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := deriver(z, base.Add(time.Hour), metrics.Options{Lookback: 24 * time.Hour, Grace: -1})
+	st, err := d.Pass(nil)
+	if err != nil || len(st.Errors) != 1 || len(st.PendingSessions) != 1 || st.Files != 0 {
+		t.Fatalf("the first pass must leave the session it cannot tell: %v %+v", err, st)
+	}
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	if st, err = d.Pass(st.PendingSessions); err != nil || len(st.Errors) > 0 || st.Files != 1 {
+		t.Fatalf("the retry must derive the file: %v %+v", err, st)
+	}
+	got, _ := points(t, z)
+	if n := total(got["main/output/m#s1"]); n != 60 {
+		t.Fatalf("the retry bypassed the first pass's look-back: got %v output tokens, want 60", n)
 	}
 }

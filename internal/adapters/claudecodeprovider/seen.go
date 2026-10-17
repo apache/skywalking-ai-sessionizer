@@ -51,6 +51,10 @@ const (
 	// stateChanged: the file changed after it landed. The line keeps the
 	// digest that landed, so putting the bytes back ends it.
 	stateChanged = "changed"
+	// stateRetired: the body's session is retired. Nothing of it lands
+	// again, and Claude Code never deletes a body file, so the line is what
+	// keeps each pass from reading the file again. It goes with its file.
+	stateRetired = "retired"
 )
 
 // seenSchema is the version of the state file.

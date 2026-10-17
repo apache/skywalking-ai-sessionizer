@@ -159,6 +159,15 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 	chain := sessionflow.OpenChain(z.Root(), opt.Conversation)
 	nothing := &Round{Session: opt.Session, Conversation: opt.Conversation}
 
+	// A retired session is never written again: no index is built or saved
+	// for it, and no chain made, while what is left of it waits for its
+	// retirement to finish.
+	if retired, err := storage.Retired(z, opt.Session); err != nil {
+		return nil, err
+	} else if retired {
+		return nothing, nil
+	}
+
 	// A session with no landed files and no chain has nothing to parse. Taking
 	// the lock would create the chain's directory, so the parse returns first
 	// and creates nothing. Otherwise a parse that ran after a scenario root
