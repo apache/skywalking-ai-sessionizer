@@ -209,6 +209,11 @@ type Retention struct {
 	// its skeleton, which keeps who did what, when and in what order, and
 	// none of what was said or run. See MetadataOnlyAfterDuration.
 	MetadataOnlyAfter string `yaml:"metadata_only_after"`
+	// RetireAfter is how long a conversation may be idle before everything
+	// of it is removed, its metadata too, and it is retired: it is never
+	// collected again, even when its runtime resumes it. See
+	// RetireAfterDuration.
+	RetireAfter string `yaml:"retire_after"`
 }
 
 // MetadataOnlyAfterDuration is metadata_only_after as a duration: zero for -1
@@ -216,6 +221,35 @@ type Retention struct {
 // is spoken of in days.
 func (r Retention) MetadataOnlyAfterDuration() (time.Duration, error) {
 	return retentionDuration("storage.retention.metadata_only_after", r.MetadataOnlyAfter)
+}
+
+// RetireAfterDuration is retire_after as a duration, read as
+// MetadataOnlyAfterDuration reads its own.
+func (r Retention) RetireAfterDuration() (time.Duration, error) {
+	return retentionDuration("storage.retention.retire_after", r.RetireAfter)
+}
+
+// Durations reads both levels and checks that they go together. Retirement
+// removes the metadata level 1 keeps, so it comes no earlier than level 1,
+// and it needs level 1 set: a root that keeps the metadata for ever would
+// otherwise retire what it was told to keep. Equal levels retire a
+// conversation with no level 1 before it.
+func (r Retention) Durations() (metadataOnly, retire time.Duration, err error) {
+	if metadataOnly, err = r.MetadataOnlyAfterDuration(); err != nil {
+		return 0, 0, err
+	}
+	if retire, err = r.RetireAfterDuration(); err != nil {
+		return 0, 0, err
+	}
+	switch {
+	case retire > 0 && metadataOnly == 0:
+		return 0, 0, fmt.Errorf("config: storage.retention.retire_after is %s and metadata_only_after is off; set metadata_only_after too, at most %s",
+			strings.TrimSpace(r.RetireAfter), strings.TrimSpace(r.RetireAfter))
+	case retire > 0 && retire < metadataOnly:
+		return 0, 0, fmt.Errorf("config: storage.retention.retire_after %s is shorter than metadata_only_after %s; it must be at least as long",
+			strings.TrimSpace(r.RetireAfter), strings.TrimSpace(r.MetadataOnlyAfter))
+	}
+	return metadataOnly, retire, nil
 }
 
 func retentionDuration(name, value string) (time.Duration, error) {
@@ -389,7 +423,7 @@ const (
 // Default returns the configuration used when none is supplied.
 func Default() *Config {
 	return &Config{
-		Storage: Storage{Root: "./data", Retention: Retention{MetadataOnlyAfter: "-1"}},
+		Storage: Storage{Root: "./data", Retention: Retention{MetadataOnlyAfter: "-1", RetireAfter: "-1"}},
 		Adapters: []Adapter{{
 			Name:    AdapterClaudeCodeLocal,
 			Enabled: true,
@@ -507,6 +541,9 @@ func Load(path string) (*Config, error) {
 	}
 	if loaded.Storage.Retention.MetadataOnlyAfter != "" {
 		cfg.Storage.Retention.MetadataOnlyAfter = loaded.Storage.Retention.MetadataOnlyAfter
+	}
+	if loaded.Storage.Retention.RetireAfter != "" {
+		cfg.Storage.Retention.RetireAfter = loaded.Storage.Retention.RetireAfter
 	}
 	if len(loaded.Adapters) > 0 {
 		cfg.Adapters = loaded.Adapters
@@ -710,7 +747,7 @@ func (c *Config) Validate() error {
 	if _, err := c.Metrics.LookbackDuration(); err != nil {
 		return err
 	}
-	if _, err := c.Storage.Retention.MetadataOnlyAfterDuration(); err != nil {
+	if _, _, err := c.Storage.Retention.Durations(); err != nil {
 		return err
 	}
 	if err := sessiondata.CheckWithholdable(c.View.Hide); err != nil {

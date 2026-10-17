@@ -124,7 +124,10 @@ that is not proven. A cursor's size check and its tail digest catch it, and the 
 that source with a conflict rather than read from a position that no longer means what it did.
 
 A session is never finished. A transcript quiet for weeks can grow again when the session is
-resumed, so the adapter never marks a session done, and every pass checks every source again.
+resumed, so the adapter never marks a session done, and every pass checks every source again. A
+session retired by `storage.retention.retire_after` is the one exception: it is never collected
+again, even when Claude Code resumes it. Set `retire_after` longer than `cleanupPeriodDays`.
+See [Retirement](../formats/storage-root.md#retirement).
 Collection polls, as [collector](../setup/configuration.md#collector) describes. There is no file
 system watcher.
 

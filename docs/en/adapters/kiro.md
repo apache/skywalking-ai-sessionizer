@@ -35,6 +35,10 @@ in `asz sources` and once in `asz collect`:
 not read : kiro-local: 24 session(s) of kiro-cli's V2 engine under sessions/cli; only the V3 engine's sessions are collected: start kiro-cli with --v3, or set chat.agentEngine to v3
 ```
 
+Kiro keeps a session until a person or Kiro Crew deletes it. A session retired by
+`storage.retention.retire_after` is never collected again, its sub-executions included, even when
+Kiro resumes it. See [Retirement](../formats/storage-root.md#retirement).
+
 ## What is read
 
 One session directory holds:

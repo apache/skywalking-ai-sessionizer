@@ -166,11 +166,11 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	defer closeClient()
 	ref.pusher = pusher
-	keep, err := cfg.Storage.Retention.MetadataOnlyAfterDuration()
+	metadataOnly, retire, err := cfg.Storage.Retention.Durations()
 	if err != nil {
 		return err
 	}
-	ref.retain(keep)
+	ref.retain(metadataOnly, retire)
 	if once || ref.base.Mode == config.ModeOnce {
 		// One pass and no loop after it, exactly as asz collect -once has:
 		// what another process was holding is reported, not deferred.
@@ -262,8 +262,14 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 		}
 		fmt.Printf("export   : %s, at the end of every pass\n", endpoint)
 	}
-	if ref.retention != nil && ref.retention.MetadataOnlyAfter > 0 {
-		fmt.Printf("retention: a conversation idle for %s keeps only its metadata; its content is removed, and only a receiver that accepted it still has it\n", ref.retention.MetadataOnlyAfter)
+	if rt := ref.retention; rt != nil {
+		// Equal levels go straight to retirement, so level 1 does nothing.
+		if rt.MetadataOnlyAfter > 0 && (rt.RetireAfter == 0 || rt.MetadataOnlyAfter < rt.RetireAfter) {
+			fmt.Printf("retention: a conversation idle for %s keeps only its metadata; its content is removed, and only a receiver that accepted it still has it\n", rt.MetadataOnlyAfter)
+		}
+		if rt.RetireAfter > 0 {
+			fmt.Printf("retention: a conversation idle for %s is retired: everything of it is removed, and it is never collected again, even when its runtime resumes it\n", rt.RetireAfter)
+		}
 	}
 	// A root a claude-code scenario build wrote. Only there does a pipeline
 	// remove a session whole, and only one a build marked.

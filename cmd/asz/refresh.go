@@ -438,14 +438,17 @@ func present(dir string, optional bool) (bool, error) {
 }
 
 // retain sets the retention: how long a conversation may be idle before only
-// its metadata is kept. Zero removes nothing, though a removal an earlier
-// pass left in progress is still finished.
-func (r *refresher) retain(keep time.Duration) {
-	r.retention = &retention.Remover{Zone: r.zone, MetadataOnlyAfter: keep, Metrics: r.deriver != nil}
+// its metadata is kept, and before it is retired. Zero does nothing at that
+// level, though a removal or a retirement an earlier pass left in progress is
+// still finished.
+func (r *refresher) retain(metadataOnly, retire time.Duration) {
+	r.retention = &retention.Remover{Zone: r.zone, MetadataOnlyAfter: metadataOnly, RetireAfter: retire, Metrics: r.deriver != nil}
 }
 
 // forget drops what the page cached of sessions whose files were removed,
-// so it reads their skeletons from then on.
+// so it reads their skeletons from then on, or that were retired: the list
+// no longer names a retired conversation, so nothing would read it again to
+// drop it.
 func (r *refresher) forget(sessions []string) {
 	if r.srv == nil {
 		return
@@ -526,8 +529,11 @@ func (r *refresher) pass() error {
 	// dropped counts the LangSmith runs not collected this pass because their
 	// conversation could not be told.
 	var dropped int
-	// retired names the retired sessions a collector found evidence of.
+	// retired names the retired sessions a collector found evidence of, and
+	// retiredNow counts the sessions retired this pass, by a retirement that
+	// began in it or one it finished.
 	var retired []string
+	retiredNow := 0
 	changed := map[string]bool{}
 
 	// A removal an earlier pass left in progress is finished first, before
@@ -536,6 +542,8 @@ func (r *refresher) pass() error {
 		res := r.retention.Recover()
 		errs = append(errs, res.Errors...)
 		r.forget(res.Removed)
+		r.forget(res.Retired)
+		retiredNow = len(res.Retired)
 	}
 
 	var cs *claudecode.Stats
@@ -843,7 +851,9 @@ func (r *refresher) pass() error {
 		res := r.retention.Pass(retention.Input{Busy: r.removeInput().Busy})
 		errs = append(errs, res.Errors...)
 		retained = res.Files
+		retiredNow += len(res.Retired)
 		r.forget(res.Removed)
+		r.forget(res.Retired)
 	}
 	if r.last && len(r.retry) > 0 {
 		// No pass follows, so these are not deferred, they are unparsed.
@@ -878,6 +888,9 @@ func (r *refresher) pass() error {
 	}
 	if retained > 0 {
 		pushed += fmt.Sprintf(" retention=%d", retained)
+	}
+	if retiredNow > 0 {
+		pushed += fmt.Sprintf(" retired=%d", retiredNow)
 	}
 	bodies := waiting != r.waiting || unreadable != r.unreadable
 	r.waiting, r.unreadable = waiting, unreadable

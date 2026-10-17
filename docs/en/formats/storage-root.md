@@ -12,6 +12,7 @@ session.
     .lock                                one collector per session
     removing.json                        a removal in progress, see Retention
     removal.state                        the generation of the last removal that deleted files
+    langsmith.shape.json                 where LangSmith runs were placed, when it collects them
     provider/                            the bytes of removed chain tips and pieces, see Retention
     metrics/                             immutable decisions of local metric derivation
       000001.json                        exact request and accounting for landed file 1
@@ -62,17 +63,25 @@ session.
     .lock                                one pusher per root
   _scenario/                             only in a root a claude-code scenario build wrote
     .lock                                one pipeline per scenario root
-  _removed/                              what a removal of a scenario session is deleting
-    <session-id>/                        the session directory, moved here whole
-    <session-id>.chain/                  its conversation's directory, moved here whole
+  _langsmith/                            when the LangSmith receiver runs
+    runs-<received-at>-<n>.request       a request received and not landed yet
+    unreadable/                          requests set aside, each with why
+    open.json                            the runs remembered, and the conversation of each
+    .lock                                one LangSmith collector per root
+  _retired/                              the retired sessions
+    <session-id>                         an empty file: the session is never collected again
+  _removed/                              what a removal of a scenario session, or a retirement,
+    <session-id>/                        is deleting: the session directory, moved here whole,
+    <session-id>.chain/                  and its conversation's directory, moved here whole
 ```
 
 Child streams are flat siblings of `main`, keyed by agent id. Provider bodies sit under the
 session, not under a stream, because a body names no stream; the view joins each to its call. The storage path deliberately does
 not mirror the source tree: a path must not encode a relationship the pipeline is supposed to
 derive. [OTLP Records](otlp.md) says how the metrics spool fills and
-what `push.state` records. `_scenario/` and `_removed/` exist only in a root a scenario build
-wrote. [Retention](#retention) says what they are for.
+what `push.state` records. `_scenario/` exists only in a root a scenario build wrote, and
+`_retired/` once a session is retired. `_removed/` is used by a scenario's removal and by a
+retirement. [Retention](#retention) says what each is for.
 
 Every command that writes to a root holds `_root/.lock` for one pass: `asz collect` and `asz
 server` for each pass, `asz parse`, `asz push` and `asz repack` for their run, and `asz scenario
@@ -314,7 +323,10 @@ and a session of thousands of calls would need thousands of snapshot cursors. So
 one table for the root, `_provider/seen.state`: for each body file, its size, its modification
 time, the start of its digest, its state, its session, and the ids that join it. The states are
 `landed`, `waiting` for a session, `excluded` by the filter, `unreadable`, `changed` after it landed,
-and `conflict` with a body of the same name the session already holds.
+`conflict` with a body of the same name the session already holds, and `retired`: a body of a
+retired session, which never lands again. Claude Code never deletes a body file, so a `retired`
+line is what keeps each pass from reading the file again. It goes once its file is gone. A body
+whose request names a retired session, or answers a `retired` request, becomes `retired` too.
 
 The table is derived. Every landed body is a record whose manifest names its file, its size and its
 digest, so a missing table is rebuilt from the landed records, and the first pass after reads each
@@ -391,7 +403,8 @@ another machine with no source files and no collector. Session Data is already c
 records name identifiers by role, not by any runtime's fields. So the index rebuilds from the
 landed files with no adapter and no runtime-specific code, and the chain head is recovered from the
 rounds directory. `asz verify` checks every landed file against its digest and every round against
-its commit digest without touching the source.
+its commit digest without touching the source. A copy that collects again takes `_retired/` with
+it, or it collects a retired session again from its start.
 
 For the same reason, the index, assembly and the chain hold no code for any one runtime. Supporting
 another runtime needs an adapter that writes Session Data, and nothing on the assembling side. The
@@ -418,13 +431,20 @@ The store had also outlived its source: it held 48 sessions where the source dir
 
 ### storage.retention
 
-`storage.retention` says how long an idle conversation keeps what in the root. A conversation is
-idle for as long as nothing new has landed in any of its streams, by asz's clock: the time is read
-from the header of its newest landed file. Whether it was sent, and whether an endpoint is set, does
-not change that. Each setting is `-1`, off, by default, and only off keeps everything.
+`storage.retention` says how long an idle conversation keeps what in the root, at two levels on one
+clock. A conversation is idle for as long as nothing new has landed in any of its streams, by asz's
+clock: the time is read from the header of its newest landed file or skeleton, never from a
+record's time, a file's time or when a file was removed. Whether it was sent, whether an endpoint
+is set, and whether its source is still there do not change that. Each setting is `-1`, off, by
+default, and only both off keeps everything.
+
+- `metadata_only_after` keeps only its metadata, to save disk, as this section describes.
+- `retire_after` removes everything of it and retires it, as [Retirement](#retirement) describes.
+  It is at least `metadata_only_after`, which must be set too, or the configuration is refused.
 
 `storage.retention.metadata_only_after` keeps only the metadata of a conversation idle for longer
-than it, to save disk: it removes the landed files and keeps a skeleton of each. A pipeline, `asz
+than it, to save disk: it removes the landed files and keeps a skeleton of each. A conversation idle
+for `retire_after` is retired instead, so with both the same, no skeleton is written. A pipeline, `asz
 collect` or `asz server`, removes at the end of a pass, after the send. A session's files go
 together, every landed file of it through its newest, never some of them. A session keeps them
 while any of these holds:
@@ -533,6 +553,80 @@ reads them again, and after four reads that each raced one it reports the check 
 rather than as damage. `asz repack` refuses a session with skeletons or with a removal in progress:
 a skeleton keeps no records to re-cut.
 
+### Retirement
+
+`storage.retention.retire_after` retires a conversation idle for longer than it: everything of it is
+removed, its metadata too, and a marker keeps it from ever being collected again. That holds even
+when its runtime resumes it, so set `retire_after` longer than the runtime keeps its own history.
+Claude Code keeps a transcript for `cleanupPeriodDays`, 30 days when it is not set, and a session
+whose transcript it removed cannot be resumed. Kiro keeps its sessions until a person or Kiro Crew
+deletes them. A LangChain conversation has no source of its own: asz alone gives it a lifetime.
+
+A pipeline, `asz collect` or `asz server`, retires at the end of a pass, after the send, before it
+looks at level 1. A conversation is retired when all of these hold:
+
+- Nothing has landed for it for `retire_after`. Its files may be landed files, skeletons or both.
+- No removal of its files is in progress.
+- Its head round reaches its newest landed file, and its parse did not fail this pass.
+- With metrics derived, every landed file of it is derived, so each file's request exists.
+
+Sending is not waited for. A conversation idle for `retire_after` is never given level 1, even
+while it waits to be retired.
+
+A retirement is written so that a crash or a power loss at any point loses nothing, and lands
+nothing of the session again:
+
+1. `_retired/<session-id>`, an empty file, is written, and its directory and the root are synced,
+   the errors checked. A failed sync stops the retirement there. The next attempt writes the marker
+   again, since a later sync that succeeds does not say an earlier one's data reached the disk. From
+   here on, every writer passes the session over.
+2. Every metrics request of the session the receiver has not answered is written again from its
+   receipt, and synced, the error checked. A request already there is written again too: its sync
+   may have failed. It is read-only, and on Windows a rename cannot replace a read-only file, so it
+   is deleted first. The receipt is still there, so a crash between the two leaves what writes it
+   again.
+3. The session's directory is renamed to `_removed/<session-id>/`, and its conversation's to
+   `_removed/<session-id>.chain/`, and each is deleted there. The lock inside each is released
+   first, since Windows cannot rename a directory that holds an open lock. After each rename, the
+   two directories it changed are synced, the errors checked, before anything moved is deleted.
+4. Every metrics request of the session the receiver has, a partly rejected one included, is
+   deleted. Then the root, `_conversations/`, `_removed/` and the spool are synced, the errors
+   checked. Every attempt syncs them, so what an earlier attempt changed is durable too: a rename
+   or a deletion cannot be made again, and a later sync of its directory is taken for it, as for
+   the deletions of level 1. A power
+   loss that brought back the session's directory after the state forgot what the receiver has
+   would make those requests again from their receipts, and send them.
+5. `push.state` loses every line of the session whose file is gone. Its owner line stays while a
+   request of it waits in the spool: a request goes to its session's owner only, and with no owner
+   it would go to whichever owner the configuration names then. `metrics.state` loses the session,
+   and the provider's table marks its lines `retired`. `_langsmith/open.json` is not changed: what
+   it remembers of a run is what tells a later update of it to be retired, and it forgets a run by
+   age, as before.
+
+The marker goes first because, after it, a crash anywhere leaves a session nothing collects, which
+the next pass finishes. With the directories removed first, a crash before the marker would let a
+collector land the session again from its start, as a second chain under an id a receiver may still
+hold.
+
+Every pass first finishes a retirement left unfinished, before anything lands, whatever the settings
+say now, both off included. `asz parse` and `asz push` do the same before anything else. A request
+that waits stays until it is sent, and the next pass after the send takes it away, and the owner
+with it.
+
+Nothing of a retired session is written again. Each collector passes it over before it makes a
+directory: Claude Code's transcripts, child agents and workflows, the plugin's records, Kiro's
+sessions and their sub-executions, and provider bodies. A LangSmith run whose conversation is
+retired is not collected and never waits for another. The metrics deriver and the parser do nothing
+for it, and `asz push` sends none of its files or rounds; its waiting requests still go. `asz repack`
+refuses a root that holds a retired session, since a new root without the marker would collect it
+again, and an sd scenario build refuses a session retired in its root. The pass log says once a
+process that a retired session's source was found and not collected, `asz sources` names it, and
+`asz verify` counts the retired sessions.
+
+While a retirement is unfinished, the page lists and draws the conversation as long as its chain is
+there, and once the chain is gone it does neither. A read of the page never makes anything of the
+session again.
+
 ### Removing by hand
 
 The session directory is the unit of retention: removing it purges everything collected for that
@@ -566,11 +660,12 @@ with a `no rounds` error, and so does the request for the document behind the pa
 
 ### A scenario root
 
-asz removes a collected session whole on its own in one case only: a session a `claude-code`
-scenario build wrote. [Scenarios](../guides/scenario.md#removal-a-session-goes-once-it-is-sent)
-describes the policy. A real session is never removed whole. Only the build writes the marker a
-whole removal needs. [Retention](#retention), when it is set, removes the landed content of an idle
-conversation, and keeps its structure, in any root but one with `_scenario/`: an sd build's
+asz removes a collected session whole on its own in two cases, which are separate. One is
+[retirement](#retirement), and a retired id is never collected again. The other is a session a
+`claude-code` scenario build wrote, described here.
+[Scenarios](../guides/scenario.md#removal-a-session-goes-once-it-is-sent) describes the policy.
+Only the build writes the marker this removal needs.
+[Retention](#retention), when it is set, runs in any root but one with `_scenario/`, an sd build's
 included.
 
 The build writes one marker for each session, `DIR/_source/.asz-scenario/<session-id>.json`, and a

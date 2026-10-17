@@ -639,7 +639,7 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if retired, err := storage.RetiredSessions(storage.NewZone(zoneRoot)); err != nil {
 		return err
 	} else if len(retired) > 0 {
-		fmt.Printf("%d session(s) are retired: nothing of them is kept, and none is collected again\n", len(retired))
+		fmt.Printf("%d session(s) are retired, and none is collected again\n", len(retired))
 	}
 
 	// A conversation's rounds are checked too. They are a digest chain, so a
@@ -861,11 +861,11 @@ func cmdCollect(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	defer closeClient()
 	ref.pusher = pusher
-	keep, err := cfg.Storage.Retention.MetadataOnlyAfterDuration()
+	metadataOnly, retire, err := cfg.Storage.Retention.Durations()
 	if err != nil {
 		return err
 	}
-	ref.retain(keep)
+	ref.retain(metadataOnly, retire)
 	if once || ref.base.Mode == config.ModeOnce {
 		// Nothing follows a single pass, so whatever it could not do is
 		// reported rather than left for a pass that never comes.

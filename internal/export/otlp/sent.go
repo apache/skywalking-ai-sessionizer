@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
 // EndpointOf names a receiver the way push.state records it.
@@ -104,10 +106,13 @@ func (s *Sent) SentTo(endpoint, rel, digest string) bool {
 // ForgetGone drops the pushed and rejected lines of every path that owned
 // reports true for and whose file is gone. It drops the owner line of a
 // session that owned reports true for, asked by its id, once nothing of the
-// session is left: its directory and its conversation's are gone, and no
-// line names a file of it. A removal that stopped part way keeps the owner,
-// so what it left is still sent to the same receiver. Every endpoint line
-// stays. The caller holds the root's export lock (storage.LockExport),
+// session is left: its directory and its conversation's are gone, no line
+// names a file of it, and no metrics request of it waits in the spool. A
+// removal that stopped part way keeps the owner, so what it left is still
+// sent to the same receiver. A retired session's requests stay until they
+// are sent, and a request goes to its session's owner only: with the owner
+// gone, it would go to whichever owner the configuration names then. Every
+// endpoint line stays. The caller holds the root's export lock (storage.LockExport),
 // because a pusher rewrites the same file.
 //
 // A line is dropped only once its file is gone, and a pusher sends only files
@@ -137,8 +142,13 @@ func ForgetGone(root string, owned func(rel string) bool, now time.Time) error {
 		}
 	}
 	left := s.sessions()
+	waiting, err := spooled(root)
+	if err != nil {
+		return err
+	}
 	for session := range s.owners {
-		if owned(session) && !left[session] && fileGone(root, session) && fileGone(root, conversationsDir+"/"+session) {
+		if owned(session) && !left[session] && !waiting[session] &&
+			fileGone(root, session) && fileGone(root, conversationsDir+"/"+session) {
 			delete(s.owners, session)
 			changed = true
 		}
@@ -147,6 +157,19 @@ func ForgetGone(root string, owned func(rel string) bool, now time.Time) error {
 		return nil
 	}
 	return s.save(path, now)
+}
+
+// spooled names the sessions a metrics request in the spool belongs to.
+func spooled(root string) (map[string]bool, error) {
+	files, err := storage.NewSpool(storage.NewZone(root)).List()
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, f := range files {
+		out[f.Session] = true
+	}
+	return out, nil
 }
 
 // fileGone reports whether the file at rel under root surely does not exist.

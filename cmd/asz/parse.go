@@ -29,6 +29,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
+	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
@@ -64,6 +65,10 @@ var rootWait = exportWait
 // waits for a pass of another command that holds it. The root has to be
 // there first: taking the lock makes a directory under it, which would make
 // a mistyped path look like an empty root.
+//
+// It then finishes every retirement a pass left unfinished, as a pass does
+// first. A retirement that cannot finish is said and the command goes on:
+// its marker is there, so the command writes nothing of that session.
 func holdRootFor(root, command string) (*storage.SessionLock, error) {
 	if _, err := os.Stat(root); err != nil {
 		return nil, err
@@ -72,7 +77,14 @@ func holdRootFor(root, command string) (*storage.SessionLock, error) {
 	if errors.Is(err, storage.ErrRootBusy) {
 		return nil, fmt.Errorf("%s: another command held this storage root for %s; nothing was done, run it again", command, rootWait)
 	}
-	return lock, err
+	if err != nil {
+		return nil, err
+	}
+	res := (&retention.Remover{Zone: storage.NewZone(root)}).RecoverRetired()
+	for _, e := range res.Errors {
+		fmt.Fprintf(os.Stderr, "  error: %s: %v\n", command, e)
+	}
+	return lock, nil
 }
 
 // parseZone assembles every session under zoneRoot, or the one named by want,

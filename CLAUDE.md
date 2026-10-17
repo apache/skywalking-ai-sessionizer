@@ -69,7 +69,7 @@ internal/view/conversation-view/ Horizon's conversation renderer, built from the
 internal/export/otlp/           sends landed files and rounds to an OpenTelemetry logs receiver, one record per file, and the metrics spool
 internal/metrics/               derives the runtime's token metric from landed Session Data into the spool; collector side; testdata holds a redacted capture of the runtime's exporter
 internal/repack/                re-cuts landed files into a new root under another budget
-internal/retention/             keeps only idle conversations' metadata: removes landed files, a skeleton in each one's place (collector side)
+internal/retention/             the two levels for idle conversations: keeps only the metadata, a skeleton in each landed file's place, then retires the session whole (collector side)
 internal/adapters/claudecode/   the claude-code-local adapter
 internal/adapters/claudecodeprovider/ the claude-code-provider adapter: the request and response bodies Claude Code writes, landed into their sessions
 internal/adapters/kiro/         the kiro-local adapter: the sessions Kiro's V3 engine writes, for kiro-cli and Kiro Crew
@@ -180,12 +180,21 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   and a reader may have taken the file) and is reported once per directory; failing it made a disk
   that kept failing land the same records on every pass. Retention, when it removes, must make a
   replacement durable, its directory synced and the error checked, before it deletes what it replaces.
-- **asz never removes a real session whole.** Only a session a scenario build marked is removed
-  whole, by the policy in its marker, and only once all of it was sent to the one receiver the
-  pipeline sends to. A removal renames each directory away before it deletes it, so no reader sees
-  half a session. `storage.retention.metadata_only_after`, off by default, removes the landed
-  files of an idle conversation, sent or not, and keeps its structure: a skeleton in each file's
-  place, and the index, cursors, state and chain untouched. It never runs over a scenario root.
+- **Only `retire_after` removes a real session whole, and its id is never collected again.** A
+  scenario build's removal takes only a session the build marked, by the policy in its marker, and
+  only once all of it was sent to the one receiver the pipeline sends to. A removal renames each
+  directory away before it deletes it, so no reader sees half a session. `storage.retention` has
+  two levels on one clock, the header time of the newest landed file, sent or not: off by default,
+  `metadata_only_after` removes the landed files of an idle conversation and keeps its structure,
+  a skeleton in each file's place and the index, cursors, state and chain untouched;
+  `retire_after`, at least as long, removes everything and retires the session. Neither runs over
+  a scenario root.
+- **A retired session is never written again.** Its marker `_retired/<session>` is an empty file,
+  written and synced before anything of the session is deleted, and never removed. Every writer
+  asks `storage.Retired` before the first `MkdirAll` or lock that would make the session's or its
+  chain's directory, since taking a lock makes it; a marker that cannot be read is an error, never
+  taken for none. A retired session's unsent metrics requests are written again from their
+  receipts before its directory goes, and keep its owner in `push.state` until they are sent.
 - **A landed file is cut once.** A round addresses records by `{seq, row}` and binds to file
   digests, so a referenced file is never re-cut. A new budget applies to new files; an existing
   root is brought under it with `asz repack` into a new root, where the chains are built again.

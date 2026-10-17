@@ -33,7 +33,7 @@ storage:
   # How long a conversation may be idle, with nothing new landed in any of
   # its streams, before this root keeps less of it. Whether it was sent, and
   # whether an endpoint is set, does not matter. Each value is a duration
-  # such as 72h, or days such as 30d, and -1 is off. Only off keeps
+  # such as 72h, or days such as 30d, and -1 is off. Only both off keeps
   # everything.
   retention:
     # To save disk, keep only the conversation's metadata: what was said and
@@ -42,6 +42,12 @@ storage:
     # conversation. The removed content cannot be restored here; only a
     # receiver that accepted it still has it.
     metadata_only_after: -1
+    # Remove everything of the conversation, its metadata too, and retire
+    # it. A retired conversation is never collected again, even when its
+    # runtime resumes it, so set this longer than the runtime keeps its own
+    # history. It is at least metadata_only_after, which must be set too;
+    # equal to it goes straight to retirement.
+    retire_after: -1
 
 adapters:
   - name: claude-code-local

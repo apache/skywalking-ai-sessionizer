@@ -38,6 +38,9 @@ import (
 
 // treeOf is every file under the directories given, with its mode, size and
 // time, so a write of any kind shows. A directory that is not there says so.
+// A directory is listed by its name and mode only: Windows updates a
+// directory's time some moments after a file in it is written, and an entry
+// added or removed shows by its own name.
 func treeOf(t *testing.T, dirs ...string) []string {
 	t.Helper()
 	var out []string
@@ -51,6 +54,10 @@ func treeOf(t *testing.T, dirs ...string) []string {
 				return err
 			}
 			rel, _ := filepath.Rel(dir, path)
+			if d.IsDir() {
+				out = append(out, fmt.Sprintf("%s/%s %s", filepath.Base(dir), filepath.ToSlash(rel), info.Mode()))
+				return nil
+			}
 			out = append(out, fmt.Sprintf("%s/%s %s %d %s", filepath.Base(dir), filepath.ToSlash(rel),
 				info.Mode(), info.Size(), info.ModTime()))
 			return nil

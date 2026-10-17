@@ -226,6 +226,14 @@ func (s *Server) Forget(id string) {
 	s.mu.Unlock()
 }
 
+// Kept reports whether the page keeps a conversation's fold in memory.
+func (s *Server) Kept(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.loaded[id]
+	return ok
+}
+
 // Time returns when a node happened, or 0 when nothing observed it.
 //
 // A node with no reference has no observed time, and a zero must render as
@@ -323,20 +331,18 @@ func (c *Conversation) Streams() []*sessionflow.Node {
 	return out
 }
 
-// List returns every conversation in the zone that has rounds.
 // Root is the storage root the page reads.
 func (s *Server) Root() string { return s.zone.Root() }
 
+// List returns every conversation in the zone that has rounds.
 func (s *Server) List() ([]string, error) {
 	base := filepath.Join(s.zone.Root(), "_conversations")
 	items, err := os.ReadDir(base)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err
 	}
 	var out []string
+	listed := make(map[string]bool, len(items))
 	for _, d := range items {
 		if !d.IsDir() {
 			continue
@@ -345,8 +351,20 @@ func (s *Server) List() ([]string, error) {
 		// file, so an entry in the directory is not yet a round.
 		if rounds, rerr := sessionflow.OpenChain(s.zone.Root(), d.Name()).List(); rerr == nil && len(rounds) > 0 {
 			out = append(out, d.Name())
+			listed[d.Name()] = true
 		}
 	}
+	// Another process can retire a conversation. The root watcher lists
+	// even with no page open, so its next pass releases the stored fold.
+	// The lock is held for this alone, so a read of the page does not wait
+	// for the listing.
+	s.mu.Lock()
+	for id := range s.loaded {
+		if !listed[id] {
+			delete(s.loaded, id)
+		}
+	}
+	s.mu.Unlock()
 	sort.Strings(out)
 	return out, nil
 }

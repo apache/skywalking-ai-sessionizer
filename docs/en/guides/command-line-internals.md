@@ -37,14 +37,21 @@ leaving them for the next one.
 
 With `storage.retention.metadata_only_after` set, a pass then keeps only the metadata of every
 conversation idle for longer, sent or not: it removes the landed files and leaves a skeleton in
-each one's place. Before it lands anything, every pass finishes a removal an earlier one left in
-progress, whatever the setting says now. A scenario root keeps its own removal, and retention never
-runs there. See [Retention](../formats/storage-root.md#retention). The startup lines say the
+each one's place. With `storage.retention.retire_after` set, a pass first retires every
+conversation idle for longer: everything of it is removed, and it is never collected again. Before
+it lands anything, every pass finishes a removal or a retirement an earlier one left in progress,
+whatever the settings say now. A scenario root keeps its own removal, and retention never runs
+there. See [Retention](../formats/storage-root.md#retention). The startup lines say the
 retention:
 
 ```text
 retention: a conversation idle for 72h0m0s keeps only its metadata; its content is removed, and only a receiver that accepted it still has it
+retention: a conversation idle for 2160h0m0s is retired: everything of it is removed, and it is never collected again, even when its runtime resumes it
 ```
+
+When both are the same, a conversation is retired with no metadata-only step first, and only the
+second line is said. `asz parse` and `asz push` finish a retirement left in progress before they do
+anything else.
 
 When metrics are turned on after a conversation kept only its metadata, the skeletons give its
 tokens, and not whether an execution was a call to an MCP server. The first pass of a process says,
@@ -78,6 +85,7 @@ One line per pass, and a quiet pass prints nothing:
 | `rejected` | records and points a receiver took and rejected, absent when 0. It also gives an `error:` line, because they are never sent again. |
 | `removed` | scenario sessions removed, absent when 0. See [A scenario root](#a-scenario-root). |
 | `retention` | landed files `storage.retention.metadata_only_after` removed, absent when 0. See [Retention](../formats/storage-root.md#retention). |
+| `retired` | conversations `storage.retention.retire_after` retired, absent when 0. See [Retirement](../formats/storage-root.md#retirement). |
 | `errors` | listed on standard error after the line |
 
 `busy` is not an error. Running two pipelines on one root is supported, and the process that holds
@@ -360,8 +368,10 @@ build prints the policy after `config`, and a feed prints it in its header:
 remove   : 24h after its last record, once sent
 ```
 
-`--remove` with `--format sd` is refused, because an sd build writes no source and its sessions are
-never removed whole. Retention, when it is set, still applies to its root. `check` refuses `--remove`, and `build` refuses zero, a negative duration and
+`--remove` with `--format sd` is refused, because an sd build writes no source and a scenario's
+removal never removes its sessions. Retention, when it is set, still applies to its root, as to a
+real one, and retirement removes a session there whole. A build of a session retired in its root is
+refused. `check` refuses `--remove`, and `build` refuses zero, a negative duration and
 anything it cannot read. Each refusal exits with status 2 and writes nothing.
 
 ## push
@@ -370,7 +380,9 @@ Sends every landed file and every round not yet sent to the OpenTelemetry logs r
 `export.otlp.endpoint`, one log record per file, then exits. One pass is all it does: a root that
 keeps growing is sent by `asz collect`, which pushes at the end of every period. This command is
 for a root that is already there, such as one copied from another machine or brought under a new
-budget by `asz repack`. It never removes anything, even over a [scenario root](#a-scenario-root).
+budget by `asz repack`. It starts no removal and no retirement, even over a [scenario
+root](#a-scenario-root). It finishes a retirement a pass left unfinished, as every command that
+writes to a root does first.
 One line for the pass:
 
 ```text

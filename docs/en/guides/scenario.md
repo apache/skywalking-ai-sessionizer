@@ -152,12 +152,13 @@ written, so a feed's session stays about that long after it was written. A one-s
 old `--at` is already past its duration, and goes as soon as it is sent. `d` counts whole days, as
 `metrics.lookback` does. One run applies one policy to every session it writes.
 
-The policy belongs to the scenario, never to the product. The configuration has no setting that
-removes a session whole, and a session no build marked, which is every real Claude Code session, is
-never removed whole. An sd build writes no source and no marker, so its sessions are never removed
-whole, and `--remove` with `--format sd` is refused. `storage.retention`, a separate setting, keeps
-only the metadata of an idle conversation in an unmarked root, an sd build's included. It never
-runs over a root with `_scenario/`, which keeps its own removal.
+The policy belongs to the scenario, never to the product. This removal never takes a session no
+build marked, which is every real Claude Code session. An sd build writes no source and no marker,
+so this removal never takes its sessions, and `--remove` with `--format sd` is refused.
+`storage.retention`, a separate setting, keeps only the metadata of an idle conversation, and with
+`retire_after` removes it whole and retires it, in an unmarked root, an sd build's included. A
+build of a session retired in its root is refused. Retention never runs over a root with
+`_scenario/`, which keeps its own removal.
 
 Nothing is removed that the pipeline cannot prove sent. Each of these keeps every marked session,
 and the pass says why once, on standard error, as `kept: every marked session: <reason>`:

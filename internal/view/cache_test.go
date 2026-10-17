@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
 // TestAFoldIsKeptByWhatItReachedNotByWhatWasListed.
@@ -51,5 +52,58 @@ func TestAFoldIsKeptByWhatItReachedNotByWhatWasListed(t *testing.T) {
 	}
 	if _, cached := s.loaded[id]; cached {
 		t.Fatal("a fold that failed was put in the cache; the next read would never try again")
+	}
+}
+
+// TestListForgetsAConversationRemovedByAnotherProcess. A separate collector
+// can retire a conversation while no page is open. Listing the root must
+// release its stored fold without another Load or an explicit Forget.
+func TestListForgetsAConversationRemovedByAnotherProcess(t *testing.T) {
+	root := t.TempDir()
+	s := New(storage.NewZone(root), nil)
+	for _, id := range []string{"removed", "kept"} {
+		w, err := sessionflow.NewWriter(sessionflow.Header{
+			Conversation: id, Session: id, Round: 1, Parser: "v1", Policy: "v1",
+			FromSeq: 1, InputDigest: "d0",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, digest, err := w.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sessionflow.OpenChain(root, id).Publish(1, digest, data); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Load(id); err != nil {
+			t.Fatal(err)
+		}
+		if !s.Kept(id) {
+			t.Fatalf("%s was not kept after loading", id)
+		}
+	}
+	if err := storage.RemoveDir(root, sessionflow.OpenChain(root, "removed").Dir(), "removed.chain", nil); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.List()
+	if err != nil || len(ids) != 1 || ids[0] != "kept" {
+		t.Fatalf("listed %v, %v; want only the remaining conversation", ids, err)
+	}
+	if s.Kept("removed") {
+		t.Fatal("the removed conversation is still kept after listing")
+	}
+	if !s.Kept("kept") {
+		t.Fatal("the remaining conversation was forgotten")
+	}
+	// A missing parent directory is an empty list too.
+	if err := storage.DeleteTree(filepath.Join(root, "_conversations"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if ids, err := s.List(); err != nil || len(ids) != 0 {
+		t.Fatalf("listed %v, %v after the parent directory went", ids, err)
+	}
+	if s.Kept("kept") {
+		t.Fatal("the last conversation is still kept after its parent directory went")
 	}
 }
