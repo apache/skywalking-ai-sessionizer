@@ -558,9 +558,46 @@ a skeleton keeps no records to re-cut.
 `storage.retention.retire_after` retires a conversation idle for longer than it: everything of it is
 removed, its metadata too, and a marker keeps it from ever being collected again. That holds even
 when its runtime resumes it, so set `retire_after` longer than the runtime keeps its own history.
-Claude Code keeps a transcript for `cleanupPeriodDays`, 30 days when it is not set, and a session
-whose transcript it removed cannot be resumed. Kiro keeps its sessions until a person or Kiro Crew
-deletes them. A LangChain conversation has no source of its own: asz alone gives it a lifetime.
+Claude Code's `cleanupPeriodDays` defaults to 30 days. This alone does not establish how long it
+keeps a session. A session whose transcript Claude Code removed cannot be resumed. Kiro keeps its sessions until a person or Kiro Crew deletes them. A LangChain
+conversation has no source of its own. asz alone gives it a lifetime.
+
+When `retire_after` is set, asz compares it with an **inspected value** for Claude Code.
+It reads only `cleanupPeriodDays` from the user's `settings.json` and the machine's managed
+settings. The user directory follows `CLAUDE_CONFIG_DIR`, then `XDG_CONFIG_HOME/claude`, then
+`~/.claude`. A managed value wins over the user's. asz reads `managed-settings.json` first,
+then the files in `managed-settings.d/` in JavaScript's default sort order.
+Names are compared by UTF-16 code units. A later value wins.
+Hidden files and files that do not end in `.json` are ignored.
+Only regular files or symbolic links to them are read.
+
+asz reports what it could inspect and says that Claude Code's effective retention was not
+determined. Project settings, command-line settings, device policy and settings managed by a
+server can change it. From version 2.1.248, Claude Desktop and Cowork keep sessions at any age by default.
+`desktopSessionCleanupPeriodDays` or a managed `cleanupPeriodDays` can limit them.
+The organization's HIPAA configuration also ends this exemption when it applies.
+Settings that cannot be read or parsed pause Claude Code's cleanup unless managed settings
+provide `cleanupPeriodDays`.
+asz reports these limits without inspecting another setting. These rules follow Claude Code's
+[directory](https://code.claude.com/docs/en/claude-directory),
+[managed settings](https://code.claude.com/docs/en/managed-settings) and
+[data usage](https://code.claude.com/docs/en/data-usage) documentation read on 2026-10-17.
+
+A value must be a whole number of days of at least 1 that asz can compare. `30.0` counts as 30.
+asz names each invalid value or file it cannot read or parse and assumes no value for it.
+It also names an unreadable managed settings directory or a file whose top level is not an object.
+Missing files are allowed. A leading UTF-8 byte-order mark is allowed.
+Empty files and files with only whitespace set no value and cause no problem.
+If no inspected file sets the value and none has a problem, asz reports the default of 30 days.
+With an explicit `source_root`, it inspects no settings and says the
+retention was not determined.
+
+asz also warns when `retire_after` is shorter than the inspected value or the reported default.
+The comparison says that a session resumed after it is retired is not collected.
+Kiro warns for any `retire_after`. LangChain has no source and gets no warning.
+These lines appear at startup, in `asz sources`, and in the list page's refresh status.
+The first pass also writes them to standard error. Later passes do not repeat them.
+With `retire_after` off, none of these lines is shown.
 
 A pipeline, `asz collect` or `asz server`, retires at the end of a pass, after the send, before it
 looks at level 1. A conversation is retired when all of these hold:

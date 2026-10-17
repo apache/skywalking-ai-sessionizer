@@ -126,7 +126,10 @@ that source with a conflict rather than read from a position that no longer mean
 A session is never finished. A transcript quiet for weeks can grow again when the session is
 resumed, so the adapter never marks a session done, and every pass checks every source again. A
 session retired by `storage.retention.retire_after` is the one exception: it is never collected
-again, even when Claude Code resumes it. Set `retire_after` longer than `cleanupPeriodDays`.
+again, even when Claude Code resumes it. Set `retire_after` longer than Claude Code keeps its history.
+When `retire_after` is set, asz reports what it could inspect in Claude Code's settings.
+It warns when retirement is shorter than the inspected `cleanupPeriodDays` or the reported default.
+It also says that effective retention was not determined.
 See [Retirement](../formats/storage-root.md#retirement).
 Collection polls, as [collector](../setup/configuration.md#collector) describes. There is no file
 system watcher.

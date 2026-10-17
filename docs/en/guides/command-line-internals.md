@@ -47,11 +47,23 @@ retention:
 ```text
 retention: a conversation idle for 72h0m0s keeps only its metadata; its content is removed, and only a receiver that accepted it still has it
 retention: a conversation idle for 2160h0m0s is retired: everything of it is removed, and it is never collected again, even when its runtime resumes it
+warning  : Kiro keeps a session until it is deleted; storage.retention.retire_after is 90 days. A session resumed after it is retired is not collected.
 ```
 
-When both are the same, a conversation is retired with no metadata-only step first, and only the
-second line is said. `asz parse` and `asz push` finish a retirement left in progress before they do
-anything else.
+When both durations are the same, a conversation is retired without first keeping only its metadata.
+Only the second retention line is said. `asz parse` and `asz push` finish a retirement left in
+progress before they do anything else.
+
+With `retire_after` set, `warning  :` lines follow the retention lines.
+The Kiro line above appears when `kiro-local` is enabled.
+For `claude-code-local`, asz reports what it could inspect in Claude Code's settings.
+It says that effective retention was not determined. It also warns when `retire_after` is shorter
+than the inspected `cleanupPeriodDays` or the reported default of 30 days.
+The inspected value does not establish Claude Code's effective retention.
+See [Retirement](../formats/storage-root.md#retirement) for the inspection's limits.
+`asz sources` prints the same lines for each runtime. The list page shows a retention warning in
+its refresh status and the full text in its title. The first pass writes the lines to standard
+error once per process. With `retire_after` off, none of these lines is shown.
 
 When metrics are turned on after a conversation kept only its metadata, the skeletons give its
 tokens, and not whether an execution was a call to an MCP server. The first pass of a process says,
