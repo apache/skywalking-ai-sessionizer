@@ -346,6 +346,32 @@
   what an answer left out. The renderer is Horizon's, now pinned at
   apache/skywalking-horizon-ui#192, whose prompt store holds skeletons, takes a piece by the SHA-256
   a removed or too large part keeps, from the record that landed first, and reads kept bytes.
+- A conversation can be retired. `storage.retention.retire_after`, `-1` and off by default, is how
+  long a conversation may be idle before everything of it is removed, its metadata too, and it is
+  retired. A retired conversation is never collected again, even when its runtime resumes it. Set
+  `retire_after` longer than the runtime keeps its own history. Idle is read on the same clock
+  as `metadata_only_after`, which must be set too, and `retire_after` is at least as long; equal,
+  a conversation is retired with no metadata-only step first. Either rule broken is a
+  configuration error. Only both settings off keeps everything. `asz collect` and `asz server`
+  retire at the end of a pass, after the send, a conversation whose head round covers its files
+  and, with metrics derived, every file of which is derived. See
+  [Retirement](../formats/storage-root.md#retirement).
+- A retirement writes its marker, `_retired/<session-id>`, an empty file, and syncs it before it
+  deletes anything. Next, it writes again, from its receipt, each metrics request the receiver does
+  not have, and syncs it. It then moves the session's directory and its conversation's under
+  `_removed/` and deletes them there. It syncs every directory it changed before it takes the
+  session out of `push.state` and `metrics.state`. The provider's table keeps its lines, marked
+  `retired`. Requests not sent stay until they are sent, to the session's owner only, whose line
+  stays meanwhile. A crash or a failed sync at any point is
+  finished by the next pass before anything lands, whatever the settings say then, and `asz parse`
+  and `asz push` finish it first too. The pass line counts `retired=`, and the startup says what
+  each level does.
+- Nothing of a retired session is written again. Every collector passes it over before it makes a
+  directory, the provider's bodies of it included, and a LangSmith run of it never waits. The
+  metrics deriver and the parser do nothing for it, `asz push` sends none of its files or rounds
+  but still sends its waiting metrics requests, and `asz repack`, an sd scenario build and the
+  scenario runner refuse it. The pass log says once a process that a retired session's source was
+  found and not collected, `asz sources` names it, and `asz verify` counts the retired sessions.
 
 ## Configuration
 

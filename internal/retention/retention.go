@@ -15,10 +15,17 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Package retention keeps only the metadata of conversations that have been
-// idle for longer than storage.retention.metadata_only_after: it removes their
-// landed files, and leaves a skeleton in the place of each. A skeleton keeps every field the index is built from, so the
-// conversation's index, and so its chain, go on as if nothing was removed.
+// Package retention keeps less of a conversation the longer it is idle.
+//
+// Level 1, after storage.retention.metadata_only_after, keeps only its
+// metadata: it removes the conversation's landed files and leaves a skeleton
+// in the place of each. A skeleton keeps every field the index is built from,
+// so the conversation's index, and so its chain, go on as if nothing was
+// removed.
+//
+// Level 2, after storage.retention.retire_after, retires it: everything of
+// it is removed, and a marker under _retired keeps it from ever being
+// collected again.
 //
 // It is collector side: it reads the round chain by its format alone, as the
 // scenario remover does, because the chain's package is server side.
@@ -57,6 +64,10 @@ type Remover struct {
 	// nothing, though Recover still finishes a removal an earlier pass left in
 	// progress.
 	MetadataOnlyAfter time.Duration
+	// RetireAfter is how long a conversation must be idle before it is
+	// retired. Zero retires nothing, though Recover still finishes a
+	// retirement an earlier pass began.
+	RetireAfter time.Duration
 	// Metrics says the pipeline derives metrics, so every file's derivation
 	// must be committed before the file is removed: a removed file keeps no
 	// execution record to derive from.
@@ -72,6 +83,10 @@ type Remover struct {
 	// Stop is called at each point a removal reaches, and a removal stops
 	// there when it returns an error, as a crash would stop it. Tests set it.
 	Stop func(Point) error
+
+	// settled names the retired sessions this process found nothing left
+	// of, so a pass does not take the locks or read the state for them.
+	settled map[string]bool
 }
 
 // Point is a place in a removal: its phase, and how many files of the
@@ -115,6 +130,9 @@ type Result struct {
 	// Files counts the files.
 	Removed []string
 	Files   int
+	// Retired names the sessions whose directories a retirement removed
+	// this pass.
+	Retired []string
 	Errors  []error
 }
 
@@ -125,12 +143,12 @@ func (r *Remover) now() time.Time {
 	return time.Now()
 }
 
-// Recover finishes every removal an earlier pass left in progress. A pass
-// runs it before anything lands, so no collector writes into a session whose
-// files are being removed. It runs whatever the retention: a removal that
-// was started is finished.
+// Recover finishes every retirement and every removal an earlier pass left
+// in progress. A pass runs it before anything lands, so no collector writes
+// into a session whose files are being removed. It runs whatever the
+// retention: what was started is finished.
 func (r *Remover) Recover() Result {
-	var res Result
+	res := r.RecoverRetired()
 	sessions, err := sessionDirs(r.Zone.Root())
 	if err != nil {
 		res.Errors = append(res.Errors, err)
@@ -166,12 +184,13 @@ func (r *Remover) Recover() Result {
 	return res
 }
 
-// Pass removes the landed files of every session that may lose them now.
-// It runs at the end of a pipeline pass, after the send. It also takes away
-// what metrics derived from a removed file once the receiver has it.
+// Pass retires every session that may be retired now, and removes the
+// landed files of every other session that may lose them. It runs at the end
+// of a pipeline pass, after the send. It also takes away what metrics derived
+// from a removed file once the receiver has it.
 func (r *Remover) Pass(in Input) Result {
 	var res Result
-	if r.MetadataOnlyAfter <= 0 {
+	if r.MetadataOnlyAfter <= 0 && r.RetireAfter <= 0 {
 		return res
 	}
 	sessions, err := sessionDirs(r.Zone.Root())
@@ -180,13 +199,49 @@ func (r *Remover) Pass(in Input) Result {
 		return res
 	}
 	r.exported(&res, func(sent *otlp.Sent) {
+		// Retirement is decided first. A session idle for retire_after is
+		// never given level 1, even while it waits to be retired, so with
+		// both levels equal no skeleton is written. A retired session is
+		// carried on by Recover, and nothing else writes to it.
+		skip := map[string]bool{}
+		var retiring []string
+		for _, id := range sessions {
+			if in.Busy[id] {
+				continue
+			}
+			retired, err := storage.Retired(r.Zone, id)
+			if err != nil || retired {
+				if err != nil {
+					res.Errors = append(res.Errors, fmt.Errorf("%s: %w", id, err))
+				}
+				skip[id] = true
+				continue
+			}
+			if r.RetireAfter <= 0 {
+				continue
+			}
+			idle, err := r.idle(id)
+			if err != nil {
+				res.Errors = append(res.Errors, fmt.Errorf("%s: %w", id, err))
+				skip[id] = true
+				continue
+			}
+			if idle {
+				skip[id] = true
+				retiring = append(retiring, id)
+			}
+		}
+		r.retire(&res, retiring, sent, true)
+		if r.MetadataOnlyAfter <= 0 {
+			return
+		}
 		requests, err := storage.NewSpool(r.Zone).List()
 		if err != nil {
 			res.Errors = append(res.Errors, err)
 			return
 		}
 		for _, id := range sessions {
-			if in.Busy[id] {
+			if in.Busy[id] || skip[id] {
 				continue
 			}
 			n, err := r.locked(id, func() (int, error) {

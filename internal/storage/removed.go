@@ -58,6 +58,21 @@ const RemovedDir = "_removed"
 // with "deleting" after the first entry of the moved tree is deleted. An
 // error from it stops RemoveDir there, as a crash would. The tests use it.
 func RemoveDir(root, dir, name string, hook func(where string) error) error {
+	return removeDir(root, dir, name, hook, nil)
+}
+
+// RemoveDirDurable is RemoveDir for a removal something is about to depend on
+// surviving a power loss. After the rename, both directories it changed are
+// synced with sync, and a failure is returned before anything moved is
+// deleted. The first sync after a failed writeback is the one that knows.
+func RemoveDirDurable(root, dir, name string, hook func(where string) error, sync func(dir string) error) error {
+	if sync == nil {
+		sync = SyncDir
+	}
+	return removeDir(root, dir, name, hook, sync)
+}
+
+func removeDir(root, dir, name string, hook func(where string) error, sync func(dir string) error) error {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 		return fmt.Errorf("storage: %q is not a name for an entry of %s", name, RemovedDir)
 	}
@@ -103,11 +118,19 @@ func RemoveDir(root, dir, name string, hook func(where string) error) error {
 	if err := os.Rename(dir, target); err != nil {
 		return err
 	}
-	// Either side of the rename is a whole directory, so a crash that loses
-	// the rename is safe. Syncing both directories only narrows that window,
-	// and a failure to sync leaves it as it was.
-	_ = syncDir(filepath.Dir(dir))
-	_ = syncDir(filepath.Dir(target))
+	// Either side of the rename is a whole directory, so for RemoveDir a
+	// crash that loses the rename is safe. Syncing both directories only
+	// narrows that window, and a failure to sync leaves it as it was.
+	if sync == nil {
+		_ = syncDir(filepath.Dir(dir))
+		_ = syncDir(filepath.Dir(target))
+	} else {
+		for _, changed := range []string{filepath.Dir(dir), filepath.Dir(target)} {
+			if err := sync(changed); err != nil {
+				return fmt.Errorf("storage: the move of %s may not survive a power loss: %w", dir, err)
+			}
+		}
+	}
 	if hook != nil {
 		if err := hook("renamed"); err != nil {
 			return err

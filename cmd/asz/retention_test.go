@@ -18,6 +18,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,8 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/kiro"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
+	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
@@ -45,7 +48,7 @@ func removedRoot(t *testing.T) (string, string, *refresher) {
 	rcv := receiver(t)
 	ref := pipelineOver(t, root, bothAdapters(root, ""))
 	sendingTo(t, ref, rcv)
-	ref.retain(time.Nanosecond)
+	ref.retain(time.Nanosecond, 0)
 	out := stdoutOf(t, func() {
 		if err := ref.pass(); err != nil {
 			t.Fatal(err)
@@ -109,7 +112,7 @@ func TestRetentionLeavesAScenarioRootAlone(t *testing.T) {
 	// the session, and the pass sends it.
 	ref := pipelineOver(t, root, bothAdapters(root, t.TempDir()))
 	sendingTo(t, ref, rcv)
-	ref.retain(time.Nanosecond)
+	ref.retain(time.Nanosecond, 0)
 	stderrOf(t, func() {
 		if err := ref.pass(); err != nil {
 			t.Fatal(err)
@@ -237,7 +240,7 @@ func unsentRemovedRoot(t *testing.T, scenarioName string) (string, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(ref.close)
-	ref.retain(time.Nanosecond)
+	ref.retain(time.Nanosecond, 0)
 	stdoutOf(t, func() {
 		if err := ref.pass(); err != nil {
 			t.Fatal(err)
@@ -422,7 +425,7 @@ func TestCommandsSayWhatIsRetired(t *testing.T) {
 			t.Fatalf("verify: %v", err)
 		}
 	})
-	if !strings.Contains(out, "1 session(s) are retired: nothing of them is kept, and none is collected again") {
+	if !strings.Contains(out, "1 session(s) are retired, and none is collected again") {
 		t.Errorf("verify does not say the session is retired:\n%s", out)
 	}
 
@@ -501,6 +504,222 @@ func TestEverySourcesListNamesARetiredSession(t *testing.T) {
 			})
 			if !strings.Contains(out, "are retired in "+root+" and are not collected again:\n  "+session) {
 				t.Errorf("sources does not name the retired session %s:\n%s", session, out)
+			}
+		})
+	}
+}
+
+// A pass retires a conversation idle for retire_after, after it sends, and
+// its line counts it. The page stops listing it. The next pass retires
+// nothing more, and its source, which is still there, is not collected
+// again.
+func TestAPassRetiresAnIdleConversation(t *testing.T) {
+	root, b := scenarioRoot(t, "growth.yaml")
+	if err := os.RemoveAll(filepath.Join(root, storage.ScenarioDir)); err != nil {
+		t.Fatal(err)
+	}
+	rcv := receiver(t)
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	sendingTo(t, ref, rcv)
+	ref.retain(time.Nanosecond, time.Nanosecond)
+	out := stdoutOf(t, func() {
+		if err := ref.pass(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, " retired=1") {
+		t.Fatalf("the pass line does not count the retirement:\n%s", out)
+	}
+	zone := storage.NewZone(root)
+	if retired, err := storage.Retired(zone, b.Session); err != nil || !retired {
+		t.Fatalf("no marker: %v", err)
+	}
+	if pathExists(zone.SessionDir(b.Session)) || pathExists(filepath.Join(root, "_conversations", b.Session)) {
+		t.Fatal("a directory of the retired session is left")
+	}
+	if ids, err := ref.srv.List(); err != nil || len(ids) != 0 {
+		t.Fatalf("the page lists %v, %v", ids, err)
+	}
+	stderrOf(t, func() {
+		out = stdoutOf(t, func() {
+			if err := ref.pass(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	})
+	if strings.Contains(out, " retired=") {
+		t.Fatalf("the next pass retired something:\n%s", out)
+	}
+	if pathExists(zone.SessionDir(b.Session)) {
+		t.Fatal("the next pass collected the retired session again")
+	}
+}
+
+// A retired conversation may never be read again. The pass must drop it
+// from the page's memory, whether retirement finishes in the pass or in
+// recovery. Only the pass that finishes the retirement counts it.
+func TestAPassForgetsARetiredConversation(t *testing.T) {
+	for _, finish := range []string{"pass", "recovery"} {
+		t.Run(finish, func(t *testing.T) {
+			root, b := scenarioRoot(t, "growth.yaml")
+			if err := os.RemoveAll(filepath.Join(root, storage.ScenarioDir)); err != nil {
+				t.Fatal(err)
+			}
+			rcv := receiver(t)
+			ref := pipelineOver(t, root, bothAdapters(root, ""))
+			sendingTo(t, ref, rcv)
+			stdoutOf(t, func() {
+				if err := ref.pass(); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if _, err := ref.srv.Load(b.Session); err != nil {
+				t.Fatal(err)
+			}
+			if !ref.srv.Kept(b.Session) {
+				t.Fatal("the page did not keep the conversation it loaded")
+			}
+
+			zone := storage.NewZone(root)
+			chain := filepath.Join(root, "_conversations", b.Session)
+			ref.retain(time.Nanosecond, time.Nanosecond)
+			if finish == "recovery" {
+				stopped := errors.New("stopped as a crash would stop it")
+				ref.retention.Stop = func(p retention.Point) error {
+					if p.Phase == retention.PhaseRetireMarked {
+						return stopped
+					}
+					return nil
+				}
+				var err error
+				var out string
+				stderrOf(t, func() {
+					out = stdoutOf(t, func() { err = ref.pass() })
+				})
+				if !errors.Is(err, stopped) {
+					t.Fatalf("the retirement did not stop at its marker: %v", err)
+				}
+				if !strings.Contains(out, "] refreshed:") || strings.Contains(out, " retired=") {
+					t.Fatalf("the stopped pass should print its line without counting a retirement:\n%s", out)
+				}
+				if !pathExists(zone.RetiredPath(b.Session)) || !pathExists(zone.SessionDir(b.Session)) || !pathExists(chain) {
+					t.Fatal("the stopped retirement should leave its marker, session and chain")
+				}
+				if _, err := ref.srv.Load(b.Session); err != nil {
+					t.Fatal(err)
+				}
+				if !ref.srv.Kept(b.Session) {
+					t.Fatal("the page did not keep the conversation before recovery")
+				}
+				ref.retention.Stop = nil
+			}
+
+			var out string
+			stderrOf(t, func() {
+				out = stdoutOf(t, func() {
+					if err := ref.pass(); err != nil {
+						t.Fatal(err)
+					}
+				})
+			})
+			if ref.srv.Kept(b.Session) {
+				t.Error("the page still keeps the retired conversation without another read")
+			}
+			if !strings.Contains(out, "] refreshed:") || !strings.Contains(out, " retired=1 ") {
+				t.Errorf("the pass line does not count the finished retirement:\n%s", out)
+			}
+			if !pathExists(zone.RetiredPath(b.Session)) || pathExists(zone.SessionDir(b.Session)) || pathExists(chain) {
+				t.Error("the retirement should leave its marker and remove the session and chain")
+			}
+		})
+	}
+}
+
+// The pipeline says at startup what each level does. Equal levels go
+// straight to retirement, so level 1 is not said then.
+func TestThePipelineSaysWhatEachLevelDoes(t *testing.T) {
+	root, _ := scenarioRoot(t, "growth.yaml")
+	ref := pipelineOver(t, root, bothAdapters(root, ""))
+	cfg := config.Default()
+	const metadataOnly, retired = "keeps only its metadata", "is retired: everything of it is removed, and it is never collected again"
+	for _, c := range []struct {
+		metadataOnly, retire time.Duration
+		says, not            []string
+	}{
+		{time.Hour, 0, []string{"idle for 1h0m0s " + metadataOnly}, []string{retired}},
+		{time.Hour, 2 * time.Hour, []string{"idle for 1h0m0s " + metadataOnly, "idle for 2h0m0s " + retired}, nil},
+		{2 * time.Hour, 2 * time.Hour, []string{"idle for 2h0m0s " + retired}, []string{metadataOnly}},
+		{0, 0, nil, []string{metadataOnly, retired}},
+	} {
+		ref.retain(c.metadataOnly, c.retire)
+		out := stdoutOf(t, func() { printPipeline(ref, cfg) })
+		for _, want := range c.says {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v and %v: the startup does not say %q:\n%s", c.metadataOnly, c.retire, want, out)
+			}
+		}
+		for _, not := range c.not {
+			if strings.Contains(out, not) {
+				t.Errorf("%v and %v: the startup says %q:\n%s", c.metadataOnly, c.retire, not, out)
+			}
+		}
+	}
+}
+
+// asz parse and asz push finish a retirement a pass left unfinished before
+// they do anything else, whatever the configuration says now, and write
+// nothing of the session: no round, no index, nothing sent.
+func TestStandaloneCommandsFinishARetirementFirst(t *testing.T) {
+	for _, command := range []string{"parse", "push"} {
+		t.Run(command, func(t *testing.T) {
+			root, b := scenarioRoot(t, "growth.yaml")
+			if err := os.RemoveAll(filepath.Join(root, storage.ScenarioDir)); err != nil {
+				t.Fatal(err)
+			}
+			rcv := receiver(t)
+			ref := pipelineOver(t, root, bothAdapters(root, ""))
+			sendingTo(t, ref, rcv)
+			ref.retain(time.Nanosecond, time.Nanosecond)
+			ref.retention.Stop = func(p retention.Point) error {
+				if p.Phase == retention.PhaseRetireMarked {
+					return errors.New("stopped as a crash would stop it")
+				}
+				return nil
+			}
+			stderrOf(t, func() {
+				stdoutOf(t, func() { _ = ref.pass() })
+			})
+			zone := storage.NewZone(root)
+			if !pathExists(zone.SessionDir(b.Session)) || !pathExists(zone.RetiredPath(b.Session)) {
+				t.Fatal("the stopped retirement should leave its marker and the session's directory")
+			}
+			rcv.Reset()
+			cfg := &config.Config{Metrics: allMetrics}
+			cfg.Storage.Root = root
+			o := rcv.Options(otlp.ProtocolGRPC)
+			cfg.Export.OTLP.Protocol, cfg.Export.OTLP.Endpoint, cfg.Export.OTLP.ServiceName = o.Protocol, o.Endpoint, "Removal Test"
+			var err error
+			stderrOf(t, func() {
+				stdoutOf(t, func() {
+					if command == "parse" {
+						err = cmdParse(cfg, config.Adapter{}, false)
+					} else {
+						err = cmdPush(cfg, config.Adapter{}, false)
+					}
+				})
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, dir := range []string{zone.SessionDir(b.Session), filepath.Join(root, "_conversations", b.Session)} {
+				if pathExists(dir) {
+					t.Fatalf("%s is left after asz %s", dir, command)
+				}
+			}
+			for _, rec := range otlptest.Records(rcv.Requests()) {
+				if otlptest.Attrs(rec.Attributes)["asz.session"] == b.Session {
+					t.Fatalf("asz %s sent a file of the retired session", command)
+				}
 			}
 		})
 	}

@@ -22,7 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -130,4 +134,72 @@ func loadReceipt(path string, lf storage.LandedFile) (*receipt, error) {
 		return nil, fmt.Errorf("metrics: receipt %s does not match its landed file", path)
 	}
 	return &r, nil
+}
+
+// ReceiptsDir is where a session's receipts are kept, one for each landed
+// file derived, named by its sequence.
+func ReceiptsDir(z *storage.Zone, session string) string {
+	return filepath.Join(z.SessionDir(session), "metrics")
+}
+
+// HandOff writes again, from its receipt, every metrics request of a session
+// the receiver has not answered, and makes each one durable. It reports how
+// many it wrote.
+//
+// A retirement calls it before the session's directory goes, since the
+// receipts are kept there and are what can make a request again. A request
+// already on disk is written again too: its directory sync may have failed,
+// and a later sync that succeeds does not prove it reached the disk. It is
+// read-only, and on Windows a rename cannot replace a read-only file, so it
+// is deleted first. A crash between the deletion and the write leaves the
+// receipt, from which the retirement writes it again.
+func HandOff(z *storage.Zone, session string, answered func(rel string) bool, sync func(dir string) error) (int, error) {
+	dir := ReceiptsDir(z, session)
+	items, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	spool := storage.NewSpool(z).Dir()
+	written := 0
+	for _, it := range items {
+		digits, ok := strings.CutSuffix(it.Name(), ".json")
+		seq, err := strconv.ParseUint(digits, 10, 64)
+		if it.IsDir() || !ok || err != nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, it.Name()))
+		if err != nil {
+			return written, err
+		}
+		// An empty receipt is a reservation, which recorded no decision.
+		if len(data) == 0 {
+			continue
+		}
+		var r receipt
+		if err := json.Unmarshal(data, &r); err != nil {
+			return written, fmt.Errorf("metrics: read receipt %s: %w", it.Name(), err)
+		}
+		if r.Schema != 1 {
+			return written, fmt.Errorf("metrics: receipt %s has unsupported schema %d", it.Name(), r.Schema)
+		}
+		name := SpoolName(session, seq)
+		if len(r.Request) == 0 || answered(storage.SpoolDir+"/"+name) {
+			continue
+		}
+		path := filepath.Join(spool, name)
+		if err := storage.DeleteTree(path, nil); err != nil {
+			return written, err
+		}
+		if err := storage.WriteAtomicDurable(path, storage.PermLanded, func(w io.Writer) error {
+			_, err := w.Write(r.Request)
+			return err
+		}, sync); err != nil {
+			return written, err
+		}
+		written++
+	}
+	return written, nil
 }

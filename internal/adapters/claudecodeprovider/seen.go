@@ -278,3 +278,35 @@ func Forget(z *storage.Zone, sessions []string, now time.Time) error {
 	}
 	return sn.save(z, now)
 }
+
+// Retire marks every line of the given sessions retired, keeping what each
+// line says. Claude Code never deletes a body file, so these lines are what
+// keeps each pass from reading a retired session's bodies again. A line goes
+// once its file is gone, as any line of a session that is gone does. A
+// retirement calls it once the sessions' directories are gone. It holds the
+// provider lock already, in the order every command takes the locks, so
+// Retire takes none, where Forget takes it itself. A table that does not
+// exist has nothing to mark.
+func Retire(z *storage.Zone, sessions []string, now time.Time) error {
+	if _, err := os.Stat(z.ProviderStatePath()); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	sn, err := loadSeen(z)
+	if err != nil {
+		return err
+	}
+	retired := map[string]bool{}
+	for _, s := range sessions {
+		retired[s] = true
+	}
+	for _, e := range sn.entries {
+		if retired[e.session] && e.state != stateRetired {
+			e.state = stateRetired
+			sn.dirty = true
+		}
+	}
+	if !sn.dirty {
+		return nil
+	}
+	return sn.save(z, now)
+}

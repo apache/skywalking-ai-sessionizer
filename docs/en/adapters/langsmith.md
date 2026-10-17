@@ -352,6 +352,18 @@ start seen, it lands under a name that says the identity was not supplied, and n
 with anything else. A later update of one of its runs that carries a key stays there: one run is
 one conversation.
 
+The client keeps nothing, so asz alone gives a conversation its lifetime, by the same two levels of
+`storage.retention` as every runtime. A conversation retired by `retire_after` is never collected
+again. A later run of its thread is not collected, and neither is an update of one of its runs, or a
+run inside one that names no conversation of its own, while asz remembers that run. They do not wait
+for anything. What `open.json` remembers of each run is what tells them apart, and a retirement does
+not change it. A run that names a conversation of its own is checked directly. The same holds for
+an update with a complete identity, even if asz no longer remembers its run. It is not collected
+if that conversation is retired. Otherwise, it lands in that conversation. An update of a run asz
+no longer remembers waits as long as it may only when its own identity is incomplete. If that
+identity remains unresolved, the update is then not collected. See
+[Retirement](../formats/storage-root.md#retirement).
+
 ## What the wire cannot supply
 
 - **A child's own conversation.** An agent invoked with its own `thread_id` reports the parent's on

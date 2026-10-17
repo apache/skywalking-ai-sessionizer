@@ -265,7 +265,7 @@ func (d *Deriver) Pass(sessions []string) (*Stats, error) {
 		}
 		ss := state.session(session)
 		receiptPath := func(lf storage.LandedFile) string {
-			return filepath.Join(d.Zone.SessionDir(session), "metrics", fmt.Sprintf("%06d.json", lf.Seq))
+			return filepath.Join(ReceiptsDir(d.Zone, session), fmt.Sprintf("%06d.json", lf.Seq))
 		}
 		// A pass whose progress was not saved may have published receipts for
 		// files after one that waited for its grace. Their requests are in the

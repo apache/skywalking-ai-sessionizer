@@ -514,3 +514,65 @@ func TestMetadataOnlyAfterDuration(t *testing.T) {
 		t.Fatalf("a configuration with metadata_only_after soon validates: %v", err)
 	}
 }
+
+// The two levels are read together. retire_after is off when it is left out,
+// is at least metadata_only_after, and needs it set; equal levels are the
+// same however each is written. A value that is not a duration is refused by
+// the setting's whole name, as metadata_only_after's is.
+func TestTheTwoRetentionLevelsGoTogether(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asz.yaml")
+	section := func(metadataOnly, retire string) string {
+		body := "storage:\n  retention:\n"
+		if metadataOnly != "" {
+			body += "    metadata_only_after: " + metadataOnly + "\n"
+		}
+		if retire != "" {
+			body += "    retire_after: " + retire + "\n"
+		}
+		return body
+	}
+	day := 24 * time.Hour
+	for _, c := range []struct {
+		metadataOnly, retire string
+		want                 [2]time.Duration
+	}{
+		{"-1", "-1", [2]time.Duration{0, 0}},
+		{"", "", [2]time.Duration{0, 0}},
+		{"30d", "", [2]time.Duration{30 * day, 0}},
+		{"30d", "-1", [2]time.Duration{30 * day, 0}},
+		{"30d", "90d", [2]time.Duration{30 * day, 90 * day}},
+		{"30d", "720h", [2]time.Duration{30 * day, 30 * day}},
+		{"720h", "30d", [2]time.Duration{30 * day, 30 * day}},
+	} {
+		body := section(c.metadataOnly, c.retire)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+		metadataOnly, retire, err := cfg.Storage.Retention.Durations()
+		if err != nil || metadataOnly != c.want[0] || retire != c.want[1] {
+			t.Errorf("%q read as %v and %v, %v; want %v", body, metadataOnly, retire, err, c.want)
+		}
+	}
+	for _, c := range []struct{ metadataOnly, retire, says string }{
+		{"-1", "30d", "metadata_only_after is off"},
+		{"", "30d", "metadata_only_after is off"},
+		{"30d", "7d", "is shorter than metadata_only_after"},
+		{"30d", "719h", "is shorter than metadata_only_after"},
+		{"30d", "soon", "storage.retention.retire_after"},
+		{"30d", "0", "storage.retention.retire_after"},
+		{"30d", "-2", "storage.retention.retire_after"},
+		{"30d", "99999999999d", "storage.retention.retire_after"},
+	} {
+		body := section(c.metadataOnly, c.retire)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), c.says) {
+			t.Errorf("%q was taken, or refused without saying %q: %v", body, c.says, err)
+		}
+	}
+}
