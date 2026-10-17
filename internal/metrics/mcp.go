@@ -19,11 +19,15 @@ package metrics
 
 import (
 	"errors"
+	"fmt"
 	"hash"
 	"io"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
@@ -112,4 +116,71 @@ func deriveExecutions(rd *sessiondata.Reader, f io.Reader, h hash.Hash, hdr *ses
 	}
 	res.points = windows(points, res, ss)
 	return res, nil
+}
+
+// unread counts the execution observations of a session's skeletons that no
+// pass counted.
+//
+// A skeleton keeps an execution record's id, tool, time and outcome, and not
+// its protocol or its server. So whether it was a call to an MCP server is not
+// known, and its MCP metrics cannot be derived. Metrics are derived only while
+// an endpoint is set, so a session removed with none set reaches a deriver
+// enabled later with nothing of its executions counted. Nothing records why an
+// observation was not counted before its file was removed, so this is a count
+// of what is there now: distinct observations a skeleton keeps that are not
+// among the counted ones. Some of them may not have been MCP calls.
+//
+// Only execution files are opened, by their name: a root's skeletons are
+// mostly transcripts, and a reader holds a buffer of its own.
+func unread(files []storage.LandedFile, ss *sessionState) (int, error) {
+	ids := map[string]bool{}
+	for _, lf := range files {
+		if !lf.Skeleton || !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindExecution)+"-") {
+			continue
+		}
+		if err := executionIDs(lf.Path, ids); err != nil {
+			return 0, fmt.Errorf("%s: %w", lf.Path, err)
+		}
+	}
+	n := 0
+	for id := range ids {
+		if !ss.Calls[executionKey(id)] {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// executionIDs adds the observation id of every execution record a file
+// holds.
+func executionIDs(path string, ids map[string]bool) error {
+	f, err := sessiondata.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	rd, err := sessiondata.NewReader(f)
+	if err != nil {
+		return err
+	}
+	if rd.Header().Kind != sessiondata.KindExecution {
+		return nil
+	}
+	for {
+		rec, err := rd.Next()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		for _, p := range rec.Parts {
+			if p.Kind != sessiondata.PartData {
+				continue
+			}
+			if r, ok := execution.Decode(p.Data); ok && r.ID != "" {
+				ids[r.ID] = true
+			}
+		}
+	}
 }

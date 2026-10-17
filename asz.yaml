@@ -31,12 +31,17 @@ storage:
   root: ./data
 
   # How long a conversation may be idle, with nothing new landed in any of
-  # its streams, before its landed files are removed from this root. Each
-  # file is replaced by a skeleton that keeps the conversation's structure, so
-  # new activity continues the same conversation; the text is kept only by
-  # the receiver it was sent to. Only a conversation that was sent is removed.
-  # A duration such as 72h, or days such as 30d. -1 keeps everything.
-  retention: -1
+  # its streams, before this root keeps less of it. Whether it was sent, and
+  # whether an endpoint is set, does not matter. Each value is a duration
+  # such as 72h, or days such as 30d, and -1 is off. Only off keeps
+  # everything.
+  retention:
+    # To save disk, keep only the conversation's metadata: what was said and
+    # run is removed from every landed file, and who did what, when, in what
+    # order and at what cost stays. New activity continues the same
+    # conversation. The removed content cannot be restored here; only a
+    # receiver that accepted it still has it.
+    metadata_only_after: -1
 
 adapters:
   - name: claude-code-local

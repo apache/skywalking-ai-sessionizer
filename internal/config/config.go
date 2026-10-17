@@ -195,17 +195,31 @@ type Storage struct {
 	// Root is where landed data is written. Default "./data", i.e. beside the
 	// binary; tests point it beside their fixtures so a case is self-contained.
 	Root string `yaml:"root"`
-	// Retention is how long a conversation may be idle before its landed
-	// files are removed from the root, each replaced by a skeleton. -1 or
-	// empty keeps everything, the default. See RetentionDuration.
-	Retention string `yaml:"retention"`
+	// Retention is how long an idle conversation keeps what in the root.
+	Retention Retention `yaml:"retention"`
 }
 
-// RetentionDuration is the retention as a duration: zero for -1 or empty,
-// which keep everything, and a d suffix counts days, as a retention is
-// spoken of in days.
-func (s Storage) RetentionDuration() (time.Duration, error) {
-	v := strings.TrimSpace(s.Retention)
+// Retention is how long a conversation may be idle before the root keeps
+// less of it. Idle is measured from the newest file landed for it, whether
+// it was sent or not, and whether an endpoint is set or not. Every value is
+// -1, off, by default, and only off keeps everything.
+type Retention struct {
+	// MetadataOnlyAfter is how long a conversation may be idle before only
+	// its metadata is kept, to save disk: each landed file is replaced by
+	// its skeleton, which keeps who did what, when and in what order, and
+	// none of what was said or run. See MetadataOnlyAfterDuration.
+	MetadataOnlyAfter string `yaml:"metadata_only_after"`
+}
+
+// MetadataOnlyAfterDuration is metadata_only_after as a duration: zero for -1
+// or empty, which keep everything, and a d suffix counts days, as a retention
+// is spoken of in days.
+func (r Retention) MetadataOnlyAfterDuration() (time.Duration, error) {
+	return retentionDuration("storage.retention.metadata_only_after", r.MetadataOnlyAfter)
+}
+
+func retentionDuration(name, value string) (time.Duration, error) {
+	v := strings.TrimSpace(value)
 	switch v {
 	case "", "-1":
 		return 0, nil
@@ -215,13 +229,13 @@ func (s Storage) RetentionDuration() (time.Duration, error) {
 		// A number of days past what a duration holds would wrap around to
 		// a short one, and remove what was meant to be kept for years.
 		if err != nil || n <= 0 || int64(n) > int64(math.MaxInt64/(24*time.Hour)) {
-			return 0, fmt.Errorf("config: storage.retention %q is not a positive number of days a duration can hold", v)
+			return 0, fmt.Errorf("config: %s %q is not a positive number of days a duration can hold", name, v)
 		}
 		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("config: storage.retention %q is not -1 or a duration such as 72h or 7d", v)
+		return 0, fmt.Errorf("config: %s %q is not -1 or a duration such as 72h or 7d", name, v)
 	}
 	return d, nil
 }
@@ -375,7 +389,7 @@ const (
 // Default returns the configuration used when none is supplied.
 func Default() *Config {
 	return &Config{
-		Storage: Storage{Root: "./data", Retention: "-1"},
+		Storage: Storage{Root: "./data", Retention: Retention{MetadataOnlyAfter: "-1"}},
 		Adapters: []Adapter{{
 			Name:    AdapterClaudeCodeLocal,
 			Enabled: true,
@@ -479,7 +493,11 @@ func Load(path string) (*Config, error) {
 	// their gaps below; pointers preserve explicit false export switches.
 	var loaded Config
 	if err := yaml.Unmarshal(data, &loaded); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+		// The library names a Go type a person editing the file has never
+		// seen. storage.retention is a section, and a single value there is
+		// the one place a reader is likely to meet it.
+		return nil, fmt.Errorf("config: parse %s: %s", path, strings.ReplaceAll(err.Error(),
+			"into config.Retention", "into storage.retention, which is a section of settings such as metadata_only_after"))
 	}
 	if err := checkKeys(data); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
@@ -487,8 +505,8 @@ func Load(path string) (*Config, error) {
 	if loaded.Storage.Root != "" {
 		cfg.Storage.Root = loaded.Storage.Root
 	}
-	if loaded.Storage.Retention != "" {
-		cfg.Storage.Retention = loaded.Storage.Retention
+	if loaded.Storage.Retention.MetadataOnlyAfter != "" {
+		cfg.Storage.Retention.MetadataOnlyAfter = loaded.Storage.Retention.MetadataOnlyAfter
 	}
 	if len(loaded.Adapters) > 0 {
 		cfg.Adapters = loaded.Adapters
@@ -692,7 +710,7 @@ func (c *Config) Validate() error {
 	if _, err := c.Metrics.LookbackDuration(); err != nil {
 		return err
 	}
-	if _, err := c.Storage.RetentionDuration(); err != nil {
+	if _, err := c.Storage.Retention.MetadataOnlyAfterDuration(); err != nil {
 		return err
 	}
 	if err := sessiondata.CheckWithholdable(c.View.Hide); err != nil {

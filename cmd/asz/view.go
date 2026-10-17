@@ -166,7 +166,7 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	}
 	defer closeClient()
 	ref.pusher = pusher
-	keep, err := cfg.Storage.RetentionDuration()
+	keep, err := cfg.Storage.Retention.MetadataOnlyAfterDuration()
 	if err != nil {
 		return err
 	}
@@ -262,11 +262,11 @@ func printPipeline(ref *refresher, cfg *config.Config) {
 		}
 		fmt.Printf("export   : %s, at the end of every pass\n", endpoint)
 	}
-	if ref.retention != nil && ref.retention.Retention > 0 {
-		fmt.Printf("retention: a sent conversation idle for %s loses its landed files; a skeleton keeps its structure, and the receiver its text\n", ref.retention.Retention)
+	if ref.retention != nil && ref.retention.MetadataOnlyAfter > 0 {
+		fmt.Printf("retention: a conversation idle for %s keeps only its metadata; its content is removed, and only a receiver that accepted it still has it\n", ref.retention.MetadataOnlyAfter)
 	}
 	// A root a claude-code scenario build wrote. Only there does a pipeline
-	// remove anything, and only what a build marked.
+	// remove a session whole, and only one a build marked.
 	if fi, err := os.Stat(filepath.Join(ref.zone.Root(), storage.ScenarioDir)); err == nil && fi.IsDir() {
 		fmt.Printf("scenario : %s\n", ref.removalSays())
 	}

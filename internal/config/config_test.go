@@ -454,24 +454,63 @@ func TestARefusedViewKeySaysWhere(t *testing.T) {
 	}
 }
 
-// storage.retention keeps everything by default and for -1, takes a duration
-// or a number of days, and refuses anything else, including zero, which
-// would remove a conversation the moment it is sent.
-func TestRetentionDuration(t *testing.T) {
+// storage.retention is a section, read from the file as written: the
+// duration given, off when the section or the key is left out or is -1, a
+// value that is not a duration refused by the setting's whole name, and the
+// single value it once was refused.
+func TestRetentionIsReadFromTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asz.yaml")
+	for body, want := range map[string]time.Duration{
+		"storage:\n  retention:\n    metadata_only_after: 30d\n": 30 * 24 * time.Hour,
+		"storage:\n  retention:\n    metadata_only_after: 72h\n": 72 * time.Hour,
+		"storage:\n  retention:\n    metadata_only_after: -1\n":  0,
+		"storage:\n  retention: {}\n":                            0,
+		"storage:\n  root: ./elsewhere\n":                        0,
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+		if d, err := cfg.Storage.Retention.MetadataOnlyAfterDuration(); err != nil || d != want {
+			t.Errorf("%q read as %v, %v; want %v", body, d, err, want)
+		}
+	}
+	for body, says := range map[string]string{
+		"storage:\n  retention:\n    metadata_only_after: soon\n": "storage.retention.metadata_only_after",
+		"storage:\n  retention: -1\n":                             "storage.retention, which is a section",
+		"storage:\n  retention: 30d\n":                            "storage.retention, which is a section",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), says) {
+			t.Errorf("%q was taken, or refused without naming %s: %v", body, says, err)
+		}
+	}
+}
+
+// storage.retention.metadata_only_after keeps everything by default and for
+// -1, takes a duration or a number of days, and refuses anything else,
+// including zero, which would remove a conversation's content the moment it
+// landed.
+func TestMetadataOnlyAfterDuration(t *testing.T) {
 	for in, want := range map[string]time.Duration{"": 0, "-1": 0, " -1 ": 0, "72h": 72 * time.Hour, "30d": 30 * 24 * time.Hour,
 		"90m": 90 * time.Minute, "106751d": 106751 * 24 * time.Hour} {
-		if d, err := (Storage{Retention: in}).RetentionDuration(); err != nil || d != want {
-			t.Errorf("storage.retention %q is %v, %v; want %v", in, d, err, want)
+		if d, err := (Retention{MetadataOnlyAfter: in}).MetadataOnlyAfterDuration(); err != nil || d != want {
+			t.Errorf("metadata_only_after %q is %v, %v; want %v", in, d, err, want)
 		}
 	}
 	for _, in := range []string{"0", "0d", "-2", "-1h", "soon", "1x", "213504d", "99999999999d"} {
-		if d, err := (Storage{Retention: in}).RetentionDuration(); err == nil {
-			t.Errorf("storage.retention %q was taken as %v", in, d)
+		if d, err := (Retention{MetadataOnlyAfter: in}).MetadataOnlyAfterDuration(); err == nil {
+			t.Errorf("metadata_only_after %q was taken as %v", in, d)
 		}
 	}
 	cfg := Default()
-	cfg.Storage.Retention = "soon"
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "storage.retention") {
-		t.Fatalf("a configuration with storage.retention soon validates: %v", err)
+	cfg.Storage.Retention.MetadataOnlyAfter = "soon"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "storage.retention.metadata_only_after") {
+		t.Fatalf("a configuration with metadata_only_after soon validates: %v", err)
 	}
 }

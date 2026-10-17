@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	collmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -41,6 +42,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
+	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
@@ -67,7 +69,7 @@ func landedAt(k int) time.Time { return time.Date(2026, 3, 1, k, 0, 0, 0, time.U
 func later() time.Time { return time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC) }
 
 func retentionOf(r *sentRoot) *retention.Remover {
-	return &retention.Remover{Zone: r.zone, Retention: time.Hour, Metrics: true, Now: later}
+	return &retention.Remover{Zone: r.zone, MetadataOnlyAfter: time.Hour, Metrics: true, Now: later}
 }
 
 // pipelineAt is one pass of asz collect, collecting on the clock given.
@@ -433,9 +435,10 @@ func skeletons(t *testing.T, z *storage.Zone, session string) []sessiondata.Head
 	return out
 }
 
-// A session keeps its files while any reason holds: it was never sent, it is
-// still active, a landed file is not parsed, its metrics are not derived, or
-// its parse failed this pass. Once none holds, the files go.
+// A session keeps its files while any reason holds: it is still active, a
+// landed file is not parsed, its metrics are not derived, or its parse failed
+// this pass. Once none holds, the files go. Whether it was sent is not one of
+// them: see TestASessionKeepsOnlyItsMetadataSentOrNot.
 func TestRetentionKeepsWhatItMust(t *testing.T) {
 	type setup func(r *sentRoot, k int)
 	full := func(r *sentRoot, k int) { r.pipelineAt(landedAt(k)) }
@@ -444,11 +447,6 @@ func TestRetentionKeepsWhatItMust(t *testing.T) {
 		land   setup
 		remove func(r *sentRoot, rem *retention.Remover, session string) retention.Result
 	}{
-		{"never sent", func(r *sentRoot, k int) {
-			r.collectAt(landedAt(k))
-			r.derive()
-			r.parse()
-		}, nil},
 		{"active", full, func(_ *sentRoot, rem *retention.Remover, _ string) retention.Result {
 			rem.Now = func() time.Time { return landedAt(1).Add(30 * time.Minute) }
 			return rem.Pass(retention.Input{})
@@ -533,6 +531,279 @@ func TestRetentionKeepsWhatItMust(t *testing.T) {
 			t.Fatalf("the removal left its intent: %v", err)
 		}
 	})
+}
+
+// A session keeps only its metadata once it is idle whether it was sent or
+// not: with no endpoint set, with one set and nothing sent yet, with a send
+// tried that no answer confirmed, and with part of it sent, the last two
+// also with the endpoint taken away afterwards. Each skeleton says what the
+// receiver confirmed of its file, and names the owner only where a send was
+// tried. The root verifies, the page draws the conversation and serves its
+// provider files as their skeletons, and a later send carries its rounds and
+// none of its removed files.
+func TestASessionKeepsOnlyItsMetadataSentOrNot(t *testing.T) {
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", "provider-bodies-long.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tried := func(r *sentRoot) {
+		r.rcv.Fail(true)
+		defer r.rcv.Fail(false)
+		client, err := r.rcv.Client(otlp.ProtocolGRPC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.Close()
+		p := &otlp.Pusher{Zone: r.zone, Client: client, Endpoint: r.endpoint, Version: "test",
+			ServiceName: "Removal Test", InstanceID: "removal-test", Layer: "AI_AGENT"}
+		if _, err := p.Pass(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	whole := func(r *sentRoot, metrics bool) *scenario.Built {
+		b := r.build(sc, scenario.Options{})
+		r.collectAt(landedAt(0))
+		if metrics {
+			r.derive()
+		}
+		r.parse()
+		return b
+	}
+	for _, c := range []struct {
+		name string
+		// metrics is whether the pipeline that removes derives, as it does
+		// only with an endpoint set, so it is false once the endpoint is
+		// gone, whatever was derived before; owned is whether a send was
+		// tried; sendAfter is whether the endpoint is still there after the
+		// removal.
+		metrics, owned, sendAfter bool
+		land                      func(r *sentRoot) *scenario.Built
+		receivers                 []string
+	}{
+		{"no endpoint", false, false, false, func(r *sentRoot) *scenario.Built { return whole(r, false) },
+			[]string{sessiondata.ReceiverUnconfirmed}},
+		{"an endpoint, nothing sent", true, false, true, func(r *sentRoot) *scenario.Built { return whole(r, true) },
+			[]string{sessiondata.ReceiverUnconfirmed}},
+		{"a send no answer confirmed", true, true, true, func(r *sentRoot) *scenario.Built {
+			b := whole(r, true)
+			tried(r)
+			return b
+		}, []string{sessiondata.ReceiverUnconfirmed}},
+		{"a send no answer confirmed, the endpoint then gone", false, true, false, func(r *sentRoot) *scenario.Built {
+			b := whole(r, true)
+			tried(r)
+			return b
+		}, []string{sessiondata.ReceiverUnconfirmed}},
+		{"part of it sent, the endpoint then gone", false, true, false, func(r *sentRoot) *scenario.Built {
+			r.build(sc, scenario.Options{Through: sc.Checkpoints()[0]})
+			r.pipelineAt(landedAt(0))
+			b := r.build(sc, scenario.Options{})
+			r.collectAt(landedAt(1))
+			r.derive()
+			r.parse()
+			return b
+		}, []string{sessiondata.ReceiverAccepted, sessiondata.ReceiverUnconfirmed}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newSentRoot(t)
+			b := c.land(r)
+			rem := retentionOf(r)
+			rem.Metrics = c.metrics
+			if res := rem.Pass(retention.Input{}); len(res.Errors) > 0 || res.Files == 0 {
+				t.Fatalf("an idle session kept its files: %+v", res)
+			}
+			sent, err := otlpSent(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := sent.Owner(b.Session)
+			if (owner != "") != c.owned {
+				t.Fatalf("owner %q: only a tried send names one", owner)
+			}
+			heads := skeletons(t, r.zone, b.Session)
+			if len(heads) == 0 {
+				t.Fatal("no skeleton took a removed file's place")
+			}
+			said := map[string]bool{}
+			for _, h := range heads {
+				if h.Removed == nil || h.Removed.Owner != owner {
+					t.Fatalf("a skeleton says %+v, want the owner %q", h.Removed, owner)
+				}
+				said[h.Removed.Receiver] = true
+			}
+			if len(said) != len(c.receivers) {
+				t.Fatalf("the skeletons say %v, want %v", said, c.receivers)
+			}
+			for _, want := range c.receivers {
+				if !said[want] {
+					t.Fatalf("the skeletons say %v, want %v", said, c.receivers)
+				}
+			}
+			landed, _ := storage.LandedFiles(r.zone, b.Session)
+			for _, lf := range landed {
+				if !lf.Skeleton {
+					t.Fatalf("%s was not removed", lf.Path)
+				}
+			}
+			verified(t, r.zone, b.Session)
+
+			h := view.New(r.zone, nil).Handler()
+			get := func(path string) (int, []byte) {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+				return w.Code, w.Body.Bytes()
+			}
+			code, body := get("/api/c/" + b.Session + "/view")
+			if code != http.StatusOK || !bytes.Contains(body, []byte(`"state":"removed"`)) {
+				t.Fatalf("the document is %d and says nothing was removed", code)
+			}
+			var doc sessionview.Conversation
+			if err := json.Unmarshal(body, &doc); err != nil {
+				t.Fatal(err)
+			}
+			q := url.Values{"session": {b.Session}}
+			bodies := 0
+			for _, f := range doc.Files {
+				if f.Kind == string(sessiondata.KindProviderBody) && f.Seq != nil {
+					q.Add("seq", fmt.Sprint(*f.Seq))
+					bodies++
+				}
+			}
+			if bodies == 0 {
+				t.Fatal("the scenario lands no provider body; the test needs some")
+			}
+			code, body = get("/api/c/" + b.Session + "/files?" + q.Encode())
+			var served []struct {
+				Seq   uint64 `json:"seq"`
+				Bytes []byte `json:"bytes"`
+			}
+			if code != http.StatusOK || json.Unmarshal(body, &served) != nil || len(served) != bodies {
+				t.Fatalf("the files route answered %d with %d of %d provider files", code, len(served), bodies)
+			}
+			for _, f := range served {
+				if len(f.Bytes) == 0 {
+					t.Fatalf("provider file %d was served empty", f.Seq)
+				}
+			}
+
+			if !c.sendAfter {
+				return
+			}
+			r.rcv.Reset()
+			r.push()
+			names := map[string]bool{}
+			for _, rec := range otlptest.Records(r.rcv.Requests()) {
+				names[otlptest.Attrs(rec.Attributes)["asz.file"]] = true
+			}
+			rounds := 0
+			for name := range names {
+				if strings.HasPrefix(name, b.Session+"/") {
+					t.Fatalf("%s was sent, although retention removed it", name)
+				}
+				if strings.HasPrefix(name, "_conversations/") {
+					rounds++
+				}
+			}
+			if rounds == 0 {
+				t.Fatal("the send carried no round of the conversation")
+			}
+		})
+	}
+}
+
+// Metrics turned on after a session that was never sent kept only its
+// metadata count the same tokens from its skeletons as from its landed files,
+// derive no MCP call from them, and say how many of its execution
+// observations they cannot derive MCP metrics for: every distinct one, since
+// nothing of them was counted before the removal.
+func TestLateMetricsSayWhatTheyCannotDerive(t *testing.T) {
+	sc, err := scenario.Load(filepath.Join("..", "scenarios", "mcp-calls.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, kept := newSentRoot(t), newSentRoot(t)
+	var b *scenario.Built
+	for _, r := range []*sentRoot{plain, kept} {
+		b = r.build(sc, scenario.Options{})
+		r.collectAt(landedAt(0))
+		r.parse()
+	}
+	observations := map[string]bool{}
+	landed, _ := storage.LandedFiles(kept.zone, b.Session)
+	for _, lf := range landed {
+		f, err := sessiondata.Open(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hdr, recs, err := sessiondata.All(f)
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hdr.Kind != sessiondata.KindExecution {
+			continue
+		}
+		for _, rec := range recs {
+			observations[rec.ID] = true
+		}
+	}
+	if len(observations) == 0 {
+		t.Fatal("the scenario lands no execution record")
+	}
+	rem := retentionOf(kept)
+	rem.Metrics = false
+	if res := rem.Pass(retention.Input{}); res.Files == 0 || len(res.Errors) > 0 {
+		t.Fatalf("the removal: %+v", res)
+	}
+	if plain.derive() == 0 {
+		t.Fatal("the landed files derive no request")
+	}
+	st, err := (&metrics.Deriver{Zone: kept.zone, Options: metrics.Options{Grace: -1, Version: "test"}}).Pass(nil)
+	if err != nil || len(st.Errors) > 0 {
+		t.Fatalf("%v %v", err, st)
+	}
+	if st.Unread[b.Session] != len(observations) {
+		t.Errorf("unread %v, want the %d observations the session landed", st.Unread, len(observations))
+	}
+	whole, removed := metricTotals(t, plain.dir), metricTotals(t, kept.dir)
+	if whole[metrics.TokenUsage] == 0 || whole[metrics.TokenUsage] != removed[metrics.TokenUsage] {
+		t.Errorf("tokens: %v from the landed files, %v from the skeletons", whole[metrics.TokenUsage], removed[metrics.TokenUsage])
+	}
+	if whole[metrics.MCPCalls] == 0 || removed[metrics.MCPCalls] != 0 || removed[metrics.MCPDuration] != 0 {
+		t.Errorf("MCP calls: %v from the landed files, %v and %v ms from the skeletons", whole[metrics.MCPCalls],
+			removed[metrics.MCPCalls], removed[metrics.MCPDuration])
+	}
+}
+
+// metricTotals adds up every point of every spooled request of a root, by
+// metric.
+func metricTotals(t *testing.T, dir string) map[string]float64 {
+	t.Helper()
+	files, err := storage.NewSpool(storage.NewZone(dir)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]float64{}
+	for _, f := range files {
+		data, err := os.ReadFile(f.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var req collmetricspb.ExportMetricsServiceRequest
+		if err := proto.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+		for _, rm := range req.ResourceMetrics {
+			for _, sm := range rm.ScopeMetrics {
+				for _, m := range sm.Metrics {
+					for _, p := range m.GetSum().GetDataPoints() {
+						out[m.Name] += p.GetAsDouble()
+					}
+				}
+			}
+		}
+	}
+	return out
 }
 
 // Each skeleton says what the receiver confirmed of its file: accepted,

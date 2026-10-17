@@ -35,14 +35,24 @@ The pipeline. One pass does three things, in this order:
 The order matters. The push runs last so a pass sends the rounds it has just written, rather than
 leaving them for the next one.
 
-With `storage.retention` set, a pass then removes the landed files of every conversation that was
-sent and has been idle for longer, leaving a skeleton in each one's place. Before it lands
-anything, every pass finishes a removal an earlier one left in progress, whatever the setting says
-now. A scenario root keeps its own removal, and retention never runs there. See
-[Retention](../formats/storage-root.md#retention). The startup lines say the retention:
+With `storage.retention.metadata_only_after` set, a pass then keeps only the metadata of every
+conversation idle for longer, sent or not: it removes the landed files and leaves a skeleton in
+each one's place. Before it lands anything, every pass finishes a removal an earlier one left in
+progress, whatever the setting says now. A scenario root keeps its own removal, and retention never
+runs there. See [Retention](../formats/storage-root.md#retention). The startup lines say the
+retention:
 
 ```text
-retention: a sent conversation idle for 72h0m0s loses its landed files; a skeleton keeps its structure, and the receiver its text
+retention: a conversation idle for 72h0m0s keeps only its metadata; its content is removed, and only a receiver that accepted it still has it
+```
+
+When metrics are turned on after a conversation kept only its metadata, the skeletons give its
+tokens, and not whether an execution was a call to an MCP server. The first pass of a process says,
+for each session, how many distinct execution observations its skeletons keep that no pass counted.
+The count does not say how many of them were MCP calls:
+
+```text
+  metrics: <session>: 4 execution observations lack retained details; their MCP metrics cannot be derived
 ```
 
 In watch mode, the default, it repeats every `interval`; with `-once` or `mode: once` it makes one
@@ -67,7 +77,7 @@ One line per pass, and a quiet pass prints nothing:
 | `metrics` | spooled metrics requests sent |
 | `rejected` | records and points a receiver took and rejected, absent when 0. It also gives an `error:` line, because they are never sent again. |
 | `removed` | scenario sessions removed, absent when 0. See [A scenario root](#a-scenario-root). |
-| `retention` | landed files `storage.retention` removed, absent when 0. See [Retention](../formats/storage-root.md#retention). |
+| `retention` | landed files `storage.retention.metadata_only_after` removed, absent when 0. See [Retention](../formats/storage-root.md#retention). |
 | `errors` | listed on standard error after the line |
 
 `busy` is not an error. Running two pipelines on one root is supported, and the process that holds
@@ -95,7 +105,9 @@ status.
 A root a `claude-code` scenario build wrote holds `_scenario/`. There a pass does one more thing,
 after the send. It removes each session the build marked that is now sent in full, by the policy in
 the session's marker. [Removal](scenario.md#removal-a-session-goes-once-it-is-sent) says
-what that takes. A root no build wrote has no `_scenario/`, and nothing in it is ever removed.
+what that takes. A root no build wrote has no `_scenario/`, and no session in it is ever removed
+whole. Retention, when it is set, keeps only the metadata of an idle conversation in such a root,
+and in one an sd build wrote. It never runs over a root with `_scenario/`.
 
 When the root holds `_scenario/` at the start, a `scenario :` line says what the removal will do.
 It asks the check each removal pass makes before it looks at any session, so it never promises a
@@ -349,7 +361,7 @@ remove   : 24h after its last record, once sent
 ```
 
 `--remove` with `--format sd` is refused, because an sd build writes no source and its sessions are
-never removed. `check` refuses `--remove`, and `build` refuses zero, a negative duration and
+never removed whole. Retention, when it is set, still applies to its root. `check` refuses `--remove`, and `build` refuses zero, a negative duration and
 anything it cannot read. Each refusal exits with status 2 and writes nothing.
 
 ## push

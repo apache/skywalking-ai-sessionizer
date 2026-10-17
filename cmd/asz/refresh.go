@@ -164,9 +164,9 @@ type refresher struct {
 	// only while this pipeline holds the scenario lock. A root no build wrote
 	// has no marker, so nothing there is ever removed.
 	remover *remove.Remover
-	// retention removes the landed files of conversations idle longer than
-	// storage.retention, and finishes a removal an earlier pass left in
-	// progress. It never runs over a scenario root, which has its own.
+	// retention keeps only the metadata of conversations idle longer than
+	// storage.retention.metadata_only_after, and finishes a removal an
+	// earlier pass left in progress. It never runs over a scenario root, which has its own.
 	retention *retention.Remover
 	// scenarioLock is held for the life of the process once the root is a
 	// scenario root. scenarioWait is how long a single pass waits for it.
@@ -434,11 +434,11 @@ func present(dir string, optional bool) (bool, error) {
 	return true, nil
 }
 
-// retain sets the retention: how long a conversation may be idle before its
-// landed files are removed. Zero removes nothing, though a removal an
-// earlier pass left in progress is still finished.
+// retain sets the retention: how long a conversation may be idle before only
+// its metadata is kept. Zero removes nothing, though a removal an earlier
+// pass left in progress is still finished.
 func (r *refresher) retain(keep time.Duration) {
-	r.retention = &retention.Remover{Zone: r.zone, Retention: keep, Metrics: r.deriver != nil}
+	r.retention = &retention.Remover{Zone: r.zone, MetadataOnlyAfter: keep, Metrics: r.deriver != nil}
 }
 
 // forget drops what the page cached of sessions whose files were removed,
@@ -718,6 +718,7 @@ func (r *refresher) pass() error {
 			for _, id := range ms.PendingSessions {
 				r.deferred[id] = true
 			}
+			sayUnread(ms.Unread)
 		}
 	}
 	rounds := 0
@@ -940,5 +941,21 @@ func (r *refresher) loop() {
 	for {
 		time.Sleep(r.interval)
 		_ = r.pass()
+	}
+}
+
+// sayUnread says, for each session, how many distinct execution observations
+// its skeletons keep that no pass counted. A skeleton says neither whether one
+// was an MCP call nor why it was not counted, so the line says what is there,
+// not what was lost. None is an error.
+func sayUnread(unread map[string]int) {
+	sessions := make([]string, 0, len(unread))
+	for id := range unread {
+		sessions = append(sessions, id)
+	}
+	sort.Strings(sessions)
+	for _, id := range sessions {
+		fmt.Fprintf(os.Stderr, "  metrics: %s: %d execution observations lack retained details; their MCP metrics cannot be derived\n",
+			id, unread[id])
 	}
 }

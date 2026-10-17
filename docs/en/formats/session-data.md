@@ -514,11 +514,12 @@ the whitespace and older-file limits in [What data holds](#what-data-holds).
 
 ## Skeletons
 
-When `storage.retention` removes a landed file, a skeleton takes its place: the same name with the
-extension `.sk`, in the same directory, written once and read-only. A skeleton is Session Data
-compressed with gzip, and it is local: it is never sent. It keeps what a conversation's structure is
-built from and none of the content, so the index rebuilt from it is the index rebuilt from the
-landed file. [Retention](storage-root.md#retention) says when a file is removed.
+When retention keeps only a conversation's metadata, a skeleton takes each landed file's place:
+the same name with the extension `.sk`, in the same directory, written once and read-only. A
+skeleton is Session Data compressed with gzip, and it is local: it is never sent. It keeps what a
+conversation's structure is built from and none of the content, so the index rebuilt from it is
+the index rebuilt from the landed file. [Retention](storage-root.md#retention) says when a file is
+removed.
 
 - **The header**, whole, with one more key, `removed`:
 
@@ -532,7 +533,8 @@ landed file. [Retention](storage-root.md#retention) says when a file is removed.
   removed, and `generation` which removal of the session removed it, counting from 1. `receiver`
   says what the receiver confirmed of it: `accepted`, `rejected` when it took the file and rejected
   some of its records, or `unconfirmed` when no answer confirmed it. `owner` is the owner its
-  session is sent under, as `push.state` records it.
+  session is sent under, as `push.state` records it, and is absent when its session was never sent
+  or tried to be.
 - **Every record, in order**, with `ord`, `off`, `bytes`, `id`, `parent`, `call`, `run`,
   `continues`, `tool`, `child`, `batch`, `label`, `started_by`, `from`, `time`, `trigger`,
   `flags`, `usage`, `model` and `dropped`. A provider body keeps `sha` too; any other record

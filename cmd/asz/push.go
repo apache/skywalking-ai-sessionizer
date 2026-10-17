@@ -106,6 +106,7 @@ func cmdPush(cfg *config.Config, _ config.Adapter, _ bool) error {
 			for _, e := range ms.Errors {
 				fmt.Fprintf(os.Stderr, "  error: %v\n", e)
 			}
+			sayUnread(ms.Unread)
 			derived = ms.Errors
 			return nil
 		}
