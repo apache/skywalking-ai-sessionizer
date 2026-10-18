@@ -56,14 +56,33 @@ the function's, as [Ownership is a namespace](#ownership-is-a-namespace) says a 
 none does; landed under its trace, the answer was a conversation of its own and the question's had
 none. A LangGraph JS graph puts the thread on every run.
 
+The receiver serves `GET /info`, `POST /runs/multipart`, the JSON batch `POST /runs/batch`, and
+the one-run endpoints: `POST /runs` starts a run, and `PATCH /runs/{id}` updates one. The run an
+update names in its path is the run it updates, and its body need not name it again. Read in
+LangSmith JS 0.10.8: when it does not batch, as with `autoBatchTracing: false`, its `updateRun`
+puts the run's id in the path alone and sends the body without it. Every such update was refused,
+so none of the runs it traced finished. A body whose `id` names another run than its path is
+refused, because which of the two the client meant cannot be told, and so is a body with no `id`
+sent to a path that names no run.
+
 An update carries only what changed. `update_run(id, outputs=...)` sends the id and the outputs,
 with the trace, the project, the kind of run and the dotted order all null — read on its own,
 a run belonging to no conversation and of no kind. So the runs that have started and not ended
 are remembered, and an update is completed from what its own start said. Nothing is invented:
-every field comes from an earlier arrival about the same run.
+every field comes from another arrival about the same run, in an earlier request or anywhere in
+the same one. Both clients write a run's start before its update, but a client written by hand
+need not, and an update completed only from the arrivals before it had no kind, landed as a
+graph's own run, and lost the model call's answer. So the arrivals of a run in one request are
+read together, with the earlier start and the later end, and a response body lands after its run's
+request, which its reply is read against.
 
 A run is remembered by when it was last seen, and forgotten 24 hours after that, or sooner when
 more than 50,000 runs are remembered, the oldest first. A run that keeps arriving stays remembered.
+What a trace remembers of its runs, to place a run that arrives inside them, follows the same rule,
+except that a run a remembered run ran inside is kept with it. So a trace that runs for days keeps
+its ancestry, not every run it made. A run that arrives inside a run forgotten this way waits for
+it, as a run of a trace idle for a day does, and then, when its conversation is known, lands with
+the ancestry that did arrive.
 An update that names no conversation of its own, whose start is not remembered because it was
 forgotten or never came, cannot be given back its conversation. It waits, as a run waits for its
 ancestry, in case its start is still on its way, and once it has waited as long as it may it is
@@ -84,6 +103,14 @@ the captures, from the Python client, carry the project and the thread.
 | `message.external` | the human message inside the root run's `inputs`, or a traced function's arguments |
 | Conversation name | the first question asked in it, or the name of the run that began it |
 | `message.assistant` | the model's content in a run's `outputs` |
+
+A chat model invoked on its own is the root of its trace, and its question is the human message
+at the end of its `inputs.messages`, as a graph's is. LangChain's tracer writes a chat model's
+messages as a list per prompt, `[[...]]`, read in langchain-core 1.6.3, and both that and a single
+list are read. Read as one flat list, no item of it was a person's message, so nothing opened the
+conversation, and with provider bodies off the question was not landed. The corpus has no such
+trace: all 51 of its trace roots are chain runs. Any other run's `messages` are the application's
+own value, and a list of lists there is not read as messages.
 
 ### A record is an arrival, not a run
 

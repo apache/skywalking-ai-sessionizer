@@ -137,8 +137,23 @@ Python and once in Go, and a test holds them to the same table — the receiver
 lands the conversation, this lands what changed, and they meet only in the name
 of the session directory.
 
+The project is the one the tool's run is traced under, whether it was set in
+code, with `LangChainTracer(project_name=...)`, `tracing_v2_enabled(project_name=...)`
+or langsmith's `tracing_context(project_name=...)`, or by the environment. The
+plugin watches LangChain's tracer start each tool run and reads the project
+from the run. The tracer and the plugin are both told of a tool's start before
+the tool runs, in either order, and the scan before the tool runs is made once
+both have been, under the tracer's project.
+
 A tool call in a run with no thread key records nothing. There is no
 conversation to file it under, and inventing one would be worse than the gap.
+Nor does a tool call that no LangChain tracer traces, or that one traces with
+tracing turned off, as inside `tracing_context(enabled=False)`: no
+conversation holds its run, and nothing says which project it is in.
+
+If the installed LangChain's tracer cannot be watched, the plugin logs a
+warning when it loads and files every change under the project the
+environment names, read as the tracing client reads it.
 
 ## What it cannot see
 
@@ -146,6 +161,18 @@ conversation to file it under, and inventing one would be worse than the gap.
   or on another host.
 - **Which tool changed what, when two run at once.** The window is shared, and
   the record says so rather than guessing.
+- **One tool's start, told late to a second set of handlers.** LangChain tells
+  every handler of a tool's start together, before the tool runs. When two
+  callback managers are merged, a tool's start reaches two copies of the
+  plugin and two tracers, and the plugin writes one begin record for it. It
+  remembers the last 100,000 tool starts it has seen from both a plugin and a
+  tracer, or has stopped waiting for, whether or not a begin was written and
+  whether or not the tool has ended. If some of one tool's start callbacks are
+  held up until 100,000 other starts have been remembered, the late ones can
+  write a second begin record, under their own tracer's project. A tool whose start callbacks are more than ten
+  minutes apart records nothing, and the same lag lets it write a begin after
+  all. Telling them apart however late they come would need memory without
+  bound.
 - **Anything at all after a long collector outage.** Output expires on the
   retention window whether or not it was collected, the same as on the Claude
   Code path.

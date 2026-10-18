@@ -356,8 +356,18 @@ func humanInput(base sessiondata.Record, d decoded) (sessiondata.Record, bool) {
 
 	if messages := rawField(d.inputs, "messages"); len(messages) > 0 {
 		var list []json.RawMessage
-		if json.Unmarshal(messages, &list) != nil {
-			return sessiondata.Record{}, false
+		switch d.run.Type {
+		case "llm", "chat_model":
+			// A chat model at the root of its trace holds a list per prompt,
+			// as requestMessages reads it. Read as one flat list, none of its
+			// items was a person's message, and the question was lost. Any
+			// other run's messages are the application's own value, and a
+			// list of lists there is not read as messages.
+			list = requestMessages(d.inputs)
+		default:
+			if json.Unmarshal(messages, &list) != nil {
+				return sessiondata.Record{}, false
+			}
 		}
 		// Only what is new. An application that keeps its own history sends
 		// the whole conversation as the turn's input, so taking every human

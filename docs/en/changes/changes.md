@@ -126,6 +126,38 @@
   every one of 80 message ids sent more than once has one form. A new capture, `streaming`, streams a
   graph and a loop over `model.stream()`; the loop sends back the chunks it joined, as
   `AIMessageChunk`, and a graph an `AIMessage`. See [LangChain](../adapters/langsmith.md).
+- The order of a run's arrivals in one request no longer changes what lands. An update written
+  before its run's start was completed only from the arrivals before it, so it had no kind and
+  landed as a graph's own run: a model call's answer was dropped, and its response body was not
+  landed. A run's arrivals in a request are now read together, so a model call's end is known when
+  a failed tool is matched to the call that asked for it, and a response body lands after its run's
+  request, so its reply is read against that request. Both clients write the start first. A client
+  written by hand need not.
+- `PATCH /runs/{id}` with a body that carries no `id` is accepted, and the run is the one the path
+  names. LangSmith JS 0.10.8 sends its updates so when it does not batch, as with
+  `autoBatchTracing: false`, and every one was refused, so none of the runs it traced finished. A
+  body whose `id` names another run than its path is refused. `POST /runs` and `PATCH /runs/{id}`
+  are now read the same way by the receiver and the collector, so a body the collector cannot read
+  is refused when it arrives, where it was accepted and then set aside.
+- A chat model invoked on its own, at the root of its trace, opens its conversation with the
+  person's question. LangChain's tracer writes a chat model's messages as a list per prompt, which
+  was read as one flat list with no person's message in it, so nothing opened the conversation and,
+  with `provider_bodies: false`, the question was not landed at all.
+- A trace that keeps making runs no longer remembers every run it made. Each arrival kept the
+  whole trace's memory fresh, so a trace that ran for days kept every run past the day and the
+  50,000 runs that bound what the receiver remembers, and every request saved them all again. A
+  trace now forgets a run when the run is forgotten, and keeps the runs a remembered run ran inside,
+  so a run arriving in a long trace still lands at once.
+- The LangChain plugin files a tool's changes under the project the tool's run is traced under. It
+  read the project from the environment alone, so with a project set in code, such as
+  `LangChainTracer(project_name=...)`, the changes went to a session the conversation was not in.
+  It now watches LangChain's tracer start each tool run and reads the project from the run, and
+  makes the scan before the tool runs once both the tracer and the plugin have been told the tool
+  started, which LangChain does before the tool runs, in either order. A tool call no LangChain
+  tracer traces, or one traced with tracing turned off, records nothing, since no conversation holds
+  its run. If the tracer cannot be watched, the plugin logs a warning and files changes under the
+  environment's project, as before.
+  See [the LangChain plugin](../setup/langchain-plugin.md).
 
 ## Claude Code
 

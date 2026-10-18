@@ -24,6 +24,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -292,6 +294,96 @@ func TestARootModelCallsInputIsNamed(t *testing.T) {
 			t.Errorf("%s: tool_schemas %v, want %v (%v)", tc.name, got, tc.tools, input.Flags)
 		}
 	}
+}
+
+// TestAChatModelAtTheRootIsAskedItsQuestion. A chat model invoked on its own
+// is the root of its trace, and LangChain's tracer writes its messages as a
+// list of lists, one per prompt. Read as one flat list, no message in it was
+// the person's, so nothing opened the conversation and, with provider bodies
+// off, the question landed nowhere. The flat list is still read too.
+func TestAChatModelAtTheRootIsAskedItsQuestion(t *testing.T) {
+	const id = "16161616-1616-7616-8616-161616161610"
+	system := `{"lc":1,"type":"constructor","id":["langchain","schema","messages","SystemMessage"],` +
+		`"kwargs":{"content":"You answer in one word.","type":"system"}}`
+	human := `{"lc":1,"type":"constructor","id":["langchain","schema","messages","HumanMessage"],` +
+		`"kwargs":{"content":"what is two plus two","type":"human"}}`
+	for name, inputs := range map[string]string{
+		"a list per prompt, as the tracer writes it": `{"messages":[[` + system + `,` + human + `]]}`,
+		"one list": `{"messages":[` + system + `,` + human + `]}`,
+	} {
+		_, zone, base := started(t, "")
+		envelope := `{"id":"` + id + `","trace_id":"` + id + `","dotted_order":"20260920T100000000000Z` + id + `",` +
+			`"run_type":"llm","name":"ChatOpenAI","start_time":"2026-09-20T10:00:00Z","end_time":"2026-09-20T10:00:01Z",` +
+			`"session_name":"asz"}`
+		extra := `{"metadata":{"thread_id":"t-root-model","ls_model_name":"gpt-x"},"runtime":{"library":"langchain-core"}}`
+		outputs := `{"generations":[[{"message":{"lc":1,"type":"constructor","id":["langchain","schema","messages","AIMessage"],` +
+			`"kwargs":{"content":"four","type":"ai"}}}]]}`
+		body, contentType := multipartOf([][2]string{
+			{"post." + id, envelope}, {"post." + id + ".inputs", inputs},
+			{"post." + id + ".outputs", outputs}, {"post." + id + ".extra", extra},
+		})
+		resp := send(t, base, "/runs/multipart", contentType, body, "")
+		resp.Body.Close()
+		c := collectorOver(zone)
+		if _, err := c.Collect(); err != nil {
+			t.Fatal(err)
+		}
+		session := threadOf("t-root-model")
+		question := false
+		for _, l := range landedRecords(t, zone, session) {
+			if slices.Contains(l.Flags, "external_input") {
+				for _, p := range l.Parts {
+					question = question || p.Text == "what is two plus two"
+				}
+			}
+		}
+		if !question {
+			t.Errorf("%s: the question did not land as the person's input", name)
+		}
+		if mentions(t, zone, session, "You answer in one word.") {
+			t.Errorf("%s: the system message landed with the question", name)
+		}
+		if call, finished, _ := answerOf(t, zone, session, "four"); call != id || !finished {
+			t.Errorf("%s: the answer landed on call %q, finished %v", name, call, finished)
+		}
+		view := parsedTwice(t, c, session)
+		if asked, talks := nodesOf(view, model.KindMessageExternal), nodesOf(view, model.KindTalk); asked != 1 || talks != 1 {
+			t.Errorf("%s: %d inputs and %d talks, want the question opening one talk", name, asked, talks)
+		}
+	}
+}
+
+// landedRecords is every record a session landed on its streams.
+func landedRecords(t *testing.T, zone *storage.Zone, session string) []sessiondata.Record {
+	t.Helper()
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []sessiondata.Record
+	for _, lf := range files {
+		if lf.Stream == "" {
+			continue
+		}
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		for {
+			record, err := reader.Next()
+			if err != nil {
+				break
+			}
+			out = append(out, *record)
+		}
+		f.Close()
+	}
+	return out
 }
 
 // TestADecoratedFunctionsResultIsNamedForWhatItHolds reads what a decorated

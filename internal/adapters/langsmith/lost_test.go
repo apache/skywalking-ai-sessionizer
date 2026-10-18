@@ -18,6 +18,8 @@
 package langsmith
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +28,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 )
 
 // A run whose conversation cannot be told, because what would say it was
@@ -199,27 +202,121 @@ func TestASparseUpdateWhoseStartNeverCameIsNotCollected(t *testing.T) {
 }
 
 // TestASparseUpdateBeforeItsStartInOneRequestLands. A request keeps the order
-// the client wrote, and the update can come before the start. The start is in
-// the request, so it is seen, and the update lands with it.
+// the client wrote. Both clients write a run's start before its update, but a
+// client written by hand can put the update first. The start is in the
+// request either way, so the update is completed from it: it ends the model
+// call, with the answer on the call. Completed only from the arrivals before
+// it, the update had no kind, landed as a graph's own run, and its answer was
+// dropped. Its response is landed after the request the start carries, so the
+// response names the reply the request was answered with: landed first, it
+// said the request was not there, and a response is never landed again.
 func TestASparseUpdateBeforeItsStartInOneRequestLands(t *testing.T) {
-	_, zone, base := started(t, "")
-	start := strings.Replace(inheritCall(``), `"end_time":"2026-09-20T10:00:02Z",`, ``, 1)
-	body, contentType := multipartOf([][2]string{
-		{"patch." + inheritChild, sparse(inheritChild, inheritRoot, lostCallOrder, "ended first")},
-		{"post." + inheritChild, start},
-		{"post." + inheritRoot, inheritFunction("t-together")},
-	})
-	resp := send(t, base, "/runs/multipart", contentType, body, "")
-	resp.Body.Close()
-	landed, err := collectorOver(zone).Collect()
-	if err != nil {
-		t.Fatal(err)
+	question := `{"lc":1,"type":"constructor","id":["langchain","schema","messages","HumanMessage"],` +
+		`"kwargs":{"content":"what changed","type":"human","id":"m-question"}}`
+	answer := `{"lc":1,"type":"constructor","id":["langchain","schema","messages","AIMessage"],` +
+		`"kwargs":{"content":"ended first","type":"ai","id":"m-answer"}}`
+	for _, order := range []string{"the update first", "the start first"} {
+		_, zone, base := started(t, "")
+		// The start carries what the model was asked and no end, so only the
+		// update has the answer.
+		start := strings.Replace(inheritCall(``), `"end_time":"2026-09-20T10:00:02Z",`, ``, 1)
+		start = strings.Replace(start, `"outputs":{"generations":[[{"message":{"kwargs":{"content":"the call's own answer"}}}]]}`,
+			`"inputs":{"messages":[[`+question+`]]}`, 1)
+		end := `{"id":"` + inheritChild + `","trace_id":"` + inheritRoot + `","dotted_order":"` + lostCallOrder + `",` +
+			`"end_time":"2026-09-20T10:00:02Z","outputs":{"generations":[[{"message":` + answer + `}]]}}`
+		update := [2]string{"patch." + inheritChild, end}
+		post := [2]string{"post." + inheritChild, start}
+		parts := [][2]string{update, post, {"post." + inheritRoot, inheritFunction("t-together")}}
+		if order == "the start first" {
+			parts[0], parts[1] = post, update
+		}
+		body, contentType := multipartOf(parts)
+		resp := send(t, base, "/runs/multipart", contentType, body, "")
+		resp.Body.Close()
+		c := collectorOver(zone)
+		c.ProviderBodies = true
+		landed, err := c.Collect()
+		if err != nil {
+			t.Fatal(err)
+		}
+		session := threadOf("t-together")
+		if landed.Dropped != 0 || !mentions(t, zone, session, `"FakeListChatModel"`) {
+			t.Errorf("%s: %d dropped: the start is not in the function's conversation", order, landed.Dropped)
+		}
+		if call, finished, found := answerOf(t, zone, session, "ended first"); call != inheritChild || !finished {
+			t.Errorf("%s: the answer landed %v, on call %q, finished %v; want it on the finished call %s",
+				order, found, call, finished, inheritChild)
+		}
+		if landed.Bodies != 2 {
+			t.Errorf("%s: %d provider bodies landed, want the call's request and its response", order, landed.Bodies)
+		}
+		held, _, err := c.loadHeld(session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, asked := held.Manifest(inheritChild + ":request")
+		response, answered := held.Manifest(inheritChild + ":response")
+		switch {
+		case !asked || request.Messages == nil || request.Messages.Unavailable != "" || len(request.Messages.Entries) != 1:
+			t.Errorf("%s: the request's history is %+v, want its one message", order, request.Messages)
+		case !answered || response.Reply == nil || response.Reply.Unavailable != "" || response.Reply.Digest == "":
+			t.Errorf("%s: the response's reply is %+v, want the answer it was given", order, response.Reply)
+		}
+		if calls := nodesOf(parsedTwice(t, c, session), model.KindLLMCall); calls != 1 {
+			t.Errorf("%s: %d model calls in the conversation, want 1", order, calls)
+		}
 	}
-	// The update, read before the start, names no kind and lands as the run's
-	// data, so it is found by its record id.
-	if landed.Dropped != 0 || !mentions(t, zone, threadOf("t-together"), updateOf(inheritChild)) ||
-		!mentions(t, zone, threadOf("t-together"), `"FakeListChatModel"`) {
-		t.Errorf("%d dropped: the update and its start are not both in the function's conversation", landed.Dropped)
+}
+
+// TestAFailedToolIsJoinedTheSameWhicheverArrivalOfTheCallComesFirst. A model
+// call is still running when a tool of the name it later asks for fails, so
+// the failure is not the answer to that call. When was the call made is read
+// from every arrival of it in the request together. Taken from the last
+// arrival alone, an update written before its start left the start, which
+// has no end, and the call was read as made when it began, before the tool
+// failed, and the failure was joined to it.
+func TestAFailedToolIsJoinedTheSameWhicheverArrivalOfTheCallComesFirst(t *testing.T) {
+	const tool = "18181818-1818-7818-8818-181818181812"
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-failed"}}`
+	start := `{"id":"` + inheritChild + `","trace_id":"` + inheritRoot + `","parent_run_id":"` + inheritRoot + `",` +
+		`"dotted_order":"` + lostCallOrder + `","run_type":"llm","name":"FakeListChatModel",` +
+		`"start_time":"2026-09-20T10:00:01Z",` + owner + `}`
+	end := `{"id":"` + inheritChild + `","trace_id":"` + inheritRoot + `","dotted_order":"` + lostCallOrder + `",` +
+		`"end_time":"2026-09-20T10:00:05Z","outputs":{"generations":[[{"message":{"kwargs":` +
+		`{"tool_calls":[{"id":"call_later","name":"lookup","args":{}}]}}}]]}}`
+	failed := `{"id":"` + tool + `","trace_id":"` + inheritRoot + `","parent_run_id":"` + inheritRoot + `",` +
+		`"dotted_order":"` + inheritOrder + `.20260920T100003000000Z` + tool + `","run_type":"tool","name":"lookup",` +
+		`"start_time":"2026-09-20T10:00:03Z","end_time":"2026-09-20T10:00:04Z",` + owner + `,` +
+		`"outputs":{},"error":"it raised"}`
+	for _, order := range []string{"the update first", "the start first"} {
+		_, zone, base := started(t, "")
+		update := [2]string{"patch." + inheritChild, end}
+		post := [2]string{"post." + inheritChild, start}
+		parts := [][2]string{update, post, {"post." + tool, failed}, {"post." + inheritRoot, inheritFunction("t-failed")}}
+		if order == "the start first" {
+			parts[0], parts[1] = post, update
+		}
+		body, contentType := multipartOf(parts)
+		resp := send(t, base, "/runs/multipart", contentType, body, "")
+		resp.Body.Close()
+		c := collectorOver(zone)
+		if _, err := c.Collect(); err != nil {
+			t.Fatal(err)
+		}
+		session := threadOf("t-failed")
+		found := false
+		for _, r := range landedRecords(t, zone, session) {
+			if r.ID == tool {
+				found = true
+				if r.Tool != "" {
+					t.Errorf("%s: the failure was joined to %q, which the model asked for after the tool failed", order, r.Tool)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: the failed tool did not land", order)
+		}
+		parsedTwice(t, c, session)
 	}
 }
 
@@ -551,6 +648,148 @@ func TestAPartialStartUnderAThreadIsNotCollected(t *testing.T) {
 	}
 	if landedAnywhere(t, zone, "the call's own answer") {
 		t.Error("the partial call was collected")
+	}
+}
+
+// TestALongTraceRemembersItsAncestryNotEveryRun. A trace that runs for more
+// than a day makes a tool run every hour. Each arrival kept the whole trace
+// fresh, so the trace remembered every run it ever made, past the day and the
+// count that bound what is remembered, and saved them all with every request.
+// Now a trace forgets a run as the run itself is forgotten, and keeps the runs
+// a remembered run ran inside: the root is kept, though it was last seen more
+// than a day ago, and a run arriving under it still lands at once.
+func TestALongTraceRemembersItsAncestryNotEveryRun(t *testing.T) {
+	const root = "17171717-1717-7717-8717-100000000000"
+	rootOrder := "20260920T100000000000Z" + root
+	owner := `"session_name":"asz","extra":{"metadata":{"thread_id":"t-long"}}`
+	start := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	tool := func(hour int) (string, string) {
+		id := fmt.Sprintf("17171717-1717-7717-8717-%012d", hour)
+		at := start.Add(time.Duration(hour) * time.Hour)
+		return id, `{"id":"` + id + `","trace_id":"` + root + `","parent_run_id":"` + root + `",` +
+			`"dotted_order":"` + rootOrder + `.` + at.Format("20060102T150405000000Z") + id + `",` +
+			`"run_type":"tool","name":"look","start_time":"` + at.Format(time.RFC3339) + `",` +
+			`"end_time":"` + at.Add(time.Second).Format(time.RFC3339) + `",` + owner + `,` +
+			`"outputs":{"output":"looked at hour ` + strconv.Itoa(hour) + `"}}`
+	}
+	_, zone, base := started(t, "")
+	c, clock := clockedOver(zone)
+	clock.at = start
+	postBatch(t, base, `{"post":[{"id":"`+root+`","trace_id":"`+root+`","dotted_order":"`+rootOrder+`",`+
+		`"run_type":"chain","name":"agent","start_time":"2026-09-20T10:00:00Z",`+owner+`,`+
+		`"inputs":{"messages":[{"role":"user","content":"keep looking"}]}}]}`)
+	passes(t, c, 1)
+	const hours = 30
+	tools := map[int]string{}
+	for hour := 1; hour <= hours; hour++ {
+		clock.at = start.Add(time.Duration(hour) * time.Hour)
+		id, run := tool(hour)
+		tools[hour] = id
+		postBatch(t, base, `{"post":[`+run+`]}`)
+		if dropped := passes(t, c, 1); dropped != 0 {
+			t.Fatalf("hour %d: %d dropped", hour, dropped)
+		}
+	}
+	memory := loadPending(filepath.Join(zone.Root(), InboxDir, pendingFile)).Traces[root]
+	if memory == nil {
+		t.Fatal("the trace is not remembered, although a run of it arrived an hour ago")
+	}
+	if _, kept := memory.Runs[root]; !kept {
+		t.Error("the root was forgotten, although the runs inside it are remembered")
+	}
+	for hour := 1; hour <= hours; hour++ {
+		_, run := memory.Runs[tools[hour]]
+		_, named := memory.ToolNames[tools[hour]]
+		// A day before the last pass, give or take the seconds a pass takes.
+		switch {
+		case hour < hours-24 && (run || named):
+			t.Errorf("the tool run of hour %d is remembered after a day", hour)
+		case hour > hours-24 && (!run || !named):
+			t.Errorf("the tool run of hour %d was forgotten within the day", hour)
+		}
+	}
+	if len(memory.Runs) > 26 {
+		t.Errorf("the trace remembers %d runs, want the root and a day of runs", len(memory.Runs))
+	}
+
+	clock.at = start.Add((hours + 1) * time.Hour)
+	_, run := tool(hours + 1)
+	postBatch(t, base, `{"post":[`+run+`]}`)
+	landed, err := c.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := threadOf("t-long")
+	if landed.Waiting != 0 || landed.Dropped != 0 || !mentions(t, zone, session, "looked at hour 31") {
+		t.Errorf("%d waiting, %d dropped: a run inside the remembered root must land at once", landed.Waiting, landed.Dropped)
+	}
+
+	// A run inside the first tool run, forgotten a day ago, waits for it as a
+	// run of a trace idle for a day does, and then lands.
+	const below = "17171717-1717-7717-8717-200000000000"
+	_, first := tool(1)
+	var firstOrder struct {
+		Dotted string `json:"dotted_order"`
+	}
+	if err := json.Unmarshal([]byte(first), &firstOrder); err != nil {
+		t.Fatal(err)
+	}
+	postBatch(t, base, `{"post":[{"id":"`+below+`","trace_id":"`+root+`","parent_run_id":"`+tools[1]+`",`+
+		`"dotted_order":"`+firstOrder.Dotted+`.20260920T110000500000Z`+below+`","run_type":"chain","name":"step",`+
+		`"start_time":"2026-09-20T11:00:00.5Z","end_time":"2026-09-20T11:00:00.8Z",`+owner+`,"outputs":{"answer":"late below"}}]}`)
+	waited, placed := 0, 0
+	for i := 0; i <= deferLimit; i++ {
+		landed, err := c.Collect()
+		if err != nil {
+			t.Fatal(err)
+		}
+		waited, placed = waited+landed.Waiting, placed+landed.Placed
+	}
+	if waited != deferLimit || placed != 1 || !mentions(t, zone, session, below) {
+		t.Errorf("%d waiting, %d placed: the run inside a forgotten run must wait for it and then land", waited, placed)
+	}
+	parsedTwice(t, c, session)
+}
+
+// TestATraceForgetsByCountWhatItsRunsForget. Past 50,000 remembered runs the
+// oldest go, and the trace forgets them too, except a run a remembered run
+// ran inside, however far above it is: a leaf two levels down keeps its
+// parent and the root, and an old tool beside them goes with its name.
+func TestATraceForgetsByCountWhatItsRunsForget(t *testing.T) {
+	const (
+		root = "19191919-1919-7919-8919-191919191910"
+		mid  = "19191919-1919-7919-8919-191919191911"
+		leaf = "19191919-1919-7919-8919-191919191912"
+		old  = "19191919-1919-7919-8919-191919191913"
+	)
+	order := "20260920T100000000000Z" + root
+	midOrder := order + ".20260920T100001000000Z" + mid
+	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	at := func(minutes int) string {
+		return now.Add(time.Duration(minutes) * time.Minute).Format(time.RFC3339Nano)
+	}
+	open := loadPending(filepath.Join(t.TempDir(), pendingFile))
+	open.Runs[root] = pendingRun{Trace: root, Dotted: order, Create: true, At: at(-60)}
+	open.Runs[mid] = pendingRun{Trace: root, Dotted: midOrder, Create: true, At: at(-60)}
+	open.Runs[old] = pendingRun{Trace: root, Dotted: order + ".20260920T100002000000Z" + old, Create: true, At: at(-60)}
+	open.Runs[leaf] = pendingRun{Trace: root, Dotted: midOrder + ".20260920T100003000000Z" + leaf, Create: true, At: at(-30)}
+	for i := 0; i < pendingLimit-1; i++ {
+		open.Runs["newer-"+strconv.Itoa(i)] = pendingRun{Trace: "newer", Create: true, At: at(-1)}
+	}
+	open.Traces[root] = &traceMemory{Runs: map[string]bool{root: false, mid: false, leaf: false, old: true},
+		ToolNames: map[string]string{old: "lookup"}, Root: true, At: at(-1)}
+	open.evict(now)
+	memory := open.Traces[root]
+	if len(open.Runs) != pendingLimit || memory == nil {
+		t.Fatalf("%d runs remembered, trace %v: want the limit, and the trace", len(open.Runs), memory)
+	}
+	for id, want := range map[string]bool{root: true, mid: true, leaf: true, old: false} {
+		if _, kept := memory.Runs[id]; kept != want {
+			t.Errorf("run %s kept %v in its trace, want %v", id, kept, want)
+		}
+	}
+	if _, named := memory.ToolNames[old]; named || !memory.Root {
+		t.Errorf("the old tool's name was kept, or the trace forgot its root was seen: %+v", memory)
 	}
 }
 
