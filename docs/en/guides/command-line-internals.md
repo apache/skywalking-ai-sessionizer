@@ -203,11 +203,19 @@ status instead of the log.
 ## repack
 
 Re-cuts every landed file of the storage root, or of one session, into `DEST` so that no file
-exceeds the configured `max_delta_bytes`, except a file of one record larger than it, which is
-carried whole. Then it assembles `DEST`'s chains. Every record keeps its bytes and its order; the
-cursors come along so collection can continue into `DEST`; the index and the chains are rebuilt
-there, because a round addresses records by file and line and the old
-references name positions that no longer exist. `DEST` must be a new or empty directory outside
+exceeds the configured `max_delta_bytes`, header and closing line included, then assembles
+`DEST`'s chains. The one exception is a record larger than the budget: it is carried whole, in a
+file of its own, which is then larger than the budget. Every record keeps its bytes and its order,
+and records of two files are cut into one only when the files are next to each other and their
+headers are the same apart from `seq` and `at`. Every cursor comes along so collection can
+continue into `DEST`, the one a second source of a stream keeps too, such as a second recorder
+directory. Each names the new file that holds the last record its source landed. A cursor whose
+`origin` is relative to the storage root, a recorder inside it, gets the origin and the name a
+collector into `DEST` gives it. The index and the chains are rebuilt there, because a round
+addresses records by file and line and the old references name positions that no longer exist.
+Each new file keeps the time the newest file its records came from was collected, and the files
+are numbered in the order their records landed, so retention finds a session as idle in `DEST` as
+in the root it was repacked from. `DEST` must be a new or empty directory outside
 the storage root. A populated destination is refused before any session is written, because its
 chains bind to the original landed files. One inside the root is refused too, because every
 command would read it as a session of the root. If a repack is interrupted, retry into another

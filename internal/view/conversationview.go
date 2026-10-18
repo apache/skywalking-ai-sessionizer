@@ -312,15 +312,12 @@ func (c *Conversation) looseRoots() []*sessionflow.Node {
 	return sessionflow.InOrder(out)
 }
 
-// sessions lists the sessions the fold holds, the conversation's own first.
+// sessions lists the sessions the round headers name. A fold takes only
+// rounds of round 1's session, so it is that one. A session node's id is not
+// read back for it: the id writes the session escaped, so "s%foo" read back
+// from session/s%25foo was a second session that does not exist.
 func (c *Conversation) sessions() []string {
-	out := []string{c.Session}
-	for _, n := range c.View.NodesByKind(model.KindSession) {
-		if id := strings.TrimPrefix(n.ID, "session/"); id != c.Session {
-			out = append(out, id)
-		}
-	}
-	return out
+	return []string{c.Session}
 }
 
 // rounds lists the chain from each round's header and file, and checks it

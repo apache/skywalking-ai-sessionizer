@@ -163,9 +163,8 @@ func Read(r io.Reader) (*Round, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(raw) == 0 {
-			continue
-		}
+		// An empty line is not skipped. It does not decode, and the writer
+		// never writes one, so a round that holds one has been changed.
 		line++
 		var probe struct {
 			T FrameType `json:"t"`

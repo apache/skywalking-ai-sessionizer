@@ -691,13 +691,26 @@ func (b *batch) group(session string) *logspb.ResourceLogs {
 }
 
 func (b *batch) add(session string, r *logspb.LogRecord, rel, digest string) error {
+	// A record that cannot be encoded fails every request it is in, on every
+	// pass, and every file batched beside it with it. A protocol buffer
+	// string must be valid UTF-8, and a file written outside asz's writer can
+	// hold a byte that is not. So it is reported on its own, and stays out.
+	if _, err := proto.Marshal(r); err != nil {
+		return fmt.Errorf("the file cannot be sent as a log record: %w", err)
+	}
 	size := int64(len(r.GetBody().GetStringValue()))
 	// A file that does not fit next to what is already batched goes after
 	// it. A file larger than the whole budget therefore travels alone: the
 	// batch before it is sent first, and the file after it starts a new one.
+	// A batch that fails is reported as the request's error, not as this
+	// file's, and this file still goes in the next request: before, it was
+	// left out of the pass under the request's error.
 	if b.bytes > 0 && b.bytes+size > b.p.BatchBytes {
 		if err := b.flush(); err != nil {
-			return err
+			b.st.Errors = append(b.st.Errors, err)
+			if b.stop != nil {
+				return nil
+			}
 		}
 	}
 	g := b.group(session)

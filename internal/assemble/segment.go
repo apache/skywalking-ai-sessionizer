@@ -63,7 +63,7 @@ func (b *builder) stage8Segments() {
 		// entity that was segment 3 can no longer supersede its own earlier
 		// revision. The first talk's first evidence is a landed position, and a
 		// landed record never moves.
-		cur.NodeID = sessionflow.NodeID("segment", sessionflow.RefID("at", cur.Talks[0].At))
+		cur.NodeID = sessionflow.LocatedID("segment", cur.Talks[0].At, "at")
 		b.segments = append(b.segments, cur)
 	}
 	for i, t := range talks {

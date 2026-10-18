@@ -145,7 +145,12 @@ addresses every record by file and line and binds itself to the file digests, so
 that a round references would break every reference. A change of budget applies to new files
 only. To bring an existing root under a new budget, `asz repack DEST` re-cuts every file into a
 new root, keeping each record's bytes and order, carries the cursors over, and builds the chains
-again on the new files, which describe the same conversation at new positions.
+again on the new files, which describe the same conversation at new positions. It cuts a file by
+what it takes once written, header and closing line included, as the collector does. It cuts
+records of two files into one only when the files are next to each other in their directory and
+their headers are the same apart from `seq` and `at`, so every file still names its own source and
+every record keeps its place. Each new file has the header of the newest file its records
+came from, `at` included, and the files are numbered in the order their records landed.
 
 ## Cursors
 
@@ -186,7 +191,7 @@ state         active
 | Field | What it is for |
 | --- | --- |
 | `source` | the source path, relative to the adapter's root, with forward slashes |
-| `origin` | the adapter's root the source is under, with forward slashes: relative to the storage root when the source root lies inside it, so a root copied whole keeps its cursors, and absolute otherwise. Written since 0.5.0 by an adapter that reads more than one root, since two roots can hold one relative path. A cursor without it was written before 0.5.0 and belongs to the root whose file it was read from - the file with its `dev` and `ino` and the bytes of its `tail_sha256`, since two filesystems can give one inode number to unrelated files - and that root writes the key on its next pass. A legacy cursor whose file was copied or restored since is not claimed; that source is read again from its start behind a cursor of its own, and the index keeps the first record it holds for an id |
+| `origin` | the adapter's root the source is under, with forward slashes: relative to the storage root when the source root lies inside it, so a root copied whole keeps its cursors, and absolute otherwise. `asz repack` writes a relative origin again for its new root, which the source root is outside, and renames the cursor named for it to match. Written since 0.5.0 by an adapter that reads more than one root, since two roots can hold one relative path. A cursor without it was written before 0.5.0 and belongs to the root whose file it was read from - the file with its `dev` and `ino` and the bytes of its `tail_sha256`, since two filesystems can give one inode number to unrelated files - and that root writes the key on its next pass. A legacy cursor whose file was copied or restored since is not claimed; that source is read again from its start behind a cursor of its own, and the index keeps the first record it holds for an id |
 | `dev`, `ino` | the device and the inode the file had when it was read, or on Windows its volume serial number and file index. Resuming a cursor compares `ino` alone, and it is what this page calls the file's identity: a change means the file was replaced, or is being reached another way, and the bytes decide which, see below. Claiming a cursor that carries no `origin` compares both, since that decides whether the cursor was read from this file at all and not from another with the same bytes at its end. |
 | `offset` | the bytes consumed, always at the end of a line, and where the next read starts. Compared with the file's size, it says whether anything is new. A size below it means the file was cut short. |
 | `ord` | the last source line consumed, so line numbers continue without counting again from byte 0 |
@@ -433,8 +438,11 @@ The store had also outlived its source: it held 48 sessions where the source dir
 
 `storage.retention` says how long an idle conversation keeps what in the root, at two levels on one
 clock. A conversation is idle for as long as nothing new has landed in any of its streams, by asz's
-clock: the time is read from the header of its newest landed file or skeleton, never from a
-record's time, a file's time or when a file was removed. Whether it was sent, whether an endpoint
+clock: the time is read from the header of its newest landed file or skeleton, the one with the
+highest sequence, never from a record's time, a file's time or when a file was removed. A root
+`asz repack` wrote has the same clock as the root it read: each file it cuts says when the newest
+file its records came from was collected, and its files are numbered in the order their records
+landed. Whether it was sent, whether an endpoint
 is set, and whether its source is still there do not change that. Each setting is `-1`, off, by
 default, and only both off keeps everything.
 

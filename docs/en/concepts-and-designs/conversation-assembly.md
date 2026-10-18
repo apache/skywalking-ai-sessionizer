@@ -194,10 +194,13 @@ every child reads as a dead end. So a stream's final step - a child's `agent.out
 auxiliary stream's last `llm.call` - has a `result_of` relation to the call that started it. It is
 written only when the shape makes it exact: one call started the stream directly, that call's
 result was joined and is its own, and the result is not the acknowledgement of a background launch.
-A child launched in the background comes back through a runtime notification instead, which is
-`reports`, and a batch of children is launched by a result that names the batch rather than answered
-by one. A child that never came back has no `result_of`. The relation's evidence is the result the
-call received, and the child's `agent.output` then says its `returned_value` is observed.
+A record that names only the stream that started the child, its `started_by`, names no call, so it
+is not a second one. It agrees with the call when that stream made the call. When it names another
+stream, nothing says which of the two started the child, and no `result_of` is written. A child
+launched in the background comes back through a runtime notification instead, which is `reports`,
+and a batch of children is launched by a result that names the batch rather than answered by one. A
+child that never came back has no `result_of`. The relation's evidence is the result the call
+received, and the child's `agent.output` then says its `returned_value` is observed.
 
 A Segment is a relation rather than a parent. It is a time window and a session outlives many of
 them, so a session cannot sit under a segment in a tree where every node has one parent.

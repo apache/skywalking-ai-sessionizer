@@ -19,9 +19,12 @@ package storage
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -203,4 +206,26 @@ func (c *Cursor) Save(path string, now time.Time) error {
 		fmt.Fprintf(bw, "state         %s\n", c.State)
 		return bw.Flush()
 	})
+}
+
+// CursorOrigin is how a source root is written into a cursor's origin, with
+// forward slashes so it reads the same on every pass. A source root inside
+// the storage root, as a scenario's is, is written relative to it, so a copy
+// of the whole root keeps its cursors. Any other root is written as it is,
+// since a source directory that moves is a different source.
+func CursorOrigin(storageRoot, sourceRoot string) string {
+	root := filepath.Clean(sourceRoot)
+	if rel, err := filepath.Rel(storageRoot, root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(root)
+}
+
+// SourceCursorName is the name of the cursor a source keeps when the plain
+// one, <prefix>.cursor, belongs to another source of the same files. It is
+// named for the source's origin and its path, so it is the same on every
+// pass.
+func SourceCursorName(prefix, origin, source string) string {
+	sum := sha256.Sum256([]byte(origin + "\n" + source))
+	return prefix + "-" + hex.EncodeToString(sum[:])[:12] + ".cursor"
 }

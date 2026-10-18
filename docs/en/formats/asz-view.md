@@ -21,7 +21,8 @@ things produce it from the same code:
 A server that holds the same `.sd` and `.sf` files, such as the SkyWalking OAP, builds the same
 document and answers a conversation query with it. Every reader shares the shape, and a change to
 it is a change to the version: a 1.x adds keys and never removes or renames one; a 2.0 may do
-either.
+either. There is one exception. asz 0.6.0 removed `state` and `committable` from each segment and
+kept the version `1.0`, because no released SkyWalking OAP or Horizon read the document yet.
 
 The document is JSON. Keys are `snake_case`, as in the two source formats, and are written in the
 order this page lists them. Times are unix milliseconds, rounded down, read from the `.sd` record a
@@ -61,12 +62,12 @@ producer of them.
            "from_time":1786033245531,"through_time":1786322168715}],
  "streams":[{"id":"stream/main","name":"main","role":"main","label":"","parent":"","records":10728,
              "steps":7310,"talk":"talk/main/95a1…","named_by":"","opened_by":[]}, …],
- "segments":[{"id":"segment/at_2_7","talks":24,"from":1786033290556,"to":1786039329174}, …],
+ "segments":[{"id":"segment/at/2/7","talks":24,"from":1786033290556,"to":1786039329174}, …],
  "talks":[{"id":"talk/main/95a1…","kind":"talk","parent":"epoch/main/0","stream":"main","at":1786033290556,
            "ref":{"seq":2,"row":7},
            "label":"for meter mal, …","reply":"## Short answer…","runs":1,"steps":132,"tools":51,
-           "from":1786033290556,"to":1786033717089,"segment":"segment/at_2_7",
-           "children":[…],"edges":[{"type":"in_segment","other":"segment/at_2_7","dir":"out","quality":"exact_unique","via":"activity window"}]}, …],
+           "from":1786033290556,"to":1786033717089,"segment":"segment/at/2/7",
+           "children":[…],"edges":[{"type":"in_segment","other":"segment/at/2/7","dir":"out","quality":"exact_unique","via":"activity window"}]}, …],
  "relations":[{"id":"rel/starts/…","type":"starts","from":"tool/toolu_…","to":"stream/a1…","quality":"exact_unique",
                "via":"parent tool result","evidence":[{"seq":1,"row":12}]}, …],
  "unresolved":[]}
@@ -75,13 +76,13 @@ producer of them.
 | Key | Value |
 | --- | --- |
 | `format`, `version` | `asz.view`, `1.0`. A reader that does not know the version stops here. |
-| `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, from the fold's session nodes; one session, equal to the conversation id, for the Claude Code adapter |
+| `conversation`, `sessions` | the conversation id, and the sessions that contributed to it, as the round headers name them. A fold takes only rounds of round 1's `session`, so the list holds that one session, equal to the conversation id for the Claude Code adapter. A session is never read back out of a node's id, which writes it escaped |
 | `head` | `round` and `digest` of the newest round the document was folded to |
 | `parser`, `policy` | from the head round's header |
 | `summary` | `title`; `state`, one of `verified`, `incomplete` when a round or a file is missing, `mismatch` when a digest failed; `problems`, one line each, empty when verified; the counts `talks`, `steps`, `streams`, `segments`, `rounds`, `unresolved`, `changes`, `provider_bodies`, the landed provider bodies, and `captured_prompts`, the calls whose request is captured; `from` and `to`, when the session began and its last activity, from the session node; and `kinds`, `relation_types` and `quality`, the fold sized by node kind, by relation type and by how well each relation is known. `withheld` is what the document withholds by name, `{}` when nothing was asked to be withheld. See [Withholding](#withholding) |
 | `rounds` | one per round, in order: `round`, `digest`, `previous` (null on round 1), `from_seq`, `through_seq`, `input_digest`, `from_time`, `through_time` (the record time range of the files the round consumed, null when none carries a time), `verified` |
 | `files` | one per `.sd` file, then one per round: `file` (its path on the wire), `format` (`sd` or `sf`), `kind`, `seq` or `round`, `stream` or `run`, `lines`, `bytes`, `digest`, `from_time`, `through_time`, and `state`, which is `removed` for a file [retention](storage-root.md#retention) removed from the local root and absent otherwise; `lines`, `bytes` and `digest` still describe the file as it landed. Absent values are null. Together with `rounds`, this is exactly what a rebuild needs. |
-| `streams` | one per execution stream: `id`, `name`, `role` (`main` or `child`), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
+| `streams` | one per execution stream: `id`, `name`, `role` (`main` for the stream named `main`; `auxiliary`, a plain model call the agent made inside its own work and not a child agent, when a record names the stream as its `child` and every record that does carries the [`auxiliary`](session-data.md#flags) flag; `child` for every other stream, a child agent), `label`, `parent`, `records`, `steps`, `talk`, `named_by`, and `opened_by`, every step the assembler could tie to the start of the stream as `{step, stream, talk, quality}`, in the order those steps happened; several means it did not choose, and neither does a view |
 | `segments` | one per activity window: `id`, `talks`, `from`, `to`. A window says where the work happened, not whether it has finished; a reader with a clock compares `to` with the time |
 | `talks` | one tree per talk, in time order. See the node below |
 | `loose` | the runs and steps no talk contains, as trees from their highest such ancestor: a child's output the fold parented to the session because the child's stream opened no talk, for instance. Empty for most conversations. With `talks`, it holds every run and step of the fold within twelve levels of its root, so the document covers the whole session |
