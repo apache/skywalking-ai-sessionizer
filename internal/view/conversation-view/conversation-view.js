@@ -144,6 +144,49 @@ const MAX_DEPTH = 32;
 const CACHE_LIMIT = 32 * 1024 * 1024;
 const ROLE_REQUEST = "request";
 const ROLE_RESPONSE = "response";
+const DIGEST = /^[0-9a-fA-F]{16}$/;
+function has(o, key) {
+  return o[key] !== void 0 && o[key] !== null;
+}
+function entryOf(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v;
+  const digest = o["digest"];
+  if (typeof digest !== "string" || !DIGEST.test(digest)) return null;
+  if (!has(o, "id") || o["id"] === "") return { digest: digest.toLowerCase() };
+  const id = o["id"];
+  return typeof id === "string" && DIGEST.test(id) ? { id: id.toLowerCase(), digest: digest.toLowerCase() } : null;
+}
+function entryShaped(v) {
+  if (v === null) return true;
+  if (typeof v !== "object" || Array.isArray(v)) return false;
+  const o = v;
+  return ["id", "digest"].every((k) => !has(o, k) || typeof o[k] === "string");
+}
+function typed(l) {
+  const list = (v) => Array.isArray(v) && v.every(entryShaped);
+  const integer = (v) => typeof v === "number" && Number.isSafeInteger(v);
+  const text = (v) => typeof v === "string";
+  const rules = [
+    ["entries", list],
+    ["add", list],
+    ["base", text],
+    ["unavailable", text],
+    ["keep", integer],
+    ["count", integer]
+  ];
+  return rules.every(([k, ok]) => !has(l, k) || ok(l[k]));
+}
+function entriesOf(v) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const x of v) {
+    const e = entryOf(x);
+    if (!e) return null;
+    out.push(e);
+  }
+  return out;
+}
 const STATE_TOO_LARGE = "too_large";
 const STATE_REMOVED = "removed";
 const PROMPT_SCHEMA = "provider_body/1";
@@ -310,12 +353,36 @@ class PromptStore {
     }
     throw new PromptError(`${record.id} was removed by retention`, STATE_REMOVED);
   }
-  /** The record a response with that provider request id carries, or null. */
-  responseOfRequestId(requestId) {
-    for (const r of this.records.values()) {
-      if (r.manifest.role === ROLE_RESPONSE && r.manifest.request === requestId) return r;
+  /**
+   * The whole message list of the request held under a record id, or null when it carries none or
+   * it does not read: a list against a base is the base's first entries and its own, and the base
+   * must have landed before it, in the same form, holding at least what is kept of it.
+   */
+  listOf(id, depth = 0) {
+    const record = this.records.get(id);
+    const m = record == null ? void 0 : record.manifest;
+    if (!record || !m || m.role !== ROLE_REQUEST || !m.history_form) return null;
+    if (!m.messages || typeof m.messages !== "object" || Array.isArray(m.messages)) return null;
+    const l = m.messages;
+    if (!typed(l) || has(l, "unavailable")) return null;
+    if (has(l, "entries")) return has(l, "base") ? null : entriesOf(l["entries"]);
+    if (!has(l, "base") || !has(l, "keep") || !has(l, "add") || depth >= MAX_DEPTH) return null;
+    const keep = l["keep"];
+    if (typeof l["base"] !== "string" || l["base"] === "" || typeof keep !== "number" || !Number.isInteger(keep) || keep < 1 || keep > 4294967295) {
+      return null;
     }
-    return null;
+    const base = this.records.get(l["base"]);
+    const add = entriesOf(l["add"]);
+    if (!base || !add || base.manifest.history_form !== m.history_form) return null;
+    if (base.seq > record.seq || base.seq === record.seq && base.row >= record.row) return null;
+    const prior = this.listOf(l["base"], depth + 1);
+    if (!prior || keep > prior.length) return null;
+    return [...prior.slice(0, keep), ...add];
+  }
+  /** The record id of the body at a landed position, or null when it is not held. */
+  idAt(seq, row) {
+    var _a;
+    return ((_a = this.byPosition.get(`${seq}/${row}`)) == null ? void 0 : _a.id) ?? null;
   }
   add(record) {
     const m = record.manifest;
@@ -669,6 +736,8 @@ const KIND = {
   "agent.launch_ack": { track: "agents", type: "agent", title: "launchAcknowledged" },
   "runtime.notification": { track: "agents", type: "agent", title: "notificationFromChild" },
   "epoch.boundary": { track: "annotation", type: "annotation", title: null, raw: "Context reset" },
+  // Where a call's history changed with no reset: a type of its own, so its colour is not a reset's.
+  "history.change": { track: "annotation", type: "history", title: "historyChanged" },
   "epoch.summary": { track: "annotation", type: "annotation", title: null, raw: "Carried-forward summary" },
   "turn.duration": { track: "annotation", type: "annotation", title: null, raw: "Turn duration" },
   "error.api": { track: "annotation", type: "error", title: null, raw: "Provider error" },
@@ -827,11 +896,16 @@ function changeRoots(records) {
   return [...roots.entries()].map(([root, files]) => ({ root, files: [...files.values()] }));
 }
 function readOrder(a, b) {
-  if (a.ref && b.ref) return a.ref.seq - b.ref.seq || a.ref.row - b.ref.row;
+  if (a.ref && b.ref) return a.ref.seq - b.ref.seq || a.ref.row - b.ref.row || a.order - b.order;
   return (a.at || 0) - (b.at || 0) || a.order - b.order;
 }
 function timeOrder(a, b) {
   return (a.at || 0) - (b.at || 0) || a.order - b.order;
+}
+function cardCall(card) {
+  var _a;
+  const to = (_a = card.attrs) == null ? void 0 : _a["to_call"];
+  return typeof to === "string" ? to : card.id;
 }
 class ConversationModel {
   constructor(doc) {
@@ -940,6 +1014,10 @@ class ConversationModel {
       flatten(t, t.id, row.stream);
     }
     for (const n of doc.loose ?? []) flatten(n, null, n.stream ?? "main");
+    for (const step of this.stepById.values()) {
+      const call = step.kind === "history.change" ? this.stepById.get(cardCall(step)) : void 0;
+      if (call) step.order = call.order - 0.5;
+    }
     for (const [name, steps] of this.stepsByStream) {
       steps.sort(readOrder);
       this.flowByStream.set(name, [...steps].sort(timeOrder));
@@ -973,6 +1051,14 @@ class ConversationModel {
   }
   loose(stream) {
     return this.looseByStream.get(stream) ?? [];
+  }
+  /** The step a click on a step selects: a history.change card selects the call it stands before, when
+   *  the document holds that call, and itself otherwise. */
+  target(id) {
+    const step = this.stepById.get(id);
+    if ((step == null ? void 0 : step.kind) !== "history.change") return id;
+    const call = cardCall(step);
+    return this.stepById.has(call) ? call : id;
   }
   step(id) {
     return id ? this.stepById.get(id) ?? null : null;
@@ -1307,9 +1393,7 @@ const ENGLISH = {
   promptRequestModes: "How much of the request to show",
   promptWholeRequest: "Whole request",
   promptWholeBody: "The body",
-  promptChanges: "What it added",
-  promptNoPrevious: "The request before this one is not among the loaded bodies, so there is nothing to compare with.",
-  promptNoPreviousNamed: "This request names no request before it, so there is nothing to compare with.",
+  promptChanges: "What changed",
   promptSystem: "System prompt",
   promptTools: "Tools ({count})",
   promptMessages: "Messages ({count})",
@@ -1317,12 +1401,37 @@ const ENGLISH = {
   promptMessagesNote: "{bytes} bytes as sent",
   promptSettings: "Settings",
   promptBlocks: "{count} block(s), {bytes} bytes",
-  promptShared: "The {count} message(s) before are as the call before sent them, {bytes} bytes.",
-  promptRewritten: "The history before this point was rewritten, and not by a compaction.",
-  promptCompacted: "The context was replaced by a summary here, so the list starts again: {before} message(s) became {after}.",
   promptAlsoChanged: "Also changed: {what}.",
   promptAdded: "Added by this call ({count})",
   promptNothingAdded: "This request adds no message.",
+  historyRole: "History",
+  historyChanged: "History changed · cause unavailable",
+  historyCounts: "{kept} kept, {changed} changed, {dropped} dropped, {added} added",
+  historyOrderChanged: "the order changed",
+  historyOrderUnknown: "whether the order changed is not known",
+  historySystemChanged: "the system prompt changed",
+  historyReplyBack: "the previous reply is included unchanged",
+  historyReplyBackChanged: "the previous reply is included with changes",
+  historyReplyNotFound: "the previous reply was not found in this history",
+  historyReplyUnknown: "whether the previous reply is included is not known",
+  promptHistoryFirst: "This is the first call of its stream since the context began, so there is nothing to compare with.",
+  promptReset: "The context was reset here, so there is nothing before this call to compare with.",
+  promptResetSummary: "The context was reset here and replaced by a summary, so there is nothing before this call to compare with.",
+  promptHistoryAuxiliary: "A call of an auxiliary stream is not compared with the calls around it.",
+  promptHistoryInternal: "The framework made this call for its own purpose, so it is not compared with the calls around it.",
+  promptHistoryUnavailable: "This history cannot be compared with the call before it: {why}.",
+  promptHistoryNone: "This request does not record its history, so there is nothing to compare with.",
+  promptHistoryKept: "The history of the call before is kept whole: its {count} message(s) come first, as it sent them.",
+  promptHistoryKeptAll: "The history of the call before is kept whole.",
+  promptHistoryChanged: "The history of the call before changed:",
+  historySystemUnknown: "whether the system prompt changed is not known",
+  promptToolsWord: "Tools",
+  promptThreadHeld: "This request continues a provider thread: it holds only its new messages, and the provider keeps the rest.",
+  promptDropped: "Dropped from the call before ({count})",
+  promptMarkKept: "kept",
+  promptMarkChanged: "changed",
+  promptMarkAdded: "added",
+  promptMarkDropped: "dropped",
   promptStopReason: "stopped: {reason}",
   promptThinking: "Thinking",
   promptReminder: "Injected by the runtime",
@@ -1953,7 +2062,6 @@ function value(ctx, v) {
   return esc(fill(s.sizeAndDigest, { bytes: f.number(v.bytes), digest: v.sha256 ? v.sha256.slice(0, 12) : "—" }));
 }
 const REMINDER = "<system-reminder>";
-const MARKED_IN_MESSAGE = 2;
 const MARKED_IN_LIST = 1;
 const NOT_MARKED = -1;
 function readBody(bytes, role) {
@@ -2149,37 +2257,20 @@ function langChainBlocks(fields, raw) {
   if (blocks.length) return blocks;
   return typeof content === "string" ? [{ kind: "text", text: "" }] : [{ kind: "unknown", json: raw }];
 }
-function deltaOf(previous, current) {
-  let shared = 0;
-  let rewritten = false;
-  const least = Math.min(previous.messages.length, current.messages.length);
-  while (shared < least && same(previous.messages[shared].raw, current.messages[shared].raw, MARKED_IN_MESSAGE)) shared++;
-  if (shared < least) rewritten = true;
-  const replaced = rewritten && current.messages.length < previous.messages.length;
-  const added = current.messages.slice(shared);
-  let sharedBytes = 0;
-  for (let i = 0; i < shared; i++) sharedBytes += size(current.messages[i].raw);
+const NOT_SETTINGS = /* @__PURE__ */ new Set(["metadata", "thread", "diagnostics"]);
+function outsideOf(previous, current, threaded) {
   return {
-    added,
-    sharedMessages: shared,
-    sharedBytes,
-    rewritten,
-    replaced,
-    systemChanged: !same(previous.raw["system"], current.raw["system"], MARKED_IN_LIST),
-    toolsChanged: !same(previous.raw["tools"], current.raw["tools"], MARKED_IN_LIST),
-    settingsChanged: !same(settings(previous), settings(current), NOT_MARKED)
+    tools: !threaded && !same(previous.raw["tools"], current.raw["tools"], MARKED_IN_LIST),
+    settings: !same(settings(previous), settings(current), NOT_MARKED)
   };
 }
 function settings(r) {
   const out = /* @__PURE__ */ Object.create(null);
-  for (const [k, v] of Object.entries(r.rest)) if (k !== "metadata") out[k] = v;
+  for (const [k, v] of Object.entries(r.rest)) if (!NOT_SETTINGS.has(k)) out[k] = v;
   return out;
 }
 function same(a, b, markedTo) {
   return canonical(a, markedTo) === canonical(b, markedTo);
-}
-function size(value2) {
-  return new TextEncoder().encode(JSON.stringify(value2) ?? "").length;
 }
 function canonical(value2, markedTo, depth = 0) {
   if (Array.isArray(value2)) return `[${value2.map((v) => canonical(v, markedTo, depth + 1)).join(",")}]`;
@@ -2188,17 +2279,9 @@ function canonical(value2, markedTo, depth = 0) {
   const parts = [];
   for (const k of Object.keys(obj).sort()) {
     if (depth <= markedTo && k === "cache_control") continue;
-    const v = k === "content" && depth < markedTo ? plainContent(obj[k]) : obj[k];
-    parts.push(`${JSON.stringify(k)}:${canonical(v, markedTo, depth + 1)}`);
+    parts.push(`${JSON.stringify(k)}:${canonical(obj[k], markedTo, depth + 1)}`);
   }
   return `{${parts.join(",")}}`;
-}
-function plainContent(content) {
-  if (typeof content === "string") return [{ type: "text", text: content }];
-  if (!Array.isArray(content) || content.length !== 1) return content;
-  const only = content[0];
-  if (!only || typeof only !== "object" || only["type"] !== "text" || typeof only["text"] !== "string") return content;
-  return [{ type: "text", text: only["text"] }];
 }
 const LINE_DIFF_CAP = 400;
 function lineDiff(before, after) {
@@ -2483,6 +2566,38 @@ function clipNote(ctx, text, bytes) {
   const shown = new TextEncoder().encode(text).length;
   return bytes > shown ? esc(fill(ctx.s.fullTextNote, { shown: ctx.f.number(shown), total: ctx.f.number(bytes) })) : "";
 }
+function historyLine(ctx, e) {
+  const { s } = ctx;
+  const a = e.attrs ?? {};
+  const keys = ["kept", "changed", "dropped", "added"];
+  const counts2 = keys.every((k) => typeof a[k] === "number") ? [fill(s.historyCounts, Object.fromEntries(keys.map((k) => [k, String(a[k])])))] : [];
+  return [...counts2, ...historyNotes(ctx, a, "reply")].join(" · ");
+}
+function historyNotes(ctx, a, replyKey) {
+  const { s } = ctx;
+  const out = [];
+  if (a["order_changed"] === "yes") out.push(s.historyOrderChanged);
+  if (a["order_changed"] === "unavailable") out.push(s.historyOrderUnknown);
+  if (a["system_changed"] === "yes") out.push(s.historySystemChanged);
+  if (a["system_changed"] === "unavailable") out.push(s.historySystemUnknown);
+  const reply = replyText(ctx, a[replyKey]);
+  if (reply) out.push(reply);
+  return out;
+}
+function replyText(ctx, status) {
+  const { s } = ctx;
+  switch (status) {
+    case "back":
+      return s.historyReplyBack;
+    case "back_changed":
+      return s.historyReplyBackChanged;
+    case "not_found":
+      return s.historyReplyNotFound;
+    case "unavailable":
+      return s.historyReplyUnknown;
+  }
+  return "";
+}
 const BATCH = 32;
 const PREVIEW = 600;
 const JSON_PREVIEW = 4e3;
@@ -2632,17 +2747,12 @@ function drawUnloaded(ctx, body, sides, failed) {
 }
 function drawRequest(ctx, e, read2, sides, store) {
   const { s, f, state } = ctx;
-  const previous = state.promptWhole ? null : previousRequest(ctx, e, sides, store);
   const modes = `
     <div class="acv-prompt-modes" role="group" aria-label="${esc(s.promptRequestModes)}">
       <button type="button" class="acv-chip${state.promptWhole ? " on" : ""}" data-prompt-whole="1" aria-pressed="${state.promptWhole}">${esc(s.promptWholeRequest)}</button>
       <button type="button" class="acv-chip${state.promptWhole ? "" : " on"}" data-prompt-whole="0" aria-pressed="${!state.promptWhole}">${esc(s.promptChanges)}</button>
     </div>`;
-  if (!state.promptWhole) {
-    if (previous === UNNAMED) return `${modes}<div class="acv-empty">${esc(s.promptNoPreviousNamed)}</div>`;
-    if (!previous) return `${modes}<div class="acv-empty">${esc(s.promptNoPrevious)}</div>`;
-    return `${modes}${drawDelta(ctx, e, deltaOf(previous, read2), read2, previous.messages.length)}`;
-  }
+  if (!state.promptWhole) return `${modes}${drawHistory(ctx, e, read2, sides, store)}`;
   const system = read2.system.length ? section(ctx, e, "system", s.promptSystem, blockSummary(ctx, read2.system), read2.system.map((b, i) => block(ctx, b, `${e.id}|req|sys|${i}`)).join("")) : "";
   const tools = read2.tools.length ? section(
     ctx,
@@ -2665,48 +2775,135 @@ function drawRequest(ctx, e, read2, sides, store) {
   const whole = documentSection(ctx, e, "request-raw", s.promptWholeBody, "", read2.raw, `${e.id}|req|raw`);
   return `${modes}${system}${tools}${messages}${settings2}${whole}`;
 }
-const UNNAMED = "unnamed";
-function previousRequest(ctx, e, sides, store) {
-  var _a, _b, _c;
-  if (!sides.request) return null;
-  const mine = store.manifestAt(sides.request.seq, sides.request.row);
-  if (mine && !mine.previous_request) return UNNAMED;
-  if (!(mine == null ? void 0 : mine.previous_request)) return null;
-  const response = store.responseOfRequestId(mine.previous_request);
-  if (!(response == null ? void 0 : response.manifest.call)) return null;
-  const call = response.manifest.call;
-  for (const step of ctx.model.stepById.values()) {
-    const bodies = bodiesOf(step);
-    const theirResponse = (_a = bodies.find((b) => b.role === ROLE_RESPONSE)) == null ? void 0 : _a.ref;
-    const theirRequest = (_b = bodies.find((b) => b.role === ROLE_REQUEST)) == null ? void 0 : _b.ref;
-    if (!theirResponse || !theirRequest || step.id === e.id) continue;
-    if (((_c = store.manifestAt(theirResponse.seq, theirResponse.row)) == null ? void 0 : _c.call) !== call) continue;
-    try {
-      const read2 = readBody(store.bodyAt(theirRequest.seq, theirRequest.row), ROLE_REQUEST);
-      return read2.kind === "request" ? read2 : null;
-    } catch {
-      return null;
-    }
+function drawHistory(ctx, e, read2, sides, store) {
+  var _a, _b;
+  const { s } = ctx;
+  const a = e.attrs ?? {};
+  const history = a["history"];
+  const reason = typeof a["history_reason"] === "string" ? a["history_reason"] : "";
+  const note = (text) => `<div class="acv-empty">${esc(text)}</div>`;
+  switch (history) {
+    case "kept":
+    case "changed":
+      break;
+    case "first":
+      return note(resetBefore(ctx, e) ?? s.promptHistoryFirst);
+    case "not_compared":
+      if (reason === "auxiliary_stream") return note(s.promptHistoryAuxiliary);
+      if (reason === "internal_call") return note(s.promptHistoryInternal);
+      return note(fill(s.promptHistoryUnavailable, { why: reason || "not_compared" }));
+    case "unavailable":
+      return note(fill(s.promptHistoryUnavailable, { why: reason || "unavailable" }));
+    default:
+      return note(s.promptHistoryNone);
   }
+  const before = ctx.model.step(typeof a["history_from"] === "string" ? a["history_from"] : null);
+  const ref = sides.request;
+  const own = ref ? store.idAt(ref.seq, ref.row) : null;
+  const mine = ref ? store.manifestAt(ref.seq, ref.row) : null;
+  const theirs = before ? requestOf(store, before) : null;
+  const lines = [];
+  const card = history === "changed" ? cardOf(ctx, e) : null;
+  if (history === "kept") {
+    const kept = (_a = before == null ? void 0 : before.attrs) == null ? void 0 : _a["history_messages"];
+    lines.push(typeof kept === "number" ? fill(s.promptHistoryKept, { count: String(kept) }) : s.promptHistoryKeptAll);
+  } else {
+    lines.push(card ? `${s.promptHistoryChanged} ${historyLine(ctx, card)}` : s.promptHistoryChanged);
+  }
+  const notes = card ? [] : historyNotes(ctx, a, "history_reply");
+  if (notes.length) lines.push(notes.join(" · "));
+  const continues = threadOf(mine) === "continue";
+  if (theirs == null ? void 0 : theirs.read) {
+    const outside = outsideOf(theirs.read, read2, continues || theirs.continues);
+    const what = [outside.tools ? s.promptToolsWord : "", outside.settings ? s.promptSettings : ""].filter(Boolean);
+    if (what.length) lines.push(fill(s.promptAlsoChanged, { what: what.join(", ") }));
+  }
+  if (continues) lines.push(s.promptThreadHeld);
+  const said = lines.map((l) => `<div class="acv-faint">${esc(l)}</div>`).join("");
+  const total = read2.messages.length;
+  const drawn = (marks22, only) => read2.messages.map((m, i) => ({ m, i, mark: marks22[i] ?? null })).filter((x) => !only || x.mark && only.includes(x.mark)).map((x) => message(ctx, x.m, x.i + 1, total, `${e.id}|req|msg|${x.i}`, x.mark ?? void 0)).join("");
+  const ownList = own ? store.listOf(own) : null;
+  if (history === "kept") {
+    const marks22 = keptMarks(a["history_messages"], (_b = before == null ? void 0 : before.attrs) == null ? void 0 : _b["history_messages"], total, (ownList == null ? void 0 : ownList.length) ?? null, continues);
+    if (!marks22) return `${said}${drawn([])}`;
+    const added = marks22.filter((m) => m === "added").length;
+    const list = added ? drawn(marks22, ["added"]) : `<div class="acv-empty">${esc(s.promptNothingAdded)}</div>`;
+    return `${said}<div class="acv-kicker" style="margin-top:12px">${esc(fill(s.promptAdded, { count: String(added) }))}</div>${list}`;
+  }
+  const N = continues ? null : ownList;
+  const P = theirs && !theirs.continues ? store.listOf(theirs.id) : null;
+  const found = N && P && N.length === total ? changedMarks(P, N) : null;
+  if (!found || !P) return `${said}${drawn([])}`;
+  const { marks: marks2, dropped } = found;
+  const gone = (theirs == null ? void 0 : theirs.read) && theirs.read.messages.length === P.length ? dropped.map((i) => message(ctx, theirs.read.messages[i], i + 1, P.length, `${e.id}|req|was|${i}`, "dropped")).join("") : "";
+  return `${said}${drawn(marks2)}${gone ? `<div class="acv-kicker" style="margin-top:12px">${esc(fill(s.promptDropped, { count: String(dropped.length) }))}</div>${gone}` : ""}`;
+}
+function cardOf(ctx, e) {
+  for (const x of ctx.model.steps(e.stream)) if (x.kind === "history.change" && cardCall(x) === e.id) return x;
   return null;
 }
-function drawDelta(ctx, e, delta, read2, previousCount) {
-  const { s, f } = ctx;
-  const changed = [
-    delta.systemChanged ? s.promptSystem : "",
-    delta.toolsChanged ? fill(s.promptTools, { count: String(read2.tools.length) }) : "",
-    delta.settingsChanged ? s.promptSettings : ""
-  ].filter(Boolean);
-  const notes = [
-    `<div class="acv-faint">${esc(fill(s.promptShared, { count: String(delta.sharedMessages), bytes: f.number(delta.sharedBytes) }))}</div>`,
-    // A compaction is not a fault: it is the runtime replacing the context with a summary, which the
-    // conversation records as its own step. Saying which of the two happened is the whole value of
-    // the note -- a warning on every ordinary growth would say nothing.
-    delta.replaced ? `<div class="acv-faint">${esc(fill(s.promptCompacted, { before: String(previousCount), after: String(read2.messages.length) }))}</div>` : delta.rewritten ? `<div class="acv-warning">${esc(s.promptRewritten)}</div>` : "",
-    changed.length ? `<div class="acv-faint">${esc(fill(s.promptAlsoChanged, { what: changed.join(", ") }))}</div>` : ""
-  ].join("");
-  const added = delta.added.length ? delta.added.map((m, i) => message(ctx, m, delta.sharedMessages + i + 1, read2.messages.length, `${e.id}|req|msg|${delta.sharedMessages + i}`)).join("") : `<div class="acv-empty">${esc(s.promptNothingAdded)}</div>`;
-  return `${notes}<div class="acv-kicker" style="margin-top:12px">${esc(fill(s.promptAdded, { count: String(delta.added.length) }))}</div>${added}`;
+function requestOf(store, step) {
+  var _a;
+  const ref = (_a = bodiesOf(step).find((b) => b.role === ROLE_REQUEST)) == null ? void 0 : _a.ref;
+  const id = ref ? store.idAt(ref.seq, ref.row) : null;
+  if (!ref || !id) return null;
+  let read2 = null;
+  try {
+    const r = readBody(store.bodyAt(ref.seq, ref.row), ROLE_REQUEST);
+    if (r.kind === "request") read2 = r;
+  } catch {
+  }
+  return { id, read: read2, continues: threadOf(store.manifestAt(ref.seq, ref.row)) === "continue" };
+}
+function threadOf(m) {
+  const t = m == null ? void 0 : m.thread;
+  return t && typeof t === "object" && typeof t.type === "string" ? t.type : "";
+}
+function keptMarks(n, p, total, own, continues) {
+  if (typeof n !== "number" || typeof p !== "number" || p > n || own !== total) return null;
+  if (continues ? total > n : total !== n) return null;
+  const offset = n - total;
+  return Array.from({ length: total }, (_, i) => offset + i < p ? "kept" : "added");
+}
+function changedMarks(P, N) {
+  const key = (x) => x.id ? `i${x.id}|${x.digest}` : `d${x.digest}`;
+  const index = (list) => {
+    const byKey = /* @__PURE__ */ new Map();
+    const byId = /* @__PURE__ */ new Map();
+    for (const [i, x] of list.entries()) {
+      if (x.id ? byId.has(x.id) : byKey.has(key(x))) return null;
+      byKey.set(key(x), i);
+      if (x.id) byId.set(x.id, i);
+    }
+    return { byKey, byId };
+  };
+  const p = index(P);
+  if (!p || !index(N)) return null;
+  const used = /* @__PURE__ */ new Set();
+  const marks2 = N.map((x) => {
+    const at = p.byKey.get(key(x));
+    if (at === void 0) return null;
+    used.add(at);
+    return "kept";
+  });
+  N.forEach((x, j) => {
+    const at = x.id ? p.byId.get(x.id) : void 0;
+    if (marks2[j] || at === void 0 || used.has(at)) return;
+    used.add(at);
+    marks2[j] = "changed";
+  });
+  const dropped = P.map((_, i) => i).filter((i) => !used.has(i));
+  return { marks: marks2.map((m) => m ?? "added"), dropped };
+}
+function resetBefore(ctx, e) {
+  const steps = ctx.model.steps(e.stream);
+  for (let i = steps.findIndex((x) => x.id === e.id) - 1; i >= 0; i--) {
+    const x = steps[i];
+    if (x.kind !== "epoch.boundary") continue;
+    const summary = x.edges.some((g) => g.type === "summarizes" && g.dir === "in");
+    return summary ? ctx.s.promptResetSummary : ctx.s.promptReset;
+  }
+  return null;
 }
 function drawResponse(ctx, e, read2) {
   const { s } = ctx;
@@ -2744,17 +2941,22 @@ function documentSection(ctx, e, key, title, note, value2, textKey) {
   const text = pretty(value2);
   return section(ctx, e, key, title, note, json(ctx, text, textKey), { copy: text });
 }
-function message(ctx, m, n, total, key) {
+function message(ctx, m, n, total, key, mark) {
   const { s } = ctx;
+  const marked = mark ? `<span class="acv-history-mark ${mark}">${esc(markText(ctx, mark))}</span>` : "";
   const only = m.blocks.length === 1 && m.blocks[0].kind === "text" && !m.blocks[0].reminder ? m.blocks[0] : null;
   return `
     <div class="acv-prompt-message"${only ? " data-copy-scope" : ""}>
       <div class="acv-prompt-message-head">
         <span><span class="acv-prompt-role">${esc(m.role || s.promptUnknownRole)}</span>${only ? copyOf(ctx, only.text ?? "") : ""}</span>
-        <span class="acv-faint">${esc(fill(s.promptMessageOf, { n: String(n), total: String(total) }))}</span>
+        <span class="acv-faint">${esc(fill(s.promptMessageOf, { n: String(n), total: String(total) }))}${marked}</span>
       </div>
       <div class="acv-prompt-message-body">${m.blocks.map((b, i) => block(ctx, b, `${key}|${i}`, b === only)).join("")}</div>
     </div>`;
+}
+function markText(ctx, mark) {
+  const { s } = ctx;
+  return { kept: s.promptMarkKept, changed: s.promptMarkChanged, added: s.promptMarkAdded, dropped: s.promptMarkDropped }[mark];
 }
 function block(ctx, b, key, headed = false) {
   const { s } = ctx;
@@ -3711,7 +3913,7 @@ function bindTimeline(ctx) {
         ctx.state.openTalks.add(tid);
         ctx.state.autoOpen.add(tid);
       }
-      ctx.select(node.dataset.node, true);
+      ctx.select(ctx.model.target(node.dataset.node), true);
       return;
     }
     const folder = target.closest("[data-folder]");
@@ -3802,6 +4004,8 @@ function present(ctx, e) {
       return { cls: `acv-activity${child}`, role: `${agent} · ${s.modelCall}`, color: "model" };
     case "thinking":
       return { cls: `acv-activity${child}`, role: `${agent} · ${s.reasoning}`, color: "model" };
+    case "history.change":
+      return { cls: "acv-activity acv-history", role: `${agent} · ${s.historyRole}`, color: "history" };
     case "tool":
       return e.mcp ? { cls: `acv-activity${child}`, role: `${agent} → ${s.mcpWord} · ${e.mcp.server}`, color: "tool" } : { cls: `acv-activity${child}`, role: `${agent} → ${s.toolWord} · ${e.name || s.callWord}`, color: "tool" };
     default:
@@ -3822,7 +4026,7 @@ function stepCard(ctx, e, prev, near) {
   const link = fs ? `<button type="button" class="acv-stream-link" data-open="${esc(fs.name)}">${esc(s.openStream)} ${esc(fs.label || fs.name.slice(0, 10))} →</button>` : "";
   const unavailable = e.state && e.state !== "available" ? `<span class="acv-mini acv-warn">[${esc(e.state)}]</span>` : "";
   const title = e.durationMs ? `${f.duration(e.durationMs)} ${s.turn}` : e.kind === "context.injection" && injectionSays(e.text) ? injectionSays(e.text).says : e.mcp ? `${e.mcp.server} · ${e.mcp.tool}` : e.name || kindTitle(e.kind, s);
-  return `${sep}<div class="acv-card ${p.cls}${e.id === state.sel ? " selected" : ""}${near && !near.has(e.id) ? " dim" : ""}" role="button" tabindex="0" data-card="${esc(e.id)}" title="${esc(s.locateInTimeline)}"${indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
+  return `${sep}<div class="acv-card ${p.cls}${e.id === state.sel ? " selected" : ""}${near && !near.has(e.id) ? " dim" : ""}" role="button" tabindex="0" data-card="${esc(m.target(e.id))}" title="${esc(s.locateInTimeline)}"${indent ? ` style="--indent:${indent};margin-left:${indent * 22}px;max-width:calc(100% - ${indent * 22}px)"` : ""}>
     <span class="acv-time"><strong>${esc(f.time(e.at))}</strong>${esc(e.kind)}</span>
     <span class="acv-content">
       <span class="acv-role">${esc(p.role)}</span>
@@ -3831,6 +4035,7 @@ function stepCard(ctx, e, prev, near) {
       ${e.text ? `${e.result ? `<span class="acv-result-label">${esc(s.input)}${e.bytes ? ` · ${f.number(e.bytes)} B` : ""}</span>` : ""}
         ${textBlock(ctx, e, "in", e.text, e.bytes, mono ? "mono" : "").html}` : ""}
       ${e.result ? resultBlock(ctx, e) : ""}
+      ${e.kind === "history.change" ? `<span class="acv-history-line">${esc(historyLine(ctx, e))}</span>` : ""}
       ${inlineChanges(ctx, e)}
     </span></div>${link}`;
 }
