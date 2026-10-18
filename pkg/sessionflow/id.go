@@ -47,13 +47,34 @@ func NodeID(kind string, parts ...string) string {
 	return join(append([]string{kind}, parts...))
 }
 
+// NodeIDIn builds the id of a node named inside another node, as a run is
+// inside its talk: the other node's id, nested, and then the parts.
+func NodeIDIn(kind, outer string, parts ...string) string {
+	written := []string{escape(kind), nest(outer)}
+	for _, p := range parts {
+		written = append(written, escape(p))
+	}
+	return joinWritten(written)
+}
+
+// LocatedID builds a node id from stable parts and then the landed location
+// of its evidence, for use where the runtime gives no identity.
+func LocatedID(kind string, r Ref, parts ...string) string {
+	all := append(append([]string{kind}, parts...), strconv.FormatUint(r.Seq, 10), strconv.FormatUint(r.Row, 10))
+	s := join(all)
+	if r.Block != nil {
+		s += ":" + strconv.Itoa(*r.Block)
+	}
+	return s
+}
+
 // RelationID builds a relation id.
 //
 // A relation is keyed by its endpoints and type, not by the evidence that
 // revealed it. Two records asserting the same edge are the same relation
 // observed twice, and must fold to one - keying by evidence would keep both.
 func RelationID(typ, from, to string) string {
-	return join([]string{"rel", typ, from, to})
+	return joinWritten([]string{escape("rel"), escape(typ), nest(from), nest(to)})
 }
 
 // UnresolvedID builds an unresolved-entry id.
@@ -66,23 +87,50 @@ func UnresolvedID(kind, ref string) string {
 
 // RefID names a landed location, for use where the runtime gives no identity.
 func RefID(kind string, r Ref) string {
-	s := join([]string{kind, strconv.FormatUint(r.Seq, 10), strconv.FormatUint(r.Row, 10)})
-	if r.Block != nil {
-		s += ":" + strconv.Itoa(*r.Block)
-	}
-	return s
+	return LocatedID(kind, r)
 }
 
+// join escapes each part, so two different lists of parts never give one id.
+// Writing a "/" in a part as "_" made the tool ids "a/b" and "a_b" one node,
+// and one call took the other's place. Only "%" and "/" are escaped, so a part
+// that holds neither is written as it is.
 func join(parts []string) string {
-	clean := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		clean = append(clean, strings.ReplaceAll(p, "/", "_"))
+	written := make([]string, len(parts))
+	for i, p := range parts {
+		written[i] = escape(p)
 	}
-	return strings.Join(clean, "/")
+	return joinWritten(written)
 }
+
+// joinWritten joins parts already written as an id writes them, and leaves
+// out an empty one.
+func joinWritten(parts []string) string {
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, "/")
+}
+
+func escape(part string) string { return partEscaper.Replace(part) }
+
+// nest writes an id as one part of another. Its "/" becomes "_", so the outer
+// id stays as readable as the ids it names: the run in talk "talk/main/8d53"
+// is "run/talk_main_8d53/8d53". A "_" the id already holds becomes "%5F"
+// first, or the talk of the main stream's cycle "a", talk/main/a, and the one
+// talk of a child stream named "main_a", talk/main_a, nest alike, and their
+// runs take each other's place. A "%" becomes "%25" as well, or an id nested
+// twice reads alike: run/talk_main_a/a and run/talk_main%5Fa/a. The nested id
+// is not escaped again, since it holds no "/" and each "%" in it begins an
+// escape.
+func nest(id string) string { return nestEscaper.Replace(id) }
+
+var (
+	partEscaper = strings.NewReplacer("%", "%25", "/", "%2F")
+	nestEscaper = strings.NewReplacer("%", "%25", "_", "%5F", "/", "_")
+)
 
 // ChainInputDigest extends an input digest with newly consumed evidence.
 //

@@ -195,7 +195,7 @@ func (r *Receiver) serveRuns(w http.ResponseWriter, req *http.Request) {
 	// Reading the request here is the only way to refuse one the collector
 	// could not convert. A body accepted and never convertible would be a 202
 	// that meant nothing, visible only in a log.
-	counted, err := countOperations(body, contentType)
+	counted, err := countOperations(body, contentType, req.Method, req.URL.Path)
 	if err != nil {
 		r.refused.Add(1)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"detail": err.Error()})
@@ -280,7 +280,7 @@ func (r *Receiver) authorized(req *http.Request) bool {
 // countOperations reads the body far enough to know it can be converted.
 type counted struct{ Operations, Feedback, Attachments int }
 
-func countOperations(body []byte, contentType string) (counted, error) {
+func countOperations(body []byte, contentType, method, path string) (counted, error) {
 	if !strings.Contains(contentType, "multipart/") {
 		// The JSON endpoints carry {"post": [...], "patch": [...]}. They are
 		// accepted so an older client is not turned away, and the collector
@@ -306,13 +306,11 @@ func countOperations(body []byte, contentType string) (counted, error) {
 		// PATCH /runs/{id} take. Accepting any JSON at all was worse than
 		// refusing: a body with no run in it was answered 202 and then
 		// silently dropped by the collector, so the client believed it had
-		// been kept.
-		var single struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal(body, &single) != nil || single.ID == "" {
-			return counted{}, errors.New(
-				"the body is neither multipart, nor a {post, patch} batch, nor a single run with an id")
+		// been kept. It is read as the collector reads it, which takes an
+		// update's id from its path.
+		if _, err := singleRun(body, Received{Method: method, Path: path}); err != nil {
+			return counted{}, fmt.Errorf(
+				"the body is neither multipart, nor a {post, patch} batch, nor a single run: %w", err)
 		}
 		return counted{Operations: 1}, nil
 	}

@@ -161,6 +161,9 @@ type builder struct {
 	// spawnEdges are resolved in stage 5 and written after stage 7, because the
 	// nodes they connect do not exist until then.
 	spawnEdges []spawnEdge
+	// startedBy is every stream a child's sidecar names as the one that
+	// started it, by child, whether that stream landed or not.
+	startedBy map[uint32][]uint32
 
 	// bodiesOfCall is the provider bodies joined to each call node, which the
 	// call carries into the round, and requestRow and responseRow the two

@@ -143,6 +143,7 @@ func (b *builder) stage5Spawns() {
 	})
 
 	spawned := map[uint32]bool{}
+	b.startedBy = map[uint32][]uint32{}
 	for _, ed := range edges {
 		if _, ok := b.byStream[ed.Stream]; !ok {
 			// The journal announces a child before its transcript exists, so this
@@ -152,16 +153,22 @@ func (b *builder) stage5Spawns() {
 			continue
 		}
 		b.stats.Spawns++
+		if ed.Parent != 0 {
+			// Kept whether that stream landed or not: a sidecar naming another
+			// agent than the one whose call claims the child disagrees with
+			// the call either way.
+			b.startedBy[ed.Stream] = append(b.startedBy[ed.Stream], ed.Parent)
+		}
 		if ed.Tool == 0 && ed.Parent != 0 {
 			// A nested child, named only by the agent that started it. The call
 			// itself lives in that agent's own file and this sidecar does not
-			// name it, so the edge runs stream to stream - weaker than a call,
-			// and far better than attaching the child to the wrong lineage.
-			if from, ok := b.byStream[ed.Parent]; ok {
+			// name it, so there is no call to draw a starts relation from. The
+			// child counts as joined, not orphaned, and sits under the session,
+			// as docs/en/adapters/claude-code.md says.
+			if _, ok := b.byStream[ed.Parent]; ok {
 				b.spawnEdges = append(b.spawnEdges, ed)
 				spawned[ed.Stream] = true
 				b.stats.SpawnsResolved++
-				_ = from
 				continue
 			}
 		}
@@ -388,6 +395,10 @@ func (b *builder) markReported(s *streamInfo) {
 // A child started in the background reports through a runtime notification
 // instead, and a batch of children is launched by a result that names the batch,
 // not answered by one - neither is taken for a return.
+//
+// Several edges can be evidence of one call. A nested child's sidecar names the
+// agent that started it and no call, so it competes with no call: it agrees
+// with the call when that agent made it, and disagrees otherwise.
 func (b *builder) returnedTo(s *streamInfo) (*toolUse, spawnEdge, bool) {
 	var found *spawnEdge
 	for i := range b.spawnEdges {
@@ -395,19 +406,31 @@ func (b *builder) returnedTo(s *streamInfo) (*toolUse, spawnEdge, bool) {
 		if ed.Stream != s.ID {
 			continue
 		}
-		if found != nil {
+		if ed.Tool == 0 && ed.Batch == 0 {
+			continue
+		}
+		if found != nil && (found.Tool != ed.Tool || found.Batch != ed.Batch) {
 			// Two calls claim one stream: which one received its result is
 			// not something to choose.
 			return nil, spawnEdge{}, false
 		}
-		found = ed
+		if found == nil {
+			found = ed
+		}
 	}
 	if found == nil || found.Batch != 0 || b.reported[s.ID] {
 		return nil, spawnEdge{}, false
 	}
 	t, ok := b.toolByID[found.Tool]
-	if !ok || t.Result == nil || t.Ambiguous || t.Result.Flags.Has(index.FlagLaunchAck) {
+	if !ok || t.Use == nil || t.Result == nil || t.Ambiguous || t.Result.Flags.Has(index.FlagLaunchAck) {
 		return nil, spawnEdge{}, false
+	}
+	for _, p := range b.startedBy[s.ID] {
+		if p != t.Use.Stream {
+			// The sidecar names another agent than the one that made the
+			// call, so which of them started the stream is not known.
+			return nil, spawnEdge{}, false
+		}
 	}
 	if _, exists := b.nodes[t.NodeID]; !exists {
 		return nil, spawnEdge{}, false

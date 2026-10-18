@@ -126,6 +126,38 @@
   every one of 80 message ids sent more than once has one form. A new capture, `streaming`, streams a
   graph and a loop over `model.stream()`; the loop sends back the chunks it joined, as
   `AIMessageChunk`, and a graph an `AIMessage`. See [LangChain](../adapters/langsmith.md).
+- The order of a run's arrivals in one request no longer changes what lands. An update written
+  before its run's start was completed only from the arrivals before it, so it had no kind and
+  landed as a graph's own run: a model call's answer was dropped, and its response body was not
+  landed. A run's arrivals in a request are now read together, so a model call's end is known when
+  a failed tool is matched to the call that asked for it, and a response body lands after its run's
+  request, so its reply is read against that request. Both clients write the start first. A client
+  written by hand need not.
+- `PATCH /runs/{id}` with a body that carries no `id` is accepted, and the run is the one the path
+  names. LangSmith JS 0.10.8 sends its updates so when it does not batch, as with
+  `autoBatchTracing: false`, and every one was refused, so none of the runs it traced finished. A
+  body whose `id` names another run than its path is refused. `POST /runs` and `PATCH /runs/{id}`
+  are now read the same way by the receiver and the collector, so a body the collector cannot read
+  is refused when it arrives, where it was accepted and then set aside.
+- A chat model invoked on its own, at the root of its trace, opens its conversation with the
+  person's question. LangChain's tracer writes a chat model's messages as a list per prompt, which
+  was read as one flat list with no person's message in it, so nothing opened the conversation and,
+  with `provider_bodies: false`, the question was not landed at all.
+- A trace that keeps making runs no longer remembers every run it made. Each arrival kept the
+  whole trace's memory fresh, so a trace that ran for days kept every run past the day and the
+  50,000 runs that bound what the receiver remembers, and every request saved them all again. A
+  trace now forgets a run when the run is forgotten, and keeps the runs a remembered run ran inside,
+  so a run arriving in a long trace still lands at once.
+- The LangChain plugin files a tool's changes under the project the tool's run is traced under. It
+  read the project from the environment alone, so with a project set in code, such as
+  `LangChainTracer(project_name=...)`, the changes went to a session the conversation was not in.
+  It now watches LangChain's tracer start each tool run and reads the project from the run, and
+  makes the scan before the tool runs once both the tracer and the plugin have been told the tool
+  started, which LangChain does before the tool runs, in either order. A tool call no LangChain
+  tracer traces, or one traced with tracing turned off, records nothing, since no conversation holds
+  its run. If the tracer cannot be watched, the plugin logs a warning and files changes under the
+  environment's project, as before.
+  See [the LangChain plugin](../setup/langchain-plugin.md).
 
 ## Claude Code
 
@@ -638,7 +670,10 @@
   gone, with the four gates that set them. A round carries no clock, so the last window of every
   session stayed `open` for ever, even in a session quiet for weeks, and nothing committed a
   segment or read its state. In `asz.view` a segment keeps `id`, `talks`, `from` and `to`; whether
-  the last one is still going is for a reader, who knows the time.
+  the last one is still going is for a reader, who knows the time. The document keeps the version
+  `1.0` although it no longer has two keys that 0.5.0 wrote. This is the one exception to the rule
+  that a 1.x never removes a key, because no released SkyWalking OAP or Horizon read the document
+  yet, and the [asz.view](../formats/asz-view.md) page says so.
 - A round no longer repeats what it says elsewhere. Gone from the nodes: the session's
   `conversation`, which the header names, and `title_from`; an epoch's `records`; a talk's `loops`
   and `runs`, which its runs are; a talk's and a run's `trigger` (on the main stream a talk's first
@@ -662,6 +697,42 @@
   Finding the record a reset continues from, or the run a record's parents lead to, could reach
   records past the round's `through_seq`, so the round could hold structure its own header and input
   digest did not cover. Assembly now works on the index as it stood at the watermark.
+
+- Two different entities could get one id. A `/` inside a part was written as `_`, so the tool
+  ids `a/b` and `a_b` gave one node, and one call took the other's place. An id nested in another
+  wrote its `/` as `_` too, so the talk of the main stream's cycle `a`, `talk/main/a`, and the talk
+  of a child stream named `main_a`, `talk/main_a`, gave their runs of the cycle `a` one id, and
+  their `in_segment` relations too. And the epoch a reset opens was named by the reset's own id, so
+  a reset whose id is `0` took the stream's first epoch's id and followed itself, and one whose id
+  is `at_1_2` took the id of a reset with no id at sequence 1 row 2. Now:
+  - inside a part, `%` is written as `%25` and `/` as `%2F`;
+  - an id nested in another, a run's talk or a relation's two ends, has each `%` written as `%25`,
+    each `_` as `%5F`, and then each `/` as `_`;
+  - the epoch a reset with an id opens is `epoch/<stream>/id/<id>`, one opened by a reset with no
+    id is `epoch/<stream>/at/<seq>/<row>`, and a segment is `segment/at/<seq>/<row>`, so the
+    location stays parts of its own and nests without a `_`.
+
+  The rules are on the [Session Flow](../formats/session-flow.md#entities) page. Parsed from scratch
+  with and without the change, the 65 conversations of a local root, Claude Code and LangChain,
+  hold 357,841 ids, and 3,637 of them moved: 2,791 `starts` and 28 `result_of` relations, because
+  the tool use id at one end holds a `_`, 748 segments, and 35 epochs that a reset with an id opens,
+  with their 35 `follows` relations. Nothing else moved. The next round of an existing conversation removes the
+  moved ids, writes them again under the new ones, and revises the `in_segment` relations that end at
+  a segment; nothing is landed again. The document's `sessions` are now the ones the round headers
+  name, never one read back out of a session node's id, which writes a `%` as `%25`.
+- A record that names the stream which started a nested child, as a Claude Code sidecar's
+  `parentAgentId` does, names no call, but it was counted as a second call that started the child.
+  A child that such a record named, and whose call received its result, got no `result_of`, and its
+  `returned_value` said unavailable. The record now agrees with the call when that stream made the
+  call, and a record that names another stream leaves the relation out, whether that stream landed
+  or not. No conversation measured changes: in a local root, no record of a Claude Code sub-agent's
+  transcript names a child, and each of the 31 nested children is named by its sidecar alone or with
+  a notification.
+- A round with an empty line in it verified. The reader skipped empty lines before it computed the
+  digest and before it checked that nothing follows the commit, so a blank line added anywhere kept
+  the round valid. [Session Flow](../formats/session-flow.md#reading-it) says a reader rejects a
+  line that does not decode and a line after the commit, and the reader now does. asz never writes
+  an empty line: none of the 948 rounds of a local root holds one.
 
 ## Release
 
@@ -706,6 +777,9 @@
 - [Session Data](../formats/session-data.md#reading-a-record) and [Session Flow](../formats/session-flow.md)
   say a reader may refuse a line that holds more than 256 objects and lists open at once, as the
   OAP does. The deepest real line measured holds 16.
+- [asz.view](../formats/asz-view.md) listed `main` and `child` as the roles of a stream. The
+  document also carries `auxiliary`, a plain model call the agent made inside its own work, and the
+  page now says when a stream has each of the three.
 - [asz.view](../formats/asz-view.md) said the document carries no RFC 3339 strings. A workspace
   change and a tool execution keep their record's `time` as that string, and the page now says so.
   It also says how siblings on one record are ordered. [Session Data](../formats/session-data.md)

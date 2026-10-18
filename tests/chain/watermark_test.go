@@ -64,8 +64,9 @@ func TestARoundReadsNothingPastItsWatermark(t *testing.T) {
 }
 
 // The header counts Bash runs by the tool and agent call nodes the round
-// holds. Two tool uses whose ids give one node id are one node, so they count
-// once, as the fold shows them.
+// holds. Two tool uses whose ids differ only in a "/" and a "_" are two calls.
+// They gave one node id, so one call took the other's place and the header
+// counted one run.
 func TestBashRunsCountTheNodes(t *testing.T) {
 	ix := index.New("s")
 	in := ix.Strings
@@ -88,7 +89,7 @@ func TestBashRunsCountTheNodes(t *testing.T) {
 			nodes++
 		}
 	}
-	if nodes != 1 || res.ToolCalls["Bash"] != nodes {
+	if nodes != 2 || res.ToolCalls["Bash"] != nodes {
 		t.Fatalf("%d tool nodes, and Bash counted %d times", nodes, res.ToolCalls["Bash"])
 	}
 }

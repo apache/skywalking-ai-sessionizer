@@ -23,7 +23,7 @@ one `commit`.
  "session_from_time":"2026-08-06T16:20:45.531Z","session_through_time":"2026-08-12T02:36:31.749Z",
  "title":"Check otel-rules support for meter mal","talks":357,"steps":16121,"streams":132,"segments":50,"unresolved":0}
 {"t":"node","id":"ack/1/1338","revision":1,"kind":"agent.launch_ack","parent":"run/…","ref":{…}}
-{"t":"relation","id":"rel/starts/tool_toolu_01Ax…/stream_a308…","revision":1,"type":"starts","from":"tool/toolu_01Ax…","to":"stream/a308…","quality":"exact_unique","via":"child sidecar","evidence":[…]}
+{"t":"relation","id":"rel/starts/tool_toolu%5F01Ax…/stream_a308…","revision":1,"type":"starts","from":"tool/toolu_01Ax…","to":"stream/a308…","quality":"exact_unique","via":"child sidecar","evidence":[…]}
 {"t":"unresolved","id":"unres/tool_result/toolu_01Bq…","revision":1,"kind":"tool_result","ref":"toolu_01Bq…","reason":"no result landed for this tool use","state":"open"}
 {"t":"commit","digest":"d829…","counts":{"nodes":1338,"relations":52,"unresolved":0}}
 ```
@@ -89,8 +89,13 @@ so an id cannot shift when an earlier source is backfilled later.
 | `relation` | `type`, `from`, `to`, `quality`, `via`, and `evidence`. A typed edge that is not containment. Cross-stream flow is a relation, never containment: a child's work stays under the child. |
 | `unresolved` | `kind`, `ref`, `reason`, and `state`: `open`, `resolved` or `terminal`. [Qualification](../concepts-and-designs/conversation-assembly.md#qualification) lists the kinds asz writes and when it writes each. |
 
-An id joins its parts with `/`. An empty part is left out, and a `/` inside a part becomes `_`, so
-the run in talk `talk/main/8d53…` is `run/talk_main_8d53…/8d53…`. The parts are joined rather than
+An id joins its parts with `/`, and an empty part is left out. Inside a part, `%` is written as
+`%25` and `/` as `%2F`, and every other character as it is. A part that is itself an id, a
+relation's two ends or a run's talk, is written differently: each `%` in that id becomes `%25`,
+each `_` becomes `%5F`, then each `/` becomes `_`, and nothing is escaped a second time. So the run
+in talk `talk/main/8d53…` is `run/talk_main_8d53…/8d53…`, and the relation from
+`tool/toolu_01Ax…` is `rel/starts/tool_toolu%5F01Ax…/…`. With both rules, two different lists of
+non-empty parts never give one id, however deep ids are nested. The parts are joined rather than
 hashed, so an id stays readable in a round file and in an error message.
 
 | Entity | Id |
@@ -108,8 +113,8 @@ These are the prefixes asz writes:
 | --- | --- |
 | `session` | `session/<session id>` |
 | `stream` | `stream/<stream name>` |
-| `epoch` | `epoch/<stream>/<id of the reset record>`. A stream's first epoch is `epoch/<stream>/0`. A reset record with no `id` is named by its location, `at_<seq>_<row>`. |
-| `segment` | `segment/at_<seq>_<row>`, the location of its first talk's first record |
+| `epoch` | `epoch/<stream>/id/<id of the reset record>`. A reset record with no `id` is named by its location, `epoch/<stream>/at/<seq>/<row>`. A stream's first epoch, when no reset opens it, is `epoch/<stream>/0`; a stream whose first record is a reset has no such epoch, and its first epoch is the one that reset opens. The three forms differ in their parts, so a reset whose id is `0`, or reads like a location, still has an epoch of its own. |
+| `segment` | `segment/at/<seq>/<row>`, the location of its first talk's first record |
 | `talk` | `talk/<stream>/<prompt cycle id>`, from its first run. A child stream is one talk, so its talk is `talk/<stream>`. |
 | `run` | `run/<talk id>/<prompt cycle id>` |
 | `llm.call` | `call/<provider call id>`, the `call` its fragments share |
@@ -282,9 +287,10 @@ once it is folded. A reader that accepts what a correct producer never writes ca
 another reader about what the round said.
 
 - The first line is not a header, a second header appears, or a line follows the commit.
-- A line does not decode, or its frame type is unknown. A reader may count a line that holds more
-  than 256 objects and lists open at once as one that does not decode, and the OAP does. Measured
-  over 360,941 lines of 94 real conversations' rounds, the deepest held 5.
+- A line does not decode, or its frame type is unknown. An empty line is a line that does not
+  decode, and a round never holds one. A reader may count a line that holds more than 256 objects
+  and lists open at once as one that does not decode, and the OAP does. Measured over 360,941
+  lines of 94 real conversations' rounds, the deepest held 5.
 - The header breaks one of its own rules. Its schema is not `sf/1`. It lacks `conversation`,
   `session`, `parser`, `policy` or `input_digest`. Its `round` is 0. Its `previous` is missing
   after round 1, or present on round 1. Its `from_seq` is 0, or its `through_seq` is below
