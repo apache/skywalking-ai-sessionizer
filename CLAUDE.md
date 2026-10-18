@@ -204,6 +204,10 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **Payload bytes are the source bytes** where a part carries the source's own JSON: byte for
   byte, apart from whitespace between tokens. `json.RawMessage` both directions, and the writer
   never re-encodes a part's data. Older files hold `\u003c`, `\u003e` and `\u0026` for the same values.
+  The one exception: JSON holding a byte that is not valid UTF-8 is left out, its size and SHA-256
+  kept and a `dropped` entry saying why, and a change or execution record is written again with
+  U+FFFD in the byte's place. Every landed line is valid UTF-8, since an OTLP receiver
+  refuses anything else.
 - **A landed file fits its budget.** A collector cuts a file by what its records take once
   written (`sessiondata.Cut`), never by source bytes: an envelope made 4 KiB of short lines 19 KB.
   A single record over `max_delta_bytes` lands alone with its largest payloads taken out as

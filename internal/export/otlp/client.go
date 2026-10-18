@@ -250,12 +250,16 @@ func (c *httpClient) ExportMetrics(req *collmetricspb.ExportMetricsServiceReques
 	return out.GetPartialSuccess().GetRejectedDataPoints(), nil
 }
 
+// maxAnswer is the most of an answer's body the client reads.
+const maxAnswer = 1 << 20
+
 // post sends one request as protobuf and returns the answer's body.
 //
 // A 2xx answer with an empty body is a full success, whatever its type,
 // since that is how a proxy in front of a receiver often answers. A 2xx
-// answer with a body is an OTLP response only when its type is protobuf.
-// Anything else is an error, and nothing is recorded as sent. Taking such an
+// answer with a body is an OTLP response only when its type is protobuf, and
+// only when the whole body arrived. Anything else is an error, and nothing is
+// recorded as sent. Taking such an
 // answer as success was measured against a real listener: an HTML page
 // answered with 200, and a redirect to a login page, both left the files
 // marked sent while the receiver stored nothing.
@@ -278,7 +282,9 @@ func (c *httpClient) post(url string, req proto.Message) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// One byte past the most an answer may be is read, so an answer that
+	// goes on past it is told from one that ends there.
+	answer, readErr := io.ReadAll(io.LimitReader(resp.Body, maxAnswer+1))
 	if resp.StatusCode == http.StatusTooManyRequests {
 		t := &Throttled{Detail: url + " answered " + resp.Status}
 		if secs, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("Retry-After"))); err == nil && secs > 0 {
@@ -292,6 +298,17 @@ func (c *httpClient) post(url string, req proto.Message) ([]byte, error) {
 			snippet = snippet[:400]
 		}
 		return nil, fmt.Errorf("otlp: %s answered %s: %s", url, resp.Status, strings.TrimSpace(string(snippet)))
+	}
+	// A success cut off before its body arrived says nothing about what the
+	// receiver took. Read as an empty answer, it marked every file of the
+	// request sent, and none was sent again.
+	if readErr != nil {
+		return nil, fmt.Errorf("otlp: %s answered %s, and its body did not arrive whole: %w; nothing is recorded as sent", url, resp.Status, readErr)
+	}
+	// What comes after the first MiB is never read, so an answer that long
+	// is not known to have arrived whole. No OTLP response comes near it.
+	if len(answer) > maxAnswer {
+		return nil, fmt.Errorf("otlp: %s answered %s with more than %d bytes, longer than any OTLP response; nothing is recorded as sent", url, resp.Status, maxAnswer)
 	}
 	if len(answer) == 0 {
 		return nil, nil

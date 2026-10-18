@@ -28,6 +28,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -46,7 +47,6 @@ func TestWriterDataBytesDoNotDependOnJSONEngine(t *testing.T) {
 		{"escape spelling", `{"s":"\u003C\u003e\u0026\/\u2028\u2029\u0001\u00e9\u00E9\ud800\ud83d\ude00"}`, `{"s":"\u003C\u003e\u0026\/\u2028\u2029\u0001\u00e9\u00E9\ud800\ud83d\ude00"}`},
 		{"number spelling", `[1E400,-0,1.0,1e+09,9007199254740993]`, `[1E400,-0,1.0,1e+09,9007199254740993]`},
 		{"duplicate keys and order", `{"z":1,"a":2,"z":3}`, `{"z":1,"a":2,"z":3}`},
-		{"invalid utf8", "{\"text\":\"\xff\xfe\xc0\xaf\"}", "{\"text\":\"\xff\xfe\xc0\xaf\"}"},
 		{"compact whitespace", " \r\n { \"x\" : [ true , null , \" a  b \\n\\t\" ] }\t", `{"x":[true,null," a  b \n\t"]}`},
 		{"string", `"<text>&\u2028"`, `"<text>&\u2028"`},
 		{"null", `null`, `null`},
@@ -303,19 +303,57 @@ func TestWriterDoesNotHTMLEscapeItsStringFields(t *testing.T) {
 	}
 }
 
-func TestWriterInvalidUTF8StringUsesGoReplacement(t *testing.T) {
-	rec := &sessiondata.Record{Ord: 1, Label: "\xff", Parts: []sessiondata.Part{{Kind: sessiondata.PartData, Data: json.RawMessage("\"\xff\"")}}}
+// No landed line holds a byte that is not valid UTF-8: JSON sent between
+// systems must be UTF-8, and a protocol buffer string, which carries a file
+// over OTLP, must be too. A string the writer encodes holds U+FFFD in its
+// place. Data holding one is taken out, whatever its size: the part keeps its
+// place, its kind and its identifiers, says omitted, or truncated while its
+// text is left, and keeps the size and the SHA-256 of what it held. The
+// record's dropped list names each such part and why, so a reader tells it
+// from a payload too large to land. Data in valid UTF-8 lands as it is.
+func TestDataThatIsNotValidUTF8IsTakenOut(t *testing.T) {
+	input := json.RawMessage("{\"command\":\"echo \xff\"}")
+	rec := &sessiondata.Record{Ord: 1, Label: "\xff", Parts: []sessiondata.Part{
+		{Kind: sessiondata.PartCall, ID: "toolu_1", Name: "Bash", Data: input},
+		{Kind: sessiondata.PartResult, Of: "toolu_1", Text: "readable", Data: json.RawMessage("\"\xfe\"")},
+		{Kind: sessiondata.PartData, Data: json.RawMessage(`"é"`)},
+	}}
 	file := writeRecords(t, rec)
+	if !utf8.Valid(file) {
+		t.Fatalf("the file holds a byte that is not valid UTF-8: %q", file)
+	}
+	// Go's default engine writes the replacement character as it is, and the
+	// older engine escapes it. Both read back as the character.
+	replacement := "\xef\xbf\xbd"
 	line := bytes.Split(file, []byte{'\n'})[1]
-	// Go's default engine writes the replacement character literally. The
-	// older engine escapes it. This known difference applies to strings,
-	// while data keeps its original bytes in both builds.
-	if !bytes.Contains(line, []byte(`"label":"�"`)) && !bytes.Contains(line, []byte(`"label":"\ufffd"`)) {
+	if !bytes.Contains(line, []byte(`"label":"`+replacement+`"`)) && !bytes.Contains(line, []byte(`"label":"\`+`ufffd"`)) {
 		t.Fatalf("unexpected invalid UTF-8 string encoding: %q", line)
 	}
 	got := readRecords(t, file)[0]
-	if got.Label != "�" || !bytes.Equal(got.Parts[0].Data, rec.Parts[0].Data) {
-		t.Fatalf("unexpected replacement or data change: %+v", got)
+	if got.Label != replacement {
+		t.Fatalf("the label reads back as %q", got.Label)
+	}
+	call, result, kept := got.Parts[0], got.Parts[1], got.Parts[2]
+	sum := sha256.Sum256(input)
+	if len(call.Data) != 0 || call.State != model.ContentOmitted || call.Bytes != len(input) ||
+		call.SHA256 != hex.EncodeToString(sum[:]) || call.Kind != sessiondata.PartCall || call.ID != "toolu_1" || call.Name != "Bash" {
+		t.Fatalf("the call part is %+v", call)
+	}
+	if len(result.Data) != 0 || result.State != model.ContentTruncated || result.Text != "readable" || result.Of != "toolu_1" || result.Bytes != 3 {
+		t.Fatalf("the result part is %+v", result)
+	}
+	if string(kept.Data) != `"é"` || kept.State != "" {
+		t.Fatalf("data in valid UTF-8 did not land as it was: %+v", kept)
+	}
+	want := []sessiondata.Drop{
+		{What: "the data of part 0", Bytes: len(input), Why: sessiondata.WhyNotUTF8},
+		{What: "the data of part 1", Bytes: 3, Why: sessiondata.WhyNotUTF8},
+	}
+	if !reflect.DeepEqual(got.Dropped, want) || !strings.Contains(sessiondata.WhyNotUTF8, "UTF-8") {
+		t.Fatalf("the record drops %+v; want %+v", got.Dropped, want)
+	}
+	if len(rec.Parts[0].Data) != 0 || rec.Parts[0].State != model.ContentOmitted || !reflect.DeepEqual(rec.Dropped, want) {
+		t.Fatal("the caller's record does not say what landed")
 	}
 }
 

@@ -23,8 +23,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
@@ -364,6 +366,61 @@ func TestCutPacksByEncodedSize(t *testing.T) {
 	}
 }
 
+// A line that is already encoded is cut by the rule a record is: lines fill
+// files of at most the budget, header and closing line included, and the
+// first line of a file is always taken, unchanged, even when it alone is
+// larger than the budget.
+func TestCutTakesARawLineByTheSameRule(t *testing.T) {
+	const budget = 2 << 10
+	h := &Header{Kind: KindTranscript, Session: "s", Src: "a.jsonl", Dialect: "d", Stream: "main", Seq: 1, At: "2026-01-01T00:00:00Z"}
+	var lines [][]byte
+	for i := 0; i < 100; i++ {
+		line, err := encodeRecord(&Record{Ord: uint64(i + 1), Sha: "x", Bytes: 2, ID: fmt.Sprintf("r%03d", i), Parts: []Part{{Kind: PartText, Text: "{}"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, line)
+	}
+	files := 0
+	for len(lines) > 0 {
+		cut, err := NewCut(h, budget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		w, err := NewWriter(&buf, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for n < len(lines) && cut.TakeRaw(lines[n]) {
+			if err := w.WriteRaw(lines[n]); err != nil {
+				t.Fatal(err)
+			}
+			n++
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 || buf.Len() > budget {
+			t.Fatalf("file %d took %d lines in %d bytes, budget %d", files, n, buf.Len(), budget)
+		}
+		lines = lines[n:]
+		files++
+	}
+	if files < 2 {
+		t.Fatalf("100 lines went into %d file(s) of %d bytes", files, budget)
+	}
+	cut, err := NewCut(h, budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("a"), 10_000)
+	if !cut.TakeRaw(big) || cut.TakeRaw([]byte("{}")) {
+		t.Fatal("a large first line was not taken alone")
+	}
+}
+
 // A part with text and data loses its data first, the larger and the
 // structured copy, and keeps its readable text, saying truncated; only a
 // tighter limit takes the text too. The digest stays the data's.
@@ -448,6 +505,83 @@ func TestADeepFieldLeavesAChangeOrExecutionRecordInPlace(t *testing.T) {
 				}
 			} else if rec, ok := execution.Decode(p.Data); !ok || rec.ID != "e1" || rec.Tool != "toolu_1" || rec.Outcome != "returned" {
 				t.Fatalf("the execution record lost its identity: %s", p.Data)
+			}
+		})
+	}
+}
+
+// A change record or an execution record holding a byte that is not valid
+// UTF-8 is never taken out whole either. It is written again in its own
+// format, which reads the byte as U+FFFD, and says truncated, with the size
+// and the digest of what it held. The record's dropped list says why.
+func TestABadByteLeavesAChangeOrExecutionRecordInPlace(t *testing.T) {
+	change := strings.Replace(string(changeRecord(t, 1, 2)), `"f0.go"`, "\"f0\xff.go\"", 1)
+	observed := "{\"schema\":\"execution/1\",\"id\":\"e1\",\"observed_by\":\"asz-plugin\",\"boundary\":\"mcp\",\"session\":\"s\",\"stream\":\"main\",\"tool\":\"toolu_1\",\"protocol\":\"mcp\",\"time\":\"2026-01-01T00:00:00Z\",\"outcome\":\"returned\",\"cwd\":\"a\xffb\"}"
+	for name, data := range map[string]json.RawMessage{
+		"change":    json.RawMessage(change),
+		"execution": json.RawMessage(observed),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := &Record{Ord: 1, Tool: "toolu_1", Parts: []Part{{Kind: PartData, Data: data}}}
+			line, n, err := fit(r, 0, true)
+			if err != nil || n != 1 {
+				t.Fatalf("fit changed %d part(s), %v", n, err)
+			}
+			if !utf8.Valid(line) {
+				t.Fatalf("the line holds a byte that is not valid UTF-8: %q", line)
+			}
+			p := r.Parts[0]
+			if p.State != model.ContentTruncated || p.SHA256 != hexDigest(data) || p.Bytes != len(data) {
+				t.Fatalf("the record is %s with digest %q and %d bytes: %s", p.State, p.SHA256, p.Bytes, p.Data)
+			}
+			if want := []Drop{{What: "the data of part 0", Bytes: len(data), Why: WhyNotUTF8}}; !reflect.DeepEqual(r.Dropped, want) {
+				t.Fatalf("the record drops %+v; want %+v", r.Dropped, want)
+			}
+			if name == "change" {
+				if rec, ok := changes.Decode(p.Data); !ok || rec.ID != "c1" || len(rec.Changes) != 1 || rec.Changes[0].Path != "f0\xef\xbf\xbd.go" {
+					t.Fatalf("the change record lost its identity or files: %s", p.Data)
+				}
+			} else if rec, ok := execution.Decode(p.Data); !ok || rec.ID != "e1" || rec.Tool != "toolu_1" || rec.Outcome != "returned" {
+				t.Fatalf("the execution record lost its identity: %s", p.Data)
+			}
+		})
+	}
+}
+
+// A byte that is not valid UTF-8 is named in the record's dropped list
+// whatever else is wrong with its data. Data nested too deep as well is taken
+// out as too deep data is, too_large, and a change or execution record with a
+// deep field as well is written again in its own format, truncated; each
+// record still says the byte was there.
+func TestABadByteIsNamedWhenItsDataIsAlsoTooDeep(t *testing.T) {
+	nest := func(inner string) string { return strings.Repeat("[", 300) + inner + strings.Repeat("]", 300) }
+	change := strings.Replace(string(changeRecord(t, 1, 2)), `"f0.go"`, "\"f0\xff.go\"", 1)
+	change = strings.TrimSuffix(change, "}") + `,"extra":` + nest("0") + `}`
+	observed := "{\"schema\":\"execution/1\",\"id\":\"e1\",\"observed_by\":\"asz-plugin\",\"boundary\":\"mcp\",\"session\":\"s\",\"stream\":\"main\",\"tool\":\"toolu_1\",\"protocol\":\"mcp\",\"time\":\"2026-01-01T00:00:00Z\",\"outcome\":\"returned\",\"cwd\":\"a\xffb\",\"extra\":" +
+		nest("0") + "}"
+	for name, c := range map[string]struct {
+		data  string
+		state string
+	}{
+		"data":      {nest("\"\xff\""), model.ContentTooLarge},
+		"change":    {change, model.ContentTruncated},
+		"execution": {observed, model.ContentTruncated},
+	} {
+		t.Run(name, func(t *testing.T) {
+			data := json.RawMessage(c.data)
+			r := &Record{Ord: 1, Tool: "toolu_1", Parts: []Part{{Kind: PartData, Data: data}}}
+			line, n, err := fit(r, 0, true)
+			if err != nil || n != 1 {
+				t.Fatalf("fit changed %d part(s), %v", n, err)
+			}
+			if !utf8.Valid(line) || Depth(line) > MaxLineDepth {
+				t.Fatalf("the line is not valid UTF-8 or nests too deep: %q", line)
+			}
+			if p := r.Parts[0]; p.State != c.state || p.SHA256 != hexDigest(data) || p.Bytes != len(data) {
+				t.Fatalf("the part is %s with digest %q and %d bytes", p.State, p.SHA256, p.Bytes)
+			}
+			if want := []Drop{{What: "the data of part 0", Bytes: len(data), Why: WhyNotUTF8}}; !reflect.DeepEqual(r.Dropped, want) {
+				t.Fatalf("the record drops %+v; want %+v", r.Dropped, want)
 			}
 		})
 	}

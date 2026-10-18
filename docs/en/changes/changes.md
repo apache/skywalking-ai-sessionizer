@@ -319,6 +319,44 @@
   closed them, such as a test receiver shutting down, could break a request the exporter had just
   started: `transport connection broken: http: CloseIdleConnections called`, seen in CI with
   scenarios pushing in parallel.
+- No landed line holds a byte that is not valid UTF-8. A JSON decoder accepts such a byte inside a
+  string, so a tool input or other source JSON could bring one, and it landed as it was. A protocol
+  buffer string must be valid UTF-8, so the OTLP export could never send that file, over HTTP or
+  gRPC, and every request it was in failed on every pass. Such data is now taken out: `omitted`, or
+  `truncated` while its text is left, with its size and SHA-256 kept. A change or execution record
+  is written again in its own format, with U+FFFD in place of the byte. Either way the record's
+  `dropped` says which part lost what and why, so it is not taken for a payload too large to land.
+  See [Reading a record](../formats/session-data.md#reading-a-record).
+- One file the OTLP export cannot send no longer holds back the others. It went in a request with
+  them, the request failed, and none of them was sent; and the file being batched when that request
+  failed was left out of the pass, under the request's error. A file that cannot be encoded is now
+  reported on its own, under its name, on every pass, and the files beside it go. A failed request
+  is reported as its own error, and the file being batched goes in the next request.
+- The OTLP exporter over HTTP takes a 2xx answer whose body does not arrive whole as an error, such
+  as one whose connection closes before the length it promised, and one longer than the 1 MiB it
+  reads of an answer. It read the first as an empty answer, a full success, and the second as its
+  first MiB, and recorded every file of the request as sent, though nothing said the receiver took
+  them. They now go again on the next pass.
+- `asz repack` keeps a session's idle clock. A file it cut kept the time of the first file its
+  records came from, and the files were numbered stream by stream, so the file with the highest
+  sequence, where retention reads how long a session has been idle, need not be the newest.
+  Retention could then remove a session's files in the new root, or retire it, while the root it was
+  repacked from kept everything. Each new file now has the header of the newest file its records
+  came from, and the files are numbered in the order their records landed.
+- `asz repack` cuts a file by what it takes once written, its header and closing line included, as
+  the collectors do. It counted only the record lines, so a file of several records could be larger
+  than `max_delta_bytes`: at a budget of 1,024 bytes, three records made a file of 1,338.
+- `asz repack` carries every cursor. A stream can have more than one source, such as two recorder
+  directories, and each source after the first keeps a cursor of its own, `<kind>-<hash>.cursor`.
+  Only `<kind>.cursor` was carried, so collection into the new root read the other sources again
+  from their start and landed their records again. Each cursor's `last_seq` now names the new file
+  holding the last record its own source landed. A recorder inside the storage root writes its
+  cursors' `origin` relative to it; a repack writes that origin, and the name of a cursor made from
+  it, as a collector into the new root computes them, or that recorder was read from its start.
+- `asz repack` cuts the records of two files into one only when the files are next to each other in
+  their directory and their headers are the same apart from `seq` and `at`. A file took the header
+  of the first file its records came from, so records of another source or another adapter version
+  landed under the wrong header.
 
 ## Retention
 
@@ -619,6 +657,10 @@
 - `candidate` checks for `cmp` and `publish` for `perl` before they change anything, as they do
   for every other tool they run. `publish` lists the upload to PyPI with the `pypi` skill among the
   steps it prints after the move, between apt and Scoop, as the release guide orders them.
+- The container image owns its storage root, `/asz/data`, as the user it runs as, 65532. The image
+  had no such directory, so Docker made a new named or anonymous volume root's, and the first
+  collection failed with `mkdir /asz/data/_root: permission denied`. A new volume now belongs to the
+  image's user. A bind mount works as before.
 
 ## Documentation
 
