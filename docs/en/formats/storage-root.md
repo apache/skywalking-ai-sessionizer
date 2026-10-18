@@ -402,8 +402,11 @@ rebuilds it from the landed files; a schema change discards it rather than migra
 and its counts of entries, blocks and strings. Cursors commit per source, but the index is written
 once per session, at the end of its pass. A crash between the two leaves the index behind what
 landed, and nothing would land again to fill the gap. So the next collect compares `indexed_seq`
-with the highest sequence on disk and indexes the landed files above it again. Parse never reads
-past `indexed_seq`, so a round cannot cite a record the index does not hold.
+with the highest sequence on disk and indexes the landed files above it again. A collector does
+that only for a session whose source it still finds, and a runtime can delete a session's source
+before the next pass. So parse makes the same comparison before it cuts a round, and indexes the
+landed files above `indexed_seq` itself. Parse never reads past `indexed_seq`, so a round cannot
+cite a record the index does not hold.
 
 ## The chain
 
@@ -430,8 +433,10 @@ disk image, both calls returned "operation not supported". There asz creates an 
 `O_EXCL`, which still refuses an existing round, then renames the complete round over it. Between
 those two calls, with no write between them, a reader or a crash can see an empty round file.
 
-No round or receipt is ever empty, so an empty file under such a name is a reservation. The chain
-does not count an empty round file, and the next publication removes one older than a minute. An
+No round or receipt is ever empty, so an empty file under such a name is a reservation. No reader
+counts an empty round file: not the chain, the page, `asz push`, retention or a scenario removal,
+so none of them waits for one or fails reading it. The next publication removes one older than a
+minute, and an idle conversation may keep one until its directory goes. An
 empty receipt holds no decision, so its file is derived again, and a publication replaces a
 receipt reservation older than a minute. A younger one may belong to a writer still running, so
 the file waits for a later pass.
@@ -581,9 +586,10 @@ anything lands, whatever `storage.retention` says now. Until a removal is finish
 lands into its session: each finds the session busy. While both a landed file and its skeleton
 are there, every reader reads the landed file, and one that finds the file gone after it listed it
 reads the skeleton. The two read as the same index. The page keeps what it read of a conversation
-for its chain head and the generation in `removal.state`, and keeps nothing while a removal is in
-progress, so a page in another process than the pipeline draws the skeletons once the files are
-removed.
+for its chain head, the generation in `removal.state` and the names of the session's landed files
+and skeletons, and keeps nothing while a removal is in progress. So a page in another process than
+the pipeline draws the skeletons once the files are removed, and never draws text from files that
+are gone.
 
 A root with skeletons still verifies. `asz verify` checks lines and bytes through each skeleton,
 binds each round to the digest each file had, which its skeleton recorded, and reports every removed
@@ -675,6 +681,9 @@ nothing of the session again:
    `_removed/<session-id>.chain/`, and each is deleted there. The lock inside each is released
    first, since Windows cannot rename a directory that holds an open lock. After each rename, the
    two directories it changed are synced, the errors checked, before anything moved is deleted.
+   The conversation directory named by the session's id goes only when its head round's header
+   names the session, or it has no round. Rounds that name another session are that session's
+   chain, as `asz push` reads them, and they stay.
 4. Every metrics request of the session the receiver has, a partly rejected one included, is
    deleted. Then the root, `_conversations/`, `_removed/` and the spool are synced, the errors
    checked. Every attempt syncs them, so what an earlier attempt changed is durable too: a rename

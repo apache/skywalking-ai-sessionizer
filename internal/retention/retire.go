@@ -305,6 +305,16 @@ func (r *Remover) retireOne(id string, sent *otlp.Sent, requests []storage.Spool
 		return false, err
 	}
 	defer func() { unlock(&chainLock) }()
+	// The conversation directory named by the session's id is its chain
+	// only when its rounds name the session, as the push reads them. One
+	// whose rounds name another session is that session's chain, and stays.
+	ownChain := true
+	if hdr, rounds, err := headRound(root, id); err != nil {
+		return false, err
+	} else if rounds && hdr.Session != id {
+		ownChain = false
+		unlock(&chainLock)
+	}
 	if decide {
 		if now, err := r.retirable(id); err != nil || !now {
 			if err == nil {
@@ -316,6 +326,9 @@ func (r *Remover) retireOne(id string, sent *otlp.Sent, requests []storage.Spool
 
 	left := false
 	for _, dir := range dirs {
+		if !ownChain && (dir == dirs[1] || dir == dirs[3]) {
+			continue
+		}
 		there, err := present(dir)
 		if err != nil {
 			return false, err
@@ -365,6 +378,9 @@ func (r *Remover) retireOne(id string, sent *otlp.Sent, requests []storage.Spool
 	// directories each rename changed are synced, the errors checked, before
 	// anything moved is deleted.
 	for i, held := range []**storage.SessionLock{&sessionLock, &chainLock} {
+		if i == 1 && !ownChain {
+			continue
+		}
 		dir, target := dirs[i], dirs[i+2]
 		phase := []string{PhaseRetireSession, PhaseRetireChain}[i]
 		unlock(held)

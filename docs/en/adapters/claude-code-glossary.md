@@ -19,7 +19,7 @@ asz conversation -terms native ID   talk · promptId · message.id · tool_use +
 asz conversation -terms both ID     run  (promptId)
 ```
 
-**64 terms: 39 that Claude Code names, 25 this project derives.** That ratio is worth watching. If
+**66 terms: 39 that Claude Code names, 27 this project derives.** That ratio is worth watching. If
 everything had a native name, the model would be a rename of one product rather than a model of
 any. If nothing did, it would have no evidence under it.
 

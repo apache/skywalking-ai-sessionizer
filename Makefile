@@ -68,8 +68,11 @@ build: $(BIN_DIR)
 
 ## test: run the whole suite, unit and end-to-end
 .PHONY: test
+# The chain tests run every scenario through crashes, removals and retirement,
+# and under -race they take most of go test's default ten minutes on their own,
+# so the suite names its own limit.
 test:
-	$(GO) test -race -count=1 ./...
+	$(GO) test -race -count=1 -timeout 30m ./...
 	@$(MAKE) --no-print-directory test-langchain-shim
 
 ## test-langchain-shim: the Python half of the agreement with the receiver
@@ -84,7 +87,7 @@ test-langchain-shim:
 ## test-e2e: the scenarios, the chain tests and the boundary rules, verbose
 .PHONY: test-e2e
 test-e2e:
-	go test -race -count=1 -v ./tests/...
+	go test -race -count=1 -timeout 30m -v ./tests/...
 
 ## scenarios: run every scenario through the built command, as CI does
 .PHONY: scenarios

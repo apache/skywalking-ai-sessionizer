@@ -1444,6 +1444,71 @@ func TestThePageKeepsNothingDuringARemoval(t *testing.T) {
 	}
 }
 
+// TestThePageServesNothingOfFilesThatAreGone. The page drew a conversation
+// and keeps it. Its session's directory then goes while its chain stays: a
+// person removes it whole, or a retirement stops after the session's
+// directory and before the chain's. The removal generation and the head round
+// are what they were. The next read draws the conversation again from what is
+// there: the document is incomplete and carries none of the text.
+func TestThePageServesNothingOfFilesThatAreGone(t *testing.T) {
+	base := newSentRoot(t)
+	b := growthAt(t, base, 2, func(k int) { base.pipelineAt(landedAt(k)) })
+	for _, how := range []string{"removed by hand", "retirement stopped"} {
+		t.Run(how, func(t *testing.T) {
+			r := base.copyOf(t)
+			srv := view.New(r.zone, nil)
+			document := func() *sessionview.Conversation {
+				t.Helper()
+				c, err := srv.Load(b.Session)
+				if err != nil {
+					t.Fatal(err)
+				}
+				doc, err := c.Build()
+				if err != nil {
+					t.Fatal(err)
+				}
+				return doc
+			}
+			if doc := document(); doc.Summary.State != sessionview.StateVerified || textIn(doc.Talks) == 0 {
+				t.Fatalf("before: %s with %d texts", doc.Summary.State, textIn(doc.Talks))
+			}
+			switch how {
+			case "removed by hand":
+				if err := storage.DeleteTree(r.zone.SessionDir(b.Session), nil); err != nil {
+					t.Fatal(err)
+				}
+			case "retirement stopped":
+				rem := retirementOf(r)
+				rem.Stop = func(p retention.Point) error {
+					if p.Phase == retention.PhaseRetireSession+" removed" {
+						return errCrash
+					}
+					return nil
+				}
+				rem.Pass(retention.Input{})
+			}
+			if present(r.zone.SessionDir(b.Session)) || !present(filepath.Join(r.dir, "_conversations", b.Session)) {
+				t.Fatal("the session's directory should be gone and its chain there")
+			}
+			if doc := document(); doc.Summary.State != sessionview.StateIncomplete || textIn(doc.Talks) != 0 {
+				t.Fatalf("after: %s with %d texts, want incomplete with none", doc.Summary.State, textIn(doc.Talks))
+			}
+		})
+	}
+}
+
+// textIn counts the nodes under these that carry text read from a record.
+func textIn(nodes []sessionview.Node) int {
+	n := 0
+	for _, x := range nodes {
+		if x.Text != "" || x.Label != "" || x.Reply != "" || x.Result != "" {
+			n++
+		}
+		n += textIn(x.Children)
+	}
+	return n
+}
+
 // Provider bodies landed after a removal are cut against the removed ones as
 // with no removal: they copy the front of a removed tip, kept in the store,
 // and cite removed pieces, kept from the first body that cited them. Every

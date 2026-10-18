@@ -992,3 +992,101 @@ func TestARetiredSessionIsNotCollected(t *testing.T) {
 		t.Errorf("%d sessions collected, want the other %d", again.Sessions, st.Sessions-1)
 	}
 }
+
+// TestRecordsPastTheIndexAreParsedWhenTheSessionIsDeleted. A pass lands the
+// rest of a session and stops before it saves the index and the session's
+// state, as a crash or a failed save leaves them, and Kiro Crew then deletes
+// the session before the next pass. No collector reads the session again, so
+// parse brings the index up to the landed files itself. The conversation is
+// the one a root with no crash has, its index holds each landed record once,
+// and a second pass lands nothing and writes no round. With the source kept,
+// the collector closes the gap, as before.
+func TestRecordsPastTheIndexAreParsedWhenTheSessionIsDeleted(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		name := "source kept"
+		if deleted {
+			name = "source deleted"
+		}
+		t.Run(name, func(t *testing.T) { recordsPastTheIndex(t, deleted) })
+	}
+}
+
+func recordsPastTheIndex(t *testing.T, deleted bool) {
+	lines := fixtureLines(t, denied)
+	found, err := filepath.Glob(filepath.Join(fixtures, "sessions", "*", denied, "session.json"))
+	if err != nil || len(found) != 1 {
+		t.Fatal(found, err)
+	}
+	header, err := os.ReadFile(found[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
+	// Each root reads its own copy of the session, written in two parts: a
+	// root with no crash, and the one the pass stops in.
+	roots := map[bool]*root{}
+	for _, crash := range []bool{false, true} {
+		src := t.TempDir()
+		dir := filepath.Join(src, "sessions", filepath.Base(filepath.Dir(filepath.Dir(found[0]))), denied)
+		mkfile(t, filepath.Join(dir, "session.json"), string(header))
+		messages := filepath.Join(dir, "messages.jsonl")
+		mkfile(t, messages, strings.Join(lines[:8], "\n")+"\n")
+		r := newRoot(t, src)
+		r.col.Now = func() time.Time { return at }
+		r.collect()
+		r.parse(denied)
+		kept := map[string][]byte{}
+		for _, path := range []string{filepath.Join(r.zone.IndexDir(denied), "entries.bin"),
+			r.zone.IndexStatePath(denied), r.zone.SessionStatePath(denied)} {
+			if kept[path], err = os.ReadFile(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		mkfile(t, messages, strings.Join(lines, "\n")+"\n")
+		r.collect()
+		if crash {
+			// The index, its state and the session's state as they were
+			// before the pass, which landed its files and saved nothing more.
+			for path, data := range kept {
+				if err := os.WriteFile(path, data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if deleted {
+				if err := os.RemoveAll(filepath.Dir(dir)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r.collect()
+		}
+		for {
+			if res := r.parse(denied); !res.Changed() || !res.More {
+				break
+			}
+		}
+		roots[crash] = r
+	}
+	r, clean := roots[true], roots[false]
+	files, err := storage.LandedFiles(r.zone, denied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := r.parse(denied); res.Changed() || res.ThroughSeq != files[len(files)-1].Seq {
+		t.Fatalf("the chain reaches %d, the newest landed file is %d", res.ThroughSeq, files[len(files)-1].Seq)
+	}
+	indexHoldsOnlyLandedRecords(t, r.zone, denied)
+	got, _ := json.Marshal(r.doc(denied))
+	want, _ := json.Marshal(clean.doc(denied))
+	if !bytes.Equal(got, want) {
+		t.Fatalf("the conversation after the crash is not the one with none:\n got %s\nwant %s", got, want)
+	}
+	if st := r.collect(); st.Records != 0 || len(st.Changed) != 0 {
+		t.Fatalf("a second pass landed again: %+v", st)
+	}
+	if res := r.parse(denied); res.Changed() {
+		t.Fatal("a second parse with nothing new wrote a round")
+	}
+	if again, _ := json.Marshal(r.doc(denied)); !bytes.Equal(again, got) {
+		t.Fatal("the conversation changed with nothing new")
+	}
+}

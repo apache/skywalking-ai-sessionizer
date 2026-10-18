@@ -96,7 +96,8 @@ type Options struct {
 	// so this never reaches a digest.
 	Now func() time.Time
 
-	// Reindex rebuilds a session's index by re-reading its landed files.
+	// Reindex rebuilds a session's index by re-reading its landed files, or
+	// extends one with the files above afterSeq.
 	//
 	// It is what makes the index genuinely disposable. Without it the index can
 	// only be built while collecting, so landed data separated from its source -
@@ -226,21 +227,10 @@ func Session(z *storage.Zone, opt Options) (*Round, error) {
 		}
 	}
 
-	ix, ok, err := index.Load(z.IndexDir(opt.Session), opt.Session)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		ix, err = rebuild(z, opt)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	// The index must not be read past what it actually covers. Its own state
 	// records that; parsing beyond it would describe records the index does not
 	// hold.
-	ixState, err := storage.LoadIndexState(z.IndexStatePath(opt.Session), opt.Session)
+	ix, ixState, err := caughtUp(z, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -465,37 +455,65 @@ func noLandedFiles(z *storage.Zone, session string) (bool, error) {
 	return len(files) == 0, nil
 }
 
-// rebuild reconstructs a missing index from the landed files themselves.
+// caughtUp loads a session's index and brings it up to the newest landed
+// file, by reading the landed files the index does not hold yet. A missing
+// index, or one that does not agree with its state, is built from nothing.
 //
-// The rebuilt index is written back, so this cost is paid once rather than on
-// every round. It is safe to write because the index is derived: if it is wrong
-// or stale, deleting it and coming back here reproduces it.
-func rebuild(z *storage.Zone, opt Options) (*index.Index, error) {
-	if opt.Reindex == nil {
-		return nil, fmt.Errorf("parse: no index for session %s, and no way to rebuild one", opt.Session)
-	}
-	ix := index.New(opt.Session)
-	n, err := opt.Reindex(z, opt.Session, ix, 0)
+// The landed files are the authority, as the filesystem is on the counter. A
+// collector extends the index only while it reads the session's source, so a
+// pass that stopped after landing and before saving the index, or whose save
+// failed, leaves records the index does not hold. When the runtime deleted
+// the source before the next pass, as Kiro Crew deletes a session, no
+// collector visits the session again, and nothing past the index would ever
+// be parsed, or let retention remove the files. Closing the gap here does it
+// for every adapter.
+//
+// The index is written back, so this cost is paid once rather than on every
+// round. It is safe to write because the index is derived: if it is wrong or
+// stale, deleting it and coming back here reproduces it. It is taken through
+// index.LoadFor, as every writer of it must be. It is written under the
+// chain's lock alone, as a missing index always was here: every command that
+// writes to a root holds the root's lock for its pass, so no collector
+// extends the index meanwhile, and the session's lock would have to come
+// before the chain's.
+func caughtUp(z *storage.Zone, opt Options) (*index.Index, *storage.IndexState, error) {
+	st, err := storage.LoadIndexState(z.IndexStatePath(opt.Session), opt.Session)
 	if err != nil {
-		return nil, fmt.Errorf("parse: rebuild index for %s: %w", opt.Session, err)
+		return nil, nil, err
 	}
-	if n == 0 {
-		return nil, fmt.Errorf("parse: no landed records for session %s", opt.Session)
+	files, err := storage.LandedFiles(z, opt.Session)
+	if err != nil {
+		return nil, nil, err
+	}
+	var landedTo uint64
+	if len(files) > 0 {
+		landedTo = files[len(files)-1].Seq
+	}
+	ix, ok, err := index.LoadFor(z.IndexDir(opt.Session), opt.Session, st)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ok && st.IndexedSeq >= landedTo {
+		return ix, st, nil
+	}
+	if !ok {
+		ix, st = index.New(opt.Session), storage.NewIndexState(opt.Session)
+	}
+	if _, err := opt.Reindex(z, opt.Session, ix, st.IndexedSeq); err != nil {
+		return nil, nil, fmt.Errorf("parse: rebuild index for %s: %w", opt.Session, err)
+	}
+	if len(ix.Entries) == 0 {
+		return nil, nil, fmt.Errorf("parse: no landed records for session %s", opt.Session)
 	}
 	if err := ix.Write(z.IndexDir(opt.Session)); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	st := storage.NewIndexState(opt.Session)
-	st.Schema, st.Entries = index.Schema, len(ix.Entries)
-	for i := range ix.Entries {
-		if s := uint64(ix.Entries[i].Seq); s > st.IndexedSeq {
-			st.IndexedSeq = s
-		}
-	}
+	st.Schema, st.IndexedSeq = index.Schema, landedTo
+	st.Entries, st.Blocks, st.Strings = len(ix.Entries), len(ix.Blocks), ix.Strings.Len()
 	if err := st.Save(z.IndexStatePath(opt.Session), opt.Now()); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return ix, nil
+	return ix, st, nil
 }
 
 // inputDigestFor extends the chain's input digest with the evidence this round
