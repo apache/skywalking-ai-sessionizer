@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · executionId · tool_call and tool_re
 asz conversation -terms both ID     run  (executionId)
 ```
 
-**63 terms: 24 that Kiro names, 39 this project derives.**
+**64 terms: 24 that Kiro names, 40 this project derives.**
 
 ---
 
@@ -82,6 +82,7 @@ not there.
 | `exact_unique` | — | derived here | one toolCallId or subSessionId on both records |
 | `follows` | — | derived here | derived from line order |
 | `hash_only` | — | derived here | no equivalent |
+| `history.change` | — | derived here | never: every history change Kiro makes is a tombstone, a reset, and it records no model request |
 | `in_segment` | — | derived here | derived |
 | `input_of` | — | derived here | no equivalent |
 | `internal_call` | — | derived here | no equivalent: Kiro records no model request, so no call's history is compared |

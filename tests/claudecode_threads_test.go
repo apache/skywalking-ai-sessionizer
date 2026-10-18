@@ -19,6 +19,7 @@ package tests_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -239,6 +240,25 @@ func TestAThreadsHistoryIsBuiltFromWhatItContinues(t *testing.T) {
 	}
 	if !spans {
 		t.Fatalf("the pair %s, %s that is not kept spans no reset", p.ID, n.ID)
+	}
+
+	// And the assembler says the same: ten kept with the reply back, the
+	// first call of each stream and the first after the compaction with no
+	// history before them, and no card.
+	got := map[string]int{}
+	for _, c := range all {
+		var a struct {
+			History string `json:"history"`
+			Reply   string `json:"history_reply"`
+		}
+		_ = json.Unmarshal(c.node.Attrs, &a)
+		got[a.History+"/"+a.Reply]++
+	}
+	if fmt.Sprint(got) != fmt.Sprint(map[string]int{"first/": 3, "kept/back": 10}) {
+		t.Fatalf("history %v; want 3 first and 10 kept with the reply back", got)
+	}
+	if cards := view.NodesByKind(model.KindHistoryChange); len(cards) != 0 {
+		t.Fatalf("%d cards; no history here changes", len(cards))
 	}
 }
 

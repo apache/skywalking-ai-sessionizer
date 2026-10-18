@@ -20,6 +20,7 @@ package scenario
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -364,5 +365,61 @@ func TestHalfADeclarationIsRefused(t *testing.T) {
 		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "both or neither") {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// TestThreadedBodiesAreWrittenAsClaudeCode2_1_302WritesThem reads back the
+// bodies of the threads scenario: a process's first request starts a thread
+// with the whole list, the system prompt and the tools; every later request
+// of the process continues it from the response before, with only what is
+// new, the billing header alone and no tools; a resume starts a new thread;
+// and the searcher's thread is its own.
+func TestThreadedBodiesAreWrittenAsClaudeCode2_1_302WritesThem(t *testing.T) {
+	sc, err := Load(filepath.Join("..", "..", "tests", "scenarios", "history-threads.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := sc.Plan(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests, _ := bodiesOf(t, p)
+	type sent struct {
+		thread, previous string
+		messages, system int
+		tools            bool
+	}
+	// A request is the searcher's by its own system prompt when it starts a
+	// thread, and by the call it continues when it does not.
+	got := map[string][]sent{}
+	for _, req := range requests {
+		th, _ := req["thread"].(map[string]any)
+		prev, _ := th["previous_message_id"].(string)
+		system := req["system"].([]any)
+		stream := "main"
+		if text, _ := system[len(system)-1].(map[string]any)["text"].(string); strings.Contains(text, "searches a repository") || strings.HasPrefix(prev, "searcher") {
+			stream = "searcher"
+		}
+		_, tools := req["tools"]
+		// A message id carries the session's tag after the call's own id.
+		if i := strings.LastIndex(prev, "-"); i > 0 {
+			prev = prev[:i]
+		}
+		got[stream] = append(got[stream], sent{th["type"].(string), prev, len(req["messages"].([]any)), len(system), tools})
+	}
+	want := map[string][]sent{
+		"main": {
+			{"create", "", 1, 2, true},
+			{"continue", "s2-call", 1, 1, false},
+			{"create", "", 5, 2, true}, // after the resume: the whole list again
+			{"continue", "s6-call", 1, 1, false},
+		},
+		"searcher": {
+			{"create", "", 1, 2, true},
+			{"continue", "searcher-s1-call", 1, 1, false},
+		},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("requests\n got %+v\nwant %+v", got, want)
 	}
 }

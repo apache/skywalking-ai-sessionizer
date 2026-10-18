@@ -210,6 +210,7 @@ session: mock-build-and-check       # optional; default derived from the steps
 title: build and check              # optional
 interval: 1s                        # the gap between steps, in every stream
 provider_bodies: false              # optional; true writes every call's request and response body
+provider_threads: false             # optional, with provider_bodies; writes provider threads as Claude Code 2.1.302 does
 system_prompt: |                    # optional; the system prompt this stream's calls send
   You build and check a repository.
 # optional, but all or nothing with system_prompt, and a stream must advertise
@@ -269,6 +270,8 @@ Every step is exactly one of these, plus an optional `after`, `checkpoint` and `
 | `reset: {summary}` | a context reset and its summary, the summary timestamped before the boundary as the runtime writes it |
 | `replay: N` | the last N main-stream records re-emitted with their run rewritten |
 | `system: {subtype, fields}` | a system record of any subtype |
+| `forget: N` | the stream's next request leaves out the N oldest messages after the first, as an application trimming its history does. It writes no record: only the request shows it. It needs `provider_bodies`, and with threads the next request starts a new one |
+| `resume: true` | a new process takes the session up again, so the stream's next request starts a new provider thread with the whole list. It needs `provider_threads` |
 
 A `tool` without a `result` is an unfinished tool. A `skill: {name, agent, steps}` is a fork whose
 child is announced only in the parent's result. A `workflow: {name, children: [{name, prompt,
@@ -360,6 +363,8 @@ checkpoints:
     unresolved_kinds: {tool_result: none}
     session: {from: +0s, to: +11.1s}      # the session node's range, as deltas from --at; title: its title
     view: {state: verified, problems: 0, talks: 3, files: 6, first_talk: {label: run the build, runs: 2}}
+    # with provider_bodies: the model calls by their history attribute, none for a call with none
+    # history: {first: 1, kept: 2, changed: 1}
     # with provider_bodies: the landed bodies, and the calls whose request is captured
     # view: {provider_bodies: 14, captured_prompts: 7, provider_files: 5}
     # the document's steps by each flag they carry
@@ -407,7 +412,8 @@ the same rounds; folding every round equals one full parse; rounds verify, link 
 writable; the landed files and rounds are self-sufficient without index and state; the head
 round's header says what the fold holds; a parse with no new evidence writes nothing; every landed
 record carries only the fields the format states a purpose for; a repack under the smallest budget
-keeps every record and the whole structure; and, for a runtime format, a second collect lands
+keeps every record and the whole structure, down to what each model call's history was and what
+each card says; and, for a runtime format, a second collect lands
 nothing, every source line becomes one landed record, parts carrying source JSON keep its bytes,
 discovery passes over the noise the writer plants beside the session, and a pass after Claude Code
 prunes the session's files sets their active cursors to `source_gone` and lands nothing. Across
@@ -447,7 +453,11 @@ six.
 Claude Code would write when `OTEL_LOG_RAW_API_BODIES` names a directory: the whole message list of
 its stream again, the cache marker on the newest message, a billing header naming the prompt and
 the previous call's request, and the session in `metadata.user_id`. A compaction starts the list
-again.
+again. With `provider_threads: true` they are written as Claude Code 2.1.302 writes them: a
+process's first request starts a provider thread, `{"type":"create"}`, and holds the whole list, the
+system prompt and the tools; every later request continues it from the response before,
+`{"type":"continue","previous_message_id":…}`, and holds only what is new, the billing header alone
+and no tools. A `resume` step, a `forget` step and a compaction each start a new thread.
 
 The system prompt and the tools a request advertises come from `system_prompt` and `tools`, written
 per stream: a scenario writes its own, and shares none with another scenario. A request body is read
@@ -467,7 +477,10 @@ sessions. `parts_keep_source_bytes` rebuilds every landed body and compares it w
 `provider_bodies_leave_the_fold` builds the scenario again without bodies, with the same ids, and
 compares the folds node by node, parent by parent and relation by relation. A node whose id is built
 from a landed position is compared by the record it stands on, since files of another kind landing
-between shift positions. `changes_leave_the_fold` compares the same way.
+between shift positions. The one node bodies may add is a `history.change` card, which only a
+request can show, and the calls' history attributes are not compared, since only the build with
+bodies has them. `changes_leave_the_fold` compares the same way, with nothing left out. Every
+other comparison of two folds counts the calls by their history attribute too.
 `provider_bodies_rebuild` reads every body a call lists the way a reader that loads bodies on demand
 does: only the session's `provider_body` files up to the one the body's `ref` names, in order. Each
 body must rebuild to its manifest's digest. It runs again on the root `repack_keeps_structure` re-cuts,

@@ -447,7 +447,10 @@ func candidates(rec *sessiondata.Record) [][]byte {
 func carriesContent(kind string) bool {
 	switch kind {
 	case model.KindLLMCall, model.KindSession, model.KindSegment,
-		model.KindStream, model.KindEpoch, model.KindTalk, model.KindRun:
+		model.KindStream, model.KindEpoch, model.KindTalk, model.KindRun,
+		// A card says what two requests' histories hold, from its
+		// attributes; the record it stands at is its call's.
+		model.KindHistoryChange:
 		return false
 	}
 	return true

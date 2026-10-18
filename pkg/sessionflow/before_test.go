@@ -49,3 +49,28 @@ func TestNodesOnOneRecordHaveOneOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestACardComesJustBeforeItsCall. A history.change card stands at its call's
+// first fragment. At one position it comes just before the call it names and
+// is ordered among the other nodes there by that call, so two calls on one
+// record keep their order with each card right before its own; ordered by its
+// kind alone, every card would come first.
+func TestACardComesJustBeforeItsCall(t *testing.T) {
+	node := func(id, kind string) *sessionflow.Node {
+		return &sessionflow.Node{Entity: sessionflow.Entity{ID: id}, Kind: kind, Ref: &sessionflow.Ref{Seq: 1, Row: 1}}
+	}
+	callA, callB := node("call/a", "llm.call"), node("call/b", "llm.call")
+	cardB, other := node("history/b", "history.change"), node("input/1/1", "message.external")
+	all := []*sessionflow.Node{callA, callB, cardB, other}
+	want := "call/a history/b call/b input/1/1"
+	for i := range all {
+		in := append(append([]*sessionflow.Node(nil), all[i:]...), all[:i]...)
+		var ids []string
+		for _, n := range sessionflow.InOrder(in) {
+			ids = append(ids, n.ID)
+		}
+		if got := strings.Join(ids, " "); got != want {
+			t.Errorf("%s, want %s", got, want)
+		}
+	}
+}

@@ -163,8 +163,13 @@ type builder struct {
 	spawnEdges []spawnEdge
 
 	// bodiesOfCall is the provider bodies joined to each call node, which the
-	// call carries into the round.
-	bodiesOfCall map[string][]sessionflow.ProviderBody
+	// call carries into the round, and requestRow and responseRow the two
+	// bodies' places in the index's Bodies.
+	bodiesOfCall            map[string][]sessionflow.ProviderBody
+	requestRow, responseRow map[string]int
+	// history is what comparing each call's history with its predecessor's
+	// found, by call node, which emitCall writes on the call and its card.
+	history map[string]*callHistory
 
 	// byPosition finds an entry by its landed position, built when first asked.
 	byPosition map[[2]uint32]int32
@@ -230,6 +235,7 @@ func Session(ix *index.Index, opt Options) (*Result, error) {
 	b.stage7Talks()     // talks and runs built, steps placed
 	b.stage8Segments()  // activity windows cut
 	b.joinProviderBodies()
+	b.compareHistories()
 	b.emitSteps() // leaves written, now that their containers are known
 
 	return b.result(), nil

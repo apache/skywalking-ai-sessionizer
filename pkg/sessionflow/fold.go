@@ -20,7 +20,10 @@ package sessionflow
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
+
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 )
 
 // View is the materialised result of folding a chain.
@@ -336,6 +339,16 @@ func (v *View) Roots() []*Node {
 	return InOrder(out)
 }
 
+// tieKey is what orders a node among nodes at one position: its own id, or
+// for a history.change card, the id of the call it stands before, which
+// shares the card's key (session-flow.md), and true to come first.
+func tieKey(n *Node) (string, bool) {
+	if n.Kind == model.KindHistoryChange {
+		return "call/" + strings.TrimPrefix(n.ID, "history/"), true
+	}
+	return n.ID, false
+}
+
 // Before reports whether a occurred before b.
 //
 // This is the display order the model calls a deterministic projection. It does
@@ -359,6 +372,17 @@ func Before(a, b *Node) bool {
 		}
 		if ap.Block != nil && *ap.Block != *bp.Block {
 			return *ap.Block < *bp.Block
+		}
+		// A history.change card stands at its call's first fragment and comes
+		// just before that call, so at one position a card is ordered by the
+		// call it names and before it; the ids alone would put call/ first.
+		ak, ac := tieKey(a)
+		bk, bc := tieKey(b)
+		if ak != bk {
+			return ak < bk
+		}
+		if ac != bc {
+			return ac
 		}
 	case ap != nil:
 		return true // a is positioned, b is not

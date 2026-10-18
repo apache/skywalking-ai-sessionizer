@@ -44,7 +44,8 @@ type ProviderBody struct {
 // plan holds, in the order Claude Code writes them: a request when the call
 // is built, and its response when the last fragment has arrived.
 //
-// They follow what Claude Code 2.1.260 was measured to write. Every call
+// They follow what Claude Code 2.1.260 was measured to write, and with
+// provider_threads what 2.1.302 writes (see request). Every call of 2.1.260
 // sends its stream's whole message list again. The newest message carries
 // the cache marker, and a one-block text message becomes a plain string once
 // the marker has left it. The first system block is a billing header naming
@@ -78,7 +79,12 @@ func (p *Plan) ProviderBodies() []ProviderBody {
 	}
 	var out []ProviderBody
 	done := map[string]bool{}
+	marks := p.marks
 	for i := range p.Events {
+		for len(marks) > 0 && marks[0].at == i {
+			chainOf(marks[0].stream).mark(marks[0])
+			marks = marks[1:]
+		}
 		e := &p.Events[i]
 		if e.Lost || lost[e.Stream] || e.Replayed {
 			continue
@@ -90,7 +96,7 @@ func (p *Plan) ProviderBodies() []ProviderBody {
 			c.user(e.Text)
 		case EvSummary:
 			c.prompt = e.Run
-			c.msgs = nil
+			c.msgs, c.open = nil, false
 			c.user(e.Text)
 		case EvResult:
 			c.push(map[string]any{"role": "user", "content": []any{
@@ -105,7 +111,7 @@ func (p *Plan) ProviderBodies() []ProviderBody {
 				out = append(out, ProviderBody{
 					Name:  requestName(p.Session, e.Call),
 					At:    e.At.Add(-time.Millisecond),
-					Bytes: c.request(p.Session),
+					Bytes: c.request(p.Session, p.threads),
 				})
 			}
 			c.blocks = append(c.blocks, fragmentBlock(e))
@@ -123,6 +129,7 @@ func (p *Plan) ProviderBodies() []ProviderBody {
 				})
 				c.push(map[string]any{"role": "assistant", "content": c.blocks})
 				c.prev, c.call, c.blocks = e.Req, "", nil
+				c.answered, c.held = e.Call, len(c.msgs)
 			}
 		}
 	}
@@ -157,6 +164,31 @@ type bodyChain struct {
 	// leaves the stand-in.
 	system string
 	tools  []ToolDef
+	// open says the stream's provider thread may be continued: answered is
+	// the call whose response it goes on from, and held how many messages
+	// the thread holds, that response included.
+	open     bool
+	answered string
+	held     int
+}
+
+// bodyMark is what a forget or resume step does to the bodies a stream sends
+// next: at is the event it comes before.
+type bodyMark struct {
+	at     int
+	stream string
+	forget int
+	resume bool
+}
+
+// mark applies a forget or a resume. Either way the client cannot go on with
+// the thread the provider holds, so the next request starts a new one.
+func (c *bodyChain) mark(m bodyMark) {
+	if m.forget > 0 && len(c.msgs) > 1 {
+		drop := min(m.forget, len(c.msgs)-1)
+		c.msgs = append(c.msgs[:1:1], c.msgs[1+drop:]...)
+	}
+	c.open = false
 }
 
 // user adds a prompt. The first message of a chain carries the injected
@@ -207,8 +239,11 @@ func (c *bodyChain) push(m map[string]any) {
 	c.msgs = append(c.msgs, m)
 }
 
-// request renders the body of the call about to be made.
-func (c *bodyChain) request(session string) []byte {
+// request renders the body of the call about to be made. With threads, a
+// request that can continue the stream's thread carries only what is new,
+// and of the system prompt only the billing header, and no tools: the
+// provider holds the rest.
+func (c *bodyChain) request(session string, threads bool) []byte {
 	header := "x-anthropic-billing-header: cc_version=2.1.260; cc_entrypoint=cli; cch=00000;"
 	if c.prev != "" {
 		header += " cc_prev_req=" + c.prev + ";"
@@ -251,6 +286,33 @@ func (c *bodyChain) request(session string) []byte {
 		}
 	}
 	user, _ := json.Marshal(map[string]string{"device_id": "scenario", "account_uuid": "scenario", "session_id": session})
+	if threads {
+		type thread struct {
+			Type     string `json:"type"`
+			Previous string `json:"previous_message_id,omitempty"`
+		}
+		type threaded struct {
+			Model    string           `json:"model"`
+			Messages []map[string]any `json:"messages"`
+			System   []any            `json:"system"`
+			// A request that starts a thread sends its tools, an empty list
+			// included; one that continues sends none.
+			Tools     *[]any         `json:"tools,omitempty"`
+			Metadata  map[string]any `json:"metadata"`
+			MaxTokens int            `json:"max_tokens"`
+			Thread    thread         `json:"thread"`
+		}
+		b := threaded{Model: ccModel, Metadata: map[string]any{"user_id": string(user)}, MaxTokens: 64000,
+			System: []any{map[string]any{"type": "text", "text": header}}}
+		if c.open && c.held <= len(c.msgs) {
+			b.Messages, b.Thread = c.msgs[c.held:], thread{Type: "continue", Previous: c.answered}
+		} else {
+			b.Messages, b.Tools, b.Thread = c.msgs, &tools, thread{Type: "create"}
+			b.System = append(b.System, map[string]any{"type": "text", "text": system, "cache_control": map[string]any{"type": "ephemeral"}})
+			c.open = true
+		}
+		return encodeBody(b)
+	}
 	type body struct {
 		Model     string           `json:"model"`
 		Messages  []map[string]any `json:"messages"`

@@ -142,7 +142,10 @@ type Checkpoint struct {
 	Written *bool `yaml:"written"`
 	// Kinds counts nodes by kind, TalksOn talks by stream, Relations by type.
 	// A stream may be named by its scenario name.
-	Kinds     map[string]int `yaml:"kinds"`
+	Kinds map[string]int `yaml:"kinds"`
+	// History counts the model calls by what their history attribute says,
+	// none for a call that carries none.
+	History   map[string]int `yaml:"history"`
 	TalksOn   map[string]int `yaml:"talks_on"`
 	RunsIn    map[string]int `yaml:"runs_in"`
 	Relations map[string]int `yaml:"relations"`
@@ -227,7 +230,7 @@ func (l Lose) Resolve(files []storage.LandedFile, stream string) (*storage.Lande
 
 // Empty reports a checkpoint with nothing to check.
 func (cp *Checkpoint) Empty() bool {
-	return cp.Rounds == nil && cp.Written == nil && len(cp.Kinds) == 0 && len(cp.TalksOn) == 0 && len(cp.RunsIn) == 0 &&
+	return cp.Rounds == nil && cp.Written == nil && len(cp.Kinds) == 0 && len(cp.History) == 0 && len(cp.TalksOn) == 0 && len(cp.RunsIn) == 0 &&
 		len(cp.Relations) == 0 && cp.Unresolved == nil && len(cp.UnresolvedKinds) == 0 && len(cp.Nodes) == 0 && cp.Verify == nil &&
 		cp.Session == nil && cp.View == nil && cp.Delta == nil
 }
@@ -392,11 +395,26 @@ func Evaluate(root string, cp *Checkpoint, ctx *Context) ([]string, error) {
 			bad("delta: round %d wrote %d nodes against a fold of %d, starting at seq %d; it is not a delta", ctx.Round.Number, ctx.Round.Nodes, len(v.Nodes), ctx.Round.FromSeq)
 		}
 	}
-	kinds, talksOn := map[string]int{}, map[string]int{}
+	kinds, talksOn, history := map[string]int{}, map[string]int{}, map[string]int{}
 	for _, n := range v.Nodes {
 		kinds[n.Kind]++
 		if n.Kind == model.KindTalk {
 			talksOn[n.Stream]++
+		}
+		if n.Kind == model.KindLLMCall {
+			var a struct {
+				History string `json:"history"`
+			}
+			_ = json.Unmarshal(n.Attrs, &a)
+			if a.History == "" {
+				a.History = "none"
+			}
+			history[a.History]++
+		}
+	}
+	for value, want := range sorted(cp.History) {
+		if history[value] != want {
+			bad("history: %s is %d calls, want %d", value, history[value], want)
 		}
 	}
 	for kind, want := range sorted(cp.Kinds) {
@@ -809,6 +827,12 @@ type Summary struct {
 	Streams    []string
 	// Records is how many records each stream holds, by stream.
 	Records map[string]int
+	// History is what each model call's history was and each card says, one
+	// line a node, named by the call or card id, which the evidence gives
+	// and no landed position moves. A card's records are named by their
+	// record ids, so a comparison of two roots cut differently holds every
+	// value.
+	History map[string]int
 }
 
 // Summarize reads a fold into a Summary.
@@ -817,7 +841,15 @@ func Summarize(root, session string) (*Summary, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Summary{Kinds: map[string]int{}, Relations: map[string]int{}, TalksOn: map[string]int{}, Unresolved: map[string]int{}, Records: map[string]int{}}
+	s := &Summary{Kinds: map[string]int{}, Relations: map[string]int{}, TalksOn: map[string]int{}, Unresolved: map[string]int{},
+		Records: map[string]int{}, History: map[string]int{}}
+	histories, err := historyLines(root, session, v)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range histories {
+		s.History[l]++
+	}
 	for _, n := range v.Nodes {
 		s.Kinds[n.Kind]++
 		if n.Kind == model.KindTalk {
@@ -840,6 +872,109 @@ func Summarize(root, session string) (*Summary, error) {
 	}
 	sort.Strings(s.Streams)
 	return s, nil
+}
+
+// historyLines is one line for each model call that says what its history
+// was, with every history attribute, and one for each card, with its
+// attributes, the records it names and stands on, and whether it stands
+// under its call's parent.
+func historyLines(root, session string, v *sessionflow.View) ([]string, error) {
+	var ids map[[2]uint64]string
+	recordOf := func(r sessionflow.Ref) (string, error) {
+		if ids == nil {
+			ids = map[[2]uint64]string{}
+			files, err := storage.LandedFiles(storage.NewZone(root), session)
+			if err != nil {
+				return "", err
+			}
+			for _, lf := range files {
+				f, err := sessiondata.Open(lf.Path)
+				if err != nil {
+					return "", err
+				}
+				_, recs, err := sessiondata.All(f)
+				f.Close()
+				if err != nil {
+					return "", err
+				}
+				for row, rec := range recs {
+					ids[[2]uint64{lf.Seq, uint64(row + 1)}] = rec.ID
+				}
+			}
+		}
+		id, ok := ids[[2]uint64{r.Seq, r.Row}]
+		if !ok || id == "" {
+			return "", fmt.Errorf("expect: a card names %d/%d, where no record with an id landed", r.Seq, r.Row)
+		}
+		return id, nil
+	}
+	var out []string
+	for id, n := range v.Nodes {
+		var a map[string]any
+		_ = json.Unmarshal(n.Attrs, &a)
+		kept := map[string]any{}
+		switch n.Kind {
+		case model.KindLLMCall:
+			for k, x := range a {
+				if strings.HasPrefix(k, "history") || k == "system_changed" {
+					kept[k] = x
+				}
+			}
+			if len(kept) == 0 {
+				continue
+			}
+		case model.KindHistoryChange:
+			kept = a
+			var refs []string
+			for _, r := range n.Refs {
+				rec, err := recordOf(r)
+				if err != nil {
+					return nil, err
+				}
+				refs = append(refs, rec)
+			}
+			kept["refs"] = refs
+			if n.Ref != nil {
+				rec, err := recordOf(*n.Ref)
+				if err != nil {
+					return nil, err
+				}
+				kept["ref"] = rec
+			}
+			if call, ok := v.Nodes[fmt.Sprint(a["to_call"])]; ok {
+				kept["under_its_call's_parent"] = call.Parent == n.Parent
+			}
+		default:
+			continue
+		}
+		line, err := json.Marshal(kept) // keys sorted
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, id+" "+string(line))
+	}
+	return out, nil
+}
+
+// Without is the summary with no nodes of the kinds named.
+func (s *Summary) Without(kinds ...string) *Summary {
+	out := *s
+	out.Kinds = map[string]int{}
+	for k, n := range s.Kinds {
+		if !slices.Contains(kinds, k) {
+			out.Kinds[k] = n
+		}
+	}
+	return &out
+}
+
+// WithoutHistory is the summary with no history lines, for comparing a
+// build with provider bodies against one without, where only the first
+// can say what a call's history was.
+func (s *Summary) WithoutHistory() *Summary {
+	out := *s
+	out.History = map[string]int{}
+	return &out
 }
 
 // Compare says how two summaries differ.
@@ -865,6 +1000,7 @@ func Compare(a, b *Summary) []string {
 		}
 	}
 	diff("kinds", a.Kinds, b.Kinds)
+	diff("history", a.History, b.History)
 	diff("relations", a.Relations, b.Relations)
 	diff("talks on", a.TalksOn, b.TalksOn)
 	diff("unresolved", a.Unresolved, b.Unresolved)
@@ -1734,12 +1870,15 @@ func ProviderBodiesRebuild(root, session string) ([]string, int, error) {
 // landing between them shift, so a node with a reference is named by the
 // record it stands on: its kind, its stream, its file's source and the
 // record's line in that source, and the part.
-func SameIdentity(rootA, sessionA, rootB, sessionB string) ([]string, error) {
-	a, err := foldIdentity(rootA, sessionA)
+//
+// Nodes of the kinds named in without are left out of both: what the evidence
+// the second build lacks may add and nothing else.
+func SameIdentity(rootA, sessionA, rootB, sessionB string, without ...string) ([]string, error) {
+	a, err := foldIdentity(rootA, sessionA, without)
 	if err != nil {
 		return nil, err
 	}
-	b, err := foldIdentity(rootB, sessionB)
+	b, err := foldIdentity(rootB, sessionB, without)
 	if err != nil {
 		return nil, err
 	}
@@ -1770,7 +1909,7 @@ func SameIdentity(rootA, sessionA, rootB, sessionB string) ([]string, error) {
 // sequence and row, and a part.
 var positionID = regexp.MustCompile(`^[^/]+/[0-9]+/[0-9]+(:[0-9]+)?$`)
 
-func foldIdentity(root, session string) (map[string]bool, error) {
+func foldIdentity(root, session string, without []string) (map[string]bool, error) {
 	v, err := parse.View(root, session)
 	if err != nil {
 		return nil, err
@@ -1816,6 +1955,9 @@ func foldIdentity(root, session string) (map[string]bool, error) {
 	}
 	out := map[string]bool{}
 	for id, n := range v.Nodes {
+		if slices.Contains(without, n.Kind) {
+			continue
+		}
 		out["node "+nameOf(id)+" in "+nameOf(n.Parent)] = true
 	}
 	for _, r := range v.Relations {

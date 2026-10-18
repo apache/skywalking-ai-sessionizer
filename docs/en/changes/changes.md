@@ -484,6 +484,19 @@
 
 ## Conversation model
 
+- A call says what its history was compared with, and a card stands where it changed. Where a
+  runtime records its requests, Claude Code with provider bodies and LangChain, each call's history
+  is the message list its request recorded, built from the provider thread where a request
+  continues one, and is compared with the call before it in its stream and epoch. A call carries
+  `history`: `kept`, `changed`, `first`, `not_compared`, or `unavailable` with the reason, and the
+  earlier reply's status. A changed history draws a `history.change` step just before the call, with
+  what was kept, changed, dropped and added, and its cause `unavailable`: it is no context reset, and
+  the calls stay in their epoch. The rules are on the
+  [Session Flow](../formats/session-flow.md#where-a-calls-history-changed) page. On every LangChain
+  capture and on the Claude Code 2.1.302 capture, no history changes without a mark, so no card is
+  drawn; the scenarios `history-forget` and `history-threads` hold a trimmed history and a thread.
+  `provider_bodies_leave_the_fold` now lets provider bodies add the card, and nothing else.
+
 - Model output whose record names no provider call is a step of its run. It was in no node at all,
   because only a call held text and reasoning. No Claude Code or LangChain record lacks the call;
   every Kiro record does, since Kiro ties no record to a request. Grouping such output into calls

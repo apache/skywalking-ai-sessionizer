@@ -119,7 +119,7 @@ func Vocabulary() []string {
 		KindMessageExternal, KindMessageAssistant, KindMessageSynthetic,
 		KindContextInjection, KindLLMCall, KindThinking, KindTool,
 		KindAgentCall, KindAgentLaunchAck, KindAgentOutput, KindRuntimeNotification,
-		KindEpochBoundary, KindEpochSummary,
+		KindEpochBoundary, KindEpochSummary, KindHistoryChange,
 		KindErrorAPI, KindControlInterrupt, KindControlPermission, KindControlCommand,
 		KindControlNotice, KindTurnDuration,
 		// relations

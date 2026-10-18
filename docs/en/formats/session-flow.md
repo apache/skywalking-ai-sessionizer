@@ -123,6 +123,7 @@ These are the prefixes asz writes:
 | `runtime.notification` | `notify/<seq>/<row>` |
 | `epoch.boundary` | `boundary/<seq>/<row>` |
 | `epoch.summary` | `summary/<seq>/<row>` |
+| `history.change` | `history/<provider call id>`: the same key as the call whose history changed, `call/<provider call id>`, so a reader finds the call from the card |
 | `error.api` | `error/<seq>/<row>` |
 | `turn.duration` | `turn/<seq>/<row>` |
 | `control.command` | `command/<seq>/<row>` |
@@ -158,6 +159,67 @@ the same way.
 The `session` node states `provider_bodies_landed`, how many bodies the session holds as of that
 round, joined or not, so a reader can say what was captured without opening a landed file. It is a
 count, named apart from the list a call carries so that one name never means two things.
+
+#### Where a call's history changed
+
+A call's history is the message list its request records, as the request body's manifest writes it
+([Session Data, History](session-data.md#history)). A request that continues a provider thread
+holds only what follows the message it names: its history is that message's call's history, then
+that call's reply, then its own messages. The call it names must be in its stream, of its form, and
+have a reply. A history is built through at most 65,536 calls and holds at most 65,536 entries.
+
+Each call is compared with its predecessor: the nearest earlier call of its stream and epoch,
+skipping only an `internal_call`. A call of unknown class, or with no request or no list, is never
+skipped, since skipping a turn would compare a call with the one before it and show a change that
+did not happen. Calls are ordered by their first fragment's landed position, as the body join
+orders them. Every call whose request carries `history_form` has `history` in its `attrs`, the
+first row of this table that applies:
+
+| `history` | when | `history_reason` |
+| --- | --- | --- |
+| `not_compared` | the call is in an `auxiliary` stream, or is an `internal_call` | `auxiliary_stream`, `internal_call` |
+| `unavailable` | the call's class is unknown | `class_unknown` |
+| `unavailable` | its own history cannot be built | `messages:<reason>`, `thread_unresolved`, `thread_reply:<reason>` |
+| `first` | no call comes before it in its stream and epoch | |
+| `unavailable` | the predecessor has no request, or none written with `history_form`, or is of unknown class, or another form, or a history that cannot be built | `earlier_no_request`, `earlier_messages:<reason>`, `earlier_class_unknown`, `form_mismatch`, `earlier_<reason>` |
+| `kept` | the predecessor's history is an ordered prefix of the call's | |
+| `changed` | it is not | |
+
+Two entries are equal when both have an id or neither does, the ids are equal where they are, and
+the digests are equal. Beside `history`:
+
+- `history_messages`: how many entries the call's history holds, whenever it can be built, so a
+  page can say how many messages a continue request did not send.
+- `history_from`: on `kept` and `changed`, the predecessor's node id.
+- `history_reply`, and `history_reply_reason` when it is `unavailable`: what became of the
+  predecessor's reply. `unavailable` with `no_reply` when the predecessor's response names none,
+  and with `form_mismatch` when its form is not the requests'. On `kept` it is looked for after the
+  predecessor's history, where no entry is one of the predecessor's: `back` when an entry there is
+  equal to it, `back_changed` when one carries its id, else `not_found`; a request that continues
+  the predecessor's own reply is `back` by construction. On `changed` the reply is `unavailable`
+  with `ambiguous` when it is equal to an entry of the predecessor's history or shares its id with
+  one, and is otherwise looked for in the whole history.
+- `system_changed`, between two Claude Code calls: `yes`, `no`, or `unavailable`. A request that
+  creates a thread or carries none has its own system prompt; a continue request has the thread's,
+  unless it carries a system block other than the billing header, which makes it, and every call
+  continuing from it, unknown. `unavailable` when either call's is.
+
+A `changed` call has a `history.change` node beside it, under the same parent. It stands at the
+call's first fragment, its `refs` are the two requests' records, and it carries no content. It sorts
+just before the call: among nodes at one position, a `history.change` node is ordered by the call
+it names, and before it. Its `attrs`:
+
+| Key | Value |
+| --- | --- |
+| `from_call`, `to_call` | the predecessor and the call |
+| `kept`, `changed`, `dropped`, `added` | counts by multiset, so repeated messages need no unique ids: for each distinct entry the smaller of its numbers of occurrences in the two histories is `kept`; of what is left, for each id the smaller of its numbers of occurrences on the two sides is `changed`; the rest of the predecessor's is `dropped`, and of the call's `added`. A runtime that sends no message id never reports `changed`: an edited message is one dropped and one added |
+| `order_changed`, `order_changed_reason` | `yes` when the messages kept or changed are no longer in their earlier order, else `no`. An entry's identity is its id, else its digest; with no id repeated on a side, the order changed exactly when the longest common subsequence of the two identity sequences is shorter than `kept` and `changed` together. `unavailable` with `repeated_id` when an id occurs twice on a side, and with `too_large` past 4,194,304 pairs of equal identities |
+| `reply`, `reply_reason`, `system_changed` | as on the call |
+| `cause` | `unavailable`. A changed history names no cause: a context reset is an explicit `epoch.boundary`, and a changed history is not one. The calls stay in their epoch |
+
+All of it is derived from the index, carries no wall-clock time, and is assembled again each round,
+so a body or a response that lands later revises the call and its card, and a card whose pair is no
+longer `changed` is tombstoned.
 
 A reference into the landed data is a landed sequence, a row, and optionally a content block. That
 is the whole address. A reader takes both the content and the time from the `.sd` record it names.

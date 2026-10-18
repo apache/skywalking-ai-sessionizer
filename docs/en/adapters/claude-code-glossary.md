@@ -19,7 +19,7 @@ asz conversation -terms native ID   talk · promptId · message.id · tool_use +
 asz conversation -terms both ID     run  (promptId)
 ```
 
-**63 terms: 39 that Claude Code names, 24 this project derives.** That ratio is worth watching. If
+**64 terms: 39 that Claude Code names, 25 this project derives.** That ratio is worth watching. If
 everything had a native name, the model would be a rename of one product rather than a model of
 any. If nothing did, it would have no evidence under it.
 
@@ -89,6 +89,7 @@ than a plausible word that would send a reader looking for a field that does not
 | `exact_ambiguous` | an identifier matched several; nothing chose one |
 | `exact_unique` | an identifier matched exactly one candidate |
 | `hash_only` | only a digest of the bytes was kept |
+| `history.change` | derived by asz from the request bodies, when provider bodies are collected: Claude Code writes no such record |
 | `in_segment` | the activity window a Talk falls in |
 | `input_of` | unavailable; the serialized provider request is not written locally |
 | `internal_call` | no equivalent: a request Claude Code sends for its own purpose, such as a compaction's, joins no call |
