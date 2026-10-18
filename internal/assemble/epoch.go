@@ -59,17 +59,23 @@ func (b *builder) stage6Epochs() {
 
 		start, prev := 0, ""
 		emit := func(boundaryAt int, end int) {
+			// The first epoch, a reset's own id and the location of a reset
+			// that has none each have a part count or a marker of their own.
+			// Written alike, a reset whose id was "0" took the first epoch's
+			// id and followed itself, and one whose id was "at_1_2" took the
+			// id of a reset with none at sequence 1 row 2.
 			var boundary *index.Entry
-			key := "0"
+			id := sessionflow.NodeID("epoch", s.Name, "0")
 			if boundaryAt >= 0 {
 				boundary = entries[boundaryAt]
-				key = b.str(boundary.Record)
-				if key == "" {
-					key = sessionflow.RefID("at", ref(boundary))
+				if record := b.str(boundary.Record); record != "" {
+					id = sessionflow.NodeID("epoch", s.Name, "id", record)
+				} else {
+					id = sessionflow.LocatedID("epoch", ref(boundary), s.Name, "at")
 				}
 			}
 			ep := &epoch{
-				NodeID: sessionflow.NodeID("epoch", s.Name, key),
+				NodeID: id,
 				Stream: s, Boundary: boundary, Start: start, End: end,
 			}
 			s.epochs = append(s.epochs, ep)

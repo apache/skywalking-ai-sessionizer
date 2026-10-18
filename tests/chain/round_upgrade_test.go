@@ -41,6 +41,11 @@ const upgradeSession = "00000001-0000-4000-8000-000000000001"
 // revises the nodes whose attributes changed, covers no new landed file, and
 // leaves the conversation as a fresh parse of the same files builds it. A
 // second parse finds nothing to write.
+//
+// The ids of an epoch that a reset with an id opens, and of a segment, moved,
+// so the round also removes those two nodes and the follows relation that
+// named the epoch under their old ids, writes them under the new ones, and
+// revises the in_segment relations whose end is the segment.
 func TestAnOlderChainContinues(t *testing.T) {
 	old := upgradeRoot(t, true)
 	r := upgradeParse(t, old, 0)
@@ -48,9 +53,39 @@ func TestAnOlderChainContinues(t *testing.T) {
 		t.Fatalf("the continuing round is round %d over sequences %d..%d, more=%v; want round 2 over no new file",
 			r.Number, r.FromSeq, r.ThroughSeq, r.More)
 	}
-	if r.Relations != 0 || r.Unresolved != 0 || r.Tombstones != 0 {
-		t.Fatalf("the continuing round writes %d relations, %d unresolved entries and %d tombstones; want node revisions only",
-			r.Relations, r.Unresolved, r.Tombstones)
+	if r.Unresolved != 0 {
+		t.Fatalf("the continuing round writes %d unresolved entries; want none", r.Unresolved)
+	}
+	f, err := os.Open(r.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	round, err := sessionflow.Read(f)
+	_ = f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var removed, relations []string
+	for _, n := range round.Nodes {
+		if n.Tombstone {
+			removed = append(removed, n.ID)
+		}
+	}
+	for _, v := range round.Relations {
+		if v.Tombstone {
+			removed = append(removed, v.ID)
+		} else {
+			relations = append(relations, v.ID)
+		}
+	}
+	if got, want := strings.Join(removed, " "),
+		"epoch/main/s8-boundary segment/at_1_2 rel/follows/epoch_main_s8-boundary/epoch_main_0"; got != want {
+		t.Errorf("the continuing round removes %s; want the ids that moved, %s", got, want)
+	}
+	if got, want := strings.Join(relations, " "), "rel/follows/epoch_main_id_s8-boundary/epoch_main_0 "+
+		"rel/in_segment/talk_a0a10ef0666c4dc7e/segment_at_1_2 rel/in_segment/talk_main_s1-cycle/segment_at_1_2 "+
+		"rel/in_segment/talk_main_s8-cycle-compact/segment_at_1_2"; got != want {
+		t.Errorf("the continuing round writes the relations %s; want %s", got, want)
 	}
 	if again := upgradeParse(t, old, 0); again.Changed() {
 		t.Fatalf("a second parse wrote round %d", again.Number)
