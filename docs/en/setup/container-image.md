@@ -51,6 +51,17 @@ docker run --rm -p 8787:8787 \
 The default command, `server`, collects every 10 minutes and serves the page. On Linux, add
 `--user "$(id -u):$(id -g)"` so the container can write to `./data`.
 
+To keep the data in a Docker volume instead of `./data`, name the volume, and add no `--user`. A
+new volume belongs to the user the image runs as:
+
+```sh
+docker run --rm -p 8787:8787 \
+  -v "$HOME/.claude/projects:/claude/projects:ro" \
+  -v "$PWD/asz.yaml:/asz/asz.yaml:ro" \
+  -v asz-data:/asz/data \
+  ghcr.io/apache/skywalking-ai-sessionizer:latest
+```
+
 ## Run any command
 
 Put the command after the image name:

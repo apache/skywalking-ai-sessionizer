@@ -22,6 +22,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"unicode/utf8"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
@@ -59,10 +61,12 @@ const endLineMax = len(`{"t":"end","records":,"digest":""}`) + 20 + 64 + 1
 // A record that is still too large with every payload taken out lands as it
 // is: its identifiers, label and part list remain.
 //
-// Data nested deeper than a line may hold, MaxDataDepth, is taken out the
-// same way first, under any limit: a reader may refuse the line otherwise. A
-// change or execution record is written again in its own format instead,
-// which leaves out the fields its format does not name.
+// Data a reader may refuse is taken out first, under any limit: data nested
+// deeper than a line may hold, MaxDataDepth, the same way, and data holding a
+// byte that is not valid UTF-8, saying omitted and naming it in the record's
+// dropped list. A change or execution record is written again in its own
+// format instead, which leaves out the fields its format does not name and
+// holds U+FFFD in place of such a byte.
 func Fit(r *Record, limit int) (int, error) {
 	_, n, err := fit(r, limit, true)
 	return n, err
@@ -105,42 +109,88 @@ func Depth(data []byte) int {
 	return deepest
 }
 
-// level takes out the data of every part nested deeper than MaxDataDepth,
-// in place, and adds the parts it changed to changed. It changes r only when
-// the record then encodes, so a record that cannot be written stays as the
-// caller gave it.
+// WhyNotUTF8 is the reason a record's dropped list gives for the data of a
+// part taken out because it held a byte that is not valid UTF-8.
+const WhyNotUTF8 = "it holds a byte that is not valid UTF-8, which no landed line may hold"
+
+// level takes out the data of every part a reader may refuse, in place, and
+// adds the parts it changed to changed. It changes r only when the record
+// then encodes, so a record that cannot be written stays as the caller gave
+// it.
+//
+// Data nested deeper than MaxDataDepth is taken out as a payload too large to
+// carry is. Data holding a byte that is not valid UTF-8 is taken out too: JSON
+// sent between systems must be UTF-8, and a protocol buffer string must be,
+// so a landed file holding such a byte could never be sent over OTLP. The
+// JSON decoder accepts such a byte inside a string, so source JSON can bring
+// one. The byte says nothing about size, so its part says omitted rather than
+// too_large, and the record's dropped list says why. Data that is too deep as
+// well says too_large, as too deep data does, and the dropped list still
+// names the byte.
 func level(r *Record, changed map[int]bool) error {
 	parts := append([]Part(nil), r.Parts...)
-	deep := map[int]bool{}
+	taken := map[int]bool{}
+	var dropped []Drop
 	for i := range parts {
-		if len(parts[i].Data) > 0 && Depth(parts[i].Data) > MaxDataDepth {
-			if !reencode(&parts[i]) {
-				omit(&parts[i])
-			}
-			deep[i] = true
+		p := &parts[i]
+		if len(p.Data) == 0 {
+			continue
 		}
+		deep, bad := Depth(p.Data) > MaxDataDepth, !utf8.Valid(p.Data)
+		if !deep && !bad {
+			continue
+		}
+		if bad {
+			dropped = append(dropped, Drop{What: fmt.Sprintf("the data of part %d", i), Bytes: len(carried(p)), Why: WhyNotUTF8})
+		}
+		switch {
+		case reencode(p):
+		case deep:
+			omit(p)
+		default:
+			leaveOut(p)
+		}
+		taken[i] = true
 	}
-	if len(deep) == 0 {
+	if len(taken) == 0 {
 		return nil
 	}
 	leveled := *r
 	leveled.Parts = parts
+	if len(dropped) > 0 {
+		leveled.Dropped = append(append([]Drop(nil), r.Dropped...), dropped...)
+	}
 	if _, err := encodeRecord(&leveled); err != nil {
 		return err
 	}
 	copy(r.Parts, parts)
-	for i := range deep {
+	r.Dropped = leveled.Dropped
+	for i := range taken {
 		changed[i] = true
 	}
 	return nil
 }
 
+// leaveOut takes out a part's data that no landed line may hold, and says
+// omitted, or truncated while its text is left, with the size and the
+// digest of what it held.
+func leaveOut(p *Part) {
+	remember(p)
+	p.Data, p.Encoding = nil, ""
+	p.State = model.ContentOmitted
+	if p.Text != "" && p.Kind != PartUnknown {
+		p.State = model.ContentTruncated
+	}
+}
+
 // reencode writes a change record or an execution record again in its own
 // format, as its decoder reads it, so a field its format does not name, nested
 // however deep, goes and the record stays: neither is ever taken out whole,
-// since a step joins to it by its tool call. Its part says truncated, with the
-// size and the digest of what it held. It reports false for any other data,
-// and for a record its format cannot write shallow enough.
+// since a step joins to it by its tool call. The decoder reads a byte that is
+// not valid UTF-8 as U+FFFD, so the record written again is valid UTF-8. Its
+// part says truncated, with the size and the digest of what it held. It
+// reports false for any other data, and for a record its format cannot write
+// shallow enough.
 func reencode(p *Part) bool {
 	if p.Kind != PartData {
 		return false
@@ -345,10 +395,26 @@ func (c *Cut) Take(r *Record) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	need := len(line) + 1
+	return c.take(len(line) + 1), nil
+}
+
+// TakeRaw reports whether a record line that is already encoded, without its
+// newline, goes into this file, by the rule Take follows. The line is never
+// changed, so one larger than the budget is taken only as the first record
+// of a file, and that file is larger than the budget.
+func (c *Cut) TakeRaw(line []byte) bool {
+	if c.limit <= 0 {
+		return true
+	}
+	return c.take(len(line) + 1)
+}
+
+// take counts a line of need bytes, its newline included, into the file, or
+// reports that the line starts the next file.
+func (c *Cut) take(need int) bool {
 	if c.room < c.limit && need > c.room {
-		return false, nil
+		return false
 	}
 	c.room -= need
-	return true, nil
+	return true
 }
