@@ -30,6 +30,9 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/asz ./cmd/asz
+# The storage root's directory, empty, for the image to own. The final image
+# has no shell to make it.
+RUN mkdir -p /out/data
 
 # Static binary, no shell, non-root. The image reads and writes only its
 # storage root, mounted at /asz/data, which is also the default the binary
@@ -45,6 +48,11 @@ COPY --from=build /out/asz /usr/local/bin/asz
 # a binary distribution must carry them.
 COPY dist-material/LICENSE dist-material/NOTICE /licenses/
 COPY dist-material/licenses /licenses/licenses
+# The storage root belongs to the user the image runs as, 65532. Docker gives
+# a new named or anonymous volume the owner of the directory it is mounted
+# on, and makes it root's when the image has no such directory, so the first
+# collection failed to write to it.
+COPY --from=build --chown=65532:65532 /out/data /asz/data
 WORKDIR /asz
 VOLUME ["/asz/data"]
 EXPOSE 8787

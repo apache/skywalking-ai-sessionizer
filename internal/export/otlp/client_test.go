@@ -18,6 +18,7 @@
 package otlp_test
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -116,6 +117,95 @@ func TestAPageAnsweredWith200IsNotASuccess(t *testing.T) {
 		if _, ok := sent.Digest(rel); ok {
 			t.Fatalf("%s was recorded as sent", rel)
 		}
+	}
+}
+
+// A success whose body is cut off before it all arrives is not a success:
+// what the receiver took is unknown. It is an error, whatever the type, and
+// a pass marks nothing sent, so the files go again.
+func TestASuccessCutOffBeforeItsBodyIsNotASuccess(t *testing.T) {
+	for _, media := range []string{"application/x-protobuf", "text/html"} {
+		t.Run(media, func(t *testing.T) {
+			// The answer promises 100 bytes, and the connection closes
+			// before the first of them.
+			c := httpReceiver(t, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				conn, buf, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: " + media + "\r\nContent-Length: 100\r\n\r\n")
+				_ = buf.Flush()
+				_ = conn.Close()
+			})
+			if _, err := c.Export(&collogspb.ExportLogsServiceRequest{}); err == nil || !strings.Contains(err.Error(), "did not arrive whole") {
+				t.Fatalf("logs: a cut answer gave %v; want an error saying its body did not arrive whole", err)
+			}
+			if _, err := c.ExportMetrics(&collmetricspb.ExportMetricsServiceRequest{}); err == nil || !strings.Contains(err.Error(), "did not arrive whole") {
+				t.Fatalf("metrics: a cut answer gave %v; want an error saying its body did not arrive whole", err)
+			}
+
+			z, _ := zoneWithOneSession(t)
+			p := &otlp.Pusher{Zone: z, Client: c, Version: "test", ServiceName: "Claude Code", Endpoint: "http://receiver"}
+			st, err := p.Pass()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Files != 0 || len(st.Errors) == 0 {
+				t.Fatalf("files=%d errors=%v; want nothing marked and the error reported", st.Files, st.Errors)
+			}
+			sent, err := otlp.LoadSent(z.Root())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for rel := range sentPaths(t, z) {
+				if _, ok := sent.Digest(rel); ok {
+					t.Fatalf("%s was recorded as sent", rel)
+				}
+			}
+		})
+	}
+}
+
+// The client reads at most 1 MiB of an answer, far more than any OTLP
+// response holds. An answer cut off just after that much is not a success
+// either, though what arrived is a whole OTLP response, and nor is a whole
+// answer longer than that: what came after the first MiB was never read.
+func TestASuccessLongerThanTheClientReadsIsNotASuccess(t *testing.T) {
+	const limit = 1 << 20
+	logs := &collogspb.ExportLogsServiceResponse{PartialSuccess: &collogspb.ExportLogsPartialSuccess{}}
+	for n := limit - 16; proto.Size(logs) != limit; n++ {
+		logs.PartialSuccess.ErrorMessage = strings.Repeat("x", n)
+	}
+	prefix, err := proto.Marshal(logs)
+	if err != nil || len(prefix) != limit {
+		t.Fatalf("a response of %d bytes, %v", len(prefix), err)
+	}
+	for name, promised := range map[string]int{"cut off after the limit": limit + 100, "longer than the limit": limit + 1} {
+		t.Run(name, func(t *testing.T) {
+			c := httpReceiver(t, func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				conn, buf, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				_, _ = fmt.Fprintf(buf, "HTTP/1.1 200 OK\r\nContent-Type: application/x-protobuf\r\nContent-Length: %d\r\n\r\n", promised)
+				_, _ = buf.Write(prefix)
+				if promised == limit+1 {
+					_ = buf.WriteByte(0)
+				}
+				_ = buf.Flush()
+				_ = conn.Close()
+			})
+			if _, err := c.Export(&collogspb.ExportLogsServiceRequest{}); err == nil {
+				t.Fatal("logs: the answer was taken as a success")
+			}
+			if _, err := c.ExportMetrics(&collmetricspb.ExportMetricsServiceRequest{}); err == nil {
+				t.Fatal("metrics: the answer was taken as a success")
+			}
+		})
 	}
 }
 

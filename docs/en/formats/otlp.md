@@ -21,7 +21,13 @@ is a small record, and the same conversation is 306 records.
 
 Landed files and rounds are both write-once, so each is sent once. `push.state` in the storage
 root lists what was sent, with the digest each file had; a file is recorded only after the request
-carrying it succeeded, so a failed request leaves it for the next pass.
+carrying it succeeded, so a failed request leaves it for the next pass. A failed request is
+reported once, as its own error, and the files after it are still tried in the same pass, unless
+the receiver asked the sender to slow down, as [Rate](#rate) describes. A file that
+cannot be encoded as a log record never goes in a request: a protocol buffer string must be valid
+UTF-8, and one file that is not would fail every request it was in, on every pass, with the files
+beside it. It is reported on its own, under its name, on every pass. asz never lands such a file
+(see [Reading a record](session-data.md#reading-a-record)), but a writer outside asz can.
 
 `push.state` also names the receivers the files went to, with one `endpoint` line each:
 `grpc://host:port`, `grpcs://host:port` with `tls: true`, or the HTTP base URL. A `rejected` line
@@ -90,8 +96,10 @@ which records were rejected. A scenario session with such a file is never remove
 
 Over HTTP, a request counts as taken only when the answer has a 2xx status and a body that is empty
 or protobuf: `application/x-protobuf`, as OTLP names it, or `application/protobuf`, whatever the
-parameters. A 2xx answer with a body of any other type is an error. Nothing in the request is
-recorded as sent, so it goes again on the next pass:
+parameters. A 2xx answer with a body of any other type is an error, and so is one whose body does
+not arrive whole, such as a connection that closes before the length the answer promised, and one
+whose body is longer than 1 MiB, which is all the sender reads of an answer. Nothing
+in the request is recorded as sent, so it goes again on the next pass:
 
 ```text
 otlp: http://127.0.0.1:12800/v1/logs answered 200 OK with text/html, not an OTLP response; nothing is recorded as sent

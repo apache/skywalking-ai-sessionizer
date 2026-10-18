@@ -39,8 +39,8 @@ stops at the first longer line.
 | --- | --- |
 | `h` | envelope version, `1` |
 | `schema` | `sd/1` |
-| `seq` | the landed sequence number, monotonic per session |
-| `at` | when the file was collected |
+| `seq` | the landed sequence number, monotonic per session, in the order files landed |
+| `at` | when the file was collected. A file `asz repack` cut says when the newest file its records came from was collected |
 | `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `execution` or `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport, and no adapter writes either. |
 | `adapter` | how the records were acquired, with its contract version |
 | `dialect` | whose schema they were read as. A push receiver and a local reader for one runtime share a dialect and nothing else. |
@@ -201,6 +201,22 @@ left, and its `bytes` and `sha256` are kept (see [Too large to land](#too-large-
 which leaves out a field the format does not name, and says `truncated`. Real lines come nowhere
 near it. Measured over 423,944 lines of 94 real conversations, the deepest held 16, a model request
 carrying a tool's JSON Schema in its data.
+
+Every landed line is valid UTF-8. JSON sent between systems must be, a reader may refuse a line
+that is not, and a protocol buffer string must be too, so a file holding such a byte could never be
+sent over [OTLP](otlp.md). A JSON decoder can accept a byte that is not valid UTF-8 inside a
+string, so source JSON can bring one, such as a write cut short in the middle of a character. A
+string the writer encodes itself, such as `text` or `label`, holds U+FFFD in its place. A part's
+data that holds such a byte is taken out, whatever its size. The part keeps its place, its kind and
+its identifiers, its `state` is `omitted`, or `truncated` while its text is left, and its `bytes`
+and `sha256` are those of the source JSON it held, as for a payload
+[too large to land](#too-large-to-land). A `changes/1` or `execution/1` record is written again in
+its own format, with U+FFFD in place of the byte, and says `truncated`. Data that is also nested
+too deep is taken out as such data is, above, and says `too_large`. In every case the record's
+[`dropped`](#dropped) gains one entry for the part, so a reader knows the byte was there: `what`
+is `the data of part N`, with N its block, `bytes` the size of the JSON taken out, and `why` is
+`it holds a byte that is not valid UTF-8, which no landed line may hold`. An
+`unknown` part keeps such bytes whole, in base64, as [Parts](#parts) describes.
 
 A `time` is written as RFC 3339: a four-digit year, the letter `T`, the time of day to the
 second with a fraction of up to nine digits or none, and `Z` or an offset such as `+08:00`. Times
@@ -455,7 +471,9 @@ takes nothing out.
   not text, an attachment with no prose, or a record or document with no message. A journal line,
   sidecar, manifest, system record or line the asz plugin wrote can land whole this way. The
   writer inserts that JSON after `json.Compact`, keeping its bytes apart from whitespace between
-  tokens. This keeps each landed record on one line. Whitespace inside strings is unchanged.
+  tokens. This keeps each landed record on one line. Whitespace inside strings is unchanged. JSON
+  that holds a byte that is not valid UTF-8 is taken out instead, as
+  [Reading a record](#reading-a-record) describes.
 - Bytes the dialect could not describe: an `unknown` part holds them inside one JSON string,
   using base64 when needed, as described below. `Part.Raw` returns the original bytes whatever
   escapes that string uses.
@@ -493,8 +511,9 @@ The measured corpus is 62 Claude Code sessions: 3,032 files and 1,100.1 MB of so
 tool result in it was 1.1 MB. Over its 28 sessions larger than 1 MB, the share of a session that is
 tool output ran from 17.3% to 83.5%, with a median of 35.1%. A rule tuned to the median is wrong by
 a factor of two at both ends. So every part states its own size and state, and a reader decides.
-No built-in adapter writes `omitted`, and a part one writes as `truncated` is one made smaller to fit
-the budget, so no part they write is clipped otherwise. Clipping is
+No built-in adapter writes `omitted` itself, and a part that lands as `omitted` or `truncated` is
+one made smaller to fit the budget or to hold only valid UTF-8, so no part is clipped otherwise.
+Clipping is
 left to a reader, such as the [asz.view](asz-view.md#a-node-in-talks) document, which clips a
 node's text and gives the full size beside it. A part is still not always all the runtime gave.
 The Claude Code dialect leaves some content out with no `dropped` entry. Its
@@ -577,7 +596,8 @@ runs after every call to an MCP server. Measured on Claude Code 2.1.282:
 ```
 
 `dropped` exists so a loss is stated rather than silent. It lists only what the dialect understood
-and chose not to carry. Everything it did not understand travels as an `unknown` part, so a later
+and chose not to carry, and the data the writer took out because it held a byte that is not valid
+UTF-8 (see [Reading a record](#reading-a-record)). Everything it did not understand travels as an `unknown` part, so a later
 version of the dialect can interpret it without collecting again. In an entry, `what` and `why`
 are strings and `bytes` is an integer.
 

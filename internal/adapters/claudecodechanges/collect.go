@@ -18,14 +18,11 @@
 package claudecodechanges
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -246,8 +243,7 @@ func cursorFor(dir, root string, src Source) (string, error) {
 	case held.Source == src.Rel && held.Origin == "" && describes(held, src.Path):
 		return plain, nil
 	}
-	sum := sha256.Sum256([]byte(root + "\n" + src.Rel))
-	return filepath.Join(dir, prefix+"-"+hex.EncodeToString(sum[:])[:12]+".cursor"), nil
+	return filepath.Join(dir, storage.SourceCursorName(prefix, root, src.Rel)), nil
 }
 
 // describes reports whether a cursor that names no root was read from this
@@ -277,18 +273,10 @@ func describes(cur *storage.Cursor, path string) bool {
 	return err == nil && got == cur.TailSHA256
 }
 
-// origin is how this collector's root is written into a cursor, with
-// forward slashes so it reads the same on every pass. A root inside the
-// storage root - a scenario's, which a test copies whole to another place
-// - is written relative to it, so the copy keeps its cursors; any other
-// root is written absolute, since a source directory that moves is a
-// different source.
+// origin is how this collector's root is written into a cursor. The rule
+// lives in storage, because asz repack writes it again for a new root.
 func (c *Collector) origin() string {
-	root := filepath.Clean(c.SourceRoot)
-	if rel, err := filepath.Rel(c.Zone.Root(), root); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return filepath.ToSlash(rel)
-	}
-	return filepath.ToSlash(root)
+	return storage.CursorOrigin(c.Zone.Root(), c.SourceRoot)
 }
 
 // collectSource lands one window of one file, and says whether more waits.
