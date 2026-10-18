@@ -274,6 +274,10 @@ The rounds directory is the authority. The state file is a cache, and a crash be
 round and saving state leaves a round the state does not mention, so the head is recovered by
 listing the directory and the previous input digest is taken from the last round's own header.
 
+A round is never empty. An empty file under a round's name is a reservation that a writer left on
+a filesystem without an exclusive rename, as [the storage root](storage-root.md#the-chain)
+describes. It is not a round: a reader passes over it, and never takes it for the head.
+
 ## Reading it
 
 `asz conversation ID` folds a chain and prints what it holds. The node kinds and relation types are

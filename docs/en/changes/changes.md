@@ -360,6 +360,18 @@
   is built again from the landed files.
 - The index reads what a provider body records of its call's history, and the class of a model call.
   Its schema moved to 17, and an older index is built again from the landed files.
+- Records landed just before a crash, or before a failed save of the index, are parsed when the
+  runtime deleted the session's source before the next pass, as Kiro Crew deletes a session and
+  Claude Code prunes its files by age. A collector brought the index up to the landed files only
+  while it read the session's source, and parse trusted the index's own `indexed_seq`, so those
+  records never reached the conversation, and retention never removed the session's files or
+  retired it. Parse now indexes the landed files above `indexed_seq` before it cuts a round, for
+  every adapter.
+- `asz push`, retention and a scenario removal pass over an empty file under a round's name, as the
+  chain does. Such a file is the reservation of a writer that stopped before its rename, on a
+  filesystem without an exclusive rename, and it stays in an idle conversation until the chain's
+  next publication. `asz push` failed reading its header on every pass, retention and retirement
+  failed when it sorted as the head, and a scenario removal waited for it to be sent, for ever.
 - The OTLP exporter over HTTP keeps its own connections. It shared the process's default HTTP
   transport, so closing it closed every other HTTP client's idle connections, and anything else that
   closed them, such as a test receiver shutting down, could break a request the exporter had just
@@ -512,6 +524,15 @@
   but still sends its waiting metrics requests, and `asz repack`, an sd scenario build and the
   scenario runner refuse it. The pass log says once a process that a retired session's source was
   found and not collected, `asz sources` names it, and `asz verify` counts the retired sessions.
+- A retirement removes the conversation directory named by the session's id only when its head
+  round names the session, or it has no round. It removed the directory without reading it, though
+  `asz push` sends each round by the session its header names, so rounds of another session under
+  that name would have gone with it. No command writes such a layout today.
+- The page draws a conversation again when its session's landed files change. It kept what it read
+  for the chain head and the removal generation only, so after a session's directory was removed by
+  hand, or a retirement stopped between the session's directory and its chain, it kept serving the
+  text of files that were gone, and a document that said `verified`. It now says `incomplete` and
+  carries none of that text, as the storage root page says.
 - With `retire_after` set, asz reports what it could inspect in Claude Code's settings.
   It says that effective retention was not determined. It names invalid or unreadable settings
   and assumes no value for them. It warns when retirement is shorter than the inspected value or the reported
@@ -822,3 +843,9 @@
   `asz-changes`, and its data directory, when run from a checkout, `asz-changes-inline`. The plugin
   is `file-changes`, as its manifest says, so the directory is `file-changes-inline`. `asz-changes`
   is the program its hooks run.
+- The [Claude Code](../adapters/claude-code-glossary.md), [Kiro](../adapters/kiro-glossary.md) and
+  [LangChain](../adapters/langsmith-glossary.md) glossaries gave 64 terms, where `asz glossary`
+  prints 66 for each, and their own tables held 66. The Claude Code and Kiro pages left `too_large`
+  and `removed` out of their totals when the two were added to their tables, and the LangChain page
+  counted 18 named terms in a table of 20. A test now reads each page and checks its totals and
+  every row against the adapter's declarations.

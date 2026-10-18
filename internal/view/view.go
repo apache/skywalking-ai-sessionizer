@@ -152,13 +152,17 @@ type Conversation struct {
 	// generation is the removal generation the session's files were read
 	// at (storage.RemovalGeneration).
 	generation int
+	// landed names the session's landed files and skeletons as they were
+	// before this was read, as landedNames lists them.
+	landed string
 }
 
 // Load folds a conversation and builds its lookups, once per round.
 //
-// A fold is kept until the chain grows past it. The check is the head round
-// on disk, which is a directory listing, not a fold. It has to be made on
-// every read: the rounds may be written by another process entirely, such
+// A fold is kept until the chain grows past it, or the session's landed
+// files change. The checks are the head round on disk and the landed files,
+// which are directory listings, not a fold. They have to be made on every
+// read: the rounds may be written by another process entirely, such
 // as an asz collect running beside a read-only asz view, and then nothing
 // in this process knows the conversation moved.
 //
@@ -174,8 +178,15 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	// was read at, and nothing is kept while a removal is in progress.
 	generation, removing, gerr := storage.RemovalGeneration(s.zone, id)
 	if c, ok := s.loaded[id]; ok {
+		// It is good only while the session's files are the ones it was read
+		// from, too. A person may remove a session's directory, and a
+		// retirement removes it before the chain, and neither moves the head
+		// or the generation. What was read of files that are gone is never
+		// served.
 		head, err := sessionflow.OpenChain(s.zone.Root(), id).Head()
-		if err == nil && gerr == nil && !removing && head == c.head && generation == c.generation {
+		landed, lerr := landedNames(s.zone, c.Session)
+		if err == nil && gerr == nil && lerr == nil && !removing &&
+			head == c.head && generation == c.generation && landed == c.landed {
 			return c, nil
 		}
 		delete(s.loaded, id)
@@ -194,8 +205,15 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		}
 		return nil, fmt.Errorf("view: no rounds for %s; run asz parse", id)
 	}
+	// The files are listed before they are read, so a file that comes or goes
+	// while they are read is found by the next read.
+	landed, err := landedNames(s.zone, v.Session)
+	if err != nil {
+		return nil, err
+	}
 	c := &Conversation{
-		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems, head: v.Round, generation: generation,
+		ID: id, View: v, Session: v.Session, zone: s.zone, problems: problems,
+		head: v.Round, generation: generation, landed: landed,
 		at:    map[[2]uint64]int64{},
 		lanes: map[uint64]string{},
 		named: map[string]int{},
@@ -217,6 +235,22 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	c.pathsScan = time.Now()
 	s.loaded[id] = c
 	return c, nil
+}
+
+// landedNames lists the paths of a session's landed files and skeletons, one
+// to a line. A landed file is written once, and a skeleton takes its place
+// under another name, so the list changes whenever what they hold does.
+func landedNames(z *storage.Zone, session string) (string, error) {
+	files, err := storage.LandedFiles(z, session)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, lf := range files {
+		b.WriteString(lf.Path)
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
 }
 
 // Forget drops a cached conversation, so a later read sees new rounds.

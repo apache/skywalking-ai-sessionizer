@@ -938,6 +938,13 @@ func (p *pass) chainSent(s *session, landed *landedSet) verdict {
 		if m == nil {
 			return blocked("%s has a name no chain writes", p.rel(path))
 		}
+		// No round is empty. An empty file under a round's name is the
+		// reservation of a writer that stopped before its rename. The chain
+		// does not count it and no push sends it, so it is not waited for,
+		// and it goes with the chain's directory.
+		if info, err := it.Info(); err == nil && info.Size() == 0 {
+			continue
+		}
 		n, _ := strconv.ParseUint(m[1], 10, 64)
 		if head == "" || n > headN {
 			head, headN = path, n

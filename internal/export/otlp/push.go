@@ -1269,9 +1269,16 @@ func roundFiles(root, conv string) ([]string, error) {
 	}
 	var out []string
 	for _, it := range items {
-		if !it.IsDir() && strings.HasSuffix(it.Name(), ".sf") {
-			out = append(out, filepath.Join(dir, it.Name()))
+		if it.IsDir() || !strings.HasSuffix(it.Name(), ".sf") {
+			continue
 		}
+		// No round is empty. An empty file under a round's name is the
+		// reservation of a writer that stopped before its rename, which the
+		// chain does not count, and the chain's next publication removes.
+		if info, err := it.Info(); err == nil && info.Size() == 0 {
+			continue
+		}
+		out = append(out, filepath.Join(dir, it.Name()))
 	}
 	sort.Strings(out)
 	return out, nil

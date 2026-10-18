@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · trace_id · id · run_type: tool
 asz conversation -terms both ID     run  (trace_id)
 ```
 
-**64 terms: 18 that LangChain names, 46 this project derives.** That ratio is worth watching against
+**66 terms: 20 that LangChain names, 46 this project derives.** That ratio is worth watching against
 the Claude Code one. A framework that records its own graph in detail still has no word for a
 conversation boundary, a context reset or a delegated agent — which is the whole reason this model
 exists separately from any product's.
@@ -34,7 +34,7 @@ Each row says where the thing is recorded in a run.
 
 | Model | LangChain | Where | Note |
 | --- | --- | --- | --- |
-| `agent.call` | `a tool call whose run has model calls beneath it` | the wire has no word for delegation; it is read from the nested context |  |
+| `agent.call` | `a tool call whose run has model calls beneath it` |  | the wire has no word for delegation; it is read from the nested context |
 | `agent.output` | `outputs.output.content` | the delegating tool run |  |
 | `call` | `id` | a run of type llm | shared by every arrival about that run |
 | `conversation` | `extra.metadata.thread_id` | a run | with session_id and conversation_id as the other spellings; supplied, never inferred |

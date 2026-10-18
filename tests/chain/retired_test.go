@@ -81,7 +81,10 @@ func retire(t *testing.T, z *storage.Zone, session string) {
 	if err := os.MkdirAll(filepath.Join(z.Root(), storage.RetiredDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(z.RetiredPath(session), nil, 0o444); err != nil {
+	// Written as retirement writes it: writable, since on Windows a rename,
+	// as retirement makes when it marks the session again, cannot replace a
+	// read-only file.
+	if err := os.WriteFile(z.RetiredPath(session), nil, storage.PermState); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -276,5 +279,62 @@ func TestARoundOfALiveSessionUnderARetiredDirectoryIsSent(t *testing.T) {
 	}
 	if rounds == 0 {
 		t.Fatal("no round of the live session under the retired directory was sent")
+	}
+}
+
+// TestARetirementKeepsTheChainOfAnotherSession. The layout above, retired
+// as a pass finishes it, which every command that writes to the root does
+// first. The directory of A goes. The rounds under the conversation
+// directory named A name live session B, so they are B's chain: they stay,
+// every one of them unchanged, and B's next parse continues them.
+func TestARetirementKeepsTheChainOfAnotherSession(t *testing.T) {
+	r := newSentRoot(t)
+	sa, err := scenario.Load(filepath.Join("..", "scenarios", "all-kinds.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb, err := scenario.Load(filepath.Join("..", "scenarios", "growth.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := r.build(sa, scenario.Options{}), r.build(sb, scenario.Options{Through: sb.Checkpoints()[0]})
+	r.collectAt(landedAt(0))
+	opt := parse.Options{Conversation: a.Session, Session: b.Session, MaxRoundBytes: removalBudget}
+	parseAll := func() {
+		t.Helper()
+		for {
+			res, err := parse.Session(r.zone, opt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !res.Changed() || !res.More {
+				return
+			}
+		}
+	}
+	parseAll()
+	chainDir := filepath.Join(r.dir, "_conversations", a.Session)
+	before := treeOf(t, filepath.Join(chainDir, "rounds"))
+	retire(t, r.zone, a.Session)
+	res := retirementOf(r).RecoverRetired()
+	if len(res.Errors) > 0 || len(res.Retired) != 1 || res.Retired[0] != a.Session {
+		t.Fatalf("the retirement: %+v", res)
+	}
+	if present(r.zone.SessionDir(a.Session)) || !present(r.zone.SessionDir(b.Session)) {
+		t.Fatal("the retirement did not remove the retired session's directory alone")
+	}
+	if after := treeOf(t, filepath.Join(chainDir, "rounds")); strings.Join(after, "\n") != strings.Join(before, "\n") {
+		t.Fatalf("the rounds of the live session changed:\nbefore:\n%s\nafter:\n%s",
+			strings.Join(before, "\n"), strings.Join(after, "\n"))
+	}
+	r.build(sb, scenario.Options{})
+	r.collectAt(landedAt(1))
+	parseAll()
+	files, err := storage.LandedFiles(r.zone, b.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := parse.View(r.dir, a.Session); err != nil || v.Session != b.Session || v.ThroughSeq != files[len(files)-1].Seq {
+		t.Fatalf("the live session's chain did not go on: %v", err)
 	}
 }

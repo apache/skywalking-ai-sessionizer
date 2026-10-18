@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · executionId · tool_call and tool_re
 asz conversation -terms both ID     run  (executionId)
 ```
 
-**64 terms: 24 that Kiro names, 40 this project derives.**
+**66 terms: 24 that Kiro names, 42 this project derives.**
 
 ---
 

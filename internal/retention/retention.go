@@ -750,13 +750,31 @@ var roundName = regexp.MustCompile(`^r(\d{6,})-([0-9a-f]{12})\.sf$`)
 // chainThrough reads the landed sequence a conversation's head round covers,
 // and false when the conversation has no round yet.
 func chainThrough(root, id string) (uint64, bool, error) {
+	hdr, ok, err := headRound(root, id)
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	return hdr.ThroughSeq, true, nil
+}
+
+// roundHeader is what retention reads of a round's header. The field names
+// are Session Flow's, written out because its package is server side.
+type roundHeader struct {
+	Session    string `json:"session"`
+	ThroughSeq uint64 `json:"through_seq"`
+}
+
+// headRound reads the header of a conversation's head round, and false when
+// the conversation has no round yet.
+func headRound(root, id string) (roundHeader, bool, error) {
+	var hdr roundHeader
 	dir := filepath.Join(root, conversationsDir, id, "rounds")
 	items, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return 0, false, nil
+		return hdr, false, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return hdr, false, err
 	}
 	var head string
 	var headN uint64
@@ -765,31 +783,32 @@ func chainThrough(root, id string) (uint64, bool, error) {
 		if it.IsDir() || m == nil {
 			continue
 		}
+		// No round is empty. An empty file under a round's name is the
+		// reservation of a writer that stopped before its rename, which the
+		// chain does not count, and the chain's next publication removes.
+		if info, err := it.Info(); err == nil && info.Size() == 0 {
+			continue
+		}
 		if n, _ := strconv.ParseUint(m[1], 10, 64); head == "" || n > headN {
 			head, headN = filepath.Join(dir, it.Name()), n
 		}
 	}
 	if head == "" {
-		return 0, false, nil
+		return hdr, false, nil
 	}
 	f, err := os.Open(head)
 	if err != nil {
-		return 0, false, err
+		return hdr, false, err
 	}
 	defer f.Close()
 	line, err := bufio.NewReader(f).ReadBytes('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return 0, false, err
-	}
-	// The field name is Session Flow's, written out because its package is
-	// server side.
-	var hdr struct {
-		ThroughSeq uint64 `json:"through_seq"`
+		return hdr, false, err
 	}
 	if err := json.Unmarshal(bytes.TrimRight(line, "\n"), &hdr); err != nil {
-		return 0, false, fmt.Errorf("the head round %s cannot be read: %w", head, err)
+		return hdr, false, fmt.Errorf("the head round %s cannot be read: %w", head, err)
 	}
-	return hdr.ThroughSeq, true, nil
+	return hdr, true, nil
 }
 
 // sessionDirs lists the sessions of a root: every directory whose name does
