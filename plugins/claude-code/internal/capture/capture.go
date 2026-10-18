@@ -189,7 +189,13 @@ func Build(r *scan.Root, reg *Registry, w *Window, ctx Context, sizeCap int64) (
 	nets := map[string]*net{}
 	var order []string
 	partial := false
+	var unread []string
 	for _, s := range steps {
+		// What the BEFORE scan could not read is not observed either: the
+		// window starts there from what an older scan saw.
+		if s.N >= w.Before {
+			unread = append(unread, s.Unread...)
+		}
 		if s.N <= w.Before {
 			continue
 		}
@@ -224,6 +230,7 @@ func Build(r *scan.Root, reg *Registry, w *Window, ctx Context, sizeCap int64) (
 		rec.Coverage = changes.CoveragePartial
 		rec.Gaps = append(rec.Gaps, "a scan stopped at its time cap; paths it did not reach are not observed")
 	}
+	notObserved(rec, unread)
 	for _, other := range reg.Windows {
 		if other.Capture == w.Capture || !overlaps(&other, w) {
 			continue
@@ -280,6 +287,7 @@ func BuildGap(r *scan.Root, step *scan.Step, session, stream string, policy *cha
 	if step.Partial {
 		rec.Coverage = changes.CoveragePartial
 	}
+	notObserved(rec, step.Unread)
 	var paths []string
 	for p := range step.Changes {
 		paths = append(paths, p)
@@ -296,6 +304,24 @@ func BuildGap(r *scan.Root, step *scan.Step, session, stream string, policy *cha
 		rec.Changes = []changes.FileChange{}
 	}
 	return rec
+}
+
+// notObserved marks a record partial for each path a scan could not read,
+// and names each once. A reader must not take the files there for unchanged.
+func notObserved(rec *changes.Record, unread []string) {
+	seen := map[string]bool{}
+	sort.Strings(unread)
+	for _, p := range unread {
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		if p == "." {
+			p = "the root"
+		}
+		rec.Coverage = changes.CoveragePartial
+		rec.Gaps = append(rec.Gaps, "a scan could not read "+p+", so what changed there is not observed")
+	}
 }
 
 // overlaps says whether two windows were open on the root at once.

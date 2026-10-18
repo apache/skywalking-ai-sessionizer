@@ -704,14 +704,16 @@ signatures are 13.3% of the bytes and wrap 0.1 MB of reasoning text.
 **A tool result's content is not always a string.** Over 20,000 `tool_result` records: string 19,707,
 list of image 124, list of text 104, list of `tool_reference` 92. `tool_reference` is an undocumented
 block, `{"type":"tool_reference","tool_name":"Monitor"}`, 194 in the corpus. A `result` takes its
-`text` from the string, or from the text blocks joined. When there is no text, the part keeps the raw
-content as `data`, because the source can be pruned and the landed copy may be the only one. A
-reader that treats the content as a string loses the image and reference results.
+`text` from the string, or from the text blocks joined. When there is no text, or the list holds a
+block that is not text, such as an image beside a caption, the part keeps the raw content as `data`
+too, because the source can be pruned and the landed copy may be the only one. A reader that treats
+the content as a string loses the image and reference results.
 
 **A Claude Code result carries `text` and `data` together.** When the record carries a
-`toolUseResult` object, the whole object becomes the result part's `data`, beside the text. Both are
-kept on purpose. `toolUseResult` has a different shape for each tool, 49 distinct key sets across the
-corpus, which flattening would lose, and it has detail the block lacks: stdout and stderr apart, a
+`toolUseResult` object, the whole object becomes the result part's `data`, beside the text, in place
+of any raw content. Both are kept on purpose. `toolUseResult` has a different shape for each tool,
+49 distinct key sets across the corpus, which flattening would lose, and it has detail the block
+lacks: stdout and stderr apart, a
 patch, a status. It is also the only full copy of long output. Among 516 records whose output spilled
 to a file, the content block was shorter than `toolUseResult.stdout` by about 28 KB where it had been
 cut. The cost is the `toolUseResult` copy in the table above, 7.6% of the bytes. An `Edit` or

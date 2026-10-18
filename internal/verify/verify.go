@@ -77,7 +77,11 @@ func (g EndGap) String() string {
 
 // StreamReport is the result of checking one stream or run directory.
 type StreamReport struct {
-	Dir     string
+	Dir string
+	// Src is the source checked, for a kind whose sources are checked apart;
+	// see Sources. Empty when the directory's files of the kind are checked
+	// as one.
+	Src     string
 	Files   int
 	Records int
 
@@ -166,15 +170,99 @@ func Stream(dir, kind string) (*StreamReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep := &StreamReport{Dir: dir, Files: len(files)}
+	reps, err := walk(dir, files, false)
+	if err != nil {
+		return nil, err
+	}
+	rep := &StreamReport{Dir: dir}
+	if len(reps) > 0 {
+		rep = reps[0]
+	}
+	endCheck(rep, cur, cursorPath)
+	return rep, nil
+}
 
+// Sources checks one stream directory for one of the plugin's kinds, changes
+// or execution, one source at a time, by the files' src. The same path can
+// hold one file after another, the plugin writing a new one after its
+// retention removed the old, and the same session can be in two recorder
+// directories. Each lands under a src of its own and numbers its lines from
+// 1, so checked as one they read as lines landed twice and as gaps. Each
+// source is held to the cursor whose source names it. When more than one
+// cursor names a src, as cursors written before 0.6.0 can, the files cannot be
+// told apart, and only the first, <kind>.cursor where it is one, is checked.
+func Sources(dir, kind string) ([]*StreamReport, error) {
+	// The cursors are read before the files are listed, as Stream reads its.
+	type held struct {
+		path string
+		cur  *storage.Cursor
+	}
+	var cursors []held
+	items, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, it := range items {
+		name := it.Name()
+		if it.IsDir() || !strings.HasSuffix(name, ".cursor") {
+			continue
+		}
+		if name != kind+".cursor" && !strings.HasPrefix(name, kind+"-") {
+			continue
+		}
+		cur, err := storage.LoadCursor(filepath.Join(dir, name), storage.CursorAppend, "")
+		if err != nil {
+			return nil, err
+		}
+		cursors = append(cursors, held{filepath.Join(dir, name), cur})
+	}
+	sort.SliceStable(cursors, func(i, j int) bool {
+		return filepath.Base(cursors[i].path) == kind+".cursor" && filepath.Base(cursors[j].path) != kind+".cursor"
+	})
+	files, err := landedFiles(dir, kind)
+	if err != nil {
+		return nil, err
+	}
+	reps, err := walk(dir, files, true)
+	if err != nil {
+		return nil, err
+	}
+	bySrc := map[string]*StreamReport{}
+	for _, rep := range reps {
+		bySrc[rep.Src] = rep
+	}
+	checked := map[string]bool{}
+	for _, c := range cursors {
+		if checked[c.cur.Source] {
+			continue
+		}
+		checked[c.cur.Source] = true
+		rep := bySrc[c.cur.Source]
+		if rep == nil {
+			rep = &StreamReport{Dir: dir, Src: c.cur.Source}
+			bySrc[rep.Src] = rep
+			reps = append(reps, rep)
+		}
+		endCheck(rep, c.cur, c.path)
+	}
+	return reps, nil
+}
+
+// walk reads a directory's landed files of one kind and checks their lines:
+// as one source, or one source for each src when bySrc is set. The reports
+// are in the order their first file landed.
+func walk(dir string, files []string, bySrc bool) ([]*StreamReport, error) {
 	// Every source starts at line 1 and byte 0, so the first record is held to
 	// that position exactly as a later record is held to the end of the one
 	// before it. Starting from whatever the first record said would accept a
 	// stream whose first landed file is lost.
-	var prevOrd, prevEnd uint64
-	first := true
-
+	type source struct {
+		rep              *StreamReport
+		prevOrd, prevEnd uint64
+		first            bool
+	}
+	var order []*source
+	sources := map[string]*source{}
 	for _, path := range files {
 		f, err := storage.OpenLanded(path)
 		if err != nil {
@@ -185,6 +273,18 @@ func Stream(dir, kind string) (*StreamReport, error) {
 			f.Close()
 			return nil, fmt.Errorf("verify: %s: %w", path, err)
 		}
+		key := ""
+		if bySrc {
+			key = r.Header().Src
+		}
+		s := sources[key]
+		if s == nil {
+			s = &source{rep: &StreamReport{Dir: dir, Src: key}, first: true}
+			sources[key] = s
+			order = append(order, s)
+		}
+		rep := s.rep
+		rep.Files++
 		if rf := removedFile(path, r.Header()); rf != nil {
 			rep.Removed = append(rep.Removed, *rf)
 		}
@@ -200,47 +300,54 @@ func Stream(dir, kind string) (*StreamReport, error) {
 			rep.Records++
 			rep.TooLarge += tooLarge(rec)
 
-			if first {
+			if s.first {
 				rep.FirstOrd = rec.Ord
-				first = false
+				s.first = false
 			}
-			if rec.Ord <= prevOrd {
+			if rec.Ord <= s.prevOrd {
 				// A repeat of ground already covered. The bytes are still here;
 				// they are here twice.
 				rep.Relanded++
 			} else {
 				// A line gap and a byte gap are independent facts, and a stream can
 				// have one without the other, so both are checked.
-				if rec.Ord != prevOrd+1 {
-					rep.OrdGaps = append(rep.OrdGaps, Gap{path, row, prevOrd + 1, rec.Ord})
+				if rec.Ord != s.prevOrd+1 {
+					rep.OrdGaps = append(rep.OrdGaps, Gap{path, row, s.prevOrd + 1, rec.Ord})
 				}
-				if rec.Off != prevEnd {
-					rep.ByteGaps = append(rep.ByteGaps, Gap{path, row, prevEnd, rec.Off})
+				if rec.Off != s.prevEnd {
+					rep.ByteGaps = append(rep.ByteGaps, Gap{path, row, s.prevEnd, rec.Off})
 				}
 			}
 
 			// A repeat must not pull the watermark backwards, or every record
 			// after it would look like a gap.
-			if rec.Ord > prevOrd {
-				prevOrd = rec.Ord
+			if rec.Ord > s.prevOrd {
+				s.prevOrd = rec.Ord
 				// +1 for the newline the source carried and the record does not.
-				prevEnd = rec.Off + uint64(rec.Bytes) + 1
+				s.prevEnd = rec.Off + uint64(rec.Bytes) + 1
 				rep.LastOrd = rec.Ord
 			}
 		}
 		f.Close()
 	}
-	rep.BytesCovered = prevEnd
+	reps := make([]*StreamReport, len(order))
+	for i, s := range order {
+		s.rep.BytesCovered = s.prevEnd
+		reps[i] = s.rep
+	}
+	return reps, nil
+}
 
-	// A snapshot cursor tracks a digest, not lines, and a stream with no cursor
-	// has nothing to say where reading stopped. Only an append cursor ahead of
-	// the records is a loss. One loss at the end is one problem, whether the
-	// cursor counts lines, bytes or both.
+// endCheck holds a source's landed records to its cursor. A snapshot cursor
+// tracks a digest, not lines, and a stream with no cursor has nothing to say
+// where reading stopped. Only an append cursor ahead of the records is a
+// loss. One loss at the end is one problem, whether the cursor counts lines,
+// bytes or both.
+func endCheck(rep *StreamReport, cur *storage.Cursor, cursorPath string) {
 	if cur.Kind == storage.CursorAppend && (cur.Ord > rep.LastOrd || cur.Offset > rep.BytesCovered) {
 		rep.End = &EndGap{Cursor: cursorPath, Ord: cur.Ord, Offset: cur.Offset,
 			LastOrd: rep.LastOrd, Covered: rep.BytesCovered}
 	}
-	return rep, nil
 }
 
 // tooLarge counts a record's parts whose payload was too large to land.

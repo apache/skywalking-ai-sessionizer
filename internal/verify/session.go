@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // SessionReport aggregates every stream and run in one session.
@@ -65,24 +66,39 @@ func Session(z *storage.Zone, session string) (*SessionReport, error) {
 
 	check := func(dir string, kinds ...string) error {
 		for _, k := range kinds {
-			sr, err := Stream(dir, k)
-			if err != nil {
-				return err
+			var reports []*StreamReport
+			// The plugin's kinds are checked one source at a time: a stream
+			// can hold more than one, each numbering its lines from 1.
+			if k == string(sessiondata.KindChanges) || k == string(sessiondata.KindExecution) {
+				srs, err := Sources(dir, k)
+				if err != nil {
+					return err
+				}
+				reports = srs
+			} else {
+				sr, err := Stream(dir, k)
+				if err != nil {
+					return err
+				}
+				reports = []*StreamReport{sr}
 			}
-			// A stream with no landed file of this kind is still checked when
-			// its cursor says something was read: every file of it is lost.
-			if sr.Files == 0 && sr.End == nil {
-				continue
-			}
-			rep.Streams = append(rep.Streams, sr)
-			rep.Records += sr.Records
-			rep.Relanded += sr.Relanded
-			rep.TooLarge += sr.TooLarge
-			rep.Removed = append(rep.Removed, sr.Removed...)
-			rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps)
-			if sr.End != nil {
-				rep.Problems++
-				rep.EndGaps++
+			for _, sr := range reports {
+				// A stream with no landed file of this kind is still checked
+				// when its cursor says something was read: every file of it
+				// is lost.
+				if sr.Files == 0 && sr.End == nil {
+					continue
+				}
+				rep.Streams = append(rep.Streams, sr)
+				rep.Records += sr.Records
+				rep.Relanded += sr.Relanded
+				rep.TooLarge += sr.TooLarge
+				rep.Removed = append(rep.Removed, sr.Removed...)
+				rep.Problems += len(sr.OrdGaps) + len(sr.ByteGaps)
+				if sr.End != nil {
+					rep.Problems++
+					rep.EndGaps++
+				}
 			}
 		}
 		return nil

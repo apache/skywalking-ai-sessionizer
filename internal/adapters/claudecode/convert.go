@@ -254,11 +254,13 @@ func partOf(raw json.RawMessage, tur *toolResult, hasTUR bool) (sessiondata.Part
 		if b.IsError != nil {
 			p.Failed = b.IsError
 		}
-		// A result whose content is neither a string nor text blocks - an image,
-		// a reference to another tool's output - reads as empty otherwise. The
-		// raw content travels instead of being described, because the source it
-		// came from can be pruned and this would be the only copy.
-		if p.Text == "" && len(b.Content) > 0 {
+		// A result whose content is more than a string or text blocks - an
+		// image, a reference to another tool's output, alone or beside text -
+		// reads as its text alone otherwise, and a screenshot's image was lost
+		// that way. The raw content travels instead of being described,
+		// because the source it came from can be pruned and this would be the
+		// only copy.
+		if len(b.Content) > 0 && (p.Text == "" || !textOnly(b.Content)) {
 			p.Data = b.Content
 			p.Bytes = len(b.Content)
 		}
@@ -307,6 +309,24 @@ func resultText(content json.RawMessage) (string, int) {
 		}
 	}
 	return "", len(content)
+}
+
+// textOnly reports whether a tool result's content is text and nothing else:
+// a string, or a list of text blocks, which resultText holds whole.
+func textOnly(content json.RawMessage) bool {
+	if len(content) > 0 && content[0] == '"' {
+		return true
+	}
+	var blocks []blockOf
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type != "text" {
+			return false
+		}
+	}
+	return true
 }
 
 // attachmentContent returns an attachment's prose, or its whole object when it

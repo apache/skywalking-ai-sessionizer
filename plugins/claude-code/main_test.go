@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -157,6 +158,60 @@ func TestAShellCommandIsObservedEndToEnd(t *testing.T) {
 	}
 	if w := agentRecs[1]; w.Tool != "toolu_2" || *w.ChangedFiles != 0 || w.Stream != "a0123456789abcdef" {
 		t.Fatalf("second window: %+v", w)
+	}
+}
+
+// A shell command that makes a directory unreadable deletes nothing. The
+// record said every file under it was deleted, with coverage complete. It
+// says the directory was not observed, and when access comes back, nothing
+// under it is found as created by nobody.
+func TestADirectoryMadeUnreadableIsNotObservedRatherThanDeleted(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission bits do not stop this reader here")
+	}
+	data := t.TempDir()
+	ws := t.TempDir()
+	sub := filepath.Join(ws, "secrets")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "key.txt"), []byte("k\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+	now := time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)
+	const session = "11111111-2222-4333-8444-555555555555"
+	window := func(tool, cmd string, at time.Time, during func()) {
+		t.Helper()
+		runHook(strings.NewReader(hookInput("PreToolUse", session, "", "Bash", tool, cmd, "", "")), data, ws, at)
+		during()
+		runHook(strings.NewReader(hookInput("PostToolUse", session, "", "Bash", tool, cmd, `{"stdout":"","stderr":""}`, "")), data, ws, at.Add(time.Second))
+	}
+	window("toolu_1", `{"command":"chmod 000 secrets"}`, now, func() {
+		if err := os.Chmod(sub, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	recs := readLines(t, output.Path(data, session, "main"))
+	if len(recs) != 1 {
+		t.Fatalf("records: %d", len(recs))
+	}
+	if r := recs[0]; *r.ChangedFiles != 0 || r.Coverage != changes.CoveragePartial || len(r.Gaps) != 1 || !strings.Contains(r.Gaps[0], "secrets") {
+		t.Fatalf("record: changed=%d coverage=%s gaps=%v changes=%+v; want nothing deleted and secrets not observed",
+			*r.ChangedFiles, r.Coverage, r.Gaps, r.Changes)
+	}
+	window("toolu_2", `{"command":"chmod 755 secrets"}`, now.Add(10*time.Second), func() {
+		if err := os.Chmod(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	})
+	recs = readLines(t, output.Path(data, session, "main"))
+	if len(recs) != 2 {
+		t.Fatalf("records: %d; a gap record says something changed between the calls", len(recs))
+	}
+	if r := recs[1]; r.Tool != "toolu_2" || *r.ChangedFiles != 0 || r.Coverage != changes.CoveragePartial {
+		t.Fatalf("record: tool=%s changed=%d coverage=%s; want nothing created, and partial since the BEFORE scan could not read secrets",
+			r.Tool, *r.ChangedFiles, r.Coverage)
 	}
 }
 

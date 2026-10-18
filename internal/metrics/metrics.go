@@ -434,9 +434,9 @@ type result struct {
 }
 
 // deriveFile reads one landed file's calls and turns the ones that finished
-// into points. A call whose last fragment is the file's last record may go
-// on across several files of the stream. Their leading fragments are read
-// until another transcript record ends the call, and it is counted once.
+// into points. The file's last call may go on across several files of the
+// stream. Their leading records are read until a record that is neither a
+// fragment of it nor a tool result ends it, and it is counted once.
 // Points take the minute the call's last fragment falls in, and a window
 // that never overlaps the series' last: a minute already passed by an
 // earlier point follows that point instead.
@@ -477,7 +477,9 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 	calls := map[string]*call{}
 	var order []string
 	var last *call
-	var tail bool
+	// open says the file ends at a fragment of its last call, or at tool
+	// results after one.
+	var open bool
 	for {
 		rec, err := rd.Next()
 		if errors.Is(err, io.EOF) {
@@ -490,8 +492,11 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 		if ok && t.After(res.latest) {
 			res.latest = t
 		}
-		tail = false
-		if hdr.Kind != sessiondata.KindTranscript || rec.Call == "" {
+		if hdr.Kind != sessiondata.KindTranscript {
+			continue
+		}
+		if rec.Call == "" {
+			open = open && isResult(rec)
 			continue
 		}
 		c := calls[rec.Call]
@@ -501,15 +506,25 @@ func deriveFile(lf storage.LandedFile, following []storage.LandedFile, since tim
 			order = append(order, rec.Call)
 		}
 		c.take(rec, t, ok)
-		last, tail = c, true
+		last, open = c, true
 	}
 	// Drain what the reader did not consume, so the digest is the file's.
 	if _, err := io.Copy(io.Discard, f); err != nil {
 		return nil, err
 	}
 	res.digest = fileDigest(&hdr, h)
-	if tail && last != nil && !ss.Calls[last.id] {
-		res.openTail = lf.Path
+	// The file's last call may go on in the next file: its own tool results
+	// sit between its fragments. It is read ahead whatever follows it here.
+	// A file that ends at a fragment of it, or at tool results after one,
+	// waits for the next file, as one does whose call was found to go on.
+	// Under a watching collector the next file lands on a later pass, and a
+	// call counted before it was counted in an earlier fragment's minute for
+	// good. A file whose last call is followed by anything else does not
+	// wait: the call is over.
+	if last != nil && !ss.Calls[last.id] {
+		if open {
+			res.openTail = lf.Path
+		}
 		for _, next := range following {
 			if next.Stream != lf.Stream {
 				continue
@@ -621,9 +636,24 @@ func (c *call) take(rec *sessiondata.Record, t time.Time, ok bool) {
 	}
 }
 
+// isResult reports whether a record carries a tool's result.
+func isResult(rec *sessiondata.Record) bool {
+	for _, p := range rec.Parts {
+		if p.Kind == sessiondata.PartResult {
+			return true
+		}
+	}
+	return false
+}
+
 // continueIn reads the leading fragments of a call. more says the call
 // may continue in another file; matched says this file held a fragment.
-// Metadata and workspace changes do not interrupt a transcript's call.
+// Metadata and workspace changes do not interrupt a transcript's call, and
+// neither do tool results, which sit between its fragments. Any other
+// record, such as a person's next prompt or a fragment of another call, ends
+// it. That is the rule deriveFile reads a file by: read on past a prompt, a
+// file waited the grace for a call its next file, read alone, counted at
+// once, and the waiting file's earlier calls then took windows after it.
 func continueIn(path string, c *call) (more, matched bool, err error) {
 	f, err := sessiondata.Open(path)
 	if err != nil {
@@ -644,6 +674,9 @@ func continueIn(path string, c *call) (more, matched bool, err error) {
 		}
 		if err != nil {
 			return false, matched, err
+		}
+		if rec.Call == "" && isResult(rec) {
+			continue
 		}
 		if rec.Call != c.id {
 			return false, matched, nil

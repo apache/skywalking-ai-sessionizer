@@ -271,9 +271,10 @@ func TestRepackFitsEveryFileInItsBudget(t *testing.T) {
 // into the new root computes them. Each cursor names the file holding the
 // last record its own source landed. Collection into the new root goes on
 // from where each source stopped: it lands nothing, then only the records
-// appended since, and the new root parses and verifies. Records of two files
-// are cut into one only when the files' headers are the same, so every file
-// names its own source.
+// appended since, and the new root parses and verifies. Each source other than
+// the first lands under a src of its own, its path marked with its first line,
+// and records of two files are cut into one only when the files' headers are
+// the same, so every file names its own source.
 func TestRepackCarriesTheCursorOfEveryRecorderRoot(t *testing.T) {
 	const session = "11111111-2222-4333-8444-555555555555"
 	line := func(id, tool string) string {
@@ -342,7 +343,7 @@ func TestRepackCarriesTheCursorOfEveryRecorderRoot(t *testing.T) {
 				}
 				return out
 			}
-			if a, b := sources(src), sources(dst); !reflect.DeepEqual(a, b) || len(a) != 2 {
+			if a, b := sources(src), sources(dst); !reflect.DeepEqual(a, b) || len(a) != 3 {
 				t.Fatalf("the files name the sources %v; the source root's name %v", b, a)
 			}
 			before, after := cursorsIn(t, src, session), cursorsIn(t, dst, session)
@@ -374,6 +375,107 @@ func TestRepackCarriesTheCursorOfEveryRecorderRoot(t *testing.T) {
 			add(inside, "asz-changes-market", line("i/c4", "toolu_7"))
 			if n := collect(dst); n != 3 {
 				t.Fatalf("collection into the new root landed %d records; want the three appended", n)
+			}
+			parsedAndVerified(t, dst, session)
+		})
+	}
+}
+
+// TestRepackRenamesTheCursorsOfALaterFile. A recorder inside the storage root
+// writes its origin relative to it, and the plugin there removed its output
+// file and wrote it again, twice. The first file at the path keeps the
+// recorder's own cursor, named for its origin and its path. Each later file
+// has a cursor named for its origin, its path and the first line of the file
+// before it. A repack writes the origin again for the new root, and must name
+// every one of those cursors as a collector into the new root computes them:
+// a later file's cursor kept under its old name was not found, and its file
+// was read from its start and landed again.
+func TestRepackRenamesTheCursorsOfALaterFile(t *testing.T) {
+	const session = "11111111-2222-4333-8444-555555555555"
+	line := func(id string) string {
+		r := &changes.Record{Schema: changes.Schema, ID: id, CapturedBy: changes.CapturedByASZPlugin, Session: session,
+			Stream: "main", Tool: "toolu_" + id, ToolName: "Bash", Time: "2026-09-08T02:00:04Z", Basis: changes.BasisToolWindow,
+			Root: &changes.Root{Path: "/w"}, ChangedFiles: changes.Int(0)}
+		b, err := r.Marshal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b) + "\n"
+	}
+	for _, budget := range []int64{1, 64 << 20} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			src := storage.NewZone(t.TempDir())
+			outside, inside := t.TempDir(), filepath.Join(src.Root(), "_recorder")
+			pathIn := func(root string) string {
+				return filepath.Join(root, "file-changes-market", "output", session, "main.jsonl")
+			}
+			add := func(root string, lines ...string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(pathIn(root)), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				f, err := os.OpenFile(pathIn(root), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, l := range lines {
+					if _, err := f.WriteString(l); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := f.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			again := func(root string, lines ...string) {
+				t.Helper()
+				if err := os.Remove(pathIn(root)); err != nil {
+					t.Fatal(err)
+				}
+				add(root, lines...)
+			}
+			collect := func(z *storage.Zone) int {
+				t.Helper()
+				records := 0
+				for _, root := range []string{outside, inside} {
+					st, err := claudecodechanges.New(root, z, 0).CollectAll(nil)
+					if err != nil || len(st.Errors) > 0 || st.Conflicts != 0 {
+						t.Fatalf("%s: %+v, %v", root, st, err)
+					}
+					records += st.Records
+				}
+				return records
+			}
+			// The outside root arrives first and keeps <kind>.cursor.
+			add(outside, line("o1"))
+			add(inside, line("a1"), line("a2"))
+			want := []int{3}
+			got := []int{collect(src)}
+			again(inside, line("b1"))
+			want, got = append(want, 1), append(got, collect(src))
+			again(inside, line("c1"), line("c2"))
+			want, got = append(want, 2), append(got, collect(src))
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("the source root landed %v records; want %v", got, want)
+			}
+			if n := len(cursorsIn(t, src, session)); n != 4 {
+				t.Fatalf("the source root has %d cursors; want one for each of four files", n)
+			}
+			dst := storage.NewZone(t.TempDir())
+			if _, err := repack.Session(src, dst, session, budget, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			if n := collect(dst); n != 0 {
+				t.Fatalf("collection into the new root landed %d records again", n)
+			}
+			if n := len(cursorsIn(t, dst, session)); n != 4 {
+				t.Fatalf("the new root has %d cursors after a collection; want the four carried, and no new one", n)
+			}
+			parsedAndVerified(t, dst, session)
+			add(outside, line("o2"))
+			add(inside, line("c3"))
+			if n := collect(dst); n != 2 {
+				t.Fatalf("collection into the new root landed %d records; want the two appended", n)
 			}
 			parsedAndVerified(t, dst, session)
 		})

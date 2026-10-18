@@ -92,6 +92,18 @@ func land(t *testing.T, z *storage.Zone, session, stream string, seq uint64, cal
 // otherwise.
 func landAs(t *testing.T, z *storage.Zone, session, stream string, seq uint64, calls []call, dialect string) string {
 	t.Helper()
+	var recs []*sessiondata.Record
+	ord := uint64(1)
+	for _, c := range calls {
+		recs = append(recs, records(c, stream == "main", &ord)...)
+	}
+	return landRecords(t, z, session, stream, seq, recs, dialect)
+}
+
+// landRecords lands a transcript of the records given, for a test that needs
+// records the call fixture does not write.
+func landRecords(t *testing.T, z *storage.Zone, session, stream string, seq uint64, recs []*sessiondata.Record, dialect string) string {
+	t.Helper()
 	path := filepath.Join(z.StreamDir(session, stream), storage.LandedName("transcript", storage.Stamp(time.Unix(int64(seq), 0)), seq))
 	err := storage.WriteAtomic(path, storage.PermLanded, func(w io.Writer) error {
 		hdr := &sessiondata.Header{Seq: seq, At: "2026-09-07T00:00:00Z", Kind: sessiondata.KindTranscript,
@@ -100,12 +112,9 @@ func landAs(t *testing.T, z *storage.Zone, session, stream string, seq uint64, c
 		if err != nil {
 			return err
 		}
-		ord := uint64(1)
-		for _, c := range calls {
-			for _, rec := range records(c, stream == "main", &ord) {
-				if err := sw.Write(rec); err != nil {
-					return err
-				}
+		for _, rec := range recs {
+			if err := sw.Write(rec); err != nil {
+				return err
 			}
 		}
 		return sw.Close()

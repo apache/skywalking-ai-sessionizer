@@ -208,22 +208,27 @@ calls in a corpus of 2,970 files and 365,825 records written by Claude Code 2.1.
 is 14.5% of the calls on child streams and 0.02% of those on main transcripts, as [Provider
 calls](../adapters/claude-code.md#provider-calls) reports.
 
-A call cut at a landed file boundary is read through following transcript files of its stream
-when the file's last record is a fragment of that call. There is no one-file limit. Metadata,
-change and execution files do not interrupt the reading; the first unrelated transcript record
-does. A tool
-result carries no call id, and in the same corpus a call's own tool results sit between its
-fragments on 24% of multi-fragment calls. Such a result ends the read-ahead. An unfinished child
+A call cut at a landed file boundary is read through following transcript files of its stream.
+The call read ahead is the file's last call, whether the file ends with a fragment of it or with
+records of no call after it. There is no one-file limit. Metadata, change and execution files do
+not interrupt the reading, and neither do tool results. A tool result carries no call id, and in
+the same corpus a call's own tool results sit between its fragments on 24% of multi-fragment calls.
+Any other transcript record ends the reading: a fragment of another call, or a record of no call
+that is not a tool result, such as a person's next prompt. That is where reading the next file
+alone ends the call too, so a file never waits for a call the next file has counted. An unfinished child
 call remains eligible when its final fragment arrives later. On a main transcript every fragment
 repeats the final usage, so the call counts in full, in the minute of the last fragment read.
 
-Under a watching collector, a file whose last record is a fragment of a call not yet counted waits
-a short grace for the next file of its stream, then is derived with what it has. When a continuation
-is found, its last file starts the grace. A deferred session is retried even while other sessions
-keep changing. An unfinished call is not marked counted when the grace expires. A file that ends
-with a tool result does not wait. A single pass, the backfill over history that already exists,
-derives with what is there and never waits. A call is never counted twice, however many files its
-records reach, and a record the runtime re-emitted before a context reset is the same call again.
+Under a watching collector, a file whose last call is not counted yet waits a short grace for the
+next file of its stream when the file ends at a fragment of that call, or at tool results after
+one, since the call may go on there. Then it is derived with what it has. When a continuation is
+found, its last file starts the grace. A file whose last call is followed by any other record does
+not wait: the call is over. A deferred session is retried even while other sessions keep changing.
+An unfinished call is not marked counted when the grace expires, and a fragment of a finished call
+that lands after the grace no longer moves it. A single pass, the backfill over history that
+already exists, derives with what is there and never waits. A call is never
+counted twice, however many files its records reach, and a record the runtime re-emitted before a
+context reset is the same call again.
 
 ### Calls to MCP servers
 

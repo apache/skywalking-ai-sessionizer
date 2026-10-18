@@ -482,19 +482,29 @@ func closeOut(o *out) (err error) {
 // carryCursors copies every cursor of the session into the new root, so a
 // collector pointed at the new root continues each source from where the old
 // one stopped instead of landing it again. A directory holds one cursor per
-// source: <prefix>.cursor for the first, and <prefix>-<hash>.cursor for each
-// other source of the same files, such as a second recorder directory. Each
-// names the new file holding the last record of the file its source landed
-// last.
+// source: <prefix>.cursor for the first, <prefix>-<hash>.cursor for each
+// other source of the same files, such as a second recorder directory, and
+// <prefix>-<hash>.cursor for each later file the plugin wrote at a source's
+// path. Each names the new file holding the last record of the file its
+// source landed last.
 //
 // An origin relative to the storage root names a source root inside it. A
 // collector into the new root writes that root as it writes any root
-// outside, and names the source's own cursor by it, so the origin and that
-// name are written again as it computes them. Left as they were, the
+// outside, and names the source's own cursors by it, so the origin and those
+// names are written again as it computes them. Left as they were, the
 // collector found no cursor of its own and read the source from its start.
 func carryCursors(src, dst *storage.Zone, session string, landedIn map[uint64]*output, now time.Time) error {
 	srcDir, dstDir := src.SessionDir(session), dst.SessionDir(session)
-	return filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+	type held struct {
+		path, rel string
+		cur       *storage.Cursor
+	}
+	var all []held
+	// A later file's cursor is named for the first line of the file before
+	// it, which only that file's cursor records: by directory, each name a
+	// cursor's successor has under the old origin, and the head it is for.
+	successor := map[string]string{}
+	err := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".cursor") {
 			return err
 		}
@@ -506,20 +516,42 @@ func carryCursors(src, dst *storage.Zone, session string, landedIn map[uint64]*o
 		if err != nil {
 			return err
 		}
+		all = append(all, held{path, rel, cur})
+		if cur.HeadSHA256 != "" {
+			name := storage.LaterCursorName(prefixOf(d.Name()), cur.Origin, storage.SourcePath(cur.Source), cur.HeadSHA256)
+			successor[filepath.Join(rel, name)] = cur.HeadSHA256
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, h := range all {
+		cur := h.cur
 		var last uint64
 		if o := landedIn[cur.LastSeq]; o != nil {
 			last = o.seq
 		}
-		name, origin := d.Name(), cur.Origin
+		name, origin := filepath.Base(h.path), cur.Origin
 		if origin != "" && !filepath.IsAbs(filepath.FromSlash(origin)) {
 			origin = storage.CursorOrigin(dst.Root(), filepath.Join(src.Root(), filepath.FromSlash(cur.Origin)))
-			prefix := strings.SplitN(strings.TrimSuffix(name, ".cursor"), "-", 2)[0]
-			if name == storage.SourceCursorName(prefix, cur.Origin, cur.Source) {
-				name = storage.SourceCursorName(prefix, origin, cur.Source)
+			prefix, source := prefixOf(name), storage.SourcePath(cur.Source)
+			if name == storage.SourceCursorName(prefix, cur.Origin, source) {
+				name = storage.SourceCursorName(prefix, origin, source)
+			} else if head, ok := successor[filepath.Join(h.rel, name)]; ok {
+				name = storage.LaterCursorName(prefix, origin, source, head)
 			}
 		}
-		return carryCursor(path, filepath.Join(dstDir, rel, name), last, origin, now)
-	})
+		if err := carryCursor(h.path, filepath.Join(dstDir, h.rel, name), last, origin, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// prefixOf is the kind a cursor's name starts with.
+func prefixOf(name string) string {
+	return strings.SplitN(strings.TrimSuffix(name, ".cursor"), "-", 2)[0]
 }
 
 // carryCursor copies one cursor with its last landed sequence, its origin
