@@ -16,15 +16,17 @@
 # under the License.
 
 # Three calls on one stream, each with its request and its response joined
-# to it, a file for each call. Every request cites the first prompt, which is
-# too large to land, so no request can be rebuilt from the root.
+# to it. Every request cites the first prompt, which is too large to land, so
+# no request can be rebuilt from the root, nor copied from, and each writes its
+# message list whole. With the list in its manifest, one call's two bodies no
+# longer fit one file of the budget, so the six bodies take four files.
 checkpoints:
   final:
     kinds: {llm.call: 3}
     view:
       state: verified
       provider_bodies: 6
-      provider_files: 3
+      provider_files: 4
       captured_prompts: 3
 collect:
   # Smaller than the first prompt.

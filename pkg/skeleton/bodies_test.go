@@ -79,10 +79,13 @@ func conversation() []providerbody.Body {
 			c.msgs = append(c.msgs, map[string]any{"role": "user", "content": text + strings.Repeat(" more context", 150)})
 		}
 		req := compact(map[string]any{"model": "m-1", "system": c.system, "tools": c.tools, "messages": c.msgs})
-		out = append(out, providerbody.Body{ID: fmt.Sprintf("req-%02d", n), Role: providerbody.RoleRequest, Src: fmt.Sprintf("%02d.json", n), Bytes: req})
+		out = append(out, providerbody.Body{ID: fmt.Sprintf("req-%02d", n), Role: providerbody.RoleRequest, Src: fmt.Sprintf("%02d.json", n), Bytes: req,
+			History: &providerbody.History{Form: providerbody.FormClaudeCode, Messages: entriesOf(c.msgs)}})
 		reply := "answer to " + text + strings.Repeat(" in detail", 140)
+		answer := map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": reply}}}
 		out = append(out, providerbody.Body{ID: fmt.Sprintf("resp-%02d", n), Role: providerbody.RoleResponse, Src: fmt.Sprintf("%02d.response.json", n),
-			Bytes: compact(map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "text", "text": reply}}})})
+			Bytes: compact(answer), History: &providerbody.History{Form: providerbody.FormClaudeCode,
+				Reply: &providerbody.Reply{Digest: entriesOf([]any{answer})[0].Digest}}})
 		c.msgs = append(c.msgs, map[string]any{"role": "assistant", "content": reply})
 	}
 	call(main, "read the file")
@@ -96,6 +99,16 @@ func conversation() []providerbody.Body {
 	call(main, "this session is being continued")
 	call(main, "and then")
 	call(child, "a last look")
+	return out
+}
+
+// entriesOf is a message list's entries, each the digest of the message as
+// written, standing in for the form an adapter computes.
+func entriesOf(msgs []any) []providerbody.Entry {
+	out := make([]providerbody.Entry, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, providerbody.EntryOf("", false, compact(m)))
+	}
 	return out
 }
 
@@ -454,5 +467,51 @@ func TestAnIdenticalBodyDoesNotTakeAnotherTip(t *testing.T) {
 	}
 	if _, err := held.Body(again.ID); !errors.Is(err, providerbody.ErrTooLarge) {
 		t.Fatalf("an identical body too large to land reads %v, want ErrTooLarge", err)
+	}
+}
+
+// TestAMessageListResolvesFromSkeletons. A skeleton keeps the manifest, its
+// message list with it, so every list a session's requests wrote reads back
+// the same from skeletons alone, with no body bytes at all: the index rebuilt
+// from them compares calls as it did from the bodies.
+func TestAMessageListResolvesFromSkeletons(t *testing.T) {
+	cut := providerbody.NewSession()
+	var landed []*sessiondata.Record
+	for _, b := range conversation() {
+		rec, err := cut.Encode(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		landed = append(landed, rec)
+	}
+	bare := providerbody.NewSession()
+	for _, rec := range landed {
+		if err := bare.Add(skeleton.Of(bodyHeader, rec)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	relative := 0
+	for _, rec := range landed {
+		m, _ := providerbody.ManifestOf(rec)
+		if m.Role != providerbody.RoleRequest {
+			continue
+		}
+		if m.Messages.Relative() {
+			relative++
+		}
+		want, _, err := cut.ListOf(rec.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _, err := bare.ListOf(rec.ID)
+		if err != nil {
+			t.Fatalf("%s from skeletons: %v", rec.ID, err)
+		}
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("%s: %v from skeletons, %v from the bodies", rec.ID, got, want)
+		}
+	}
+	if relative == 0 {
+		t.Fatal("no list was written against a base; the test needs some")
 	}
 }

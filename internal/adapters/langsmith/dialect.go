@@ -120,6 +120,9 @@ type decoded struct {
 	inputs   json.RawMessage
 	outputs  json.RawMessage
 	metadata map[string]any
+	// class is a model call's class, internal_call or turn_call, or "" when
+	// no start of the run said.
+	class string
 	// alone says this request held the whole trace and no model call in it.
 	// Then nothing else can be carrying what this run's fields hold.
 	alone bool
@@ -234,19 +237,26 @@ func Convert(op Operation, firstOfTrace bool, hints Hints) ([]sessiondata.Record
 	if err := json.Unmarshal(op.Envelope, &envelope); err != nil {
 		return nil, err
 	}
-	return ConvertRun(op, envelope, "", firstOfTrace, hints)
+	return ConvertRun(op, envelope, "", "", firstOfTrace, hints)
 }
 
 // ConvertRun is Convert with the run already read, and with whatever an
 // earlier arrival supplied that this one left out. An update carries only
 // what changed, so on its own it says neither what kind of run it is nor
 // which conversation it belongs to.
-func ConvertRun(op Operation, run Run, method string, firstOfTrace bool, hints Hints) ([]sessiondata.Record, error) {
+//
+// class is the class the run's start gave it, when this arrival is an update;
+// a start classifies itself.
+func ConvertRun(op Operation, run Run, method, class string, firstOfTrace bool, hints Hints) ([]sessiondata.Record, error) {
 	d, err := decodeOperation(op)
 	if err != nil {
 		return nil, err
 	}
 	d.run = run
+	d.class = class
+	if own := callClassOf(op); own != "" {
+		d.class = own
+	}
 	// An update carries no metadata, so how the run was traced comes from
 	// what its own start said.
 	if method != "" {
@@ -467,6 +477,9 @@ func modelCall(base sessiondata.Record, d decoded) sessiondata.Record {
 	base.From = sessiondata.FromAgent
 	base.Time = timeOf(d)
 	base.Model, _ = d.metadata["ls_model_name"].(string)
+	if d.class != "" {
+		base.Flags = append(base.Flags, d.class)
+	}
 	if d.run.Finished() {
 		base.Flags = append(base.Flags, "finished")
 		message := generationOf(d.outputs)
@@ -495,8 +508,8 @@ func modelCall(base sessiondata.Record, d decoded) sessiondata.Record {
 // every reader. A record named this way may hold more than the system prompt,
 // such as the person's message, which lands on its own record as well.
 //
-// Measured on the 72 model arrivals of the captured corpus: every one sent
-// its inputs out of band, and the 43 that offered tools sent them in an
+// Measured on the 80 model arrivals of the captured corpus: every one sent
+// its inputs out of band, and the 46 that offered tools sent them in an
 // out-of-band extra, so no landed envelope carried either. The envelope
 // carries a field only when the client did not split it out.
 func requestFlags(envelope json.RawMessage) []string {

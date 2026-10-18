@@ -18,6 +18,7 @@
 package index
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/changes"
@@ -91,7 +92,98 @@ func bodyOf(in *Interner, rec *sessiondata.Record) *Body {
 	case providerbody.RoleResponse:
 		b.Role = BodyRoleResponse
 	}
+	historyOf(in, m, b)
 	return b
+}
+
+// historyOf reads the manifest's history fields into the body. A value that
+// does not read as the format page says leaves the field unavailable rather
+// than guessed at: a digest that is not sixteen hexadecimal characters is not
+// one, whatever it holds.
+func historyOf(in *Interner, m *providerbody.Manifest, b *Body) {
+	if m.HistoryForm == "" {
+		return
+	}
+	b.Form = in.ID(m.HistoryForm)
+	if m.System != "" {
+		if _, ok := messageOf(providerbody.Entry{Digest: m.System}); ok {
+			b.System = in.ID(m.System)
+		} else {
+			b.SystemUnknown = true
+		}
+	}
+	// A thread no rule describes says the request holds something unknown,
+	// so its list cannot be read as its history.
+	threadUnknown := false
+	if t := m.Thread; t != nil {
+		switch {
+		case t.Type == providerbody.ThreadCreate:
+			b.Thread = ThreadCreate
+		case t.Type == providerbody.ThreadContinue && t.Previous != "" && len(t.Previous) <= providerbody.MaxPrevious:
+			b.Thread, b.ThreadPrevious = ThreadContinue, in.ID(t.Previous)
+		default:
+			threadUnknown = true
+		}
+	}
+	if l := m.Messages; l != nil {
+		unavailable := func(why string, count int) {
+			b.List, b.ListWhy, b.ListCount, b.messages = ListUnavailable, in.ID(why), uint32(count), ""
+		}
+		entries := l.Entries
+		switch {
+		case l.Unavailable != "":
+			unavailable(l.Unavailable, l.Count)
+		case l.Relative():
+			b.List, b.ListBase, b.ListKeep = ListRelative, in.ID(l.Base), uint32(l.Keep)
+			entries = l.Add
+		default:
+			b.List = ListWhole
+		}
+		if b.List != ListUnavailable {
+			encoded := make([]byte, 0, len(entries)*messageWidth)
+			buf := make([]byte, messageWidth)
+			for _, e := range entries {
+				msg, ok := messageOf(e)
+				if !ok {
+					unavailable(providerbody.UnrecognisedShape, 0)
+					encoded = nil
+					break
+				}
+				encodeMessage(buf, &msg)
+				encoded = append(encoded, buf...)
+			}
+			b.messages = string(encoded)
+		}
+		if threadUnknown {
+			unavailable(providerbody.UnrecognisedShape, 0)
+		}
+	}
+	if r := m.Reply; r != nil {
+		if r.Unavailable != "" {
+			b.Reply, b.ReplyWhy = ReplyUnavailable, in.ID(r.Unavailable)
+		} else if msg, ok := messageOf(providerbody.Entry{ID: r.ID, Digest: r.Digest}); ok {
+			b.Reply, b.ReplyHasID, b.ReplyID, b.ReplyDigest = ReplyEntry, msg.HasID, msg.ID, msg.Digest
+		} else {
+			b.Reply, b.ReplyWhy = ReplyUnavailable, in.ID(providerbody.UnrecognisedShape)
+		}
+	}
+}
+
+// messageOf turns an entry's two digests into numbers.
+func messageOf(e providerbody.Entry) (Message, bool) {
+	d, err := strconv.ParseUint(e.Digest, 16, 64)
+	if err != nil || len(e.Digest) != 16 {
+		return Message{}, false
+	}
+	msg := Message{Digest: d}
+	if e.ID != "" {
+		id, err := strconv.ParseUint(e.ID, 16, 64)
+		if err != nil || len(e.ID) != 16 {
+			return Message{}, false
+		}
+		msg.HasID, msg.ID = true, id
+	}
+	return msg, true
 }
 
 // batchOf takes the batch from the record when it names one, and from the file
@@ -155,19 +247,21 @@ func triggerOf(t string) Trigger {
 // flagNames is the mapping the adapter writes and the index reads back. It is
 // one table so the two cannot disagree.
 var flagNames = map[string]Flags{
-	"synthetic":      FlagSynthetic,
-	"context_reset":  FlagEpochBoundary,
-	"reset_summary":  FlagEpochSummary,
-	"finished":       FlagStopReason,
-	"external_input": FlagExternalInput,
-	"injected":       FlagInjection,
-	"child_result":   FlagChildResult,
-	"error":          FlagError,
-	"launch_ack":     FlagLaunchAck,
-	"turn_duration":  FlagTurnDuration,
-	"command":        FlagCommand,
-	"notice":         FlagNotice,
-	"auxiliary":      FlagAuxiliary,
+	"synthetic":             FlagSynthetic,
+	"context_reset":         FlagEpochBoundary,
+	"reset_summary":         FlagEpochSummary,
+	"finished":              FlagStopReason,
+	"external_input":        FlagExternalInput,
+	"injected":              FlagInjection,
+	"child_result":          FlagChildResult,
+	"error":                 FlagError,
+	"launch_ack":            FlagLaunchAck,
+	"turn_duration":         FlagTurnDuration,
+	"command":               FlagCommand,
+	"notice":                FlagNotice,
+	"auxiliary":             FlagAuxiliary,
+	model.ClassInternalCall: FlagInternalCall,
+	model.ClassTurnCall:     FlagTurnCall,
 }
 
 // FlagName returns the written form of one flag.

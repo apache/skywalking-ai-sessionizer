@@ -128,6 +128,11 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.TriggerExternal, Note: "the root run of a trace carries the message that opened it"},
 	model.Term{Unified: model.TriggerNotification, Note: "no equivalent"},
 	model.Term{Unified: model.TriggerUnknown, Note: "derived"},
+
+	model.Term{Unified: model.ClassTurnCall,
+		Note: "no equivalent: a run of type llm whose start carries no lc_internal_call"},
+	model.Term{Unified: model.ClassInternalCall, Native: "extra.metadata.lc_internal_call", Where: "the start of a run of type llm",
+		Note: "LangChain sets it on a model call it makes for its own purpose, such as SummarizationMiddleware's summary"},
 )
 
 // Glossary is what this runtime calls the things the model names.

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io/fs"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
@@ -74,6 +75,11 @@ type Session struct {
 	// maxRecord is the largest line a record Encode returns may take in a
 	// landed file, its newline included; zero means no limit. See Budget.
 	maxRecord int64
+	// budget is the landed file's budget itself, which the cap on a message
+	// list is a share of.
+	budget int64
+	// added counts the records added, so a record knows which came before it.
+	added int
 
 	records map[string]*held
 	pieces  map[string]pieceAt
@@ -100,6 +106,8 @@ type held struct {
 	// removed says rec is a skeleton: the record keeps its place and its
 	// pieces' digests, and none of its bytes.
 	removed bool
+	// at is the record's place among the records added, from zero.
+	at int
 }
 
 type pieceAt struct {
@@ -118,9 +126,9 @@ func NewSession() *Session {
 // its largest pieces taken out until it fits. Zero or less means no limit; a
 // budget no record can fit still takes out every piece it can.
 func (s *Session) Budget(budget int64) {
-	s.maxRecord = 0
+	s.maxRecord, s.budget = 0, 0
 	if budget > 0 {
-		s.maxRecord = max(budget-FileOverhead, 1)
+		s.maxRecord, s.budget = max(budget-FileOverhead, 1), budget
 	}
 }
 
@@ -135,10 +143,40 @@ func ManifestOf(rec *sessiondata.Record) (*Manifest, error) {
 	}
 	last := rec.Parts[len(rec.Parts)-1]
 	var m Manifest
-	if last.Kind != sessiondata.PartData || json.Unmarshal(last.Data, &m) != nil || m.Schema != Schema {
+	if last.Kind != sessiondata.PartData || unmarshalManifest(last.Data, &m) != nil || m.Schema != Schema {
 		return nil, fmt.Errorf("providerbody: the last part of %s is not a %s manifest", rec.ID, Schema)
 	}
 	return &m, nil
+}
+
+// historyKeys are the keys a manifest says its call's history in.
+var historyKeys = []string{"history_form", "messages", "system", "thread", "reply"}
+
+// unmarshalManifest reads a manifest. One whose history keys do not read is
+// read without them, as a body that says nothing of its call's history: it
+// still joins its call and rebuilds, and its history is never compared. A key
+// is matched without case, as the decoder matches it.
+func unmarshalManifest(data []byte, m *Manifest) error {
+	if json.Unmarshal(data, m) == nil {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for k := range fields {
+		for _, h := range historyKeys {
+			if strings.EqualFold(k, h) {
+				delete(fields, k)
+			}
+		}
+	}
+	rest, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	*m = Manifest{}
+	return json.Unmarshal(rest, m)
 }
 
 // Holds reports the SHA-256 of the body the session holds under id.
@@ -229,7 +267,8 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 		}
 		return ErrRepeat
 	}
-	s.records[rec.ID] = &held{rec: rec, m: m, removed: removed}
+	s.records[rec.ID] = &held{rec: rec, m: m, removed: removed, at: s.added}
+	s.added++
 	for i, p := range rec.Parts[:own] {
 		if p.Kind != sessiondata.PartData {
 			continue
@@ -580,6 +619,7 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 	fill := map[string][]byte{sum: body}
 	parts, why := s.cut(body, m, fill)
 	if why == "" {
+		s.writeHistory(m, b.History)
 		rec.Parts = append(parts, manifestPart(m))
 		s.fit(rec, fill)
 		// What is left after the pieces go is the manifest, and a body of
@@ -598,6 +638,7 @@ func (s *Session) Encode(b Body) (*sessiondata.Record, error) {
 		// Why the body was not cut is the whole part's text; the manifest
 		// does not repeat it.
 		m.Depth, m.Segments = 0, []Segment{{Part: &zero}}
+		s.writeHistory(m, b.History)
 		rec.Parts = []sessiondata.Part{whole, manifestPart(m)}
 		s.fit(rec, fill)
 		if err := s.roundTrip(rec, fill); err != nil {

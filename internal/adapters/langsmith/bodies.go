@@ -222,7 +222,12 @@ func (c *Collector) landBodies(session string, state *storage.SessionState,
 		case providerbody.RoleResponse:
 			keys.Call, keys.Request = b.run.ID, b.run.ID
 		}
-		rec, err := held.Encode(providerbody.Body{ID: id, Role: b.role, Src: src, Keys: keys, Bytes: b.bytes})
+		h := historyOf(b.role, b.bytes)
+		if b.role == providerbody.RoleResponse {
+			h.Reply = eligibleReply(held, b.run.ID, h.Reply)
+		}
+		rec, err := held.Encode(providerbody.Body{ID: id, Role: b.role, Src: src, Keys: keys, Bytes: b.bytes,
+			History: h})
 		switch {
 		case errors.Is(err, providerbody.ErrRepeat):
 			out.repeats++

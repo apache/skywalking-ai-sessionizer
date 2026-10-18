@@ -19,7 +19,7 @@ asz conversation -terms native ID   talk · promptId · message.id · tool_use +
 asz conversation -terms both ID     run  (promptId)
 ```
 
-**61 terms: 39 that Claude Code names, 22 this project derives.** That ratio is worth watching. If
+**63 terms: 39 that Claude Code names, 24 this project derives.** That ratio is worth watching. If
 everything had a native name, the model would be a rename of one product rather than a model of
 any. If nothing did, it would have no evidence under it.
 
@@ -91,6 +91,7 @@ than a plausible word that would send a reader looking for a field that does not
 | `hash_only` | only a digest of the bytes was kept |
 | `in_segment` | the activity window a Talk falls in |
 | `input_of` | unavailable; the serialized provider request is not written locally |
+| `internal_call` | no equivalent: a request Claude Code sends for its own purpose, such as a compaction's, joins no call |
 | `omitted` | deliberately not carried |
 | `removed` | no equivalent: asz removes the payloads of a conversation idle longer than storage.retention.metadata_only_after from its own root; Claude Code keeps its transcript as before |
 | `retries` | unavailable; retry identity is not recorded |
@@ -100,6 +101,7 @@ than a plausible word that would send a reader looking for a field that does not
 | `talk` | one readable interaction; derived from where a run was triggered |
 | `too_large` | no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget, such as a pasted screenshot |
 | `truncated` | part of the bytes, with the full length reported |
+| `turn_call` | every call a transcript records; Claude Code writes no flag for it |
 | `unavailable` | the runtime never wrote it, or the source was pruned |
 | `unknown` | no record of the run states a trigger |
 | `unresolved` | no usable evidence |

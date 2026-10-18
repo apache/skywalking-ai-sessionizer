@@ -139,6 +139,10 @@ var glossary = model.NewGlossary(Dialect,
 		Note: "also a user record with promptSource \"sdk\", no origin and no isMeta - a headless run's prompt - and a run whose records state no origin at all - a locally typed command"},
 	model.Term{Unified: model.TriggerNotification, Native: "origin.kind == \"task-notification\"", Where: "record"},
 	model.Term{Unified: model.TriggerUnknown, Note: "no record of the run states a trigger"},
+
+	model.Term{Unified: model.ClassTurnCall, Note: "every call a transcript records; Claude Code writes no flag for it"},
+	model.Term{Unified: model.ClassInternalCall,
+		Note: "no equivalent: a request Claude Code sends for its own purpose, such as a compaction's, joins no call"},
 )
 
 // Glossary returns what Claude Code calls the things the model names.

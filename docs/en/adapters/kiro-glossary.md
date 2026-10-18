@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · executionId · tool_call and tool_re
 asz conversation -terms both ID     run  (executionId)
 ```
 
-**61 terms: 24 that Kiro names, 37 this project derives.**
+**63 terms: 24 that Kiro names, 39 this project derives.**
 
 ---
 
@@ -84,6 +84,7 @@ not there.
 | `hash_only` | — | derived here | no equivalent |
 | `in_segment` | — | derived here | derived |
 | `input_of` | — | derived here | no equivalent |
+| `internal_call` | — | derived here | no equivalent: Kiro records no model request, so no call's history is compared |
 | `llm.call` | — | derived here | no equivalent: the engine records what the model said and not which request said it |
 | `message.synthetic` | — | derived here | not read: records the engine writes on recovery end their id in -synthetic, are a tool result, a child's end or a turn's end, and none was measured |
 | `model` | — | derived here | not read: no record says which model answered; session.json names the model chosen |
@@ -102,6 +103,7 @@ not there.
 | `too_large` | — | derived here | no equivalent: asz omits a payload whose record alone is larger than a landed file's byte budget |
 | `trigger` | — | derived here | derived: a user record that is neither a steering note nor written by the engine |
 | `truncated` | — | derived here | not read: the model is sent a preview of a large tool output, and that preview is the result here; the whole output is in tool-outputs, which is not collected |
+| `turn_call` | — | derived here | no equivalent: Kiro records no model request, so no call's history is compared |
 | `unknown` | — | derived here | derived |
 | `unresolved` | — | derived here | derived |
 | `weak_inference` | — | derived here | derived |

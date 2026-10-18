@@ -90,6 +90,9 @@ class Handler(BaseHTTPRequestHandler):
         tools = [t["function"]["name"] for t in request.get("tools", [])]
         told = sum(1 for m in request.get("messages", []) if m.get("role") == "tool")
         calls, text = _reply(behaviour, tools, told, index)
+        if request.get("stream"):
+            self._stream(request, behaviour, index, calls, text)
+            return
         message = {"role": "assistant", "content": text}
         if calls:
             message = {"role": "assistant", "content": None, "tool_calls": calls}
@@ -106,6 +109,47 @@ class Handler(BaseHTTPRequestHandler):
         }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+    def _stream(self, request, behaviour, index, calls, text):
+        """The same reply as server-sent chunks, as a provider streams it.
+
+        The text goes in pieces and each tool call's arguments in two, and the
+        pieces join to exactly what the unstreamed reply holds, so the client
+        has to put the reply together, which is what a streaming case measures.
+        """
+        def chunk(delta, finish=None):
+            return {"id": "chatcmpl-%d" % index, "object": "chat.completion.chunk",
+                    "created": 1700000000, "model": behaviour,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}
+
+        chunks = [chunk({"role": "assistant", "content": ""})]
+        for i, call in enumerate(calls or []):
+            arguments = call["function"]["arguments"]
+            half = len(arguments) // 2
+            chunks.append(chunk({"tool_calls": [{"index": i, "id": call["id"], "type": "function",
+                                                 "function": {"name": call["function"]["name"],
+                                                              "arguments": arguments[:half]}}]}))
+            chunks.append(chunk({"tool_calls": [{"index": i, "function": {"arguments": arguments[half:]}}]}))
+        # Three pieces that join to exactly the text, and none for a reply
+        # that is all tool calls.
+        if text:
+            third = max(len(text) // 3, 1)
+            for i in range(0, len(text), third):
+                chunks.append(chunk({"content": text[i:i + third]}))
+        chunks.append(chunk({}, "tool_calls" if calls else "stop"))
+        if (request.get("stream_options") or {}).get("include_usage"):
+            chunks.append({"id": "chatcmpl-%d" % index, "object": "chat.completion.chunk",
+                           "created": 1700000000, "model": behaviour, "choices": [],
+                           "usage": {"prompt_tokens": 100 + index, "completion_tokens": 10,
+                                     "total_tokens": 110 + index}})
+        body = "".join("data: %s\n\n" % json.dumps(c) for c in chunks) + "data: [DONE]\n\n"
+        body = body.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

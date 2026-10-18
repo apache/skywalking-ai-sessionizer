@@ -40,6 +40,7 @@ was still running.
 | plain | 1 | 6 | 6 | 0 | 0 | 19964 | `thread-plain` |
 | shared-thread-key | 1 | 22 | 22 | 0 | 0 | 99890 | `123` |
 | slow-tool | 2 | 18 | 15 | 3 | 3 | 68470 | `thread-slow` |
+| streaming | 1 | 25 | 25 | 0 | 0 | 88068 | `thread-streaming`, `thread-streaming-loop` |
 | subagent | 1 | 39 | 39 | 0 | 0 | 179370 | `thread-subagent` |
 | subagent-own-thread | 1 | 30 | 30 | 0 | 0 | 125255 | `thread-subagent-parent` |
 | summarized | 1 | 35 | 35 | 0 | 0 | 174152 | `thread-summarized` |
@@ -55,9 +56,9 @@ Counted across every case, by the kind of run that carried them.
 
 | run type | runs | bytes | share |
 | --- | --- | --- | --- |
-| chain | 385 | 3195023 | 79.0% |
-| llm | 75 | 723377 | 17.9% |
-| tool | 27 | 125734 | 3.1% |
+| chain | 404 | 3240325 | 78.9% |
+| llm | 80 | 740882 | 18.0% |
+| tool | 28 | 127449 | 3.1% |
 
 A graph's own `chain` runs carry the whole message list again in their inputs
 and outputs, which is why they hold most of the bytes while saying nothing the
@@ -78,6 +79,7 @@ conversation does not already have.
 | plain | One turn, no tools: the smallest conversation there is. |
 | shared-thread-key | Two applications using one thread key: project alone is not isolation. |
 | slow-tool | A slow tool: runs are posted open and completed later by a patch. |
+| streaming | A streaming model: each reply is put together from chunks. |
 | subagent | An agent as a tool: its model calls have their own context. |
 | subagent-own-thread | A sub-agent invoked with its own thread key: a separate conversation. |
 | summarized | SummarizationMiddleware: the history is replaced by a summary, twice. |

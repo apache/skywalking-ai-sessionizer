@@ -79,6 +79,11 @@ type pendingRun struct {
 	// update carries no metadata at all, and without this a decorated
 	// function's completion is read as a graph's.
 	Method string `json:"method,omitempty"`
+	// Class is the class the run's start gave a model call, internal_call or
+	// turn_call. Only a start carries the whole metadata, so an update lacking
+	// lc_internal_call says nothing, and without this its record would carry
+	// no class at all.
+	Class string `json:"class,omitempty"`
 	// Session is the conversation this run's evidence lands in, already
 	// resolved. It is kept rather than derived again because the update
 	// carries none of what deriving it needs.
@@ -209,7 +214,10 @@ func (p *pending) evict(now time.Time) {
 //
 // What is already known is kept when this arrival does not carry it, so a
 // start seen earlier in the same batch is not erased by the update after it.
-func (p *pending) started(run Run, method, session string, now time.Time) {
+//
+// A start's class is kept; when two starts of one run disagree, internal_call
+// is kept, the side that compares nothing.
+func (p *pending) started(run Run, method, class, session string, now time.Time) {
 	known := p.Runs[run.ID]
 	set := func(into *string, value string) {
 		if value != "" {
@@ -224,6 +232,9 @@ func (p *pending) started(run Run, method, session string, now time.Time) {
 	set(&known.Project, run.Session)
 	set(&known.Start, run.Start)
 	set(&known.Method, method)
+	if class == classInternal || (class != "" && known.Class == "") {
+		known.Class = class
+	}
 	set(&known.Session, session)
 	known.At = now.UTC().Format(time.RFC3339Nano)
 	p.Runs[run.ID] = known

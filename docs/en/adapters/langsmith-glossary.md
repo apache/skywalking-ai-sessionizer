@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · trace_id · id · run_type: tool
 asz conversation -terms both ID     run  (trace_id)
 ```
 
-**61 terms: 17 that LangChain names, 44 this project derives.** That ratio is worth watching against
+**63 terms: 18 that LangChain names, 45 this project derives.** That ratio is worth watching against
 the Claude Code one. A framework that records its own graph in detail still has no word for a
 conversation boundary, a context reset or a delegated agent — which is the whole reason this model
 exists separately from any product's.
@@ -43,6 +43,7 @@ Each row says where the thing is recorded in a run.
 | `error.api` | `error` | a run | a string with the exception and its traceback |
 | `id` | `id` | a run | the record is the arrival, so a run that is posted and later patched has two |
 | `input_of` | `inputs` | a run |  |
+| `internal_call` | `extra.metadata.lc_internal_call` | the start of a run of type llm | LangChain sets it on a model call it makes for its own purpose, such as SummarizationMiddleware's summary |
 | `llm.call` | `run_type: llm` | a run |  |
 | `message.assistant` | `outputs.generations[].message.kwargs.content` | a run of type llm |  |
 | `message.external` | `inputs.messages` | the root run of a trace | the message that opened the turn has no run of its own |
@@ -104,6 +105,7 @@ not there.
 | `trigger` | — | derived here | no equivalent: derived from a trace's root run |
 | `truncated` | — | derived here | no equivalent: nothing measured arrived truncated |
 | `turn.duration` | — | derived here | no equivalent as a record; a run's own start and end give it |
+| `turn_call` | — | derived here | no equivalent: a run of type llm whose start carries no lc_internal_call |
 | `unavailable` | — | derived here | a run that arrived unfinished: its content is not there yet |
 | `unknown` | — | derived here | derived |
 | `unresolved` | — | derived here | derived: a failed tool whose model call arrived in another request |

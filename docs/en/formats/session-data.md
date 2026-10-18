@@ -159,6 +159,8 @@ source's fields, never by guessing from text or size, so a reader can act on a f
 | `command` | is a command run in line rather than said to the model |
 | `notice` | is the runtime telling the requester about the session itself |
 | `auxiliary` | names a child stream that is a plain model call the agent made inside its own work, not a child agent |
+| `internal_call` | is a model call the framework made for its own purpose, such as a summary, which takes no part in the history of its stream |
+| `turn_call` | is a model call that is a turn of its stream. A LangChain call that carries neither flag has an unknown class, and its history is never compared. Claude Code writes neither: every call its transcript records is a turn call |
 
 `system_prompt` and `tool_schemas` exist so a server that shows a conversation to the people an
 agent served can withhold what the runtime sent the model, by name rather than by guessing from the
@@ -251,6 +253,7 @@ part that asz builds, the manifest, schema `provider_body/1`:
 | `bytes` limit | a body may claim at most 256 MiB, and a rebuild stops as soon as it passes the size its record claims, so a damaged record cannot make a reader hold more than one body |
 | `chain` | the first sixteen hexadecimal characters of the SHA-256 of the request's first message, with the cache marker taken out. It chooses which earlier body a copy comes from. It is storage, and a join must not rely on it |
 | `model`, `session`, `call`, `request`, `previous_request` | the values the body carries that join it, as its adapter read them, in the model's words: the session it names; on a response, the call it answers and the provider's id for its request; on a request, the call it was sent to when its adapter knew it, and otherwise the provider request id of the call before it in its chain. Empty when the body carries none. The [adapter's glossary](../adapters/claude-code.md#provider-bodies) says what the runtime calls each |
+| `history_form`, `messages`, `system`, `thread`, `reply` | what the body says about its call's history. See [History](#history) |
 
 A reference is a digest or a record id, never a file and a row, because `asz repack` renumbers files
 and rows and carries record lines unchanged. Every reference points at a record that landed before
@@ -294,6 +297,77 @@ and `sha` to its manifest.
 
 On two captures of Claude Code 2.1.260, the landed `provider_body` files were 25.5% and 21.6% of the
 bytes Claude Code wrote, and all 42 bodies rebuilt exactly.
+
+### History
+
+A manifest also says what its body holds of the call's history, so assembly can tell where a call's
+history changed without reading a body. The history of a call is the message list its request
+records, as the runtime recorded it. For Claude Code that is what was sent to the provider; for
+LangChain it is what LangChain passed to the chat model, never the provider's request.
+
+```json
+{"history_form":"claude-code/1",
+ "thread":{"type":"continue","previous":"msg_011C…"},
+ "system":"3f0c9a1e5b7d2c44",
+ "messages":{"base":"03455f62-….request","keep":11,"add":[{"digest":"9c1e…"},{"digest":"07ab…"}]}}
+```
+
+| Key | Value |
+| --- | --- |
+| `history_form` | the rules the other keys were written under: `claude-code/1` or `langchain/1`. Two lists are compared, and a list is written against a base, only under one form. A rule changes only with a new version. Absent on a body landed before asz wrote these keys, which is never compared |
+| `messages` | on a request, its messages in order, one entry each: `{"id":…,"digest":…}`, where `id` is the first sixteen hexadecimal characters of the SHA-256 of the message id the runtime sent, present only when it sent one, and `digest` the same of the message's form below. Written as `{"entries":[…]}`; or as `{"base":…,"keep":k,"add":[…]}`, the first `k` entries of the list of the record `base` followed by `add`; or as `{"unavailable":…}` with the reason, and for a list too large its `count`. An empty list is a request with no messages, never an absent one |
+| `system` | on a Claude Code request, the digest of its `system`: a list of blocks without its billing header, the text block whose text starts `x-anthropic-billing-header:`, and any other value as it is. Absent when nothing else is there |
+| `thread` | on a Claude Code request, the provider thread it starts, `{"type":"create"}`, or continues, `{"type":"continue","previous":…}` with the provider message id it goes on from, at most 128 bytes. Absent when the request carries none. A request that continues a thread holds only what follows that message |
+| `reply` | on a response, the entry of the message it produced, in the same form as a request's messages, or `{"unavailable":…}` |
+
+A list is written against a base only when the base is the body this body's copy comes from, its
+list is in the same form, and the two share a front; otherwise it is written whole. So a list's
+chain is its body's chain, at most 32 deep. A reader checks that the base is an earlier request of
+the session, of the same form, and holds at least `keep` entries, and treats a list that fails as
+unavailable, as it does a list of any other shape. A manifest whose other history keys do not read
+is read without them, as a body that says nothing of its call's history: it still joins its call
+and rebuilds. The budget never takes a manifest out, so a list that would take more than a quarter of
+`max_delta_bytes` as written is `{"unavailable":"too_large","count":…}`; every other key has a fixed
+size, and an entry 53 bytes with an id and 30 without.
+
+Measured on the 20 LangChain capture directories and the Claude Code thread capture (2026-10-18),
+each written with and without the history keys: at the default budget of 2 MiB the keys are 5.3% and
+5.4% of the bytes the `provider_body` files hold, the cap takes no list, the index grows by 13,651
+and 3,581 bytes, and the compressed skeletons of those files by 5,697 and 700. At 4 KiB, the
+smallest budget a scenario uses, the keys are 7.8% and 13.0%, the index grows by 14,293 and 3,989
+bytes and the skeletons by 11,733 and 2,642, and the cap takes 11 of the 79 LangChain lists: the
+longest of a twenty-turn conversation, 19 to 39 messages, whose bodies copy from no earlier body
+under so small a budget.
+
+The reasons a list or a reply is unavailable: `unrecognised_shape`, a body the form does not cover;
+`plural_prompts`, a LangChain request that is not exactly one prompt; `too_large`;
+`no_single_reply`, a response that is not exactly one finished message; and `no_request`, a LangChain
+response whose request did not land. A LangChain reply is written only when the call's request read
+as exactly one prompt: its reply is otherwise unavailable with the request's reason.
+
+A form is canonical JSON of the message: object keys sorted by their UTF-8 bytes, no space between
+tokens, numbers as written, and in strings only the quotation mark, the backslash and the
+characters below U+0020 escaped. Nothing a runtime recorded is left out of a message because a
+provider may not use it: which fields reach a provider depends on its adapter and its mode, which the
+recorded data does not say, and leaving out a field one of them sends hides a change.
+
+- **`claude-code/1`**: a message as sent, with two exceptions, both measured on messages sent again
+  unchanged by Claude Code 2.1.260 and 2.1.302. `cache_control` is left out of the message and of each
+  of its content blocks, since the runtime moves the marker to the newest message. A content list of
+  one block whose only keys are `type` `"text"`, `text` and `cache_control` reads as its `text`
+  string, since a message is sent again collapsed that way; a text block with any other key, such as
+  citations, keeps its form. The reply is `{"role":"assistant","content":…}` with the response's
+  content blocks, and carries no `id`: the response's id is never in a message. A response with no
+  stop reason, or that is not an assistant message, has no reply. On a capture of 2.1.302, removing
+  the first exception broke 6 of 10 comparisons of unchanged history, and removing the second 4.
+- **`langchain/1`**: a message in LangChain's constructor form, `{"lc":1,"type":"constructor","id":[…,
+  class],"kwargs":{…}}`, read as `{"class":…,"kwargs":…}`, with the last element of the path as the
+  class and the kwargs without `id`; every field's type is checked before it is read, so an `lc` of
+  `true` is not 1. Python and JavaScript write the path differently, so only the class is kept. A
+  chunk class keeps its own name. A plain message is `unrecognised_shape`. The reply is the message
+  of the response's one generation. On the 20 capture directories under
+  `tests/apps/langchain/testdata`, every one of 80 message ids sent more than once has one form.
+
 
 ## Closing line
 

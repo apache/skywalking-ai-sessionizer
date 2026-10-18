@@ -113,9 +113,19 @@
   own arguments and result, and a graph's first input, are the application's own, so they are named
   only by their shape: a message of the `system` or `developer` role, a value under a key a provider
   takes the prompt by, or a list of tools. The shapes are listed on the LangChain page. On the
-  captured corpus the client sends both out of band, and all 48 trace roots are chain runs, so the
+  captured corpus the client sends both out of band, and all 51 trace roots are chain runs, so the
   one record named is the arguments of the LangChain JS traced function, which hold its system
   message.
+
+- A model call's record says whether LangChain made it for its own purpose, such as
+  `SummarizationMiddleware`'s summary, from `lc_internal_call` in its start's metadata: it is flagged
+  `internal_call`, and any other model call `turn_call`. Only a start decides, and an update carries
+  its start's class, or none when the receiver no longer holds it.
+- A request's manifest lists its messages in the form `langchain/1`, one digest each, with nothing
+  left out of a message, and a response's the message it produced. On the 20 capture directories,
+  every one of 80 message ids sent more than once has one form. A new capture, `streaming`, streams a
+  graph and a loop over `model.stream()`; the loop sends back the chunks it joined, as
+  `AIMessageChunk`, and a graph an `AIMessage`. See [LangChain](../adapters/langsmith.md).
 
 ## Claude Code
 
@@ -136,6 +146,19 @@
   names a talk. The page shows the flags on the step. A session collected before this keeps its
   records as they are, because landed records are never rewritten. Collecting it into a new root
   names them.
+
+- What each model call was sent is recorded as a list, so a conversation can tell where a call's
+  history changed without reading a body. A provider body's manifest lists the messages its request
+  held, one digest each, the system prompt without its billing header, the message its response
+  produced, and the provider thread the request starts or continues, in the form `claude-code/1`
+  ([Session Data](../formats/session-data.md#history)). Claude Code 2.1.302 continues a thread the
+  provider keeps: a process's first request holds the whole message list, and each later one only
+  the new messages and the id of the response it goes on from. Measured on one session of nine
+  resumed turns, 14 requests: with each such history built from the call it names, every call's
+  history was the one before it with the reply next, through six resumes, until the compaction. A
+  redacted copy of that session is a test. See
+  [Claude Code Provider Bodies](../adapters/claude-code-provider-bodies.md). A body landed before
+  this carries no list.
 
 ## MCP calls
 
@@ -275,6 +298,8 @@
   so the session never parsed again; and the 65,537th part of a record took the first part's
   position, so its step replaced the first one's. The index schema moved to 16, and an older index
   is built again from the landed files.
+- The index reads what a provider body records of its call's history, and the class of a model call.
+  Its schema moved to 17, and an older index is built again from the landed files.
 - The OTLP exporter over HTTP keeps its own connections. It shared the process's default HTTP
   transport, so closing it closed every other HTTP client's idle connections, and anything else that
   closed them, such as a test receiver shutting down, could break a request the exporter had just
