@@ -1,0 +1,38 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Four calls. The fourth's request leaves out the two oldest messages after
+# the first, so its history is not the one before it with more after it: it
+# changed, a card stands just before it, and its cause is unavailable. Of the
+# third call's five messages three are kept and two dropped; the third call's
+# reply and the new question are added. No context reset: one epoch.
+checkpoints:
+  final:
+    kinds: {llm.call: 4, history.change: 1, epoch: 1, epoch.boundary: 0}
+    history: {first: 1, kept: 2, changed: 1}
+    nodes:
+      history/s9-call-2d0e5ed6b2ef:
+        kind: history.change
+        refs: 2
+        attrs: {from_call: call/s6-call-2d0e5ed6b2ef, to_call: call/s9-call-2d0e5ed6b2ef, kept: 3, changed: 0, dropped: 2, added: 2, order_changed: "no", reply: back, system_changed: "no", cause: unavailable}
+      call/s9-call-2d0e5ed6b2ef: {kind: llm.call, attrs: {history: changed, history_from: call/s6-call-2d0e5ed6b2ef, history_messages: 5, history_reply: back}}
+    view:
+      state: verified
+      provider_bodies: 8
+      captured_prompts: 4
+# Small, so the history attributes and the card travel through many rounds.
+parse: {max_round_bytes: 3072}

@@ -161,13 +161,16 @@ func (b *builder) joinProviderBodies() {
 	}
 
 	b.bodiesOfCall = map[string][]sessionflow.ProviderBody{}
+	b.requestRow, b.responseRow = map[string]int{}, map[string]int{}
 	for _, k := range calls {
 		var joined []sessionflow.ProviderBody
 		if i, ok := requestFor[k.node]; ok {
 			joined = append(joined, bodies[i].published())
+			b.requestRow[k.node] = bodies[i].row
 		}
 		if i, ok := responseOf[k.node]; ok {
 			joined = append(joined, bodies[i].published())
+			b.responseRow[k.node] = bodies[i].row
 		}
 		if len(joined) > 0 {
 			b.bodiesOfCall[k.node] = joined
@@ -177,6 +180,8 @@ func (b *builder) joinProviderBodies() {
 
 // body is one provider body this round may join.
 type body struct {
+	// row is the body's place in the index's Bodies.
+	row               int
 	role              index.BodyRole
 	ref               sessionflow.Ref
 	prompt, previous  uint32
@@ -206,7 +211,7 @@ func (b *builder) bodiesInWindow() []body {
 		}
 		seen[e.Record] = true
 		out = append(out, body{
-			role: y.Role, ref: sessionflow.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row)},
+			row: i, role: y.Role, ref: sessionflow.Ref{Seq: uint64(e.Seq), Row: uint64(e.Row)},
 			prompt: e.Run, previous: y.Previous, request: y.Request, msg: e.Call,
 		})
 	}

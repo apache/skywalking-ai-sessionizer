@@ -75,6 +75,7 @@ Run is triggered from outside the loop, by input or by the runtime reporting a c
 | `runtime.notification` | the runtime telling the parent a child completed |
 | `epoch.boundary` | an explicit model-context reset |
 | `epoch.summary` | the carried-forward summary that reset produced |
+| `history.change` | where a call's history is not the one before it with more after it. **Not** a reset, and it names no cause |
 | `error.api` | a provider error |
 | `control.interrupt` | an externally initiated interruption |
 | `control.permission` | a permission decision or mode change |

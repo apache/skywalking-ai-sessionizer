@@ -116,6 +116,7 @@ rather than synthesised.
 | | `runtime.notification` | the runtime informing the parent that a child completed |
 | **Epoch** | `epoch.boundary` | an explicit model-context reset |
 | | `epoch.summary` | the carried-forward summary produced by that reset |
+| **History** | `history.change` | where a call's history is not the history before it with more after it. It names no cause and carries no content |
 | **Control** | `error.api` | a provider error, with retry state where available |
 | | `control.interrupt` | an externally initiated interruption |
 | | `control.permission` | a permission decision or mode change |
@@ -183,6 +184,18 @@ Four properties of this check matter:
   serialized request, this verifies what was actually sent. Where it does not, the same equation
   evaluated over a reconstructed message list is a **structural cross-check on the reconstruction**,
   not a statement about the wire. Adapters must report which of the two applies.
+
+asz evaluates a weaker form of the check where an adapter records each request's message list. A
+call is compared with the eligible call before it in its stream and epoch: one that is a turn, not
+work the framework did for itself, and whose list is readable. When the earlier history is an
+ordered prefix of the later one, the call's history is **kept**; otherwise it **changed**, and a
+`history.change` step stands before the call, with what was kept, changed, dropped and added. The
+earlier response's reply is reported apart, as found in the later history, sent back altered, not
+found, or unavailable, so an identical retry is kept with its reply not found. A call that cannot
+be compared says why, and is neither kept nor changed. A changed history names no cause and is not
+a reset, so the calls stay in their epoch. The rules are on the
+[Session Flow](../formats/session-flow.md#where-a-calls-history-changed) page; which runtimes
+record the lists is on each adapter's page.
 
 ## Evidence and qualification
 

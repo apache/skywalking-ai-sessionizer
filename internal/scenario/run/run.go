@@ -40,6 +40,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/expect"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/execution"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 )
 
 // Options settle a check run.
@@ -503,14 +504,21 @@ func changesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session 
 
 // providerBodiesLeaveTheFold does the same for provider bodies: a body is
 // what a call sent and got back, joined to the call by a view, and no step.
+// The one node bodies add is the card where a call's history changed, which
+// only a call's request can show; the call's own history attributes are
+// attributes, which this does not compare.
 func providerBodiesLeaveTheFold(sc *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxDelta, maxRound int64) ([]string, error) {
-	return leavesTheFold("provider_bodies_leave_the_fold", "the provider bodies", sc.WithoutProviderBodies(), f, out, session, opts, maxDelta, maxRound)
+	return leavesTheFold("provider_bodies_leave_the_fold", "the provider bodies", sc.WithoutProviderBodies(), f, out, session, opts, maxDelta, maxRound,
+		model.KindHistoryChange)
 }
 
 // The plain build is cut at the scenario's budget, as the build it is
 // compared with: a record over a smaller budget lands alone, and a node named
 // by where its first record landed would differ for that alone.
-func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxDelta, maxRound int64) ([]string, error) {
+//
+// added names the kinds of node the evidence may add, which the comparison
+// leaves out.
+func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f scenario.Format, out, session string, opts Options, maxDelta, maxRound int64, added ...string) ([]string, error) {
 	plain := out + "-plain"
 	defer os.RemoveAll(plain)
 	built, err := scenario.Build(plainScenario, f, plain, scenario.Options{At: opts.At, Scale: opts.Scale, Interval: opts.Interval, MaxDelta: maxDelta})
@@ -531,11 +539,16 @@ func leavesTheFold(property, what string, plainScenario *scenario.Scenario, f sc
 	if err != nil {
 		return nil, err
 	}
+	with = with.Without(added...)
+	if len(added) > 0 {
+		// Only the build with the evidence can say what a call's history was.
+		with, without = with.WithoutHistory(), without.WithoutHistory()
+	}
 	var lines []string
 	for _, d := range append(expect.Compare(with, without), expect.CompareRecords(with, without)...) {
 		lines = append(lines, property+": the fold differs with and without "+what+": "+d)
 	}
-	same, err := expect.SameIdentity(out, session, plain, built.Session)
+	same, err := expect.SameIdentity(out, session, plain, built.Session, added...)
 	if err != nil {
 		return nil, err
 	}

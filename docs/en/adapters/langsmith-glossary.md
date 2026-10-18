@@ -21,7 +21,7 @@ asz conversation -terms native ID   talk · trace_id · id · run_type: tool
 asz conversation -terms both ID     run  (trace_id)
 ```
 
-**63 terms: 18 that LangChain names, 45 this project derives.** That ratio is worth watching against
+**64 terms: 18 that LangChain names, 46 this project derives.** That ratio is worth watching against
 the Claude Code one. A framework that records its own graph in detail still has no word for a
 conversation boundary, a context reset or a delegated agent — which is the whole reason this model
 exists separately from any product's.
@@ -84,6 +84,7 @@ not there.
 | `external` | — | derived here | the root run of a trace carries the message that opened it |
 | `follows` | — | derived here | derived from order within a trace |
 | `hash_only` | — | derived here | no equivalent |
+| `history.change` | — | derived here | derived by asz from the inputs of two runs of type llm: trim_messages, langmem and an edited message under one id change the history and write no mark |
 | `in_segment` | — | derived here | derived |
 | `message.synthetic` | — | derived here | no equivalent: nothing here fabricates a message on the model's behalf |
 | `notification` | — | derived here | no equivalent |

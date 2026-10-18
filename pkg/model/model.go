@@ -71,6 +71,11 @@ const (
 	KindEpochBoundary = "epoch.boundary" // an explicit model-context reset
 	KindEpochSummary  = "epoch.summary"  // the carried-forward summary produced by that reset
 
+	// KindHistoryChange marks where a call's history is not the one before it
+	// with more after it. It names no cause: a context reset is an explicit
+	// record, and a changed history is not one. It carries no content.
+	KindHistoryChange = "history.change"
+
 	// Control family.
 	KindErrorAPI          = "error.api"
 	KindControlInterrupt  = "control.interrupt"

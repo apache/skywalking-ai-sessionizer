@@ -26,16 +26,19 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/index"
+	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/providerbody"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/skeleton"
 )
 
@@ -578,6 +581,151 @@ func TestAReplyIsLookedForOnlyAfterItsCall(t *testing.T) {
 		requests := [][]providerbody.Entry{{r}, {r}, third}
 		if got := replyOutcome(r, requests, 1); got != want {
 			t.Fatalf("%v: %s, want %s", third, got, want)
+		}
+	}
+}
+
+// TestEveryLangChainCallSaysWhatItsHistoryWasComparedWith holds what the
+// assembler makes of every capture: a conversation that only grows keeps its
+// history call after call with the reply sent back; a reply the framework
+// sends back with the agent's name added is back_changed; the summariser's
+// own calls and a tool's plain calls are not compared; a marked summary is a
+// reset, so the call after it is the first of its epoch; and no capture
+// changes a history without a mark, so no card is drawn.
+func TestEveryLangChainCallSaysWhatItsHistoryWasComparedWith(t *testing.T) {
+	want := map[string]map[string]int{
+		"abandoned-run":       {"first": 1},
+		"js-graph":            {"first": 1, "kept/back": 1},
+		"js-traceable":        {"first": 1},
+		"large-content":       {"first": 1, "kept/back": 1},
+		"long-conversation":   {"first": 1, "kept/back": 19},
+		"loop":                {"first": 1, "kept/back": 5},
+		"no-thread-key":       {"first": 1, "kept/back": 1},
+		"parallel-tools":      {"first": 1, "kept/back": 1},
+		"plain":               {"first": 1},
+		"shared-thread-key":   {"first": 1, "kept/back": 2},
+		"slow-tool":           {"first": 1, "kept/back": 1},
+		"streaming":           {"first": 2, "kept/back": 2, "kept/back_changed": 1},
+		"subagent":            {"first": 2, "kept/back": 2, "kept/back_changed": 1, "not_compared/auxiliary_stream": 1},
+		"subagent-own-thread": {"first": 2, "kept/back": 1, "kept/back_changed": 1},
+		"summarized":          {"first": 3, "kept/back": 4, "not_compared/internal_call": 2},
+		"three-turns":         {"first": 1, "kept/back": 3},
+		"tool-error":          {"first": 1},
+		"traceable-only":      {},
+		"two-threads":         {"first": 2, "kept/back": 2},
+		"unsafe-thread-key":   {"first": 4},
+	}
+	cases, err := os.ReadDir(corpus)
+	if err != nil {
+		t.Skipf("no corpus: %v", err)
+	}
+	seen := 0
+	for _, c := range cases {
+		if !c.IsDir() {
+			continue
+		}
+		seen++
+		zone, sessions := land(t, c.Name())
+		got := map[string]int{}
+		for _, s := range sessions {
+			if _, err := parse.Session(zone, parse.Options{Conversation: s, Session: s, Reindex: index.Rebuild}); err != nil {
+				t.Fatal(err)
+			}
+			view := fold(t, zone, s)
+			checkPredecessors(t, c.Name(), zone, s, view)
+			for _, n := range view.Nodes {
+				var a struct {
+					History string `json:"history"`
+					Reason  string `json:"history_reason"`
+					Reply   string `json:"history_reply"`
+				}
+				_ = json.Unmarshal(n.Attrs, &a)
+				switch n.Kind {
+				case model.KindHistoryChange:
+					t.Errorf("%s: a card %s; no capture changes a history without a mark", c.Name(), n.ID)
+				case model.KindLLMCall:
+					key := a.History
+					if a.Reason != "" {
+						key += "/" + a.Reason
+					}
+					if a.Reply != "" {
+						key += "/" + a.Reply
+					}
+					got[key]++
+				}
+			}
+		}
+		w, ok := want[c.Name()]
+		if !ok {
+			t.Errorf("%s: a new capture; measure it and add it here", c.Name())
+			continue
+		}
+		if fmt.Sprint(got) != fmt.Sprint(w) {
+			t.Errorf("%s: %v, want %v", c.Name(), got, w)
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("%d captures, %d expected", seen, len(want))
+	}
+}
+
+// checkPredecessors holds each call's comparison to the calls around it: a
+// compared call names the nearest earlier call of its stream that is not the
+// framework's own, a first call has none before it but across a reset, and
+// a call's length is its own request's list.
+func checkPredecessors(t *testing.T, kase string, zone *storage.Zone, session string, view *sessionflow.View) {
+	t.Helper()
+	held, _ := heldInOrder(t, zone, session)
+	before := func(a, b *sessionflow.Ref) bool { return a.Seq < b.Seq || (a.Seq == b.Seq && a.Row < b.Row) }
+	byStream := map[string][]*sessionflow.Node{}
+	for _, n := range view.Nodes {
+		if n.Kind == model.KindLLMCall {
+			byStream[n.Stream] = append(byStream[n.Stream], n)
+		}
+	}
+	resets := view.NodesByKind(model.KindEpochBoundary)
+	for stream, calls := range byStream {
+		sort.Slice(calls, func(i, j int) bool { return before(calls[i].Ref, calls[j].Ref) })
+		var last *sessionflow.Node
+		for _, n := range calls {
+			var a struct {
+				History  string `json:"history"`
+				Reason   string `json:"history_reason"`
+				From     string `json:"history_from"`
+				Messages *int   `json:"history_messages"`
+			}
+			_ = json.Unmarshal(n.Attrs, &a)
+			// A request whose list reads says its length, and only such a one.
+			list, _, err := held.ListOf(strings.TrimPrefix(n.ID, "call/") + ":request")
+			switch {
+			case err == nil && a.Messages == nil:
+				t.Errorf("%s: %s says no length; its request holds %d messages", kase, n.ID, len(list))
+			case err == nil && *a.Messages != len(list):
+				t.Errorf("%s: %s says %d messages; its request holds %d", kase, n.ID, *a.Messages, len(list))
+			case err != nil && a.Messages != nil:
+				t.Errorf("%s: %s says %d messages; its request's list does not read: %v", kase, n.ID, *a.Messages, err)
+			}
+			switch a.History {
+			case "kept", "changed":
+				if last == nil || a.From != last.ID {
+					t.Errorf("%s: %s is compared with %s; the call before it in %s is %v", kase, n.ID, a.From, stream, last)
+				}
+			case "first":
+				if last != nil {
+					spans := false
+					for _, r := range resets {
+						if r.Stream == stream && before(last.Ref, r.Ref) && before(r.Ref, n.Ref) {
+							spans = true
+						}
+					}
+					if !spans {
+						t.Errorf("%s: %s is first, and %s comes before it with no reset between", kase, n.ID, last.ID)
+					}
+				}
+			}
+			if a.Reason != model.ClassInternalCall {
+				last = n
+			}
 		}
 	}
 }

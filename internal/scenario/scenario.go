@@ -66,6 +66,11 @@ type Scenario struct {
 	// directory. A claude-code build writes them as files; an sd build lands
 	// them.
 	ProviderBodies bool `yaml:"provider_bodies"`
+	// ProviderThreads writes the bodies as Claude Code 2.1.302 does: a
+	// process's first request starts a provider thread and holds the whole
+	// message list, and every later one continues it from the response
+	// before and holds only what is new. A resume step starts a new process.
+	ProviderThreads bool `yaml:"provider_threads"`
 	// SystemPrompt is the system prompt the main stream sends, written as the
 	// runtime sends it. Empty leaves the stand-in, which is filler sized to
 	// exercise cutting rather than something to read.
@@ -132,6 +137,14 @@ type Step struct {
 	Replay int `yaml:"replay"`
 	// System is a system record of any subtype.
 	System *System `yaml:"system"`
+	// Forget drops this many of the oldest messages after the first from the
+	// history the stream's next request sends: what an application trimming
+	// its history does. No transcript record shows it; only a provider body
+	// does, and with threads the next request starts a new thread.
+	Forget int `yaml:"forget"`
+	// Resume is a new process taking the session up again, which starts a
+	// new provider thread. It needs provider_threads.
+	Resume bool `yaml:"resume"`
 }
 
 // Queued is input that exists only as an attachment. Mode is what the
@@ -438,8 +451,45 @@ func (sc *Scenario) Validate() error {
 	if sc.ProviderBodies && namesNoCall(sc.Steps) {
 		return errors.New("provider_bodies: a body is written for each call, and an unidentified call or error names none")
 	}
+	forget, resume := bodySteps(sc.Steps)
+	switch {
+	case sc.ProviderThreads && !sc.ProviderBodies:
+		return errors.New("provider_threads: threads are written in provider bodies, and the scenario writes none")
+	case forget && !sc.ProviderBodies:
+		return errors.New("forget: only a provider body shows a history the client trimmed, and the scenario writes none")
+	case resume && !sc.ProviderThreads:
+		return errors.New("resume: a new process starts a new provider thread, and the scenario writes no threads")
+	}
 	seen := map[string]bool{}
 	return validateSteps(sc.Steps, "steps", seen, true, advertised(sc.Tools))
+}
+
+// bodySteps reports whether a forget or a resume step is anywhere in the
+// scenario, in any stream.
+func bodySteps(steps []Step) (forget, resume bool) {
+	for i := range steps {
+		s := &steps[i]
+		forget, resume = forget || s.Forget > 0, resume || s.Resume
+		var nested [][]Step
+		if c := s.Call; c != nil {
+			if c.Agent != nil {
+				nested = append(nested, c.Agent.Steps)
+			}
+			if c.Skill != nil {
+				nested = append(nested, c.Skill.Steps)
+			}
+			if c.Workflow != nil {
+				for _, child := range c.Workflow.Children {
+					nested = append(nested, child.Steps)
+				}
+			}
+		}
+		for _, n := range nested {
+			f, r := bodySteps(n)
+			forget, resume = forget || f, resume || r
+		}
+	}
+	return forget, resume
 }
 
 // namesNoCall reports whether a step, in any stream, writes model output with no
@@ -570,13 +620,16 @@ func validateSteps(steps []Step, where string, seen map[string]bool, main bool, 
 		at := fmt.Sprintf("%s[%d]", where, i)
 		n := 0
 		for _, set := range []bool{s.Input != "", s.Queued != nil, s.Inject != nil, s.Call != nil,
-			s.Result != nil, s.Error.Text != "", s.Reset != nil, s.Replay > 0, s.System != nil} {
+			s.Result != nil, s.Error.Text != "", s.Reset != nil, s.Replay > 0, s.System != nil, s.Forget != 0, s.Resume} {
 			if set {
 				n++
 			}
 		}
 		if n != 1 {
-			return fmt.Errorf("%s: a step is exactly one of input, queued, inject, call, result, error, reset, replay, system", at)
+			return fmt.Errorf("%s: a step is exactly one of input, queued, inject, call, result, error, reset, replay, system, forget, resume", at)
+		}
+		if s.Forget < 0 {
+			return fmt.Errorf("%s: forget is how many messages are dropped, never negative", at)
 		}
 		if in := s.Inject; in != nil {
 			// The runtime carries these in two attachment types, and the

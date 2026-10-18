@@ -157,11 +157,27 @@ func (b *builder) emitCall(c *providerCall, parent string) {
 	if bodies := b.bodiesOfCall[c.NodeID]; len(bodies) > 0 {
 		a[sessionflow.ProviderBodiesAttr] = bodies
 	}
+	h := b.history[c.NodeID]
+	if h != nil {
+		for k, v := range h.attrs {
+			a[k] = v
+		}
+	}
 	b.node(sessionflow.Node{
 		Entity: sessionflow.Entity{ID: c.NodeID}, Kind: model.KindLLMCall,
 		Parent: parent, Stream: c.Stream.Name,
 		Ref: &refs[0], Refs: refs, Attrs: attrs(a),
 	})
+	// Where the call's history changed, a card of its own just before it,
+	// at the call's first fragment, naming the two requests it compares.
+	if h != nil && h.card != nil {
+		b.node(sessionflow.Node{
+			Entity: sessionflow.Entity{ID: sessionflow.NodeID("history", b.str(c.CallID))}, Kind: model.KindHistoryChange,
+			Parent: parent, Stream: c.Stream.Name,
+			Ref: &refs[0], Refs: h.refs, Attrs: attrs(h.card),
+		})
+		b.stats.Steps++
+	}
 
 	// The response's own content becomes steps inside the call. Their position
 	// is (record, block), which is stable because a landed record never changes.

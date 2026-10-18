@@ -243,6 +243,11 @@ type Plan struct {
 	// bodies, and bodies says it writes them. See ProviderBodies.
 	Provider bool
 	bodies   bool
+	// threads writes the bodies with provider threads, and marks are what a
+	// forget or resume step does to the bodies the stream sends next. See
+	// ProviderBodies.
+	threads bool
+	marks   []bodyMark
 	// at is the base time the plan was resolved against, which Span
 	// measures from.
 	at       time.Time
@@ -303,7 +308,7 @@ func (sc *Scenario) Plan(opts Options) (*Plan, error) {
 	if scale == 0 {
 		scale = 1
 	}
-	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Entrypoint: sc.Entrypoint, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, at: at, interval: interval, scale: scale,
+	p := &Plan{Session: sc.Session, Project: sc.Project, Title: sc.Title, Entrypoint: sc.Entrypoint, Provider: sc.ProviderBodies, bodies: sc.ProviderBodies && !sc.omitBodies, threads: sc.ProviderThreads, at: at, interval: interval, scale: scale,
 		SystemPrompt: sc.SystemPrompt, Tools: sc.Tools}
 	if p.Project == "" {
 		p.Project = "-Users-dev-scenario"
@@ -430,6 +435,10 @@ func (b *planner) step(l *lane, s *Step, id string) error {
 		l.last = summary.ID
 	case s.Replay > 0:
 		b.replay(s.Replay)
+	case s.Forget > 0 || s.Resume:
+		// Nothing a transcript records: it changes only what the stream's
+		// next request sends.
+		b.p.marks = append(b.p.marks, bodyMark{at: len(b.p.Events), stream: l.stream, forget: s.Forget, resume: s.Resume})
 	case s.System != nil:
 		at := b.tick(l, s.After)
 		e := Event{Kind: EvSystem, Stream: l.stream, Batch: l.batch, At: at, ID: id + "-sys-" + s.System.Subtype, Parent: l.last,

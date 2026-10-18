@@ -90,6 +90,8 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.KindRuntimeNotification, Native: "<task-notification>", Where: "a user record's content"},
 	model.Term{Unified: model.KindEpochBoundary, Native: "system/compact_boundary", Where: "a system record"},
 	model.Term{Unified: model.KindEpochSummary, Native: "isCompactSummary", Where: "a user record"},
+	model.Term{Unified: model.KindHistoryChange,
+		Note: "derived by asz from the request bodies, when provider bodies are collected: Claude Code writes no such record"},
 	model.Term{Unified: model.KindErrorAPI, Native: "system/api_error", Where: "a system record"},
 	// The runtime has a word for these two, so the Native value stays, but
 	// nothing reads it yet.
