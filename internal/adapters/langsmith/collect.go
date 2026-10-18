@@ -337,12 +337,26 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 	partial := make([]bool, len(operations))
 	follows := make([]int, len(operations))
 	first := map[string]int{}
+	// Every arrival of the request is remembered before any is completed, so
+	// an update is completed from its run's start wherever the start is in the
+	// request. Both clients write the start first, and nothing on the wire
+	// says they must. Completed only from the arrivals before it, an update
+	// written first had no kind, and a model call's answer was dropped with
+	// the fields of a graph's own run.
+	envelopes := make([]Run, len(operations))
+	seen := c.Now()
 	for i, op := range operations {
-		var envelope Run
-		if err := json.Unmarshal(op.Envelope, &envelope); err != nil {
+		if err := json.Unmarshal(op.Envelope, &envelopes[i]); err != nil {
 			return Landed{}, &unreadable{fmt.Errorf("run %s: %w", op.RunID, err)}
 		}
-		completed, known, found := open.complete(envelope)
+		// An update to /runs/{id} may name its run in the path alone.
+		if envelopes[i].ID == "" {
+			envelopes[i].ID = op.RunID
+		}
+		open.started(envelopes[i], methodOf(op), callClassOf(op), "", seen)
+	}
+	for i, op := range operations {
+		completed, known, found := open.complete(envelopes[i])
 		runs[i] = completed
 		methods[i] = known.Method
 		classes[i] = known.Class
@@ -482,11 +496,14 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		}
 	}
 
+	// Every arrival of a run in the request is taken together, so what is read
+	// of the run does not depend on which arrival came last. Keeping the last
+	// one replaced an update written before its start with the start, which
+	// has no end, and a failed tool was joined to a call the model made after
+	// the tool had failed.
 	byRun := make(map[string]Run, len(operations))
 	for i, op := range operations {
-		if _, seen := byRun[op.RunID]; !seen || runs[i].Type != "" {
-			byRun[op.RunID] = runs[i]
-		}
+		byRun[op.RunID] = mergeRun(byRun[op.RunID], runs[i])
 	}
 	hints := ResolveWith(operations, byRun)
 	// Whether a trace has a model call in it is a fact about the trace, not
@@ -580,6 +597,34 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		out.Sessions = append(out.Sessions, session)
 	}
 	return out, nil
+}
+
+// mergeRun is two arrivals of one run taken together: what one leaves out,
+// the other supplies. A run's arrivals are completed from one memory of it,
+// so they name the same trace, parent, kind and name, unless a client sent
+// two values for one, and then the first is kept. Its times are what one
+// arrival carries and another does not, and the earlier start and the later
+// end are kept, so the order of the arrivals decides neither.
+func mergeRun(into, from Run) Run {
+	fill := func(field *string, value string) {
+		if *field == "" {
+			*field = value
+		}
+	}
+	fill(&into.ID, from.ID)
+	fill(&into.TraceID, from.TraceID)
+	fill(&into.ParentID, from.ParentID)
+	fill(&into.Dotted, from.Dotted)
+	fill(&into.Type, from.Type)
+	fill(&into.Name, from.Name)
+	fill(&into.Session, from.Session)
+	if at := momentOf(from.Start, ""); !at.IsZero() && (into.Start == "" || at.Before(momentOf(into.Start, ""))) {
+		into.Start = from.Start
+	}
+	if at := momentOf(from.End, ""); !at.IsZero() && (into.End == "" || at.After(momentOf(into.End, ""))) {
+		into.End = from.End
+	}
+	return into
 }
 
 // sessionOf decides where a run's evidence lands, by what the run itself
@@ -1140,17 +1185,42 @@ func jsonOperations(body []byte, header Received) ([]Operation, error) {
 // The method is what separates them. Without it the same body means two
 // different things, and reading it as a post either way would land a finished
 // run as one that had only started.
+//
+// An update names its run in its path, and the body need not name it again:
+// LangSmith JS sends the update without its id when it does not batch. So the
+// path's id is the run's when the body has none. A body that names another run
+// is refused, because which of the two the client meant cannot be told.
 func singleRun(body []byte, header Received) ([]Operation, error) {
 	var envelope Run
-	if err := json.Unmarshal(body, &envelope); err != nil || envelope.ID == "" {
-		return nil, errors.New("the body carries no run with an id")
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, fmt.Errorf("the body is not a run: %w", err)
 	}
 	op := "post"
 	if strings.EqualFold(header.Method, http.MethodPatch) || strings.EqualFold(header.Method, http.MethodPut) {
 		op = "patch"
 	}
-	return []Operation{{Op: op, RunID: envelope.ID, Envelope: json.RawMessage(body),
+	id := envelope.ID
+	if named := pathRunID(header.Path); op == "patch" && named != "" {
+		if id != "" && id != named {
+			return nil, fmt.Errorf("the body names run %s and the path names run %s", id, named)
+		}
+		id = named
+	}
+	if id == "" {
+		return nil, errors.New("the body carries no run with an id")
+	}
+	return []Operation{{Op: op, RunID: id, Envelope: json.RawMessage(body),
 		Fields: map[string]json.RawMessage{}, Order: 1, Bytes: len(body)}}, nil
+}
+
+// pathRunID is the run a path of the form /runs/{id} names, or "" for a path
+// that names none, such as the batch endpoints beside it.
+func pathRunID(path string) string {
+	id, ok := strings.CutPrefix(path, "/runs/")
+	if !ok || id == "" || id == "batch" || id == "multipart" || strings.Contains(id, "/") {
+		return ""
+	}
+	return id
 }
 
 // methodOf reads how the runtime said this run was traced, from whichever

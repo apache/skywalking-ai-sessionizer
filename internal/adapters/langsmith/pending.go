@@ -110,8 +110,9 @@ type pendingRun struct {
 // holding no model call is not a trace holding none.
 type traceMemory struct {
 	// Runs are the runs of this trace that have been seen, and whether each
-	// was a tool. Anything not here has not been seen, which is different
-	// from having been seen and not being a tool.
+	// was a tool. Anything not here has not been seen, or was forgotten as
+	// forgetTraceRuns says, which is different from having been seen and not
+	// being a tool.
 	Runs map[string]bool `json:"runs,omitempty"`
 	// ToolNames names the tool runs, so a session can place a run inside one
 	// that has been seen but has not landed yet. Deciding a run may be
@@ -197,16 +198,49 @@ func (p *pending) evict(now time.Time) {
 			delete(p.Traces, trace)
 		}
 	}
-	if len(p.Runs) <= pendingLimit {
-		return
+	if len(p.Runs) > pendingLimit {
+		ids := make([]string, 0, len(p.Runs))
+		for id := range p.Runs {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return p.Runs[ids[i]].At < p.Runs[ids[j]].At })
+		for _, id := range ids[:len(p.Runs)-pendingLimit] {
+			delete(p.Runs, id)
+		}
 	}
-	ids := make([]string, 0, len(p.Runs))
-	for id := range p.Runs {
-		ids = append(ids, id)
+	p.forgetTraceRuns()
+}
+
+// forgetTraceRuns makes a trace forget a run when the run itself is
+// forgotten, unless a run still remembered ran inside it.
+//
+// Every arrival of a trace keeps the whole trace fresh, so a trace that kept
+// making runs remembered every run it ever made, past both limits above, and
+// every request saved them all again. A run a remembered run ran inside is
+// kept, because a run arriving next may run inside it too, and is placed by
+// it: forgetting the root of a long trace made each new run of it wait. A run
+// forgotten here is like a run of a trace idle for a day: a run that arrives
+// inside it waits for it, and then, when its conversation is known, lands with
+// the ancestry that did arrive.
+func (p *pending) forgetTraceRuns() {
+	kept := make(map[string]bool, len(p.Runs))
+	for id, run := range p.Runs {
+		kept[id] = true
+		for _, above := range ancestors(run.Dotted, id) {
+			kept[above] = true
+		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return p.Runs[ids[i]].At < p.Runs[ids[j]].At })
-	for _, id := range ids[:len(p.Runs)-pendingLimit] {
-		delete(p.Runs, id)
+	for _, memory := range p.Traces {
+		for id := range memory.Runs {
+			if !kept[id] {
+				delete(memory.Runs, id)
+			}
+		}
+		for id := range memory.ToolNames {
+			if !kept[id] {
+				delete(memory.ToolNames, id)
+			}
+		}
 	}
 }
 

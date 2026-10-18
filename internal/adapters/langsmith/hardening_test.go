@@ -26,14 +26,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
 // collectorOver is a collector on a root, with the clock fixed so a test that
@@ -41,6 +44,94 @@ import (
 func collectorOver(zone *storage.Zone) *Collector {
 	at := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
 	return &Collector{Zone: zone, Now: func() time.Time { at = at.Add(time.Second); return at }}
+}
+
+// parsedTwice parses a session that has landed, then collects and parses it
+// again, and returns the conversation. The second pass must land nothing and
+// write no round: what landed once does not land again, and the same evidence
+// folds to the same conversation.
+func parsedTwice(t *testing.T, c *Collector, session string) *sessionflow.View {
+	t.Helper()
+	parseAll := func() bool {
+		changed := false
+		for {
+			round, err := parse.Session(c.Zone, parse.Options{Conversation: session, Session: session})
+			if err != nil {
+				t.Fatalf("parse %s: %v", session, err)
+			}
+			changed = changed || round.Changed()
+			if !round.More {
+				return changed
+			}
+		}
+	}
+	if !parseAll() {
+		t.Fatalf("%s: the first parse wrote no round", session)
+	}
+	view, err := sessionflow.OpenChain(c.Zone.Root(), session).Fold()
+	if err != nil {
+		t.Fatalf("fold %s: %v", session, err)
+	}
+	again, err := c.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Requests != 0 || again.Files != 0 || again.Records != 0 {
+		t.Errorf("%s: the second pass landed %+v, want nothing", session, again)
+	}
+	if parseAll() {
+		t.Errorf("%s: the second parse wrote a round with nothing new", session)
+	}
+	return view
+}
+
+// answerOf finds the landed record holding a text, and says which call it is
+// on and whether that call is finished.
+func answerOf(t *testing.T, zone *storage.Zone, session, text string) (call string, finished, found bool) {
+	t.Helper()
+	files, err := storage.LandedFiles(zone, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lf := range files {
+		if lf.Stream == "" {
+			continue
+		}
+		f, err := os.Open(lf.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader, err := sessiondata.NewReader(f)
+		if err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		for {
+			record, err := reader.Next()
+			if err != nil {
+				break
+			}
+			for _, part := range record.Parts {
+				if part.Kind == sessiondata.PartText && part.Text == text {
+					f.Close()
+					return record.Call, slices.Contains(record.Flags, "finished"), true
+				}
+			}
+		}
+		f.Close()
+	}
+	return "", false, false
+}
+
+// nodesOf counts a conversation's nodes of one kind.
+func nodesOf(view *sessionflow.View, kind string) int {
+	n := 0
+	for _, node := range view.Nodes {
+		if node.Kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 // TestAGzipBodyIsBoundedByWhatItBecomes.
@@ -197,11 +288,98 @@ func TestASingleRunLandsAndAPatchEndsIt(t *testing.T) {
 	}
 }
 
+// patchTo sends one run to PATCH path, as the one-run endpoint takes it, and
+// returns the status it was answered with.
+func patchTo(t *testing.T, base, path, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPatch, base+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestAnUpdateNamedOnlyByItsPathEndsItsRun. LangSmith JS 0.10.8 ends a run
+// with PATCH /runs/{id} and a body without the id when it does not batch, as
+// with autoBatchTracing false: RunTree.patchRun builds the update with no id,
+// and Client.updateRun puts the id in the path alone. Every such update was
+// refused, so no run it traced ever finished. The path names the run. A body
+// that names another run is refused, since which one the client meant cannot
+// be told, and so is a body with no id sent to a path that names no run.
+func TestAnUpdateNamedOnlyByItsPathEndsItsRun(t *testing.T) {
+	_, zone, base := started(t, "")
+	const id = "11111111-1111-7111-8111-111111111112"
+	const other = "11111111-1111-7111-8111-111111111113"
+	order := "20260920T100000000000Z" + id
+	start := `{"id":"` + id + `","trace_id":"` + id + `","dotted_order":"` + order + `",` +
+		`"run_type":"llm","name":"ChatOpenAI","start_time":"2026-09-20T10:00:00Z",` +
+		`"session_name":"asz","extra":{"metadata":{"thread_id":"t-path"}}}`
+	resp := send(t, base, "/runs", "application/json", []byte(start), "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("start: status %d", resp.StatusCode)
+	}
+	// What patchRun sends: everything it knows of the run but its id, the end
+	// in milliseconds since the epoch.
+	update := `{"name":"ChatOpenAI","run_type":"llm","start_time":"2026-09-20T10:00:00Z","end_time":1789898405000,` +
+		`"outputs":{"generations":[[{"message":{"kwargs":{"content":"named by its path"}}}]]},` +
+		`"dotted_order":"` + order + `","trace_id":"` + id + `","session_name":"asz","extra":{"metadata":{"thread_id":"t-path"}}}`
+	for _, refused := range []struct{ path, body string }{
+		{"/runs/" + id, `{"id":"` + other + `",` + update[1:]},
+		{"/runs/batch", update},
+		{"/runs/" + id + "/feedback", update},
+		{"/runs", update},
+	} {
+		if status := patchTo(t, base, refused.path, refused.body); status != http.StatusBadRequest {
+			t.Errorf("PATCH %s %.40s: status %d, want %d", refused.path, refused.body, status, http.StatusBadRequest)
+		}
+	}
+	if status := patchTo(t, base, "/runs/"+id, update); status != http.StatusAccepted {
+		t.Fatalf("PATCH /runs/{id} with the id in the path alone: status %d, want %d", status, http.StatusAccepted)
+	}
+	c := collectorOver(zone)
+	landed, err := c.Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := threadOf("t-path")
+	if landed.Requests != 2 || landed.Unreadable != 0 || landed.Dropped != 0 {
+		t.Fatalf("%+v: want the start and its update collected", landed)
+	}
+	if call, finished, _ := answerOf(t, zone, session, "named by its path"); call != id || !finished {
+		t.Errorf("the answer landed on call %q, finished %v; want it on the finished call %s", call, finished, id)
+	}
+	if calls := nodesOf(parsedTwice(t, c, session), model.KindLLMCall); calls != 1 {
+		t.Errorf("%d model calls in the conversation, want 1", calls)
+	}
+
+	// The collector reads a waiting request by the same rule.
+	for _, refused := range []Received{
+		{Method: http.MethodPatch, Path: "/runs/multipart"},
+		{Method: http.MethodPost, Path: "/runs/" + id},
+	} {
+		if _, err := singleRun([]byte(update), refused); err == nil {
+			t.Errorf("%s %s: an update with no id was read as a run", refused.Method, refused.Path)
+		}
+	}
+	if _, err := singleRun([]byte(`{"id":"`+id+`",`+update[1:]), Received{Method: http.MethodPatch, Path: "/runs/" + other}); err == nil {
+		t.Error("a body that names another run than its path was read as one of them")
+	}
+}
+
 // TestABodyWithNoRunInItIsRefused: answering 202 to a body nothing can be
-// read out of tells the client it was kept when it was not.
+// read out of tells the client it was kept when it was not. A run with an id
+// and a time of the wrong type is one the collector cannot read either, and
+// it was accepted, then set aside.
 func TestABodyWithNoRunInItIsRefused(t *testing.T) {
 	_, _, base := started(t, "")
-	for _, body := range []string{`"just a string"`, `42`, `{"no":"id"}`} {
+	for _, body := range []string{`"just a string"`, `42`, `{"no":"id"}`, `{"id":"r1","start_time":true}`} {
 		resp := send(t, base, "/runs", "application/json", []byte(body), "")
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {

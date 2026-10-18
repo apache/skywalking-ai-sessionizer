@@ -80,26 +80,49 @@ type body struct {
 	prompt string
 }
 
-// bodiesOf reads the bodies one request's arrivals carry, in arrival order.
+// bodiesOf reads the bodies one request's arrivals carry, in arrival order,
+// except that a response waits for its run's request.
 //
 // A body names the prompt its call was placed under, so it is read from the
 // records as placed: a nested stream's call carries the tool it ran inside,
 // not the trace the request arrived with.
+//
+// A response is read against its run's request, which has to be held when the
+// response lands, and a landed response is never written again. An update
+// written before its start in the same request carried the response ahead of
+// the request, and the response said its request was not there. So a response
+// whose run's request comes later in the request lands right after it.
 func bodiesOf(items []placed, records [][]sessiondata.Record) []body {
-	var out []body
+	isModel := func(item placed) bool { return item.run.Type == "llm" || item.run.Type == "chat_model" }
+	asks := func(item placed) bool { return len(item.inputs) > 0 && string(item.inputs) != "null" }
+	requestAt := map[string]int{}
 	for i, item := range items {
-		if item.run.Type != "llm" && item.run.Type != "chat_model" {
+		if _, seen := requestAt[item.run.ID]; !seen && isModel(item) && asks(item) {
+			requestAt[item.run.ID] = i
+		}
+	}
+	var out []body
+	waiting := map[string][]body{}
+	for i, item := range items {
+		if !isModel(item) {
 			continue
 		}
 		var prompt string
 		if i < len(records) && len(records[i]) > 0 {
 			prompt = records[i][0].Run
 		}
-		if in := item.inputs; len(in) > 0 && string(in) != "null" {
-			out = append(out, body{run: item.run, role: providerbody.RoleRequest, model: item.model, bytes: in, prompt: prompt})
+		if asks(item) {
+			out = append(out, body{run: item.run, role: providerbody.RoleRequest, model: item.model, bytes: item.inputs, prompt: prompt})
+			out = append(out, waiting[item.run.ID]...)
+			delete(waiting, item.run.ID)
 		}
-		if out2 := item.outputs; item.run.Finished() && len(out2) > 0 && string(out2) != "null" {
-			out = append(out, body{run: item.run, role: providerbody.RoleResponse, model: item.model, bytes: out2, prompt: prompt})
+		if answer := item.outputs; item.run.Finished() && len(answer) > 0 && string(answer) != "null" {
+			response := body{run: item.run, role: providerbody.RoleResponse, model: item.model, bytes: answer, prompt: prompt}
+			if at, asked := requestAt[item.run.ID]; asked && at > i {
+				waiting[item.run.ID] = append(waiting[item.run.ID], response)
+				continue
+			}
+			out = append(out, response)
 		}
 	}
 	return out
