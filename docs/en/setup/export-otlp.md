@@ -82,6 +82,12 @@ service:
     logs:
       receivers: [otlp]
       exporters: [file]
+    metrics:
+      receivers: [otlp]
+      exporters: [file]
 ```
 
-Point `endpoint` at `127.0.0.1:4317`, run `asz push`, and read `logs.json`.
+Point `endpoint` at `127.0.0.1:4317`, run `asz push`, and read `logs.json`. It has one line for each
+request, the logs and the metrics together. Keep the `metrics` pipeline even when only the logs
+matter: asz sends [metrics](#metrics) by default, and a Collector without that pipeline refuses
+them, with `Unimplemented` over gRPC and `404 Not Found` over HTTP, so `asz push` fails.

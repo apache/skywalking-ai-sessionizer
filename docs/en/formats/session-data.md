@@ -414,11 +414,12 @@ original it has.
 ### Too large to land
 
 A landed file travels whole, so the collector's `max_delta_bytes` is the most a receiver has to store
-at once. A collector cuts a file by what its records take once written, not by the bytes they were
-read from: a record carries an envelope its source line does not, and 4 KiB of short source lines
-measured 19 KB of records. One record cannot be cut: a pasted screenshot measured 4.6 MB in one
-transcript line. Such a record lands alone in a file of its own, and its largest payloads are taken
-out, one at a time, until the file fits.
+at once, with the one exception at the end of this section. A collector cuts a file by what its
+records take once written, not by the bytes they were read from: a record carries an envelope its
+source line does not, and 4 KiB of short source lines measured 19 KB of records. One record cannot
+be cut: a pasted screenshot measured 4.6 MB in one transcript line. Such a record lands alone in a
+file of its own, and its largest payloads are taken out, one at a time, until the file fits or
+nothing is left to take out.
 
 A part taken out keeps its place, its kind and every identifier: `id`, `name`, `of`, `server`,
 `server_tool`, `failed` and `media`. Its `data` and `encoding` go first, and then its `text`, except
@@ -442,7 +443,9 @@ returned, so it is a few hundred bytes and is left as it is.
 Of two payloads of the same size, the one in the earlier part goes first, so the same record always
 loses the same parts. No other part carries `sha256`. A record that is still too large with every
 payload taken out lands as it is: what is left is its identifiers, its label and the list of its
-parts. `asz repack` carries records as they landed, and takes nothing out.
+parts. Its file is then larger than `max_delta_bytes`: a record with a label of 10,000 bytes landed
+as a file of 10,434 bytes under a budget of 4 KiB. `asz repack` carries records as they landed, and
+takes nothing out.
 
 ### What data holds
 

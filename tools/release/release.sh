@@ -72,8 +72,8 @@
 #       newer than every full release, and no for a patch of an older line.
 #       --latest and --not-latest give the answer without asking. Then write the announcement
 #       and the website entries into dist/VERSION, and print what is left
-#       to do: the website, the announcement, the homebrew and apt skills,
-#       and Scoop and winget. A run after the move skips the move
+#       to do: the website, the announcement, the homebrew, apt and pypi
+#       skills, and Scoop and winget. A run after the move skips the move
 #       and runs every later step again. --remove-old removes older versions
 #       from the release directory, and archive.apache.org keeps them. It is
 #       refused in the run that moves: run publish again with it once the
@@ -484,7 +484,7 @@ sync_release_assets() {
 if [ "$cmd" = candidate ]; then
   step "The version"
   pick_version "Version to prepare the release candidate for"
-  tools="git gpg shasum tar gzip unzip file curl gh python3 sh"
+  tools="git gpg shasum tar gzip unzip file curl gh python3 sh cmp"
   if [ "$no_upload" = false ]; then tools="$tools svn"; fi
   # shellcheck disable=SC2086 # the list is split on purpose
   need_tools $tools
@@ -967,7 +967,7 @@ fi
 if [ "$cmd" = publish ]; then
   step "The version"
   pick_version "Version the vote passed for"
-  need_tools git svn shasum awk gh gpg curl cmp
+  need_tools git svn shasum awk gh gpg curl cmp perl
   fetch_tag
   platforms=$(tag_platforms)
   debs=$(tag_debs)
@@ -1351,6 +1351,11 @@ YAML
     say "  4. Add $version to the apt repository with the apt skill, which opens a pull request"
     say "     to apache/skywalking-website."
     n=5
+  fi
+  if git cat-file -e "$tag:plugins/langchain/pyproject.toml" 2>/dev/null; then
+    say "  $n. Upload the LangChain plugin $version to PyPI with the pypi skill. An upload cannot be"
+    say "     undone, and the skill builds it from the voted source package."
+    n=$((n + 1))
   fi
   say "  $n. Once the PMC has agreed on dev@skywalking.apache.org to each, move Scoop and winget"
   say "     to $version, as docs/en/guides/how-to-release.md says."
