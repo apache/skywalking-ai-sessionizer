@@ -287,6 +287,11 @@
   the messages dropped, and says a reset only where the conversation records one. On a root landed
   before histories were recorded, it says there is nothing to compare. The renderer is Horizon's,
   now pinned at `d5830a1` (apache/skywalking-horizon-ui#202).
+- The Prompt tab reads a LangChain JS or LangGraph JS message by its class. LangChain for
+  JavaScript names a message's kind only by its class, not in its fields, so every message of such a
+  call showed as `message`, and a tool result as plain text without the call it answers. Streamed
+  chunks, including the ones LangChain for Python writes, read as the message they belong to. The
+  renderer is Horizon's, now pinned at `64c6948` (apache/skywalking-horizon-ui#203).
 
 ## Collection
 

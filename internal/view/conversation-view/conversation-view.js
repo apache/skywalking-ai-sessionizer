@@ -2193,6 +2193,7 @@ function readLangChainRequest(body, prompt) {
 function readLangChainResponse(body, generation) {
   const message2 = generation["message"];
   const fields = isObject(message2) ? langChainFields(message2) : null;
+  const type = isObject(message2) && fields ? langChainType(message2, fields) : "";
   const rest = /* @__PURE__ */ Object.create(null);
   for (const [k, v] of Object.entries(fields ?? {})) {
     if (!["content", "tool_calls", "invalid_tool_calls", "usage_metadata", "id", "type"].includes(k)) rest[k] = v;
@@ -2208,7 +2209,7 @@ function readLangChainResponse(body, generation) {
     kind: "response",
     model: typeof model === "string" ? model : void 0,
     id: typeof (fields == null ? void 0 : fields["id"]) === "string" ? fields["id"] : void 0,
-    blocks: fields ? langChainBlocks(fields, message2) : typeof text === "string" ? [{ kind: "text", text }] : [],
+    blocks: fields ? langChainBlocks(fields, message2, type) : typeof text === "string" ? [{ kind: "text", text }] : [],
     usage: isObject(usage) ? usage : void 0,
     rest,
     raw: body
@@ -2216,9 +2217,25 @@ function readLangChainResponse(body, generation) {
 }
 function readLangChainMessage(value2) {
   const fields = langChainFields(value2);
-  const type = typeof fields["type"] === "string" ? fields["type"] : "";
+  const type = langChainType(value2, fields);
   const role = typeof fields["role"] === "string" ? fields["role"] : "";
-  return { role: type && type !== "chat" ? type : role, blocks: langChainBlocks(fields, value2), raw: value2 };
+  return { role: type && type !== "chat" ? type : role, blocks: langChainBlocks(fields, value2, type), raw: value2 };
+}
+const LANGCHAIN_TYPES = /* @__PURE__ */ new Map([
+  ["HumanMessage", "human"],
+  ["AIMessage", "ai"],
+  ["SystemMessage", "system"],
+  ["ToolMessage", "tool"],
+  ["FunctionMessage", "function"],
+  ["ChatMessage", "chat"],
+  ["RemoveMessage", "remove"]
+]);
+function langChainType(m, fields) {
+  const id = m["lc"] === 1 && m["type"] === "constructor" && Array.isArray(m["id"]) ? m["id"] : [];
+  const named = typeof fields["type"] === "string" ? fields["type"] : id[id.length - 1];
+  if (typeof named !== "string") return "";
+  const cls = named.replace(/Chunk$/, "");
+  return LANGCHAIN_TYPES.get(cls) ?? (typeof fields["type"] === "string" ? fields["type"] : "");
 }
 function langChainContentBlock(value2) {
   return isObject(value2) && value2["type"] === "tool_call" ? langChainToolCall(value2) : readBlock(value2);
@@ -2231,9 +2248,9 @@ function langChainFields(m) {
   const kwargs = m["kwargs"];
   return m["lc"] === 1 && m["type"] === "constructor" && isObject(kwargs) ? kwargs : m;
 }
-function langChainBlocks(fields, raw) {
+function langChainBlocks(fields, raw, type) {
   const content = fields["content"];
-  if (fields["type"] === "tool" || fields["role"] === "tool") {
+  if (type === "tool" || fields["role"] === "tool") {
     const about = {
       ...typeof fields["tool_call_id"] === "string" ? { id: fields["tool_call_id"] } : {},
       ...fields["status"] === "error" ? { failed: true } : {}
