@@ -1,8 +1,9 @@
 # Claude Code Plugin Internals
 
 How the [Claude Code plugin](../setup/claude-code-plugin.md) decides what to record, what it writes,
-and what was verified. The plugin is named `asz-changes`. Its code is under `plugins/claude-code/`,
-and what Claude Code installs, the manifest and the hooks, is under `plugins/claude-code/plugin/`.
+and what was verified. The plugin is named `file-changes`, and the program its hooks run is
+`asz-changes`. Its code is under `plugins/claude-code/`, and what Claude Code installs, the manifest
+and the hooks, is under `plugins/claude-code/plugin/`.
 
 ## What is recorded, and by whom
 
@@ -226,10 +227,18 @@ runs them now.
 ## What a scan is
 
 A scan walks the root under the exclusion rules and hashes what it finds. A file whose size,
-modification time and inode are as the last scan saw them keeps its hash, unless its
+modification time, inode and change time are as the last scan saw them keeps its hash, unless its
 modification time falls within the last scan's own second, when it is hashed again because the
-clock cannot tell. Every scan appends a step to the root's chain: which paths changed and from
+clock cannot tell. `chmod` changes a file's change time and none of the others, so a file made
+unreadable is read again and found so. On Windows the plugin reads no change time, so there a file
+whose access was taken away is found only once its size or its modification time changes. Every scan appends a step to the root's chain: which paths changed and from
 what hash to what. A window is the span of steps between its two scans.
+
+A path the scan finds gone is deleted. A directory or a file that is there and that the scan cannot
+read, as after a command ran `chmod 000` on it, is not observed. The step names it, the manifest
+keeps what the scan before saw under it, and the record of each window whose scans could not read
+it says `coverage: partial`, with a gap that names the path. Its files are not recorded as deleted
+when it becomes unreadable, nor as created when it can be read again.
 
 Two tools open at once on one root, two subagents say, see each other. A file changed in a step
 only one window spans is that window's alone; one changed in a step both span is `shared`, and
@@ -299,7 +308,7 @@ first on `PATH` and load the plugin's directory for one session:
 PATH="$PWD/bin:$PATH" claude --plugin-dir plugins/claude-code/plugin
 ```
 
-Its data directory is `asz-changes-inline`.
+Its data directory is `file-changes-inline`.
 
 `asz-changes status`, with `CLAUDE_PLUGIN_DATA` set, prints the settings in force and the
 exclusion rules they expand to.

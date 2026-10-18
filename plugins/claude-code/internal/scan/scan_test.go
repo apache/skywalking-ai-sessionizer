@@ -21,6 +21,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +147,71 @@ func TestScanStopsAtItsTimeCap(t *testing.T) {
 	}
 	if !step.Partial || m.N != 1 {
 		t.Fatalf("partial=%v n=%d", step.Partial, m.N)
+	}
+}
+
+// A directory or a file the scan cannot read is still there. A tool that ran
+// chmod 000 on it made every file under it look deleted, with the step
+// complete, and restoring access then made them look created. What cannot be
+// read keeps what the last scan saw, and the step names it as not observed.
+func TestWhatAScanCannotReadIsNotDeleted(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("permission bits do not stop this reader here")
+	}
+	ws := t.TempDir()
+	write(t, filepath.Join(ws, "a.txt"), "a\n")
+	write(t, filepath.Join(ws, "sub", "b.txt"), "b\n")
+	write(t, filepath.Join(ws, "sub", "deep", "c.txt"), "c\n")
+	write(t, filepath.Join(ws, "locked.txt"), "l\n")
+	// Older than the scan before, so the scan takes its hash from what it
+	// saw: chmod changes neither the size, the modification time nor the
+	// inode it compares.
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(ws, "locked.txt"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	r, err := scan.Open(t.TempDir(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := scan.Options{SizeCap: 1 << 20, Now: steady()}
+	m1, _, err := r.Scan(o)
+	if err != nil || len(m1.Files) != 4 {
+		t.Fatalf("first scan: %v %v", m1.Files, err)
+	}
+	for _, p := range []string{"sub", "locked.txt"} {
+		if err := os.Chmod(filepath.Join(ws, p), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(filepath.Join(ws, "sub"), 0o755)
+		_ = os.Chmod(filepath.Join(ws, "locked.txt"), 0o644)
+	})
+	write(t, filepath.Join(ws, "a.txt"), "A\n")
+	m2, step, err := r.Scan(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(step.Changes) != 1 || step.Changes["a.txt"].After == "" {
+		t.Fatalf("the step records %v; want only the change to a.txt", step.Changes)
+	}
+	if got := strings.Join(step.Unread, " "); got != "locked.txt sub" {
+		t.Fatalf("the step names %q as not read, want the directory and the file", got)
+	}
+	for _, p := range []string{"sub/b.txt", "sub/deep/c.txt", "locked.txt"} {
+		if m2.Files[p] != m1.Files[p] {
+			t.Fatalf("%s: the manifest has %+v, want what the last scan saw, %+v", p, m2.Files[p], m1.Files[p])
+		}
+	}
+	if err := os.Chmod(filepath.Join(ws, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(ws, "locked.txt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, step, err := r.Scan(o); err != nil || len(step.Changes) != 0 || len(step.Unread) != 0 {
+		t.Fatalf("access back: changes %v unread %v err %v; want nothing", step.Changes, step.Unread, err)
 	}
 }
 

@@ -93,6 +93,12 @@ type Cursor struct {
 	Ord        uint64 // source line consumed through; the next batch starts at Ord+1
 	LastUUID   string // last uuid seen - diagnostic only, since many lines carry none
 	TailSHA256 string
+	// HeadSHA256 is the digest of the file's first line, for a source that
+	// can be removed and written again at the same path, as the plugin's
+	// output is: a file that does not begin with this line is another file.
+	// Empty until the first line is read, and on a source that is never
+	// written again.
+	HeadSHA256 string
 
 	// Snapshot fields.
 	ContentSHA256 string
@@ -154,6 +160,8 @@ func LoadCursor(path string, kind CursorKind, source string) (*Cursor, error) {
 			c.LastUUID = val
 		case "tail_sha256":
 			c.TailSHA256 = val
+		case "head_sha256":
+			c.HeadSHA256 = val
 		case "content_sha256":
 			c.ContentSHA256 = val
 		case "size":
@@ -196,6 +204,9 @@ func (c *Cursor) Save(path string, now time.Time) error {
 			if c.TailSHA256 != "" {
 				fmt.Fprintf(bw, "tail_sha256   %s\n", c.TailSHA256)
 			}
+			if c.HeadSHA256 != "" {
+				fmt.Fprintf(bw, "head_sha256   %s\n", c.HeadSHA256)
+			}
 		} else {
 			fmt.Fprintf(bw, "content_sha256 %s\n", c.ContentSHA256)
 		}
@@ -228,4 +239,36 @@ func CursorOrigin(storageRoot, sourceRoot string) string {
 func SourceCursorName(prefix, origin, source string) string {
 	sum := sha256.Sum256([]byte(origin + "\n" + source))
 	return prefix + "-" + hex.EncodeToString(sum[:])[:12] + ".cursor"
+}
+
+// LaterCursorName is the name of the cursor of a later file at a source's
+// path: one the plugin wrote there after removing another, whose cursor
+// recorded previousHead, the digest of that file's first line. It is named
+// for the source's origin, its path and that digest, so it is the same on
+// every pass, and each file at the path has a cursor of its own.
+func LaterCursorName(prefix, origin, source, previousHead string) string {
+	sum := sha256.Sum256([]byte(origin + "\n" + source + "\n" + previousHead))
+	return prefix + "-" + hex.EncodeToString(sum[:])[:12] + ".cursor"
+}
+
+// markLen is how many hexadecimal characters of a file's first line digest
+// mark its source.
+const markLen = 12
+
+// MarkedSource is the src a source lands under, and its cursor's source,
+// when it is not the first at its path: the path, a #, and the first 12
+// hexadecimal characters of head, the digest of its file's first line.
+func MarkedSource(path, head string) string { return path + "#" + head[:markLen] }
+
+// SourcePath is the path a src or a cursor's source names: the part before
+// the mark MarkedSource adds, or the whole of one without it.
+func SourcePath(src string) string {
+	i := strings.LastIndexByte(src, '#')
+	if i < 0 || len(src)-i-1 != markLen {
+		return src
+	}
+	if _, err := hex.DecodeString(src[i+1:]); err != nil {
+		return src
+	}
+	return src[:i]
 }

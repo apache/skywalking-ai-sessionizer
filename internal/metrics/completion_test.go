@@ -27,6 +27,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 func TestFinishedCallAcrossThreeLandedFiles(t *testing.T) {
@@ -101,6 +102,138 @@ func TestMainCallUsesTheFinalFragmentAcrossFiles(t *testing.T) {
 	ps := got["main/output/m#s1"]
 	if len(ps) != 1 || total(ps) != 60 || !ps[0].start.Equal(base.Add(time.Minute)) {
 		t.Fatalf("main call must count once in its final fragment's minute: %+v", ps)
+	}
+}
+
+// toolResult is the result of a call's first tool, which the runtime writes
+// between that call's fragments. It belongs to no call.
+func toolResult(ord uint64) *sessiondata.Record {
+	return &sessiondata.Record{Ord: ord, Sha: "x", Bytes: 1, Tool: "toolu_1", From: sessiondata.FromExternal,
+		Time:  base.Add(time.Minute - 150*time.Millisecond).Format(time.RFC3339Nano),
+		Parts: []sessiondata.Part{{Kind: sessiondata.PartResult, Of: "toolu_1", Text: "ok", State: "available", Bytes: 2}}}
+}
+
+// A call's own tool results sit between its fragments on 24% of the calls
+// with more than one fragment. A landed file can end at a fragment while the
+// next begins with such a result. The call goes on past the result, so its
+// last fragment in line order is after it, and the call counts in that
+// fragment's minute. Stopping at the result put it in the minute before.
+func TestMainCallReadsPastItsOwnToolResultAcrossFiles(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	cut := call{id: "interleaved", model: "m", at: base.Add(time.Minute - 200*time.Millisecond), frags: 3, in: 4, out: 60}
+	first, rest := cut, cut
+	first.only = 1
+	rest.skip = 1
+	ord := uint64(1)
+	landRecords(t, z, "s1", "main", 1, records(first, true, &ord), "claude-code/1")
+	ord = 2
+	landRecords(t, z, "s1", "main", 2, append([]*sessiondata.Record{toolResult(1)}, records(rest, true, &ord)...), "claude-code/1")
+	d := deriver(z, base.Add(time.Hour), metrics.Options{})
+	st, err := d.Pass(nil)
+	if err != nil || len(st.Errors) > 0 {
+		t.Fatal(err, st)
+	}
+	got, _ := points(t, z)
+	ps := got["main/output/m#s1"]
+	if len(ps) != 1 || total(ps) != 60 || !ps[0].start.Equal(base.Add(time.Minute)) {
+		t.Fatalf("the call must count once, in its last fragment's minute %s: %+v", base.Add(time.Minute), ps)
+	}
+}
+
+// The boundary can also fall after the result. The file's last call is read
+// ahead all the same when the next file is there, and counts in its last
+// fragment's minute. Under a watching collector the next file lands on a
+// later pass, so a file that ends with its last call's tool results waits
+// the grace for it, as a file that ends at a fragment does. Counting the call
+// at once put it in the earlier minute for good. A file whose last call is
+// followed by anything else does not wait: the call is over.
+func TestACallGoesOnAfterAFileThatEndsWithItsToolResult(t *testing.T) {
+	cut := call{id: "interleaved", model: "m", at: base.Add(time.Minute - 200*time.Millisecond), frags: 3, in: 4, out: 60}
+	first, rest := cut, cut
+	first.only = 1
+	rest.skip = 1
+	firstFile := func(z *storage.Zone) string {
+		ord := uint64(1)
+		recs := records(first, true, &ord)
+		return landRecords(t, z, "s1", "main", 1, append(recs, toolResult(ord)), "claude-code/1")
+	}
+
+	z := storage.NewZone(t.TempDir())
+	firstFile(z)
+	ord := uint64(1)
+	landRecords(t, z, "s1", "main", 2, records(rest, true, &ord), "claude-code/1")
+	if st, err := deriver(z, base.Add(time.Hour), metrics.Options{}).Pass(nil); err != nil || len(st.Errors) > 0 {
+		t.Fatal(err, st)
+	}
+	got, _ := points(t, z)
+	if ps := got["main/output/m#s1"]; len(ps) != 1 || total(ps) != 60 || !ps[0].start.Equal(base.Add(time.Minute)) {
+		t.Fatalf("the call must count once, in its last fragment's minute %s: %+v", base.Add(time.Minute), ps)
+	}
+
+	z = storage.NewZone(t.TempDir())
+	aged(t, firstFile(z), base)
+	st, err := deriver(z, base.Add(30*time.Second), metrics.Options{}).Pass(nil)
+	if err != nil || len(st.Errors) > 0 || st.Deferred != 1 || st.Files != 0 {
+		t.Fatalf("a file that ends with its call's tool result must wait for the call's next fragment: %v %+v", err, st)
+	}
+	ord = 1
+	aged(t, landRecords(t, z, "s1", "main", 2, records(rest, true, &ord), "claude-code/1"), base.Add(40*time.Second))
+	if st, err := deriver(z, base.Add(time.Hour), metrics.Options{}).Pass(nil); err != nil || len(st.Errors) > 0 || st.Files != 2 {
+		t.Fatalf("the continuation landed during the grace: %v %+v", err, st)
+	}
+	got, _ = points(t, z)
+	if ps := got["main/output/m#s1"]; len(ps) != 1 || total(ps) != 60 || !ps[0].start.Equal(base.Add(time.Minute)) {
+		t.Fatalf("a continuation that landed during the grace: the call must count once, in its last fragment's minute %s: %+v", base.Add(time.Minute), ps)
+	}
+
+	z = storage.NewZone(t.TempDir())
+	ord = 1
+	recs := records(call{id: "over", model: "m", at: base, frags: 1, in: 1, out: 5}, true, &ord)
+	recs = append(recs, prompt(ord, base.Add(time.Second)))
+	aged(t, landRecords(t, z, "s1", "main", 1, recs, "claude-code/1"), base)
+	if st, err := deriver(z, base.Add(30*time.Second), metrics.Options{}).Pass(nil); err != nil || len(st.Errors) > 0 || st.Deferred != 0 || st.Files != 1 {
+		t.Fatalf("a file whose last call is followed by a prompt must not wait: %v %+v", err, st)
+	}
+}
+
+// prompt is a person's next question, which belongs to no call and ends the
+// call before it.
+func prompt(ord uint64, at time.Time) *sessiondata.Record {
+	return &sessiondata.Record{Ord: ord, Sha: "x", Bytes: 1, From: sessiondata.FromExternal,
+		Time:  at.Format(time.RFC3339Nano),
+		Parts: []sessiondata.Part{{Kind: sessiondata.PartText, Text: "next question", State: "available", Bytes: 13}}}
+}
+
+// Reading on into the next file ends a call where reading that file alone
+// does. It read past a prompt, so a file whose last call had ended in the
+// next file waited the grace, while the next file, read alone, counted the
+// call at once. The waiting file then counted its own earlier call after
+// that one, and the earlier call's window followed the later call's: 10:03
+// instead of 10:00.
+func TestReadingOnEndsACallWhereReadingAloneDoes(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	done := call{id: "a", model: "m", at: base, frags: 1, in: 1, out: 5}
+	cut := call{id: "b", model: "m", at: base.Add(2*time.Minute - 100*time.Millisecond), frags: 2, in: 2, out: 7}
+	first, rest := cut, cut
+	first.only = 1
+	rest.skip = 1
+	ord := uint64(1)
+	recs := records(done, true, &ord)
+	recs = append(recs, records(first, true, &ord)...)
+	aged(t, landRecords(t, z, "s1", "main", 1, recs, "claude-code/1"), base.Add(2*time.Minute))
+	ord = 1
+	recs = records(rest, true, &ord)
+	recs = append(recs, prompt(ord, base.Add(2*time.Minute+time.Second)))
+	aged(t, landRecords(t, z, "s1", "main", 2, recs, "claude-code/1"), base.Add(2*time.Minute))
+	for _, now := range []time.Duration{2*time.Minute + 30*time.Second, time.Hour} {
+		if st, err := deriver(z, base.Add(now), metrics.Options{}).Pass(nil); err != nil || len(st.Errors) > 0 {
+			t.Fatal(err, st)
+		}
+	}
+	got, _ := points(t, z)
+	ps := got["main/output/m#s1"]
+	if len(ps) != 2 || !ps[0].start.Equal(base) || ps[0].value != 5 || !ps[1].start.Equal(base.Add(2*time.Minute)) || ps[1].value != 7 {
+		t.Fatalf("the first call must count at %s and the second at %s, once each: %+v", base, base.Add(2*time.Minute), ps)
 	}
 }
 

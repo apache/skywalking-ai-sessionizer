@@ -44,7 +44,7 @@ stops at the first longer line.
 | `kind` | what it was collected from: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `execution` or `provider_body`. `otlp_log` and `otlp_span` are reserved for a push transport, and no adapter writes either. |
 | `adapter` | how the records were acquired, with its contract version |
 | `dialect` | whose schema they were read as. A push receiver and a local reader for one runtime share a dialect and nothing else. |
-| `src` | the source, relative to the adapter's source root, with forward slashes on every platform |
+| `src` | the source, relative to the adapter's source root, with forward slashes on every platform. In the `changes` and `execution` kinds, a source other than the first at its path, a later file the plugin wrote there or the same path under a second recorder root, is the path, `#`, and the first 12 hexadecimal characters of the SHA-256 of the file's first line, so each source has a `src` of its own |
 | `session`, `stream`, `batch` | the session, the execution stream (`main` or an agent id), and the group of children a workflow run started. A `provider_body` file names neither a stream nor a batch |
 
 A reader refuses a header unless `h` is `1`, `schema` is `sd/1`, and `kind`, `session`, `src` and
@@ -63,7 +63,8 @@ session under its id and puts every child stream flat under `streams/`, keyed by
 project directory a source file sits in, and the workflow directory a child's transcript sits in.
 `src` is the only place both survive. It uses forward slashes on every platform, so a root reads
 the same on the machine that collected it and on any other. With a record's `off` and `sha`, it
-lets a reader check the record against its source for as long as the source exists.
+lets a reader check the record against its source for as long as the source exists. A `src` with
+the mark described above names its file by the part before its last `#`.
 
 ## File kinds
 
@@ -130,7 +131,9 @@ document at `ord` 1 and `off` 0, so for it `asz verify` rebuilds the body instea
 files of one kind, `ord` must run 1, 2, 3 with no gap, starting at 1. The first record must start
 at byte 0, and each record after it at the byte after the previous record's line ends. Where the
 stream has an append cursor, the records must reach the line and the byte the cursor names (see
-[Append cursors](storage-root.md#append-cursors)). A skipped line, or a lost file of a source that
+[Append cursors](storage-root.md#append-cursors)). In the `changes` and `execution` kinds, a stream
+can hold more than one source, each numbering its lines from 1, so these checks apply to the files
+of each `src` apart, and each `src` is held to the cursor whose `source` names it. A skipped line, or a lost file of a source that
 is a stream of lines, would otherwise show only as a shorter conversation. The Claude Code
 adapter's `agent_meta`, `workflow_manifest` and `workflow_script` files are each one document with
 a snapshot cursor, so a lost one is found only by the round chain (see

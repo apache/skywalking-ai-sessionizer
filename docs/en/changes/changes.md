@@ -160,6 +160,20 @@
   [Claude Code Provider Bodies](../adapters/claude-code-provider-bodies.md). A body landed before
   this carries no list.
 
+- A tool result that holds an image beside its text keeps the image. The text blocks became the
+  result's text, and when the record had no `toolUseResult` object the rest of the content was
+  dropped with nothing saying so. Content that holds anything but text blocks now travels whole as
+  the result's `data`, beside the text, as content with no text did. A session collected before
+  this keeps the loss, because landed records are never rewritten.
+
+- The Claude Code plugin records a directory or a file it cannot read as not observed. After a
+  command ran `chmod 000` on a directory, the next scan recorded every file under it as deleted,
+  with the record's coverage complete, and making it readable again recorded them as created. The
+  scan now keeps what it saw there before, and the record says `coverage: partial`, with a gap that
+  names the path. A file the scan had seen unchanged is read again when its change time moved, as
+  `chmod` moves it, so a file made unreadable is found too; on Windows the plugin reads no change
+  time. See [What a scan is](../adapters/claude-code-plugin.md#what-a-scan-is).
+
 ## MCP calls
 
 - A call to an MCP server names its server and its tool. Claude Code calls an MCP tool
@@ -351,12 +365,29 @@
   Only `<kind>.cursor` was carried, so collection into the new root read the other sources again
   from their start and landed their records again. Each cursor's `last_seq` now names the new file
   holding the last record its own source landed. A recorder inside the storage root writes its
-  cursors' `origin` relative to it; a repack writes that origin, and the name of a cursor made from
-  it, as a collector into the new root computes them, or that recorder was read from its start.
+  cursors' `origin` relative to it; a repack writes that origin, and the name of each cursor made
+  from it, a second source's or a later file's the plugin wrote at a path, as a collector into the
+  new root computes them, or that recorder was read from its start.
 - `asz repack` cuts the records of two files into one only when the files are next to each other in
   their directory and their headers are the same apart from `seq` and `at`. A file took the header
   of the first file its records came from, so records of another source or another adapter version
   landed under the wrong header.
+- A plugin file the plugin removed and wrote again is collected. The plugin removes an output file
+  it has not written to for `retention.ttl`, and writes a new one at the same path when the session
+  goes on. Read against the old file's cursor, the new file was a conflict, and nothing more from
+  that path was collected, its workspace changes and calls to MCP servers included. The cursor of a
+  plugin file now records the digest of the file's first line, read on every pass, and a file that
+  begins with another line is read from its start behind a cursor of its own, even one of the same
+  length over the inode the old file had. It lands under a `src` of its own, the path followed by
+  `#` and the start of that digest, and so does the same path under a second recorder root. A file
+  rewritten behind its cursor still begins with its first line, and is still a conflict. A cursor
+  that read lines before this has no such digest, so for it a file written again is still a
+  conflict. See [Pruned sources](../formats/storage-root.md#pruned-sources).
+- `asz verify` checks each source of the plugin's kinds apart. It checked a stream's `changes` or
+  `execution` files as one source, from line 1, against `<kind>.cursor` alone. A second source,
+  which numbers its lines from 1 again, read as lines landed twice and as gaps in bytes, and a lost
+  file of it was not found. Each `src` is now checked from line 1 against the cursor whose `source`
+  names it, through skeletons too. See [Session Data](../formats/session-data.md#header).
 
 ## Retention
 
@@ -496,6 +527,14 @@
   the tokens from asz. A configuration that still names the adapter loads, and an enabled entry is
   skipped with a line that says so. The spool holds only derived requests, and `spool.state` is no
   longer written.
+- A model call counts in the minute of its last fragment when a landed file boundary falls among
+  its fragments and its own tool results. Reading on into the next file stopped at the first record
+  of no call, such as a tool result. On a main transcript every fragment carries the final usage and
+  a stop reason, so the call counted in an earlier fragment's minute, and at the edge of the first
+  derivation's look-back it could be left out. A tool result no longer stops the reading, any other
+  record does, such as a fragment of another call or a person's prompt, and the file's last call is
+  read on also when the file ends with a tool result. Under a watching collector, such a file waits the grace for its next file, as a file
+  that ends at a fragment does. See [OpenTelemetry export](../formats/otlp.md).
 
 ## Development
 
@@ -705,3 +744,7 @@
 - The Claude Code adapter page said the system prompt and the tool schemas are absent from
   transcripts. That holds for the versions it was measured on, 2.1.220 to 2.1.251, and the page now
   says so. Later versions write them in two attachments, which the adapter names.
+- The [Claude Code plugin internals](../adapters/claude-code-plugin.md) page named the plugin
+  `asz-changes`, and its data directory, when run from a checkout, `asz-changes-inline`. The plugin
+  is `file-changes`, as its manifest says, so the directory is `file-changes-inline`. `asz-changes`
+  is the program its hooks run.

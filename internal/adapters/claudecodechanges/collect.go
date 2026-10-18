@@ -18,6 +18,9 @@
 package claudecodechanges
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -228,22 +231,127 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 // its offset. A root whose file is another takes a cursor of its own
 // rather than reading its file against another's position, which is the
 // conflict that stopped both for good.
+//
+// One path can also hold one file after another. The plugin removes a file
+// once it was not written to for retention.ttl, and writes a new one at the
+// same path when the session goes on. Read against the old cursor, the new
+// file was a conflict, and nothing more from that path was collected. So
+// each file at a path has a cursor of its own: see followFiles.
 func cursorFor(dir, root string, src Source) (string, error) {
 	// A landed file's name prefix is its kind, and so is its cursor's, so
 	// a stream's change file and execution file keep separate places.
 	prefix := string(src.Kind)
-	plain := filepath.Join(dir, prefix+".cursor")
-	held, err := storage.LoadCursor(plain, storage.CursorAppend, src.Rel)
+	path := filepath.Join(dir, prefix+".cursor")
+	held, err := storage.LoadCursor(path, storage.CursorAppend, src.Rel)
 	if err != nil {
 		return "", err
 	}
 	switch {
 	case held.Source == "", held.Source == src.Rel && held.Origin == root:
-		return plain, nil
 	case held.Source == src.Rel && held.Origin == "" && describes(held, src.Path):
-		return plain, nil
+	default:
+		path = filepath.Join(dir, storage.SourceCursorName(prefix, root, src.Rel))
+		if held, err = storage.LoadCursor(path, storage.CursorAppend, src.Rel); err != nil {
+			return "", err
+		}
 	}
-	return filepath.Join(dir, storage.SourceCursorName(prefix, root, src.Rel)), nil
+	return followFiles(dir, prefix, root, src, path, held)
+}
+
+// followFiles follows the cursors of one path, from the first file the path
+// held to the file it holds now. A cursor records the digest of its file's
+// first line. A file that does not begin with that line is a later file, and
+// its cursor is named for the path and that line, so it is the same name on
+// every pass. The plugin never writes a line twice, so two files it writes
+// never begin with the same line. A file rewritten behind its cursor still
+// begins with its first line, so it stays with that cursor, and is still a
+// conflict there.
+//
+// The first line is read on every pass, even when the file has the inode the
+// cursor recorded and the size it read to: a file system can give a new file
+// the inode of the one removed before it, and a new file of the same length
+// was taken for the old one and never read. A file that holds no complete
+// line yet is not the file of a cursor that read one, so it goes to a cursor
+// of its own, which waits for that line.
+func followFiles(dir, prefix, root string, src Source, path string, cur *storage.Cursor) (string, error) {
+	var head string
+	read := false
+	seen := map[string]bool{}
+	for cur.HeadSHA256 != "" {
+		if !read {
+			h, err := firstLine(src.Path)
+			if errors.Is(err, os.ErrNotExist) {
+				// The file went after discovery listed it. TailAppend says
+				// so, behind the cursor it had.
+				return path, nil
+			}
+			if err != nil {
+				return "", err
+			}
+			head, read = h, true
+		}
+		if head == cur.HeadSHA256 {
+			return path, nil
+		}
+		seen[path] = true
+		path = filepath.Join(dir, storage.LaterCursorName(prefix, root, src.Rel, cur.HeadSHA256))
+		if seen[path] {
+			return "", fmt.Errorf("claudecodechanges: the cursors of %s name each other in a loop at %s", src.Rel, path)
+		}
+		var err error
+		if cur, err = storage.LoadCursor(path, storage.CursorAppend, src.Rel); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+// landedSrc is the src a source's files land with. The first source at a
+// path lands under the path. A later file at the path, or the same path under
+// a second recorder root, has a cursor of its own, and lands under the path
+// marked with its first line, see storage.MarkedSource. Its records number
+// their lines from 1 again, so without its own src a reader of the landed
+// files took them for lines landed twice. A cursor with no first line has
+// read nothing yet, or read before 0.6.0, when its files landed under the
+// path.
+func landedSrc(src Source, cursorPath string, cur *storage.Cursor) string {
+	if filepath.Base(cursorPath) == string(src.Kind)+".cursor" || cur.HeadSHA256 == "" {
+		return src.Rel
+	}
+	return storage.MarkedSource(src.Rel, cur.HeadSHA256)
+}
+
+// firstLine is the digest of a file's first line without its newline, or ""
+// when the file holds no complete line yet. It is read in pieces, since one
+// line can be several megabytes.
+func firstLine(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	buf := make([]byte, 64<<10)
+	for {
+		n, err := f.Read(buf)
+		if i := bytes.IndexByte(buf[:n], '\n'); i >= 0 {
+			h.Write(buf[:i])
+			return hex.EncodeToString(h.Sum(nil)), nil
+		}
+		h.Write(buf[:n])
+		if errors.Is(err, io.EOF) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+	}
+}
+
+// lineDigest is the digest firstLine gives for a file that begins with b.
+func lineDigest(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // describes reports whether a cursor that names no root was read from this
@@ -329,12 +437,17 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		return false, false, nil
 	}
 
+	// The first line is taken from the bytes read, not from the file now,
+	// which may already be a later one.
+	if cur.HeadSHA256 == "" && chunk.Lines[0].Off == 0 {
+		cur.HeadSHA256 = lineDigest(chunk.Lines[0].Bytes)
+	}
 	seq := state.Take()
 	name := storage.LandedName(string(src.Kind), storage.Stamp(now), seq)
 	hdr := &sessiondata.Header{
 		H: 1, Seq: seq, At: now.UTC().Format(time.RFC3339Nano),
 		Kind: src.Kind, Adapter: Name + "/" + Version, Dialect: Dialect,
-		Src: src.Rel, Session: src.Session, Stream: src.Stream,
+		Src: landedSrc(src, cursorPath, cur), Session: src.Session, Stream: src.Stream,
 	}
 	// A record is larger than its line, so the file ends where the converted
 	// records reach the budget, and the cursor stops before the first line
@@ -388,6 +501,7 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 	if err != nil && !os.IsNotExist(err) {
 		return true, false, err
 	}
+	cur.Source = hdr.Src
 	cur.Dev, cur.Ino = chunk.Dev, chunk.Ino
 	cur.Offset, cur.Ord = chunk.NewOffset, chunk.NewOrd
 	cur.LastUUID, cur.TailSHA256 = chunk.LastUUID, digest

@@ -21,12 +21,12 @@
 //
 // A scan walks the root under the exclusion rules and hashes what it
 // finds. A stat cache makes the second scan cheap: a file whose size,
-// modification time and inode are as the last scan saw them keeps its
-// hash, unless its modification time is within the last scan's own
-// second, when it is hashed again because the clock cannot tell. The
-// bytes of every new hash are copied into a content store, which is what
-// a diff is later made from, since a tool may have rewritten the file in
-// place by then.
+// modification time, inode and change time, where the platform keeps one,
+// are as the last scan saw them keeps its hash, unless its modification
+// time is within the last scan's own second, when it is hashed again
+// because the clock cannot tell. The bytes of every new hash are copied
+// into a content store, which is what a diff is later made from, since a
+// tool may have rewritten the file in place by then.
 //
 // Every scan appends a step to the root's chain: which paths changed and
 // from what hash to what. A window is the span of steps between its two
@@ -61,6 +61,10 @@ type Entry struct {
 	Size  int64  `json:"size"`
 	MTime int64  `json:"mtime"` // nanoseconds
 	Inode uint64 `json:"inode"`
+	// CTime is when the inode last changed, in nanoseconds, where the
+	// platform keeps it. chmod changes it and nothing else the cache
+	// compares, so a file made unreadable is read again and found so.
+	CTime int64  `json:"ctime,omitempty"`
 	Hash  string `json:"hash"`
 }
 
@@ -81,6 +85,10 @@ type Step struct {
 	// Partial says the scan stopped at its time cap; the changes above
 	// are what it saw before stopping.
 	Partial bool `json:"partial,omitempty"`
+	// Unread names the directories and files the scan could not read, "."
+	// for the root. Nothing under them is observed, so the manifest keeps
+	// what the scan before saw there.
+	Unread []string `json:"unread,omitempty"`
 }
 
 // PathChange is one path's hash before and after a step; an empty hash
@@ -181,8 +189,22 @@ func (r *Root) Scan(opt Options) (*Manifest, *Step, error) {
 
 	next := &Manifest{N: prev.N + 1, From: start.UTC().Format(time.RFC3339Nano), Files: map[string]Entry{}}
 	timedOut := false
+	// What is gone was deleted. What is there and cannot be read is only not
+	// observed: a tool that ran chmod 000 on a directory made every file
+	// under it look deleted, and restoring access made them look created.
+	var unread []string
+	notRead := func(p string, err error) {
+		if errors.Is(err, fs.ErrNotExist) {
+			return
+		}
+		rel, rerr := filepath.Rel(r.Path, p)
+		if rerr == nil {
+			unread = append(unread, filepath.ToSlash(rel))
+		}
+	}
 	walkErr := filepath.WalkDir(r.Path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
+			notRead(p, err)
 			if d != nil && d.IsDir() {
 				return fs.SkipDir
 			}
@@ -208,15 +230,17 @@ func (r *Root) Scan(opt Options) (*Manifest, *Step, error) {
 		}
 		info, ierr := d.Info()
 		if ierr != nil {
+			notRead(p, ierr)
 			return nil
 		}
-		e := Entry{Size: info.Size(), MTime: info.ModTime().UnixNano(), Inode: inodeOf(info)}
-		if old, ok := prev.Files[rel]; ok && old.Size == e.Size && old.MTime == e.MTime && old.Inode == e.Inode && e.MTime < racy {
+		e := Entry{Size: info.Size(), MTime: info.ModTime().UnixNano(), Inode: inodeOf(info), CTime: ctimeOf(info)}
+		if old, ok := prev.Files[rel]; ok && old.Size == e.Size && old.MTime == e.MTime && old.Inode == e.Inode && old.CTime == e.CTime && e.MTime < racy {
 			e.Hash = old.Hash
 		} else {
 			h, herr := r.hashAndKeep(p, e.Size, opt.SizeCap)
 			if herr != nil {
-				return nil // unreadable now; absent from this manifest, seen again next time
+				notRead(p, herr)
+				return nil
 			}
 			e.Hash = h
 		}
@@ -227,8 +251,14 @@ func (r *Root) Scan(opt Options) (*Manifest, *Step, error) {
 		return nil, nil, walkErr
 	}
 	next.To = now().UTC().Format(time.RFC3339Nano)
+	sort.Strings(unread)
+	for p, old := range prev.Files {
+		if _, ok := next.Files[p]; !ok && under(p, unread) {
+			next.Files[p] = old
+		}
+	}
 
-	step := &Step{N: next.N, From: next.From, To: next.To, Changes: map[string]PathChange{}, Partial: timedOut}
+	step := &Step{N: next.N, From: next.From, To: next.To, Changes: map[string]PathChange{}, Partial: timedOut, Unread: unread}
 	for p, e := range next.Files {
 		if old, ok := prev.Files[p]; !ok || old.Hash != e.Hash {
 			before := ""
@@ -294,7 +324,7 @@ func (r *Root) Touch(rel string, opt Options) (*Step, error) {
 		if herr != nil {
 			return nil, herr
 		}
-		cur = &Entry{Size: info.Size(), MTime: info.ModTime().UnixNano(), Inode: inodeOf(info), Hash: h}
+		cur = &Entry{Size: info.Size(), MTime: info.ModTime().UnixNano(), Inode: inodeOf(info), CTime: ctimeOf(info), Hash: h}
 	case serr != nil && !os.IsNotExist(serr):
 		return nil, serr
 	}
@@ -321,6 +351,17 @@ func (r *Root) Touch(rel string, opt Options) (*Step, error) {
 		return nil, err
 	}
 	return step, nil
+}
+
+// under says whether a path is one of the paths given, "." for the root, or
+// lies below one.
+func under(p string, paths []string) bool {
+	for _, u := range paths {
+		if u == "." || p == u || strings.HasPrefix(p, u+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // excluded says whether a path lies under a pruned directory.

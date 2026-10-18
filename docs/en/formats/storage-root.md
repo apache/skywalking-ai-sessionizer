@@ -156,7 +156,12 @@ came from, `at` included, and the files are numbered in the order their records 
 
 Each source has one cursor, beside the files it tracks, named `<kind>.cursor`. The dot matters.
 Landed files are named `<kind>-<collected-at>-<seq>.sd`, so a cursor named with a hyphen would share
-their prefix, and a scan for one kind's files would take the cursor for data.
+their prefix, and a scan for one kind's files would take the cursor for data. A stream can hold more
+than one source of the plugin's kinds: the same session in a second plugin directory or recorder
+root, or a file the plugin wrote again at the same path (see [Pruned sources](#pruned-sources)). The
+first source keeps the plain name. Each other one has a cursor named
+`<kind>-<12 hexadecimal characters>.cursor`, which a scan for landed files passes over by its
+extension.
 
 A cursor belongs to one source rather than to the session, because a session can hold hundreds of
 sources. Measured on 2026-09-11 on one machine's storage root of 60 Claude Code sessions, the
@@ -190,13 +195,14 @@ state         active
 
 | Field | What it is for |
 | --- | --- |
-| `source` | the source path, relative to the adapter's root, with forward slashes |
-| `origin` | the adapter's root the source is under, with forward slashes: relative to the storage root when the source root lies inside it, so a root copied whole keeps its cursors, and absolute otherwise. `asz repack` writes a relative origin again for its new root, which the source root is outside, and renames the cursor named for it to match. Written since 0.5.0 by an adapter that reads more than one root, since two roots can hold one relative path. A cursor without it was written before 0.5.0 and belongs to the root whose file it was read from - the file with its `dev` and `ino` and the bytes of its `tail_sha256`, since two filesystems can give one inode number to unrelated files - and that root writes the key on its next pass. A legacy cursor whose file was copied or restored since is not claimed; that source is read again from its start behind a cursor of its own, and the index keeps the first record it holds for an id |
+| `source` | the source path, relative to the adapter's root, with forward slashes. For a source of the plugin's that lands under a `src` of its own, that `src`, see [Pruned sources](#pruned-sources) |
+| `origin` | the adapter's root the source is under, with forward slashes: relative to the storage root when the source root lies inside it, so a root copied whole keeps its cursors, and absolute otherwise. `asz repack` writes a relative origin again for its new root, which the source root is outside, and renames each cursor named for it to match: a second source's, and a later file's. Written since 0.5.0 by an adapter that reads more than one root, since two roots can hold one relative path. A cursor without it was written before 0.5.0 and belongs to the root whose file it was read from - the file with its `dev` and `ino` and the bytes of its `tail_sha256`, since two filesystems can give one inode number to unrelated files - and that root writes the key on its next pass. A legacy cursor whose file was copied or restored since is not claimed; that source is read again from its start behind a cursor of its own, and the index keeps the first record it holds for an id |
 | `dev`, `ino` | the device and the inode the file had when it was read, or on Windows its volume serial number and file index. Resuming a cursor compares `ino` alone, and it is what this page calls the file's identity: a change means the file was replaced, or is being reached another way, and the bytes decide which, see below. Claiming a cursor that carries no `origin` compares both, since that decides whether the cursor was read from this file at all and not from another with the same bytes at its end. |
 | `offset` | the bytes consumed, always at the end of a line, and where the next read starts. Compared with the file's size, it says whether anything is new. A size below it means the file was cut short. |
 | `ord` | the last source line consumed, so line numbers continue without counting again from byte 0 |
 | `last_uuid` | the id of the last record that had one. For diagnosis only: many lines carry no id, and nothing compares it. |
 | `tail_sha256` | the SHA-256 of the 1 MiB before `offset`. A mismatch means bytes already read were rewritten. |
+| `head_sha256` | the SHA-256 of the file's first line, without its newline, taken from the bytes the first read landed. Written for the plugin's files, which the plugin can remove and write again at the same path, on every cursor that has read a line since 0.6.0, see [Pruned sources](#pruned-sources). A file that does not begin with this line is another file. A cursor that read lines before 0.6.0 has none and is never given one, so the file at its path is taken to be its file, and a file the plugin writes again there is a `conflict`. |
 | `size`, `mtime` | the size and modification time last seen. Recorded, never compared. |
 | `last_seq` | the sequence of the last file this source landed |
 | `state` | `active`, `source_gone` or `conflict` |
@@ -315,6 +321,41 @@ plugin removes an output file itself once it has not been written to for `retent
 by default (see [Retention](../adapters/claude-code-plugin.md#retention)). Their adapter sets
 `source_gone` only on a file that goes while a pass reads it, so the cursor of a file the plugin
 removed is left as it was.
+
+When the session goes on after that, the plugin writes a new file at the same path. Its bytes are
+not the ones the old cursor read, so read against that cursor it would be a `conflict`, and nothing
+more from the path would be collected. So the cursor of a plugin file records `head_sha256`, and a
+pass finds a file's cursor before it reads the file:
+
+1. It starts at the path's cursor, `<kind>.cursor` or the one of a second source.
+2. A cursor with no `head_sha256` takes the file. It has read nothing yet, or it was written before
+   0.6.0.
+3. Otherwise the pass reads the file's first line. When its SHA-256 is `head_sha256`, the file is
+   the cursor's file. The line is read on every pass, even when the file has the `ino` the cursor
+   recorded and a size equal to its `offset`: a file system can give a new file the inode of the
+   one removed before it, and a new file of the same length would otherwise never be read.
+4. Otherwise the file is a later one. The next cursor is `<kind>-<12 hexadecimal characters>.cursor`,
+   the first 12 hexadecimal characters of the SHA-256 of the adapter's root as `origin` writes it,
+   the source path and that `head_sha256`, joined by newlines. The pass goes back to step 2 with it.
+   A file that holds no complete line yet begins with no line, so it comes to a cursor that has read
+   nothing, and waits there for its first line.
+
+A later file is read from its start, its lines numbered from 1, behind a cursor that has read
+nothing. Nothing of the file before it is landed again: that file is gone, and the plugin writes
+each record once, so two files it writes never begin with the same line. A file rewritten behind
+its cursor still begins with the line it began with, so it stays with its cursor and is a
+`conflict` there, as [Append cursors](#append-cursors) says. A file whose first line was rewritten
+is taken for a later file.
+
+A source with a cursor other than `<kind>.cursor`, a later file at the path or the same path under
+a second recorder root, lands under a `src` of its own: the source path, `#`, and the first 12
+hexadecimal characters of its `head_sha256`. Its cursor's `source` is that `src`. Its lines number
+from 1 again, so a reader of the landed files alone tells it from the other sources of the stream,
+and `asz verify` checks each `src` of the plugin's kinds apart, as
+[Session Data](session-data.md#header) says. A skeleton keeps its file's header, and `asz repack`
+cuts the records of two files into one only when their headers are the same, so both keep it. A
+cursor that read lines before 0.6.0
+has no `head_sha256`, and its files land under the source path, as they did.
 
 A session a scenario build marked is the one case where asz deletes a source itself. Once all of
 the session is sent, a pipeline removes its source first and then the whole session directory, as
