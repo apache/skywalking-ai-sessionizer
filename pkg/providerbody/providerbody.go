@@ -96,6 +96,14 @@ type Manifest struct {
 	Request         string `json:"request,omitempty"`
 	PreviousRequest string `json:"previous_request,omitempty"`
 
+	// What the body says about its call's history, in the form HistoryForm
+	// names (history.go). Empty on a body landed before asz wrote them.
+	HistoryForm string    `json:"history_form,omitempty"`
+	Messages    *Messages `json:"messages,omitempty"`
+	System      string    `json:"system,omitempty"`
+	Thread      *Thread   `json:"thread,omitempty"`
+	Reply       *Reply    `json:"reply,omitempty"`
+
 	Segments []Segment `json:"segments"`
 }
 
@@ -147,6 +155,9 @@ type Body struct {
 	Src   string
 	Keys  Keys
 	Bytes []byte
+	// History is what the adapter read from the bytes about the call's
+	// history; nil from an adapter that reads none.
+	History *History
 }
 
 // Digest is the SHA-256 of b in hexadecimal, as a manifest and a copy name

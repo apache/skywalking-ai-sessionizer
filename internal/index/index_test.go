@@ -386,3 +386,99 @@ func TestALongLabelAndManyPartsSurviveTheRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestAProviderBodysHistorySurvivesTheRoundTrip. What a manifest says of its
+// call's history is indexed as it was written: a list whole or against a
+// base, a list that is unavailable and why, a thread, a system digest and a
+// reply. Through keeps the entries of the bodies it keeps, and no others.
+func TestAProviderBodysHistorySurvivesTheRoundTrip(t *testing.T) {
+	const a, b, c = "0000000000000001", "0000000000000002", "00000000000000ff"
+	manifest := func(fields map[string]any) json.RawMessage {
+		m := map[string]any{"schema": "provider_body/1", "sha256": "d", "bytes": 2, "depth": 0,
+			"segments": []any{map[string]any{"lit": "{}"}}, "history_form": "langchain/1"}
+		for k, v := range fields {
+			m[k] = v
+		}
+		raw, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	records := []map[string]any{
+		{"role": "request", "system": "5555555555555555", "thread": map[string]any{"type": "create"},
+			"messages": map[string]any{"entries": []any{map[string]any{"id": c, "digest": a}, map[string]any{"digest": b}}}},
+		{"role": "response", "reply": map[string]any{"id": c, "digest": b}},
+		{"role": "request", "thread": map[string]any{"type": "continue", "previous": "msg_1"},
+			"messages": map[string]any{"base": "r1", "keep": 2, "add": []any{map[string]any{"digest": c}}}},
+		{"role": "request", "messages": map[string]any{"unavailable": "too_large", "count": 9}},
+		{"role": "response", "reply": map[string]any{"unavailable": "no_single_reply"}},
+		{"role": "request", "messages": map[string]any{"entries": []any{map[string]any{"digest": "not a digest"}}}},
+		{"role": "request", "thread": map[string]any{"type": "fork"}, "messages": map[string]any{"entries": []any{}}},
+		{"role": "request", "messages": map[string]any{"base": "r1", "keep": 4294967297, "add": []any{}}},
+		{"role": "request", "system": "garbage", "messages": map[string]any{"entries": []any{}}},
+	}
+	hdr := &sessiondata.Header{Kind: sessiondata.KindProviderBody, Session: "sess-1"}
+	ix := index.New("sess-1")
+	for i, fields := range records {
+		rec := &sessiondata.Record{Ord: uint64(i + 1), ID: "r" + string(rune('1'+i)),
+			Parts: []sessiondata.Part{{Kind: sessiondata.PartData, Data: manifest(fields)}}}
+		e, blocks, body := index.FromRecord(ix, hdr, rec, uint32(i+1), 1)
+		ix.AppendRecord(e, blocks, body)
+	}
+	dir := t.TempDir()
+	if err := ix.Write(dir); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := index.Load(dir, "sess-1")
+	if err != nil || !ok {
+		t.Fatalf("Load: ok=%v err=%v", ok, err)
+	}
+	s := got.Strings.String
+	first, reply, cont, large, noReply, bad := got.Bodies[0], got.Bodies[1], got.Bodies[2], got.Bodies[3], got.Bodies[4], got.Bodies[5]
+	if s(first.Form) != "langchain/1" || first.Thread != index.ThreadCreate || s(first.System) != "5555555555555555" ||
+		first.List != index.ListWhole || first.MsgCount != 2 {
+		t.Fatalf("the first request: %+v", first)
+	}
+	msgs := got.Messages[first.MsgFirst : first.MsgFirst+first.MsgCount]
+	if !msgs[0].HasID || msgs[0].ID != 0xff || msgs[0].Digest != 1 || msgs[1].HasID || msgs[1].Digest != 2 {
+		t.Fatalf("the first request's entries: %+v", msgs)
+	}
+	if reply.Reply != index.ReplyEntry || !reply.ReplyHasID || reply.ReplyID != 0xff || reply.ReplyDigest != 2 {
+		t.Fatalf("the reply: %+v", reply)
+	}
+	if cont.Thread != index.ThreadContinue || s(cont.ThreadPrevious) != "msg_1" || cont.List != index.ListRelative ||
+		s(cont.ListBase) != "r1" || cont.ListKeep != 2 || cont.MsgCount != 1 || got.Messages[cont.MsgFirst].Digest != 0xff {
+		t.Fatalf("the continue request: %+v", cont)
+	}
+	if large.List != index.ListUnavailable || s(large.ListWhy) != "too_large" || large.ListCount != 9 || large.MsgCount != 0 {
+		t.Fatalf("the list too large: %+v", large)
+	}
+	if noReply.Reply != index.ReplyUnavailable || s(noReply.ReplyWhy) != "no_single_reply" {
+		t.Fatalf("the response with no reply: %+v", noReply)
+	}
+	// A manifest whose list does not read is indexed, with the list unavailable.
+	if bad.List != index.ListUnavailable || s(bad.ListWhy) != "unrecognised_shape" || bad.MsgCount != 0 {
+		t.Fatalf("an unreadable list: %+v", bad)
+	}
+	// A thread no rule describes, and a list keeping more entries than an
+	// index row can count, are unavailable too, never a list read another way.
+	for _, b := range got.Bodies[6:8] {
+		if b.List != index.ListUnavailable || s(b.ListWhy) != "unrecognised_shape" || b.Thread != index.ThreadNone {
+			t.Fatalf("an unknown thread or an overflowing keep: %+v", b)
+		}
+	}
+	// A system that is not a digest is not known, which is not the same as none.
+	if b := got.Bodies[8]; b.System != 0 || !b.SystemUnknown {
+		t.Fatalf("a system that is not a digest: %+v", b)
+	}
+	if first.SystemUnknown {
+		t.Fatalf("a digest was taken for none: %+v", first)
+	}
+	if cut := got.Through(2); len(cut.Messages) != 2 {
+		t.Fatalf("through the first two bodies: %d entries, want the first request's 2", len(cut.Messages))
+	}
+	if len(got.Messages) != 3 {
+		t.Fatalf("%d entries in all, want 3", len(got.Messages))
+	}
+}

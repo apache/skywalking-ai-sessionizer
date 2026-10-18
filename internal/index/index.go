@@ -33,7 +33,7 @@ package index
 
 // Schema is the on-disk index version. Bump it when Entry, Block or Body
 // changes; a mismatch discards the index and rebuilds rather than migrating.
-const Schema = 16
+const Schema = 17
 
 // Kind classifies a record without reading it.
 type Kind uint8
@@ -130,6 +130,14 @@ const (
 	// call that opened it stays a tool step. Set by the adapter from what it
 	// saw directly under the tool; never inferred here.
 	FlagAuxiliary
+	// FlagInternalCall marks a model call the framework made for its own
+	// purpose, which takes no part in the history of its stream, and
+	// FlagTurnCall one that does. Set by the adapter from what the call's start
+	// said. A runtime whose every call is a turn sets neither, as Claude Code
+	// does; a call of a runtime that sets them and carries neither has an
+	// unknown class, and is never compared.
+	FlagInternalCall
+	FlagTurnCall
 )
 
 // Has reports whether every bit in f is set.
@@ -246,6 +254,80 @@ type Body struct {
 	// whose runtime knew its call carries that on its entry's Call, as a
 	// response does, and joins by it.
 	Previous uint32
+
+	// What the manifest says about the call's history (pkg/providerbody,
+	// history.go), so the assembler compares calls from the index alone. Form
+	// is the interned name of the rules the fields were written under; zero
+	// for a body landed before asz wrote them, which is never compared.
+	Form uint32
+	// Thread is the provider thread a request starts or continues, and
+	// ThreadPrevious the interned message id a continue request names.
+	Thread         ThreadKind
+	ThreadPrevious uint32
+	// System is the interned digest of a request's system prompt without its
+	// bookkeeping; zero when the request carries nothing else. SystemUnknown
+	// says the manifest named one that is not a digest, so the prompt is not
+	// known, which is not the same as there being none.
+	System        uint32
+	SystemUnknown bool
+	// List says how a request's message list is written. Its entries are
+	// Messages[MsgFirst:MsgFirst+MsgCount]: the whole list, or what follows
+	// the first ListKeep entries of the list of the record ListBase names.
+	// ListWhy and ListCount say why a list is unavailable, interned, and how
+	// many messages a list too large held.
+	List               ListKind
+	ListBase, ListKeep uint32
+	MsgFirst, MsgCount uint32
+	ListWhy, ListCount uint32
+	// Reply is a response's message, its digests as numbers, or ReplyWhy,
+	// interned, says why there is none.
+	Reply                ReplyKind
+	ReplyHasID           bool
+	ReplyID, ReplyDigest uint64
+	ReplyWhy             uint32
+
+	// messages carries a request's entries from FromRecord to AppendRecord,
+	// which moves them into Index.Messages and clears it. They are encoded
+	// as the index file holds them, in a string, so two bodies compare by
+	// what they hold.
+	messages string
+}
+
+// ThreadKind is the provider thread a request names.
+type ThreadKind uint8
+
+const (
+	ThreadNone ThreadKind = iota
+	ThreadCreate
+	ThreadContinue
+)
+
+// ListKind is how a request's message list is written.
+type ListKind uint8
+
+const (
+	ListAbsent ListKind = iota
+	ListWhole
+	ListRelative
+	ListUnavailable
+)
+
+// ReplyKind is what a response says of its reply.
+type ReplyKind uint8
+
+const (
+	ReplyAbsent ReplyKind = iota
+	ReplyEntry
+	ReplyUnavailable
+)
+
+// Message is one entry of a request's message list: the digests of the id
+// the runtime sent, when it sent one, and of the message's form, as the
+// numbers their sixteen hexadecimal characters spell.
+type Message struct {
+	HasID  bool
+	ID     uint64
+	Digest uint64
 }
 
 // BlockKind classifies a joinable content block.

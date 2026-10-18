@@ -325,6 +325,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 	runs := make([]Run, len(operations))
 	sessions := make([]string, len(operations))
 	methods := make([]string, len(operations))
+	classes := make([]string, len(operations))
 	// One run is one conversation. Its first arrival in this request
 	// decides, and a later arrival of the same run follows it, so one run is
 	// never split across two; a later arrival that names a conversation
@@ -344,6 +345,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		completed, known, found := open.complete(envelope)
 		runs[i] = completed
 		methods[i] = known.Method
+		classes[i] = known.Class
 
 		// Which conversation this belongs to, resolved here rather than
 		// later, because a start and an update to it can be in one batch and
@@ -386,7 +388,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		if unsupplied[decides] || partial[decides] {
 			remembered = ""
 		}
-		open.started(completed, methodOf(op), remembered, c.Now())
+		open.started(completed, methodOf(op), callClassOf(op), remembered, c.Now())
 		if partial[decides] {
 			open.partial(op.RunID)
 		}
@@ -513,7 +515,7 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		if retired[i] {
 			// Remembered in its conversation, so a later arrival of it, or
 			// of a run inside it, is known to be retired too.
-			open.started(envelope, methodOf(op), session, c.Now())
+			open.started(envelope, methodOf(op), callClassOf(op), session, c.Now())
 			if !slices.Contains(out.Retired, session) {
 				out.Retired = append(out.Retired, session)
 			}
@@ -523,8 +525,8 @@ func (c *Collector) convertWith(request Waiting, open *pending, wait bool) (Land
 		// update carries none of this. So a run is remembered whether or not
 		// it has finished, and is forgotten only by age. Forgetting it here
 		// lost its start to any replay of this request.
-		open.started(envelope, methodOf(op), session, c.Now())
-		records, err := ConvertRun(op, envelope, methods[i], op.Op == "post", hints)
+		open.started(envelope, methodOf(op), callClassOf(op), session, c.Now())
+		records, err := ConvertRun(op, envelope, methods[i], classes[i], op.Op == "post", hints)
 		if err != nil {
 			return out, &unreadable{fmt.Errorf("run %s: %w", op.RunID, err)}
 		}

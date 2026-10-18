@@ -89,7 +89,7 @@ the captures, from the Python client, carry the project and the thread.
 
 A run is posted when it starts and patched when it ends, so the same run can reach asz more than
 once. Both clients send the two as one post of the finished run when they fall in one batch, as
-most runs do: in the captured corpus 462 of 476 posts carried their run's end. Each arrival is its
+most runs do: in the captured corpus 487 of 501 posts carried their run's end. Each arrival is its
 own record, with the run as its `call`.
 
 They cannot share one record id. The index keeps the first entry for an id, and in the streaming
@@ -234,10 +234,28 @@ On this wire a body is the framework's view of what it sent — the run's `input
 LangChain's serialized message form — and not the bytes the provider received. The manifest says
 which adapter it came from, and a reader must not take it for the wire.
 
+**What a call's history was.** A request's manifest also lists its messages, one digest each in the
+form `langchain/1`, and a response's names the message it produced, so assembly can tell where a
+call's history changed without reading a body; [Session Data](../formats/session-data.md#history)
+gives the rules. A message is compared as LangChain serialized it, with nothing left out. On the 20
+capture directories, every one of the 80 message ids sent more than once has one form. Of the 79
+replies, 47 come back in a later request as they were produced, 3 come back altered by the
+framework, and 29 never come back. Two of the altered ones gained `name`, the name of the agent
+that wrote them, when a subagent's answer went back to its caller. The third is a loop over
+`model.stream()` that sent back the chunks it joined, which LangChain marks with
+`chunk_position: "last"`; a graph that streams sends back an `AIMessage`, which comes back equal.
+
+**Which calls are the conversation's.** A model call LangChain makes for its own purpose, such as
+`SummarizationMiddleware`'s summary, carries `lc_internal_call` in its run's metadata, and its
+record is flagged `internal_call`; any other model call is flagged `turn_call`. Only a run's start
+carries the whole metadata, so only a start decides, and an update's record carries the class its
+start gave, or none when the receiver does not hold it, as after the start was forgotten or before
+asz wrote the flag. Two starts that disagree leave `internal_call`.
+
 **Where the system prompt and the tools land.** The system message and the tools a model was offered
 reach asz in a model call's `inputs` and `extra`, and in any run the application hands them to, such
-as a decorated function, which the paragraphs below cover. Measured on the 75 model arrivals of the
-captured corpus, every one sent its inputs out of band, and the 43 that offered tools sent them in
+as a decorated function, which the paragraphs below cover. Measured on the 80 model arrivals of the
+captured corpus, every one sent its inputs out of band, and the 46 that offered tools sent them in
 an out-of-band `extra`. The system message lands in the provider bodies, as part of a request's
 inputs, and a reader that [withholds](../formats/asz-view.md#withholding) anything is served no
 body. The tools land nowhere: a request body is its inputs, and the `extra` they came in is not
@@ -247,7 +265,7 @@ Two other records can hold the request itself. A model call that arrives before 
 lands that arrival's whole run envelope, whether or not a later arrival finishes it. The envelope
 held neither on the corpus, but a client that put them inside it would land them there. A trace
 whose root is the model call itself, with no message list in its inputs, such as a completion asked
-with a list of prompts, lands those inputs whole as its first input. All 48 trace roots of the
+with a list of prompts, lands those inputs whole as its first input. All 51 trace roots of the
 corpus are chain runs, so none landed this way. Each record is named `system_prompt` when it holds
 inputs of any shape, since they are the request the model was sent, and the envelope also when its
 `extra` holds a prompt by shape, under a key a provider takes it by. It is named `tool_schemas` when
@@ -384,7 +402,7 @@ identity remains unresolved, the update is then not collected. See
   - The middleware summarises inside a turn, so the talk it happens in stays in the epoch where the
     turn began, as it does for a Claude Code compaction in the middle of a turn.
   - The reset lands with the arrival that carries the request. In the captured corpus every model
-    call's first arrival carried its request, 74 of 74. A request that arrives after its call has
+    call's first arrival carried its request, 79 of 79. A request that arrives after its call has
     begun puts that one call in the old epoch.
   - A marked message with no `id` makes no reset. The middleware gives every message one. Without
     it, one summary could not be told from another with the same words.

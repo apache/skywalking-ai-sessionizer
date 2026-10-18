@@ -36,9 +36,10 @@ BASE = "http://127.0.0.1:8931/v1"
 SYSTEM = "You are a site status assistant.\n" + ("Rule: never guess.\n" * 800)
 
 
-def model(behaviour):
+def model(behaviour, streaming=False):
     """A model whose name tells the stand-in which behaviour to play."""
-    return ChatOpenAI(model=behaviour, base_url=BASE, api_key="stand-in", temperature=0)
+    return ChatOpenAI(model=behaviour, base_url=BASE, api_key="stand-in", temperature=0,
+                      streaming=streaming)
 
 
 @tool
@@ -235,6 +236,41 @@ def case_abandoned_run():
     os._exit(0)
 
 
+def case_streaming():
+    """A streaming model: each reply is put together from chunks.
+
+    A streamed reply can be traced as a chunk class, with an id the client made
+    up for the run, so whether it is sent back as the message it was is a
+    question only a capture answers. The second turn streams the graph itself,
+    as an application showing tokens as they come does. The last two calls
+    stream the model directly, outside any graph, and send the joined chunks
+    back as history, as a hand-written loop does.
+    """
+    from langchain_core.messages import HumanMessage
+    from langsmith import traceable
+
+    agent = create_react_agent(model("tool", streaming=True), [lookup_status],
+                               checkpointer=InMemorySaver())
+    ask(agent, "Check docs-1.", "thread-streaming")
+    config = {"configurable": {"thread_id": "thread-streaming"}}
+    for _ in agent.stream({"messages": [{"role": "user", "content": "Check docs-2."}]},
+                          config=config, stream_mode="messages"):
+        pass
+
+    @traceable(run_type="chain", name="loop", metadata={"thread_id": "thread-streaming-loop"})
+    def loop():
+        chat = model("plain", streaming=True)
+        history = [HumanMessage("Check docs-3.")]
+        reply = None
+        for piece in chat.stream(history):
+            reply = piece if reply is None else reply + piece
+        history += [reply, HumanMessage("And docs-4?")]
+        for _ in chat.stream(history):
+            pass
+
+    loop()
+
+
 def case_traceable_only():
     """No LangChain graph at all: the client's own decorator."""
     from langsmith import traceable
@@ -269,4 +305,5 @@ CASES = {
     "summarized": case_summarized,
     "abandoned-run": case_abandoned_run,
     "traceable-only": case_traceable_only,
+    "streaming": case_streaming,
 }

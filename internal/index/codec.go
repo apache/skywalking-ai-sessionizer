@@ -35,7 +35,8 @@ const (
 	entryWidth = 4 + 4 + 4 + 4 + 1 + 1 + 2 + 8 + 4*9 + 8 + 4 + 4 // 80
 	blockWidth = 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 4               // 33
 	// entry role request previous
-	bodyWidth = 4 + 1 + 4 + 4 // 13
+	bodyWidth    = 4 + 1 + 4 + 4 + 4 + 1 + 4 + 4 + 1 + 4*6 + 1 + 1 + 8 + 8 + 4 + 1 // 74
+	messageWidth = 1 + 8 + 8                                                       // 17
 )
 
 var le = binary.LittleEndian
@@ -113,6 +114,17 @@ func (ix *Index) Write(dir string) error {
 	for i := range ix.Bodies {
 		encodeBody(ybuf, &ix.Bodies[i])
 		if _, err := w.Write(ybuf); err != nil {
+			return err
+		}
+	}
+
+	if err := writeU32(w, uint32(len(ix.Messages))); err != nil {
+		return err
+	}
+	mbuf := make([]byte, messageWidth)
+	for i := range ix.Messages {
+		encodeMessage(mbuf, &ix.Messages[i])
+		if _, err := w.Write(mbuf); err != nil {
 			return err
 		}
 	}
@@ -211,6 +223,25 @@ func Load(dir, session string) (ix *Index, ok bool, err error) {
 		decodeBody(b, &bodies[i])
 	}
 
+	if b, err = read(4); err != nil {
+		return nil, false, err
+	}
+	nMsg := int(le.Uint32(b))
+	messages := make([]Message, nMsg)
+	for i := 0; i < nMsg; i++ {
+		if b, err = read(messageWidth); err != nil {
+			return nil, false, err
+		}
+		decodeMessage(b, &messages[i])
+	}
+	// A body names its entries by position, so one that names past the
+	// table was written by something else; the index is built again.
+	for i := range bodies {
+		if uint64(bodies[i].MsgFirst)+uint64(bodies[i].MsgCount) > uint64(nMsg) {
+			return nil, false, nil
+		}
+	}
+
 	// Entries are in landed order, and a round's watermark takes the entries
 	// at or below it as a prefix (Through). An index whose sequences go back
 	// was extended twice over the same files; it is built again rather than
@@ -222,7 +253,7 @@ func Load(dir, session string) (ix *Index, ok bool, err error) {
 	}
 	return &Index{
 		Session: session, Strings: loadInterner(strs),
-		Entries: entries, Blocks: blocks, Bodies: bodies,
+		Entries: entries, Blocks: blocks, Bodies: bodies, Messages: messages,
 	}, true, nil
 }
 
@@ -256,6 +287,23 @@ func encodeBody(b []byte, x *Body) {
 	b[4] = byte(x.Role)
 	le.PutUint32(b[5:], x.Request)
 	le.PutUint32(b[9:], x.Previous)
+	le.PutUint32(b[13:], x.Form)
+	b[17] = byte(x.Thread)
+	le.PutUint32(b[18:], x.ThreadPrevious)
+	le.PutUint32(b[22:], x.System)
+	b[26] = byte(x.List)
+	le.PutUint32(b[27:], x.ListBase)
+	le.PutUint32(b[31:], x.ListKeep)
+	le.PutUint32(b[35:], x.MsgFirst)
+	le.PutUint32(b[39:], x.MsgCount)
+	le.PutUint32(b[43:], x.ListWhy)
+	le.PutUint32(b[47:], x.ListCount)
+	b[51] = byte(x.Reply)
+	b[52] = boolByte(x.ReplyHasID)
+	le.PutUint64(b[53:], x.ReplyID)
+	le.PutUint64(b[61:], x.ReplyDigest)
+	le.PutUint32(b[69:], x.ReplyWhy)
+	b[73] = boolByte(x.SystemUnknown)
 }
 
 func decodeBody(b []byte, x *Body) {
@@ -263,6 +311,42 @@ func decodeBody(b []byte, x *Body) {
 	x.Role = BodyRole(b[4])
 	x.Request = le.Uint32(b[5:])
 	x.Previous = le.Uint32(b[9:])
+	x.Form = le.Uint32(b[13:])
+	x.Thread = ThreadKind(b[17])
+	x.ThreadPrevious = le.Uint32(b[18:])
+	x.System = le.Uint32(b[22:])
+	x.List = ListKind(b[26])
+	x.ListBase = le.Uint32(b[27:])
+	x.ListKeep = le.Uint32(b[31:])
+	x.MsgFirst = le.Uint32(b[35:])
+	x.MsgCount = le.Uint32(b[39:])
+	x.ListWhy = le.Uint32(b[43:])
+	x.ListCount = le.Uint32(b[47:])
+	x.Reply = ReplyKind(b[51])
+	x.ReplyHasID = b[52] == 1
+	x.ReplyID = le.Uint64(b[53:])
+	x.ReplyDigest = le.Uint64(b[61:])
+	x.ReplyWhy = le.Uint32(b[69:])
+	x.SystemUnknown = b[73] == 1
+}
+
+func encodeMessage(b []byte, m *Message) {
+	b[0] = boolByte(m.HasID)
+	le.PutUint64(b[1:], m.ID)
+	le.PutUint64(b[9:], m.Digest)
+}
+
+func decodeMessage(b []byte, m *Message) {
+	m.HasID = b[0] == 1
+	m.ID = le.Uint64(b[1:])
+	m.Digest = le.Uint64(b[9:])
+}
+
+func boolByte(v bool) byte {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func decodeEntry(b []byte, e *Entry) {

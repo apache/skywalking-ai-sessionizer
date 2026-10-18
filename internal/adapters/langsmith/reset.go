@@ -54,7 +54,7 @@ const (
 // request first carried the summary, and the summariser's own call, which read
 // the old history, lands before it. That holds when a call's request arrives
 // with its first record, which every model call in the captured corpus did
-// (71 of 71). A request that arrives after its call has begun lands its reset
+// (79 of 79). A request that arrives after its call has begun lands its reset
 // after that call's first record, and landed files are never rewritten, so
 // that one call counts in the old epoch.
 func resets(base sessiondata.Record, d decoded) []sessiondata.Record {

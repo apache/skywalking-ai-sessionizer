@@ -133,8 +133,19 @@ func Vocabulary() []string {
 		ContentAvailable, ContentRedacted, ContentOmitted, ContentHashOnly,
 		ContentSizeOnly, ContentTruncated, ContentUnavailable, ContentTooLarge, ContentRemoved,
 		TriggerExternal, TriggerNotification, TriggerUnknown,
+		// the class of a model call
+		ClassTurnCall, ClassInternalCall,
 	}
 }
+
+// The class of a model call: a turn of its stream, whose history the next
+// call of the stream goes on from, or a call the framework made for its own
+// purpose, such as a summary, which takes no part in that history. A record
+// carries one as a flag, and a call that cannot be compared names it.
+const (
+	ClassTurnCall     = "turn_call"
+	ClassInternalCall = "internal_call"
+)
 
 // Roles a record plays. These are the names the index and the details format
 // use for a record's identifiers, and a reader meets them whenever it is shown

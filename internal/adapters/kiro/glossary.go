@@ -126,6 +126,9 @@ var glossary = model.NewGlossary(Dialect,
 	model.Term{Unified: model.TriggerExternal, Native: "user", Where: "messages.jsonl"},
 	model.Term{Unified: model.TriggerNotification, Note: "no equivalent"},
 	model.Term{Unified: model.TriggerUnknown, Note: "derived"},
+
+	model.Term{Unified: model.ClassTurnCall, Note: "no equivalent: Kiro records no model request, so no call's history is compared"},
+	model.Term{Unified: model.ClassInternalCall, Note: "no equivalent: Kiro records no model request, so no call's history is compared"},
 )
 
 // Glossary is what this runtime calls the things the model names.

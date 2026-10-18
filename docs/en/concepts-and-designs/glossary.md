@@ -124,6 +124,16 @@ are what everything above it sees.
 | `time` | when the runtime says it happened |
 | `trigger` | what started the run: `external`, `notification`, or `unknown` |
 
+The class of a model call, which a record carries as a flag where its runtime says it:
+
+| class | is |
+| --- | --- |
+| `turn_call` | a turn of its stream: the next call of the stream goes on from its history |
+| `internal_call` | a call the framework made for its own purpose, such as a summary, which takes **no** part in the history of its stream. Not a turn, and not a child agent either. |
+
+A LangChain call that carries neither flag has an unknown class, and its history is never compared.
+Claude Code writes neither flag, since every call its transcript records is a turn call.
+
 ## Qualification
 
 Nothing is presented as observed unless it was observed.

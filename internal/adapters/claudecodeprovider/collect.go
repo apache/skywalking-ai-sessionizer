@@ -608,7 +608,8 @@ func (c *Collector) collectSession(session string, files []*file, sn *seen, st *
 		return nil
 	}
 	for _, f := range files {
-		rec, err := held.Encode(providerbody.Body{ID: ID(f.name), Role: RoleOf(f.name), Src: f.name, Keys: f.keys, Bytes: f.body})
+		rec, err := held.Encode(providerbody.Body{ID: ID(f.name), Role: RoleOf(f.name), Src: f.name, Keys: f.keys, Bytes: f.body,
+			History: HistoryOf(RoleOf(f.name), f.body)})
 		switch {
 		case errors.Is(err, providerbody.ErrRepeat):
 			done = append(done, f)

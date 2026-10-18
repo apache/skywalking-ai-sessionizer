@@ -33,8 +33,9 @@ files and memory index, the schemas of every MCP tool, and the environment block
 the operating system. asz lands and sends the bodies as they are, and redacts nothing.
 
 **How large.** In a capture with the full tool list, a main request was 121 to 196 KB, of which the
-tool schemas were 74 KB and the system prompt 10 KB, and a subagent's request 33 to 58 KB. Every
-call sends its chain's whole message list again. So most of a body is bytes the session already has.
+tool schemas were 74 KB and the system prompt 10 KB, and a subagent's request 33 to 58 KB. In
+2.1.260 every call sends its chain's whole message list again; in 2.1.302 a request that starts a
+thread does, below. So most of a body is bytes the session already has.
 
 Earlier messages come back with the same text, but not always spelled the same way. Two things move
 as the list grows. The cache marker, `cache_control`, moves to the newest message. And a message of
@@ -46,6 +47,28 @@ written reports a history that merely grew as one that was rewritten.
 A compaction is the case that really does rewrite the list. It replaces the context with a summary
 and starts the list again, so the list is shorter as well as different, and the conversation records
 it as an `epoch.boundary` step with the summary beside it.
+
+**Threads.** In 2.1.302 a request names a thread the provider keeps. Measured on one session of
+`claude -p`, nine turns each a new process resuming it, 14 requests:
+
+- A process's first request carries `"thread":{"type":"create"}` and holds the whole message list:
+  2, 8, 11, 17, 20, 26, 5 and 8 messages over the main stream's processes.
+- Every later request of the process carries `"thread":{"type":"continue","previous_message_id":…}`,
+  the message id of the response before it, and holds only what is new: here the tool result and a
+  `system`-role message, 2 each. It carries no tools, and of `system` only the billing header. The
+  provider holds the rest.
+- A resumed session's first request starts a new thread with the whole list again. A subagent has a
+  thread of its own. The compaction request carries no thread.
+- With each continue request's history built from the call it names, that call's reply and its own
+  messages, every call's history was the history before it with the reply next, through six resumes,
+  until the compaction. The two spellings above still apply: without the first, 6 of those 10
+  comparisons fail, and without the second, 4.
+- The billing header in `system` differs on every request, since it names the request before, the
+  prompt and the turn; every other system block is sent the same each time.
+
+A redacted copy of this session is `internal/adapters/claudecodeprovider/testdata/threads`, and a
+test lands it through both adapters. [Session Data](../formats/session-data.md#history) gives what
+a manifest records of the thread and of each message.
 
 ## What the adapter lands
 
@@ -99,5 +122,5 @@ prompt, were left unjoined.
 ## Not measured
 
 Subagents or workflow agents running at the same time, server-side clearing of old tool results,
-the `thread` field that sends only a tail of the messages, retries, a long session, `--resume` and
-`--fork-session`, Bedrock, Vertex and gateways, and Windows.
+an interactive session, a thread continued from a message other than the last response, retries, a
+long session, `--fork-session`, Bedrock, Vertex and gateways, and Windows.

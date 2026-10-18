@@ -32,6 +32,9 @@ type Index struct {
 	Blocks  []Block
 	// Bodies holds the provider bodies among the entries, in landed order.
 	Bodies []Body
+	// Messages holds the entries of the bodies' message lists, in the order
+	// their bodies landed; a body names its own with MsgFirst and MsgCount.
+	Messages []Message
 
 	byRecord    map[uint32]int32
 	byMsg       map[uint32][]int32
@@ -54,6 +57,14 @@ func New(session string) *Index {
 func (ix *Index) AppendRecord(e Entry, blocks []Block, body *Body) {
 	if body != nil {
 		body.Entry = uint32(len(ix.Entries))
+		body.MsgFirst = uint32(len(ix.Messages))
+		for b := body.messages; len(b) >= messageWidth; b = b[messageWidth:] {
+			var m Message
+			decodeMessage([]byte(b[:messageWidth]), &m)
+			ix.Messages = append(ix.Messages, m)
+		}
+		body.MsgCount = uint32(len(ix.Messages)) - body.MsgFirst
+		body.messages = ""
 		ix.Bodies = append(ix.Bodies, *body)
 	}
 	ix.Append(e, blocks...)
@@ -121,9 +132,15 @@ func (ix *Index) Through(seq uint64) *Index {
 		blocks = int(last.BlockFirst + last.BlockCount)
 	}
 	bodies := sort.Search(len(ix.Bodies), func(i int) bool { return int(ix.Bodies[i].Entry) >= k })
+	messages := 0
+	if bodies > 0 {
+		last := ix.Bodies[bodies-1]
+		messages = int(last.MsgFirst + last.MsgCount)
+	}
 	return &Index{
 		Session: ix.Session, Strings: ix.Strings,
 		Entries: ix.Entries[:k:k], Blocks: ix.Blocks[:blocks:blocks], Bodies: ix.Bodies[:bodies:bodies],
+		Messages: ix.Messages[:messages:messages],
 	}
 }
 
