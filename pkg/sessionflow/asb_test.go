@@ -164,6 +164,29 @@ func TestTamperedRoundRejected(t *testing.T) {
 	}
 }
 
+// An empty line is a line that does not decode, and one after the commit is a
+// line after the commit, so a reader rejects the round either way. Skipping
+// it made a round with an inserted blank line verify against its old digest,
+// while a reader following the format page refused it.
+func TestABlankLineIsRejected(t *testing.T) {
+	data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {
+		_ = w.Node(sessionflow.Node{Entity: sessionflow.Entity{ID: "talk/1"}, Kind: "talk"})
+	})
+	if _, err := sessionflow.Read(bytes.NewReader(data)); err != nil {
+		t.Fatalf("the round as written: %v", err)
+	}
+	first := bytes.IndexByte(data, '\n') + 1
+	for name, edited := range map[string][]byte{
+		"before the commit": append(append(append([]byte(nil), data[:first]...), '\n'), data[first:]...),
+		"after the commit":  append(append([]byte(nil), data...), '\n'),
+		"at the start":      append([]byte("\n"), data...),
+	} {
+		if _, err := sessionflow.Read(bytes.NewReader(edited)); err == nil {
+			t.Errorf("a blank line %s was accepted", name)
+		}
+	}
+}
+
 // A round cut short mid-write must not read as a complete one.
 func TestTruncatedRoundRejected(t *testing.T) {
 	data, _ := build(t, header(1, "", 1, 10), func(w *sessionflow.Writer) {

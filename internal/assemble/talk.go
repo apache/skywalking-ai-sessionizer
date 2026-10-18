@@ -217,7 +217,7 @@ func (b *builder) newTalkKeyed(s *streamInfo, ep *epoch, id string) *talk {
 // and the reply. A run is not a single provider call - a run usually contains
 // several, because each tool result starts another.
 func (b *builder) newRun(t *talk, s *streamInfo, cycle uint32) {
-	id := sessionflow.NodeID("run", t.NodeID, b.str(cycle))
+	id := sessionflow.NodeIDIn("run", t.NodeID, b.str(cycle))
 	if _, exists := b.runNode[runKey{s.ID, cycle}]; exists {
 		return
 	}

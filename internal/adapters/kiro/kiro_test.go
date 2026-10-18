@@ -394,7 +394,7 @@ func TestCompactionIsAnEpoch(t *testing.T) {
 			last = t0
 		}
 	}
-	if !strings.HasPrefix(last.Parent, "epoch/main/tombstone_summarize_") {
+	if !strings.HasPrefix(last.Parent, "epoch/main/id/tombstone_summarize_") {
 		t.Errorf("the turn after the compaction is in %s", last.Parent)
 	}
 }
