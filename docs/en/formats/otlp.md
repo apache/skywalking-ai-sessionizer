@@ -292,8 +292,11 @@ a request of its own. A landed file is cut at
 `max_delta_bytes`, 2 MiB by default, and a round is cut at `parse.max_round_bytes`, also
 2 MiB, so a request normally carries several files. A source record larger than the budget lands
 alone, with its largest payloads omitted until the file fits: the largest source record in the
-measured corpus is a 4.6 MB pasted screenshot. The exception is a round covering one landed file,
-which is published whole.
+measured corpus is a 4.6 MB pasted screenshot. There are two exceptions. A record still larger than
+the budget with every payload omitted lands as it is, keeping its identifiers, its label and its
+list of parts, so its file is larger than the budget, as
+[Too large to land](session-data.md#too-large-to-land) says. A round covering one landed file is
+published whole.
 
 The receiver's limit must cover the largest single request. The OAP accepts 50 MB over gRPC and
 10 MiB over HTTP by default. An OpenTelemetry Collector accepts 4 MiB over gRPC and 20 MiB over

@@ -256,10 +256,35 @@ func (f *fixture) requirePublished() {
 
 func TestPublishMovesTheCandidateAndPromotesThePrerelease(t *testing.T) {
 	f := newFixture(t)
-	if output, err := f.run(); err != nil {
+	output, err := f.run()
+	if err != nil {
 		t.Fatalf("publish: %v\n%s", err, output)
 	}
 	f.requirePublished()
+	// The steps it prints are the guide's sections after Publish, in order.
+	steps := output[strings.Index(output, "Next, in this order:"):]
+	at := -1
+	for _, want := range []string{"skywalking-website", "announce.txt", "homebrew skill", "apt skill", "pypi skill", "Scoop and winget"} {
+		i := strings.Index(steps, want)
+		if i < 0 || i < at {
+			t.Fatalf("the next steps do not name %q after the step before it:\n%s", want, steps)
+		}
+		at = i
+	}
+}
+
+// A tag older than the LangChain plugin has nothing to upload to PyPI, and
+// publish says nothing of it.
+func TestPublishNamesPyPIOnlyForATagWithThePlugin(t *testing.T) {
+	f := newFixture(t)
+	f.write("no-plugin", nil)
+	output, err := f.run()
+	if err != nil {
+		t.Fatalf("publish: %v\n%s", err, output)
+	}
+	if strings.Contains(output, "pypi skill") {
+		t.Fatalf("publish names the pypi skill for a tag without the plugin:\n%s", output)
+	}
 	if len(f.events("upload")) != 0 {
 		t.Fatalf("publish uploaded files the prerelease already held: %+v", f.events("upload"))
 	}
@@ -621,6 +646,8 @@ if tool == "git":
         print(sha)
     elif args == ["show", tag + ":Makefile"]:
         print("PLATFORMS := linux/amd64\nDEB_PACKAGES := asz")
+    elif args == ["cat-file", "-e", tag + ":plugins/langchain/pyproject.toml"]:
+        sys.exit(1 if (root / "no-plugin").exists() else 0)
     elif args == ["show", tag + ":docs/en/changes/changes.md"]:
         print("# Changes in 0.3.0\n\nFixture release. See [Install](../setup/install.md#verify-a-package), [this](#fixes) and [KEYS](https://downloads.apache.org/skywalking/KEYS).")
     else:

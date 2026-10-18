@@ -129,10 +129,10 @@ What the three commands share:
    key that is not RSA of at least 2048 bits, and a key that has no user ID with an apache.org
    address. gpg reads the expiry of a key from KEYS, not from your machine. So when you extend
    your key, have a PMC member commit the renewed public key to KEYS before the next candidate.
-2. **The tools.** git, Go 1.27 or later, make, Python 3, gpg, shasum, tar, gzip, zip, unzip, file, curl, svn, and
-   gh logged in to an account that can write to the repository. `prepare`, `candidate` and
-   `publish` check for the tools they use before they change anything, and name any that is
-   missing. `prepare` needs gh only when it pushes.
+2. **The tools.** git, Go 1.27 or later, make, Python 3, perl, gpg, shasum, cmp, tar, gzip, zip,
+   unzip, file, curl, svn, and gh logged in to an account that can write to the repository.
+   `prepare`, `candidate` and `publish` check for the tools they use before they change anything,
+   and name any that is missing. `prepare` needs gh only when it pushes.
 3. **svn access.** Uploading a candidate needs write access to the dev area,
    `https://dist.apache.org/repos/dist/dev/skywalking`. Moving it to the release directory needs a
    PMC member.
@@ -191,11 +191,13 @@ arguments. It offers the version the heading of `docs/en/changes/changes.md` nam
    Version in `docs/menu.yml` does not point at `/en/changes/changes`.
 2. Checks the license headers and runs `make check`. `--skip-check` leaves out `make check`.
 3. Removes the in-development note from `docs/en/changes/changes.md`, and leaves the page at its
-   path and the menu and the welcome page as they are. It commits "Prepare the $VERSION candidate"
-   and puts the annotated tag `v$VERSION` on that commit. So the tag holds the finished changelog
-   at `changes.md`, where the menu and the welcome page of the tag link it. The tag's message is
-   `Apache SkyWalking AI Sessionizer $VERSION`. Neither calls the tag a release, because the tag
-   is the candidate.
+   path and the menu and the welcome page as they are. It sets `version` in
+   `plugins/langchain/pyproject.toml` to `$VERSION`, because the LangChain plugin's packages, built
+   from the source package after the vote, take their version from that file. It commits
+   "Prepare the $VERSION candidate" and puts the annotated tag `v$VERSION` on that commit. So the
+   tag holds the finished changelog at `changes.md`, where the menu and the welcome page of the
+   tag link it. The tag's message is `Apache SkyWalking AI Sessionizer $VERSION`. Neither calls
+   the tag a release, because the tag is the candidate.
 4. In a second commit, "Open $NEXT", moves `docs/en/changes/changes.md` to
    `docs/en/changes/changes-$VERSION.md` with `git mv`, and lists the version under Changelog in
    `docs/menu.yml`, right after Current Version. It writes a new `docs/en/changes/changes.md` for
@@ -210,14 +212,29 @@ By hand, the two commits are:
 
 ```sh
 git checkout -b release/$VERSION
-# Remove the in-development note from docs/en/changes/changes.md.
-git commit -am "Prepare the $VERSION candidate"
+# Remove the in-development note from docs/en/changes/changes.md, and the blank line after it.
+sed "s/^version = \".*\"/version = \"$VERSION\"/" plugins/langchain/pyproject.toml > pyproject.toml.tmp
+mv pyproject.toml.tmp plugins/langchain/pyproject.toml
+git add docs/en/changes/changes.md plugins/langchain/pyproject.toml
+git commit -m "Prepare the $VERSION candidate"
 git tag -a v$VERSION -m "Apache SkyWalking AI Sessionizer $VERSION"
 git mv docs/en/changes/changes.md docs/en/changes/changes-$VERSION.md
-# List $VERSION in docs/menu.yml. Write docs/en/changes/changes.md for $NEXT, with its heading
-# and the in-development note.
+# List $VERSION in docs/menu.yml, as shown below.
+cat > docs/en/changes/changes.md <<PAGE
+# Changes in $NEXT
+
+> In development, not yet released. \`tools/release/release.sh prepare $NEXT\` removes this note.
+PAGE
 git add docs/menu.yml docs/en/changes/changes.md
 git commit -m "Open $NEXT"
+```
+
+Then push them and open the pull request, as step 5 does:
+
+```sh
+git push -u origin release/$VERSION
+git push origin v$VERSION
+gh pr create --base main --head release/$VERSION --title "Prepare the $VERSION candidate and open $NEXT"
 ```
 
 The second commit lists the version right after Current Version, so the Changelog of
@@ -283,9 +300,10 @@ asking for the passphrase, run `export GPG_TTY=$(tty)` first.
 The command takes these steps and stops at the first failure:
 
 1. **Check the tools and tag.** It needs git, gh, Python 3, gpg, shasum, tar, gzip, unzip, file,
-   curl and sh, plus svn when uploading. The tag must exist on origin, agree with any local tag,
-   and hold the finished changelog at `docs/en/changes/changes.md`. A missing local tag is
-   fetched. The packages are the source package and the platforms in the tag's Makefile.
+   curl, sh and cmp, plus Go when the tag's Makefile names Debian packages, because Go reads them, and
+   svn when uploading. The tag must exist on origin, agree with any local tag, and hold the
+   finished changelog at `docs/en/changes/changes.md`. A missing local tag is fetched. The
+   packages are the source package and the platforms in the tag's Makefile.
    `git archive` must contain no fonts; `.gitattributes` excludes the two OFL fonts and local
    metadata files such as `._*`, `.DS_Store` and `__MACOSX`.
 2. **Check the candidate directory.** It lists the dev and release roots, then the project's
@@ -422,7 +440,7 @@ writes nothing into `dist/$VERSION/`. The plan does not claim that prerelease as
   texts.
 - Each Debian package is `apache-skywalking-ai-sessionizer-$VERSION-bin-<package>-<arch>.deb`, one
   for each package in `DEB_PACKAGES` in the tag's Makefile and each Linux platform. `asz` installs
-  `/usr/bin/asz`, and `asz-claude-code` installs `/usr/bin/asz-changes`. Each holds the same
+  `/usr/bin/asz`, and `asz-changes` installs `/usr/bin/asz-changes`. Each holds the same
   binary as the Linux binary package, with the same `LICENSE`, `NOTICE` and `licenses/` under
   `/usr/share/doc/<package>/`. `tools/release/deb-package` writes them, so a build on macOS gives the same
   bytes as one on Linux. `candidate` checks that each installs its binary and the licenses, and
@@ -474,8 +492,8 @@ Release Candidate:
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-windows-arm64.zip
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-amd64.deb
    - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-arm64.deb
-   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-claude-code-amd64.deb
-   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-claude-code-arm64.deb
+   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-changes-amd64.deb
+   - <sha512>  apache-skywalking-ai-sessionizer-$VERSION-bin-asz-changes-arm64.deb
 
 Release Tag:
  * (Git Tag) v$VERSION
@@ -492,11 +510,12 @@ Guide to build the release from source:
 
 Notes for voters:
  * The binary archives are the unchanged packages CI attached to the GitHub prerelease after all its checks passed on the tag push, verified below. Only the source archive was created locally. The release manager signed every archive after checking its contents and checksums, and attached the source archive and every signature to the same prerelease.
- * CI run: https://github.com/apache/skywalking-ai-sessionizer/actions/runs/<run id>
- * Prerelease: https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v$VERSION, commit <release commit>
- * Asset: <asset id>, sha256:<asset digest>, <package name>
+ * verified <count> packages from https://github.com/apache/skywalking-ai-sessionizer/actions/runs/<run id>
+ * https://github.com/apache/skywalking-ai-sessionizer/releases/tag/v$VERSION, release <release id>, attempt <run attempt>, commit <release commit>
+ * asset <asset id>, sha256:<asset digest>, <file name>
  * internal/view/conversation-view/ in the source package is the build output of Horizon's conversation renderer, from apache/skywalking-horizon-ui at the commit its HORIZON_COMMIT file names. It is Apache-2.0 code of the ASF with no third-party code in it. The source package builds and runs with it as it is. `make conversation-view-check`, which needs Node.js 24 and pnpm, rebuilds it from that commit and compares. In the unpacked source package it compares every file except the two fonts, which the source package does not carry, and it names the two it left out.
  * The two fonts the page draws with are under the SIL Open Font License, a Category B license, so they are in the binary packages only. A build from the source package draws the page with system fonts.
+ * The .deb files are Debian packages of the same Linux binaries, one for asz and one for the change recorder, with the same LICENSE, NOTICE and licenses/ under /usr/share/doc. apt installs them from the index on the SkyWalking website, which lists released versions only and is written after the vote.
 
 Voting will start now and will remain open for at least 72 hours. All PMC members are requested to give their votes.
 
@@ -508,7 +527,9 @@ Thanks.
 ```
 
 Each checksum line is the content of the package's `.sha512` file. The fingerprint is the one
-`candidate` checked in KEYS.
+`candidate` checked in KEYS. The three lines after the first note are what
+`tools/release/ci-binaries.sh` printed when it verified the prerelease, with one `asset` line for
+each file on it. `candidate` keeps them in `dist/$VERSION/ci-provenance.txt`.
 
 The vote stays open for at least 72 hours. Only the votes of PMC members are binding. Anyone else
 is welcome to vote, and those votes count as non-binding. The vote passes with at least three
@@ -742,7 +763,7 @@ tools/release/release.sh publish $VERSION
 
 It does these steps in order.
 
-1. **Check** for git, svn, shasum, awk, gh, gpg, curl and cmp, before anything moves. Then check
+1. **Check** for git, svn, shasum, awk, gh, gpg, curl, cmp and perl, before anything moves. Then check
    the tag, as `candidate` does.
 2. **Check the GitHub release.** It must be the release of `v$VERSION`, titled `$VERSION`, and not
    a draft. It must hold every binary archive and `.sha512` file CI attached, and no file that is

@@ -127,6 +127,53 @@ func TestFitLandsARecordThatCannotShrinkAsItIs(t *testing.T) {
 	}
 }
 
+// The one file a budget does not hold: a record still larger than the budget
+// with every payload taken out lands as it is, alone in its file. The docs
+// state this exception, so a receiver is not sized by a promise the collector
+// does not keep. The file is read back to show what it carries.
+func TestAFileOfOneRecordWithNothingLeftToTakeOutIsOverTheBudget(t *testing.T) {
+	const budget = 4 << 10
+	h := &Header{Kind: KindTranscript, Session: "s", Src: "a.jsonl", Dialect: "d", Stream: "main", Seq: 1, At: "2026-01-01T00:00:00Z"}
+	label, text := strings.Repeat("l", 10_000), strings.Repeat("a", 5_000)
+	r := &Record{Ord: 1, Sha: "x", Bytes: 1, Label: label, Parts: []Part{{Kind: PartText, Text: text}}}
+	cut, err := NewCut(h, budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := cut.Take(r); !ok || err != nil {
+		t.Fatalf("the first record of a file was taken %v, %v", ok, err)
+	}
+	var buf bytes.Buffer
+	w, err := NewWriter(&buf, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Budget(budget)
+	if err := w.Write(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	size := buf.Len()
+	if size <= budget {
+		t.Fatalf("the file is %d bytes, within the budget of %d; the label should have kept it over", size, budget)
+	}
+	_, recs, err := All(&buf)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("read back %d records, %v", len(recs), err)
+	}
+	got := recs[0]
+	if got.Label != label {
+		t.Fatalf("the label read back is %d bytes, want %d", len(got.Label), len(label))
+	}
+	if p := got.Parts[0]; p.State != model.ContentTooLarge || p.Text != "" || p.SHA256 != hexDigest([]byte(text)) || p.Bytes != len(text) {
+		t.Fatalf("the text part is %s with %d bytes of text, digest %q and size %d; want too_large, empty, the text's digest and size",
+			p.State, len(p.Text), p.SHA256, p.Bytes)
+	}
+	t.Logf("a record with a %d-byte label landed as a file of %d bytes under a budget of %d", len(label), size, budget)
+}
+
 func TestFitChangesNothingWithoutALimitOrWhenItFits(t *testing.T) {
 	for _, max := range []int{0, -1, 1 << 20} {
 		r := &Record{Ord: 1, Sha: "x", Bytes: 1, Parts: []Part{{Kind: PartText, Text: strings.Repeat("a", 5_000)}}}

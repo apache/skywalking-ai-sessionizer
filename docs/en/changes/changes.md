@@ -251,10 +251,13 @@
   stopped the session's pass at the failed file, before anything was saved, and they land in the same
   order now. Records enter the index only once their file has landed, and a file that did not land
   gives its number back.
-- Every landed file fits `max_delta_bytes`. A collector cut a file by the bytes it read, and a
-  record is larger than its source line by its envelope: 4 KiB of short lines landed as 19 KB. Files
-  are now cut by what their records take once written. A single record larger than the budget lands
-  alone, and its largest payloads are taken out, one at a time, until the file fits. A part taken
+- A landed file fits `max_delta_bytes`, unless it holds a single record that is still larger with
+  every payload taken out. A collector cut a file by the bytes it read, and a record is larger than
+  its source line by its envelope: 4 KiB of short lines landed as 19 KB. Files are now cut by what
+  their records take once written. A single record larger than the budget lands alone, and its
+  largest payloads are taken out, one at a time, until the file fits or nothing is left to take
+  out. Its identifiers, its label and the list of its parts are never taken out, so a record with a
+  label of 10,000 bytes lands as a file of 10,434 bytes under a budget of 4 KiB. A part taken
   out keeps its place, its kind and its identifiers, and says `too_large`, with the size of the
   original and the SHA-256 of what it carried in the new part field `sha256`. A part loses its data
   before its text, so a result whose runtime record of a written file is large keeps its readable
@@ -601,6 +604,21 @@
 - The `apt` skill installs every older version in the index through the redirects, not only the
   versions added. Adding a version moves the one that was newest to the archive, so its redirect
   changes too.
+- The release guide's commands for preparing a candidate by hand left the LangChain plugin's
+  version in `plugins/langchain/pyproject.toml` as it was. `prepare` sets it to the version being
+  released, so a candidate prepared by hand would have built PyPI packages of the previous version.
+  The commands now set it, write the next version's changelog as `prepare` does, and push and open
+  the pull request. In a clone at 0.6.0, they made the same two commits, tree for tree, as
+  `prepare --no-push`.
+- The release guide named the Debian package of the change recorder `asz-claude-code`, its name
+  before 0.5.0, in the vote mail and where it says what each package installs. The Makefile builds
+  `asz-changes`. The vote mail in the guide also lacked the note on the Debian packages that
+  `candidate` writes, and now gives the lines on the verified CI run as `candidate` writes them. A
+  test holds the guide's list of packages in the vote mail to the Makefile. The guide also says
+  that `candidate` needs Go to read the Debian packages, and lists perl and cmp among the tools.
+- `candidate` checks for `cmp` and `publish` for `perl` before they change anything, as they do
+  for every other tool they run. `publish` lists the upload to PyPI with the `pypi` skill among the
+  steps it prints after the move, between apt and Scoop, as the release guide orders them.
 
 ## Documentation
 
@@ -635,6 +653,11 @@
 - The LangChain plugin's README, which is its page on PyPI, says the plugin needs `asz-changes` and
   a `tools.scope` naming the application's tools. It links the documentation of the released
   version.
+- [Export over OpenTelemetry](../setup/export-otlp.md) showed an OpenTelemetry Collector
+  configuration with a logs pipeline only. asz sends metrics by default, and that Collector refused
+  them, with `Unimplemented` over gRPC and `404 Not Found` over HTTP, so `asz push` failed. The
+  configuration now has a metrics pipeline too. CI's Collector check kept its own copy, which had
+  the metrics pipeline, so it passed. It now reads the configuration from the page.
 - The contributing guide and the docs index pointed to this repository's issues, which are turned
   off. They now point to the SkyWalking issue tracker, which the SkyWalking projects share.
 - The Claude Code adapter page said the system prompt and the tool schemas are absent from

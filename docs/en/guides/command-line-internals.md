@@ -203,9 +203,10 @@ status instead of the log.
 ## repack
 
 Re-cuts every landed file of the storage root, or of one session, into `DEST` so that no file
-exceeds the configured `max_delta_bytes`, then assembles `DEST`'s chains. Every record keeps its
-bytes and its order; the cursors come along so collection can continue into `DEST`; the index and
-the chains are rebuilt there, because a round addresses records by file and line and the old
+exceeds the configured `max_delta_bytes`, except a file of one record larger than it, which is
+carried whole. Then it assembles `DEST`'s chains. Every record keeps its bytes and its order; the
+cursors come along so collection can continue into `DEST`; the index and the chains are rebuilt
+there, because a round addresses records by file and line and the old
 references name positions that no longer exist. `DEST` must be a new or empty directory outside
 the storage root. A populated destination is refused before any session is written, because its
 chains bind to the original landed files. One inside the root is refused too, because every

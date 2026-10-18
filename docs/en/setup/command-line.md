@@ -100,9 +100,9 @@ It also counts the parts that were too large to land, which are not a problem.
 ## repack
 
 Copies the storage root, or one session, into `DEST`, a new or empty directory outside the root,
-with no file larger than `max_delta_bytes`, and assembles the conversations there. Use it after
+cutting its files at `max_delta_bytes`, and assembles the conversations there. Use it after
 changing `max_delta_bytes`. A record larger than the new budget is carried whole, in a file of its
-own: repack never leaves anything out.
+own, over the budget: repack never leaves anything out.
 
 ## index
 

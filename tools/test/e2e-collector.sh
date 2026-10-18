@@ -27,29 +27,22 @@ HTTP_PORT="${OTELCOL_HTTP_PORT:-14318}"
 WORK="$(mktemp -d)"
 trap 'docker rm -f asz-e2e-otelcol >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
 
-# The Collector configuration the export page shows, with the file exporter.
+# The Collector configuration is read from the export page itself: the first
+# YAML block under "See what a receiver gets". A copy kept here once added a
+# metrics pipeline the page did not have, so CI passed while a person who
+# followed the page saw asz push fail.
+page=docs/en/setup/export-otlp.md
 mkdir -p "$WORK/otelcol"
-cat > "$WORK/otelcol/config.yaml" <<YAML
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-        max_recv_msg_size_mib: 32
-      http:
-        endpoint: 0.0.0.0:4318
-exporters:
-  file:
-    path: /out/logs.json
-service:
-  pipelines:
-    logs:
-      receivers: [otlp]
-      exporters: [file]
-    metrics:
-      receivers: [otlp]
-      exporters: [file]
-YAML
+# The block must open and close inside that section; anything else is a page
+# whose shape changed, said here rather than as a Collector that fails later.
+awk '
+  /^## / { if (inside) exit 2; section = ($0 == "## See what a receiver gets"); next }
+  section && !inside && $0 == "```yaml" { inside = 1; next }
+  inside && $0 == "```" { closed = 1; exit }
+  inside { print }
+  END { if (!closed) exit 2 }
+' "$page" > "$WORK/otelcol/config.yaml" && [ -s "$WORK/otelcol/config.yaml" ] ||
+  { echo "$page has no closed YAML block under \"See what a receiver gets\""; exit 1; }
 
 # push_over PROTOCOL ENDPOINT: build a session, start a Collector, push the
 # session over the transport named, and check what the Collector wrote.
