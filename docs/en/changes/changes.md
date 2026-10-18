@@ -230,6 +230,17 @@
   has no segment list, which a third-party adapter may write, is read as having none, where the
   Prompt tab dropped the body. The renderer is Horizon's, now pinned at `1401336`
   (apache/skywalking-horizon-ui#198).
+- The page draws where a model call's history changed: a `history.change` card just before the
+  call, dashed and in a colour no other kind uses, with how many messages were kept, changed,
+  dropped and added, whether their order or the system prompt changed, and what became of the
+  earlier call's reply. Clicking it selects the call. The Prompt tab's second mode, now "What
+  changed", says what the comparison found instead of comparing two bodies by position. A Claude
+  Code 2.1.302 request that continues a provider thread holds only its new messages, and the old
+  mode reported every such request as a rewritten history, or as the context replaced by a
+  summary. The mode marks each message kept, changed or added where the pairing is certain, lists
+  the messages dropped, and says a reset only where the conversation records one. On a root landed
+  before histories were recorded, it says there is nothing to compare. The renderer is Horizon's,
+  now pinned at `d5830a1` (apache/skywalking-horizon-ui#202).
 
 ## Collection
 
