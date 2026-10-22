@@ -233,6 +233,13 @@ func (c *Chain) Fold() (*View, error) {
 // problems written in rather than an error in place of one; anything that
 // needs a whole chain uses Fold.
 func (c *Chain) FoldPartial() (*View, []string, error) {
+	return c.FoldPartialThrough(0)
+}
+
+// FoldPartialThrough is FoldPartial stopped after the given round, so a reader
+// pinned to a head reads the conversation as it was at that round while later
+// rounds are published. Zero folds every round.
+func (c *Chain) FoldPartialThrough(through uint64) (*View, []string, error) {
 	files, err := c.List()
 	if err != nil {
 		return nil, nil, err
@@ -240,6 +247,9 @@ func (c *Chain) FoldPartial() (*View, []string, error) {
 	v := NewView(c.id)
 	var problems []string
 	for _, rf := range files {
+		if through != 0 && rf.Round > through {
+			break
+		}
 		if rf.Round != v.Round+1 {
 			problems = append(problems, fmt.Sprintf("round %d is missing; the chain stops at round %d", v.Round+1, v.Round))
 			break

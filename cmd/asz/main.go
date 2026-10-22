@@ -52,6 +52,8 @@ Usage:
   asz server [-config FILE] [ADDR]     collect and serve in one process (default 127.0.0.1:8787)
   asz view [-config FILE] [ADDR]       serve an existing storage root as a page; reads only
   asz push [-config FILE]              send a storage root to an OpenTelemetry logs receiver, in one pass
+  asz measure [-config FILE] [-pricing FILE] [-json] ID   what a conversation's model calls consumed, per talk; calls no model
+  asz judge ID ...                     judge a conversation: its targets, whether each was achieved, what the work was; see asz judge
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
   asz scenario build|check FILE ...    build a session from a scenario, or check one; see asz scenario
@@ -98,6 +100,12 @@ func main() {
 	cmd := os.Args[1]
 	if cmd == "scenario" {
 		os.Exit(cmdScenario(os.Args[2:]))
+	}
+	if cmd == "measure" {
+		os.Exit(cmdMeasure(os.Args[2:]))
+	}
+	if cmd == "judge" {
+		os.Exit(cmdJudge(os.Args[2:]))
 	}
 	if cmd == "version" {
 		fmt.Printf("asz %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)

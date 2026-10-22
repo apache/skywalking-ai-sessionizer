@@ -614,6 +614,9 @@ func (p *pass) decide(s *session) verdict {
 	if v := p.metricsSent(s, landed); v.reason != "" {
 		return v
 	}
+	if v := p.judgmentsSent(s); v.reason != "" {
+		return v
+	}
 	if !policy.Immediate() {
 		if !landed.timed {
 			return blocked("no landed record carries a time, so the retention cannot be counted")
@@ -908,6 +911,32 @@ func (p *pass) sentAll(files []sentFile, notYet string) verdict {
 		}
 	}
 	return wait
+}
+
+// judgmentsSent checks that every judge run of the session went to the
+// receiver whole, since the removal takes the runs with the session. A run
+// not closed may still write a stage, and the pusher sends none of it, so it
+// is waited for rather than lost; a closed run's every stage file and its
+// close file must be sent.
+func (p *pass) judgmentsSent(s *session) verdict {
+	runs, err := storage.JudgmentRuns(storage.NewZone(p.root), s.id)
+	if err != nil {
+		return blocked("%v", err)
+	}
+	var files []sentFile
+	for _, run := range runs {
+		if !run.Closed() {
+			return waiting("judge run %d is not closed", run.Run)
+		}
+		for _, f := range run.Files {
+			digest, err := storage.FileDigest(f.Path)
+			if err != nil {
+				return blocked("%v", err)
+			}
+			files = append(files, sentFile{rel: p.rel(f.Path), digest: digest})
+		}
+	}
+	return p.sentAll(files, "judge runs not sent yet")
 }
 
 // roundName is the name a chain gives a round, as the pusher reads it.

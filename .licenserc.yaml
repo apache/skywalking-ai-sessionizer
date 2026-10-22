@@ -56,6 +56,9 @@ header:
     # that lists the plugin, as plain JSON, which has no comment to carry a header in.
     - 'plugins/claude-code/**/*.json'
     - '.claude-plugin/marketplace.json'
+    # The judge's answer schemas are given to agent CLIs and APIs as they are,
+    # and plain JSON has no comment to carry a header in.
+    - 'internal/judge/kit/*.schema.json'
     # npm reads the LangChain JS harness's manifest as plain JSON.
     - 'tests/apps/langchain-js/package.json'
     - '**/testdata/**'

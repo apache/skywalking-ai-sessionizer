@@ -44,6 +44,120 @@ type Config struct {
 	Metrics  Metrics   `yaml:"metrics"`
 	Export   Export    `yaml:"export"`
 	View     View      `yaml:"view"`
+	Judge    Judge     `yaml:"judge"`
+}
+
+// Judge configures asz judge and asz measure. A judge run happens only when a
+// person runs asz judge: nothing in collect, server or push starts one.
+type Judge struct {
+	// Pricing is the optional price file. Empty prices nothing, and the
+	// tokens still count.
+	Pricing string `yaml:"pricing"`
+	// Hide lists the flags whose records the evaluators are never shown,
+	// as view.hide lists them for the page. A provider body is then never
+	// shown either, since a request carries both again.
+	Hide []string `yaml:"hide"`
+	// Timeout bounds one evaluator call, as a duration such as 30m. A stage
+	// cut into calls runs several, and a failed call is tried once more.
+	Timeout string `yaml:"timeout"`
+	// ReadBytes bounds what one evaluator call reads through the
+	// navigation, in bytes of answers. Zero is no bound.
+	ReadBytes int `yaml:"read_bytes"`
+	// Mode is how a stage is given to its evaluator: single, one call;
+	// stream, cut into chunks; auto, one call when the rows it is given fit
+	// SingleBytes and chunks of ChunkBytes beyond. Concurrency bounds the
+	// chunks run at once.
+	Mode        string `yaml:"mode"`
+	SingleBytes int    `yaml:"single_bytes"`
+	ChunkBytes  int    `yaml:"chunk_bytes"`
+	Concurrency int    `yaml:"concurrency"`
+	// StateBytes bounds what a call is given of the targets found so far
+	// in a targets scan; the targets tool gives the rest whole.
+	StateBytes int `yaml:"state_bytes"`
+	// Progress is how often a running stage says what it has consumed so
+	// far, as a duration such as 30s; 0 says it only when the stage ends.
+	Progress string `yaml:"progress"`
+	// Evaluators are the models and agent CLIs a stage can be given to, by
+	// name.
+	Evaluators map[string]Evaluator `yaml:"evaluators"`
+	// Plan is what asz judge runs when it is not told one stage: the
+	// stages after the ledger, in order, each with its evaluator.
+	Plan []JudgeStage `yaml:"plan"`
+}
+
+// Evaluator is one model or agent CLI a stage is given to.
+type Evaluator struct {
+	// Kind is cli, an agent CLI asz runs, or api, a provider's API asz
+	// calls itself.
+	Kind string `yaml:"kind"`
+	// Program is claude, codex or kiro-cli for a CLI, and anthropic,
+	// openai or bedrock for an API. openai is any endpoint that speaks the
+	// OpenAI chat completions API; bedrock is Amazon Bedrock's Converse
+	// API.
+	Program string `yaml:"program"`
+	// Command is the CLI's path, when it is not the program's name on PATH.
+	Command string `yaml:"command"`
+	// Args are added to the CLI's command line.
+	Args []string `yaml:"args"`
+	// Model is the model to ask for. Empty leaves the CLI's own default.
+	Model string `yaml:"model"`
+	// Endpoint is the API's base URL, and APIKeyEnv the environment
+	// variable holding its key.
+	Endpoint  string `yaml:"endpoint"`
+	APIKeyEnv string `yaml:"api_key_env"`
+	// Region and Profile are Bedrock's: the AWS region, us-east-1 when
+	// empty, and the AWS CLI profile whose credentials sign the requests,
+	// when they are not in the environment. A Bedrock evaluator with
+	// APIKeyEnv sends that Bedrock API key instead and signs nothing.
+	Region  string `yaml:"region"`
+	Profile string `yaml:"profile"`
+	// MaxTurns bounds the turns an evaluator takes in one call: model
+	// calls for an API, agent turns for a CLI that has the limit.
+	MaxTurns int `yaml:"max_turns"`
+	// MaxTokens bounds what one model call of an API evaluator may answer.
+	// 8000 when unset.
+	MaxTokens int `yaml:"max_tokens"`
+}
+
+// JudgeStage is one stage of a plan.
+type JudgeStage struct {
+	Stage     string `yaml:"stage"`
+	Evaluator string `yaml:"evaluator"`
+}
+
+// check refuses judge settings a run could not use.
+func (j Judge) check() error {
+	switch j.Mode {
+	case "", "auto", "single", "stream":
+	default:
+		return fmt.Errorf("config: judge.mode %q is not auto, single or stream", j.Mode)
+	}
+	if j.Concurrency < 1 {
+		return fmt.Errorf("config: judge.concurrency %d must be at least 1", j.Concurrency)
+	}
+	for name, n := range map[string]int{"read_bytes": j.ReadBytes, "single_bytes": j.SingleBytes, "chunk_bytes": j.ChunkBytes, "state_bytes": j.StateBytes} {
+		if n < 0 {
+			return fmt.Errorf("config: judge.%s %d must not be negative", name, n)
+		}
+	}
+	if j.Progress != "" {
+		if d, err := time.ParseDuration(j.Progress); err != nil || d < 0 {
+			return fmt.Errorf("config: judge.progress %q is not a duration", j.Progress)
+		}
+	}
+	return nil
+}
+
+// TimeoutDuration is the timeout of one evaluator call: 30m when unset.
+func (j Judge) TimeoutDuration() (time.Duration, error) {
+	if j.Timeout == "" {
+		return 30 * time.Minute, nil
+	}
+	d, err := time.ParseDuration(j.Timeout)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("judge.timeout: %q is not a positive duration", j.Timeout)
+	}
+	return d, nil
 }
 
 // View configures what asz view and asz server serve.
@@ -424,6 +538,28 @@ const (
 func Default() *Config {
 	return &Config{
 		Storage: Storage{Root: "./data", Retention: Retention{MetadataOnlyAfter: "-1", RetireAfter: "-1"}},
+		Judge: Judge{
+			Hide:        []string{},
+			Timeout:     "30m",
+			ReadBytes:   131072,
+			Mode:        "auto",
+			SingleBytes: 32768,
+			ChunkBytes:  24576,
+			Concurrency: 4,
+			StateBytes:  16384,
+			Progress:    "30s",
+			Evaluators: map[string]Evaluator{
+				"claude": {Kind: "cli", Program: "claude", Args: []string{}, MaxTurns: 60},
+				"codex":  {Kind: "cli", Program: "codex", Args: []string{}},
+				"kiro":   {Kind: "cli", Program: "kiro-cli", Args: []string{}},
+			},
+			Plan: []JudgeStage{
+				{Stage: "targets", Evaluator: "claude"},
+				{Stage: "achievement", Evaluator: "claude"},
+				{Stage: "subtasks", Evaluator: "claude"},
+				{Stage: "efficiency", Evaluator: "claude"},
+			},
+		},
 		Adapters: []Adapter{{
 			Name:    AdapterClaudeCodeLocal,
 			Enabled: true,
@@ -536,6 +672,21 @@ func Load(path string) (*Config, error) {
 	if err := checkKeys(data); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
+	// Which of the judge's numbers the file sets: zero is a value some of
+	// them take, as read_bytes 0 is no bound, so a missing key and a zero
+	// are told apart.
+	var set struct {
+		Judge struct {
+			ReadBytes   *int `yaml:"read_bytes"`
+			SingleBytes *int `yaml:"single_bytes"`
+			ChunkBytes  *int `yaml:"chunk_bytes"`
+			Concurrency *int `yaml:"concurrency"`
+			StateBytes  *int `yaml:"state_bytes"`
+		} `yaml:"judge"`
+	}
+	if err := yaml.Unmarshal(data, &set); err != nil {
+		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
 	if loaded.Storage.Root != "" {
 		cfg.Storage.Root = loaded.Storage.Root
 	}
@@ -599,6 +750,40 @@ func Load(path string) (*Config, error) {
 		cfg.View.Hide = slices.Compact(slices.Sorted(slices.Values(loaded.View.Hide)))
 	}
 	cfg.View.HideOverride = loaded.View.HideOverride
+	j := &loaded.Judge
+	if j.Pricing != "" {
+		cfg.Judge.Pricing = j.Pricing
+	}
+	if len(j.Hide) > 0 {
+		cfg.Judge.Hide = slices.Compact(slices.Sorted(slices.Values(j.Hide)))
+	}
+	if j.Timeout != "" {
+		cfg.Judge.Timeout = j.Timeout
+	}
+	if j.Mode != "" {
+		cfg.Judge.Mode = j.Mode
+	}
+	if j.Progress != "" {
+		cfg.Judge.Progress = j.Progress
+	}
+	for _, n := range []struct {
+		from *int
+		to   *int
+	}{{set.Judge.ReadBytes, &cfg.Judge.ReadBytes}, {set.Judge.SingleBytes, &cfg.Judge.SingleBytes},
+		{set.Judge.ChunkBytes, &cfg.Judge.ChunkBytes}, {set.Judge.Concurrency, &cfg.Judge.Concurrency},
+		{set.Judge.StateBytes, &cfg.Judge.StateBytes}} {
+		if n.from != nil {
+			*n.to = *n.from
+		}
+	}
+	// An evaluator named as a default replaces it; any other name is added,
+	// so a file that adds an API keeps the agent CLIs.
+	for name, e := range j.Evaluators {
+		cfg.Judge.Evaluators[name] = e
+	}
+	if len(j.Plan) > 0 {
+		cfg.Judge.Plan = j.Plan
+	}
 	return cfg, cfg.Validate()
 }
 
@@ -673,6 +858,9 @@ func (c *Collector) applyDefaults() {
 func (c *Config) Validate() error {
 	if c.Storage.Root == "" {
 		return fmt.Errorf("config: storage.root must not be empty")
+	}
+	if err := c.Judge.check(); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	// A machine can run more than one recorder - Claude Code's plugin and

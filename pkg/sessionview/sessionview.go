@@ -292,6 +292,11 @@ type Node struct {
 	Usage   *sessiondata.Usage `json:"usage,omitempty"`
 	Flags   []string           `json:"flags,omitempty"`
 	Dropped []sessiondata.Drop `json:"dropped,omitempty"`
+	// Model is the provider model an llm.call ran on, as the runtime named
+	// it, from the same record as Usage. A price is looked up by it, so it
+	// is never guessed from another call. Empty when that record has none,
+	// as on files landed before the field was kept.
+	Model string `json:"model,omitempty"`
 
 	// A talk adds these.
 	Label   string `json:"label,omitempty"`

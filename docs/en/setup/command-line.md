@@ -12,6 +12,8 @@ asz show [-config FILE] SESSION ID            print the collected record behind 
 asz verify [-config FILE] [SESSION]           check collected data against its digests
 asz repack [-config FILE] DEST [SESSION]      copy the data into DEST, cut to the configured file size
 asz index [-config FILE] [SESSION]            report the lookup index
+asz measure [-config FILE] [-pricing FILE] [-json] ID   what a conversation's model calls consumed
+asz judge [-config FILE] [-round N] [-from T -to T | -from-id ID -to-id ID] [-evaluator NAME | -plan ...] ID   judge a conversation; -list and -show read runs
 asz glossary                                  what Claude Code calls each thing asz names
 asz scenario build|check FILE ...             build or check a test scenario
 asz version                                   print the version
@@ -108,6 +110,20 @@ own, over the budget: repack never leaves anything out.
 
 Reports what the lookup index of a session holds. The index can be deleted at any time; the next
 collection rebuilds it.
+
+## measure
+
+Prints what one conversation's model calls consumed: tokens by type, money where the price file prices
+a call, and the costliest talks with the child agents each started. It calls no model. `-json` prints
+the ledger as one object: `total`, every `owners` cost, every `main_talks` cost with its child agents,
+`unattributed`, `prices` and `dialect`. See [Prices](judge.md#prices).
+
+## judge
+
+Judges one conversation at its current head, or at round `-round N`: the targets the person set,
+whether each was achieved, how each sub-task went, and what each piece of work was, each stage given to
+an evaluator. `-from` and `-to`, or `-from-id` and `-to-id`, judge a window of whole main talks. `-list`
+lists a conversation's runs and `-show N` prints one. See [Judge a Conversation](judge.md).
 
 ## glossary
 

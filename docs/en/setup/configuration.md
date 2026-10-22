@@ -165,6 +165,26 @@ withholds nothing. Collect it again into a new root to withhold there.
 | `hide` | `[]` | The flags whose steps the page withholds from every reader: `system_prompt`, `tool_schemas`. A withheld step keeps its place, its flags and its size, loses its text, and has state `omitted`. The provider bodies go with it, because a request carries both again. With `hide_override` on, this applies to a request that sets no `hide` parameter. |
 | `hide_override` | `false` | Whether a request's `hide` parameter replaces `hide` for that request. On, a host that serves the API through its own route decides what each reader is kept from, and `hide=` with no name withholds nothing. Off, `hide` is the whole answer, and a request that carries the parameter is refused with status 400. |
 
+## judge
+
+What [`asz judge`](judge.md) and `asz measure` use. A run happens only when a person runs `asz
+judge`.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `pricing` | `""` | The price file. Empty prices nothing, and the tokens still count. |
+| `hide` | `[]` | The flags whose records the evaluators are never shown: `system_prompt`, `tool_schemas`. |
+| `timeout` | `30m` | How long one evaluator call may take. A stage cut into calls runs several, and a call that fails, a timeout included, is tried once more. |
+| `evaluators` | `claude`, `codex` and `kiro` | The evaluators a stage can be given to, by name. Each has `kind` (`cli` or `api`) and `program` (`claude`, `codex` or `kiro-cli`; `anthropic`, `openai` or `bedrock`), and as it needs `command`, `args`, `model`, `endpoint`, `api_key_env`, `region`, `profile`, `max_turns` and `max_tokens`. See [Evaluators](judge.md#evaluators). |
+| `read_bytes` | `131072` | What one evaluator call may read through the navigation, in bytes of answers. An answer that would read past it is refused whole, the evaluator is told to answer with what it read, and the stage records it. `0` is no bound |
+| `mode` | `auto` | How a stage is given to its evaluator: `single`, one call; `stream`, cut into calls; `auto`, one call when the rows it is given fit `single_bytes`, calls of `chunk_bytes` beyond |
+| `single_bytes` | `32768` | The rows one call of a stage may be given in `auto` mode |
+| `chunk_bytes` | `24576` | The rows one call of a stage is given when it is cut |
+| `state_bytes` | `16384` | What one call of a targets scan is given of the targets found so far. Past it they are shortened, and the `targets` tool gives the rest whole |
+| `progress` | `30s` | How often a running stage prints what it has consumed so far. `0` prints it only when the stage ends |
+| `concurrency` | `4` | How many calls of one stage run at once. A targets scan always runs one at a time |
+| `plan` | `targets`, `achievement`, `subtasks` and `efficiency`, each by `claude` | The stages `asz judge` runs when it is not told a plan, in order, each with its `stage` and `evaluator`. The first is `targets`. |
+
 ## The changes adapter
 
 `changes` collects the records `asz-changes` writes: what each tool call changed on disk, for

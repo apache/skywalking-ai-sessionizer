@@ -1,0 +1,118 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "achievements"
+  ],
+  "properties": {
+    "achievements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "basis",
+          "criteria",
+          "claims",
+          "note",
+          "cite"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "basis": {
+            "type": "string",
+            "enum": [
+              "person_accepted",
+              "observed_result",
+              "delivered_answer",
+              "agent_claim_only",
+              "no_evidence"
+            ]
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "state",
+                "delivered",
+                "cite"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "the criterion's id, such as t2.c1"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "met",
+                    "not_met",
+                    "unknown",
+                    "not_captured"
+                  ]
+                },
+                "delivered": {
+                  "type": "boolean",
+                  "description": "the criterion asks for an answer or an explanation, and a reply delivered it"
+                },
+                "cite": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "claims": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text",
+                "state",
+                "cite"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "supported",
+                    "contradicted",
+                    "no_evidence",
+                    "not_captured"
+                  ]
+                },
+                "cite": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

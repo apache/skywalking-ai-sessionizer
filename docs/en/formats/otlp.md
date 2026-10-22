@@ -129,10 +129,10 @@ body:
 
 | Attribute | Value |
 | --- | --- |
-| `asz.format` | `sd` for a landed file, `sf` for a round |
-| `asz.format.version` | the version in the file's first line: `sd/1` or `sf/1` |
+| `asz.format` | `sd` for a landed file, `sf` for a round, `sj` for a judge run's stage file |
+| `asz.format.version` | the version in the file's first line: `sd/1`, `sf/1` or `sj/1` |
 | `asz.file` | the file's path relative to the storage root |
-| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `execution`, `provider_body`; for `sf`, `round` |
+| `asz.file.kind` | for `sd`, the header's kind: `transcript`, `agent_meta`, `journal`, `workflow_manifest`, `workflow_script`, `changes`, `execution`, `provider_body`; for `sf`, `round`; for `sj`, `judgment` |
 | `asz.file.digest` | the file's SHA-256, the digest of the body as received |
 | `asz.lines` | how many lines the body has, the header and the closing line included |
 | `asz.session` | the session the file belongs to; for `sf`, the session the round was assembled from |
@@ -153,6 +153,28 @@ also carries the time it was observed.
 Every scenario in the test suite is pushed to a receiver over both transports and checked against
 the two tables above, in both formats, so a change to the wire that this page does not describe
 fails the build. See [Scenarios](../guides/scenario.md).
+
+## Judge runs
+
+A [judge run](session-judgment.md) is sent once it has closed: each stage file is one record, in run
+order, its body the file as written. A run that never closed is not sent, and neither is a run whose
+files do not all read, or whose close file does not list one of them. The close file goes only once
+every other stage of its run is recorded as sent, so a receiver never holds a close without what it
+closes. The stage files go under the session they belong to, with the same owner as its other files. A stage file
+carries the attributes every file carries, `asz.conversation`, and what a receiver needs to list a run
+without decoding a body:
+
+| Attribute | Value |
+| --- | --- |
+| `asz.judgment.run` | the run's number in its conversation |
+| `asz.judgment.stage` | `ledger`, `targets`, `achievement`, `subtasks`, `efficiency` or `close` |
+| `asz.judgment.status` | `complete`, `partial` or `failed`; on the close file, the run's |
+| `asz.judgment.head.round`, `asz.judgment.head.digest` | the round of the chain the run measured |
+| `asz.judgment.evaluator`, `asz.judgment.evaluator.kind`, `asz.judgment.evaluator.program`, `asz.judgment.evaluator.model` | who made the stage; the model only when known |
+| `asz.judgment.targets`, `asz.judgment.achieved`, `asz.judgment.partly`, `asz.judgment.not_achieved`, `asz.judgment.cannot_verify` | on the close file only: the targets, and how many were judged at each level |
+
+A stage file is stamped with the time it finished: the evaluation's own time, never the
+conversation's.
 
 ## Metrics
 

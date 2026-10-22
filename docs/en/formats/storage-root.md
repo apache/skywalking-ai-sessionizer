@@ -40,6 +40,10 @@ session.
     index/
       entries.bin                        the derived index
       index.state                        how far the index reaches
+    judgments/                           the judge runs of the session's conversation
+      j000001/                           one run, see Session Judgment
+        s1-ledger-<digest12>.sj · … · s9-close-<digest12>.sj
+        work/                            what each evaluator was given and said; never sent
   _conversations/
     <conversation-id>/
       conversation.state                 the head pointer, outside every digest
@@ -81,13 +85,17 @@ not mirror the source tree: a path must not encode a relationship the pipeline i
 derive. [OTLP Records](otlp.md) says how the metrics spool fills and
 what `push.state` records. `_scenario/` exists only in a root a scenario build wrote, and
 `_retired/` once a session is retired. `_removed/` is used by a scenario's removal and by a
-retirement. [Retention](#retention) says what each is for.
+retirement. [Retention](#retention) says what each is for. A session's `judgments/` holds the
+[judge runs](session-judgment.md) of its conversation. They sit in the session's directory rather
+than the chain's, which is removed to parse a conversation again, so they go where the session goes.
 
 Every command that writes to a root holds `_root/.lock` for one pass: `asz collect` and `asz
 server` for each pass, `asz parse`, `asz push` and `asz repack` for their run, and `asz scenario
 build` for each session it builds. Another command over the same root waits for it, a watching
 pipeline by doing nothing that period, so two commands never write the same root at once. `asz
-view` and `asz index` only read, and take no lock. The LangSmith receiver is the one writer outside
+judge` holds it only while it reserves a run and while it writes each stage file, never while an
+evaluator works, which can take minutes. `asz view`, `asz index` and `asz measure` only read, and
+take no lock. The LangSmith receiver is the one writer outside
 a pass. It only adds requests to `_langsmith/`, each under a new name, and a pass takes them under
 that directory's own lock.
 Locks are taken in one order: `_scenario`, `_root`, `_export`, `_metrics`, `_provider`, a
@@ -453,7 +461,7 @@ A storage root is complete on its own. A copy of it can be listed, verified, re-
 another machine with no source files and no collector. Session Data is already converted: its
 records name identifiers by role, not by any runtime's fields. So the index rebuilds from the
 landed files with no adapter and no runtime-specific code, and the chain head is recovered from the
-rounds directory. `asz verify` checks every landed file against its digest and every round against
+rounds directory. Judge runs travel with their session, each stage file verifying itself. `asz verify` checks every landed file against its digest and every round against
 its commit digest without touching the source. A copy that collects again takes `_retired/` with
 it, or it collects a retired session again from its start.
 

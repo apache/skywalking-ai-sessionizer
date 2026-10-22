@@ -343,3 +343,73 @@ view:
   # sets no hide. Off, hide above is the whole answer, and a request that
   # carries the parameter is refused.
   hide_override: false
+
+# asz judge and asz measure. A judge run measures one conversation at one
+# head of its chain: the ledger asz computes, then the targets the person
+# set, whether each was achieved, and what each piece of work was, each
+# stage given to an evaluator. A run happens only when a person runs asz
+# judge; nothing in collect, server or push starts one. An evaluator reads
+# the conversation, so what it reads goes to the model behind it.
+judge:
+  # The optional price file: per model, what a million tokens of each type
+  # cost, from a time on. Empty prices nothing, and the tokens still count.
+  pricing: ""
+  # The flags whose records the evaluators are never shown, as view.hide
+  # lists them for the page.
+  hide: []
+  # How long one evaluator call may take. A stage cut into calls runs several,
+  # and a call that fails, a timeout included, is tried once more.
+  timeout: 30m
+  # What one evaluator call may read through the navigation, in bytes of
+  # answers. Past it, every tool tells the evaluator to answer with what it
+  # read. 0 is no bound.
+  read_bytes: 131072
+  # How a stage is given to its evaluator: single, one call; stream, cut
+  # into chunks; auto, one call when the rows it is given fit single_bytes,
+  # chunks of chunk_bytes beyond. concurrency bounds the chunks run at once.
+  mode: auto
+  single_bytes: 32768
+  chunk_bytes: 24576
+  concurrency: 4
+  # What a call of a targets scan is given of the targets found so far, in
+  # bytes; the targets tool gives the rest whole.
+  state_bytes: 16384
+  # How often a running stage prints what it has consumed so far. 0 prints it
+  # only when the stage ends.
+  progress: 30s
+  # The models and agent CLIs a stage can be given to, by name. kind cli
+  # runs an agent CLI: program claude, codex or kiro-cli, found on PATH or
+  # at command. kind api calls a provider's API: program anthropic, or
+  # openai for any endpoint that speaks the OpenAI chat completions API,
+  # with endpoint, model and api_key_env, for example:
+  #   haiku:
+  #     kind: api
+  #     program: anthropic
+  #     endpoint: https://api.anthropic.com
+  #     model: claude-haiku-4-5
+  #     api_key_env: ANTHROPIC_API_KEY
+  evaluators:
+    claude:
+      kind: cli
+      program: claude
+      args: []
+      max_turns: 60
+    codex:
+      kind: cli
+      program: codex
+      args: []
+    kiro:
+      kind: cli
+      program: kiro-cli
+      args: []
+  # What asz judge runs when it is not told one stage: the stages after the
+  # ledger, in order, each with its evaluator.
+  plan:
+    - stage: targets
+      evaluator: claude
+    - stage: achievement
+      evaluator: claude
+    - stage: subtasks
+      evaluator: claude
+    - stage: efficiency
+      evaluator: claude
