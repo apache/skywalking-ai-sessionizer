@@ -41,7 +41,7 @@ var (
 	// and sends, and must not know how anything is assembled or shown. A
 	// scenario's writers land input, so they are collector side too.
 	collectorSide = []string{"internal/adapters/", "internal/export/", "internal/metrics/", "internal/retention/", "internal/scenario/"}
-	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/", "internal/scenario/expect/"}
+	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/", "internal/scenario/expect/", "internal/judge/"}
 	// The scenario runner wires both sides, as the command does. Only the
 	// command and the tests may import it.
 	wiring = []string{"internal/scenario/run/"}

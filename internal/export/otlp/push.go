@@ -47,6 +47,7 @@ import (
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
 // Pusher sends every file in a storage root that has not been sent yet.
@@ -361,6 +362,7 @@ func (p *Pusher) Pass() (*Stats, error) {
 			}
 		}
 		b.addRounds(s.id)
+		b.addJudgments(s.id)
 		sent[s.id] = true
 	}
 	// A conversation that is not a session of this root, such as one
@@ -572,6 +574,178 @@ func (b *batch) addRounds(conv string) {
 			b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", rel, err))
 		}
 	}
+}
+
+// addJudgments adds a session's judge runs, each only once it is closed: a
+// run still running may yet write a stage, and the close file is what says it
+// is done. Every stage file of a run is read and checked first, and the close
+// file must list each by its digest; a run with one that does not read, or
+// that the close file does not list, is not sent at all. The stages go first,
+// and the close file only once every stage is recorded as sent, so a receiver
+// never holds a run's close without what it closes.
+func (b *batch) addJudgments(session string) {
+	runs, err := storage.JudgmentRuns(b.p.Zone, session)
+	if err != nil {
+		b.st.Errors = append(b.st.Errors, err)
+		return
+	}
+	type staged struct {
+		rel  string
+		data []byte
+		file *sessionjudge.File
+	}
+	for _, run := range runs {
+		if !run.Closed() || b.stop != nil {
+			continue
+		}
+		var stages []staged
+		var closing *staged
+		listed := map[string]bool{}
+		bad := false
+		for _, f := range run.Files {
+			rel, _ := filepath.Rel(b.p.Zone.Root(), f.Path)
+			rel = filepath.ToSlash(rel)
+			data, err := os.ReadFile(f.Path)
+			if err == nil {
+				var file *sessionjudge.File
+				if file, err = sessionjudge.Read(bytes.NewReader(data)); err == nil {
+					s := staged{rel, data, file}
+					if file.Header.Stage == sessionjudge.StageClose {
+						closing = &s
+						for _, st := range file.Stages {
+							listed[st.Digest] = true
+						}
+					} else {
+						stages = append(stages, s)
+					}
+				}
+			}
+			if err != nil {
+				b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", rel, err))
+				bad = true
+				break
+			}
+		}
+		if bad || closing == nil {
+			continue
+		}
+		present := map[string]bool{}
+		for _, s := range stages {
+			present[s.file.Commit.Digest] = true
+			if !listed[s.file.Commit.Digest] {
+				b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: the run's close file does not list it", s.rel))
+				bad = true
+			}
+		}
+		for digest := range listed {
+			if !present[digest] {
+				b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: lists a stage %q the run does not hold", closing.rel, digest))
+				bad = true
+			}
+		}
+		if bad {
+			continue
+		}
+		// A stage still unsent goes even when the close went already, as an
+		// older asz could send it first; the close never goes twice.
+		added := false
+		for _, s := range stages {
+			if b.stop != nil {
+				return
+			}
+			if b.state.pushed(s.rel) {
+				continue
+			}
+			if err := b.addJudgment(s.rel, s.data, s.file, session); err != nil {
+				if errors.Is(err, errSessionHeld) || errors.Is(err, errSessionRetired) {
+					return
+				}
+				b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", s.rel, err))
+			}
+			added = true
+		}
+		if added && b.stop == nil {
+			if err := b.flush(); err != nil {
+				b.st.Errors = append(b.st.Errors, err)
+			}
+		}
+		sent := b.stop == nil && !b.state.pushed(closing.rel)
+		for _, s := range stages {
+			sent = sent && b.state.pushed(s.rel)
+		}
+		if !sent {
+			continue
+		}
+		if err := b.addJudgment(closing.rel, closing.data, closing.file, session); err != nil {
+			if errors.Is(err, errSessionHeld) || errors.Is(err, errSessionRetired) {
+				return
+			}
+			b.st.Errors = append(b.st.Errors, fmt.Errorf("%s: %w", closing.rel, err))
+		}
+	}
+}
+
+// addJudgment adds one stage file of a judge run. What a receiver needs to
+// list a run, and to tell its stages apart, travels as attributes copied off
+// the header, so it never has to decode a body to list one.
+func (b *batch) addJudgment(rel string, data []byte, file *sessionjudge.File, conv string) error {
+	h := file.Header
+	session := h.Session
+	if session == "" {
+		session = conv
+	}
+	if retired, err := b.isRetired(session); err != nil {
+		return err
+	} else if retired {
+		return errSessionRetired
+	}
+	if !b.claim(session) {
+		return errSessionHeld
+	}
+	digest := digestOf(data)
+	attrs := []*commonpb.KeyValue{
+		str("asz.format", "sj"),
+		str("asz.format.version", h.Schema),
+		str("asz.file", rel),
+		str("asz.file.kind", "judgment"),
+		str("asz.file.digest", digest),
+		integer("asz.lines", int64(bytes.Count(data, []byte("\n")))),
+		str("asz.session", session),
+		str("asz.conversation", h.Conversation),
+		integer("asz.judgment.run", int64(h.Run)),
+		str("asz.judgment.stage", h.Stage),
+		str("asz.judgment.status", h.Status),
+		integer("asz.judgment.head.round", int64(h.Head.Round)),
+		str("asz.judgment.head.digest", h.Head.Digest),
+		str("asz.judgment.evaluator", h.Evaluator.Name),
+		str("asz.judgment.evaluator.kind", h.Evaluator.Kind),
+		str("asz.judgment.evaluator.program", h.Evaluator.Program),
+	}
+	if h.Evaluator.Model != "" {
+		attrs = append(attrs, str("asz.judgment.evaluator.model", h.Evaluator.Model))
+	}
+	if s := h.Summary; s != nil {
+		attrs = append(attrs,
+			integer("asz.judgment.targets", int64(s.Targets)),
+			integer("asz.judgment.achieved", int64(s.Achieved)),
+			integer("asz.judgment.partly", int64(s.Partly)),
+			integer("asz.judgment.not_achieved", int64(s.NotAchieved)),
+			integer("asz.judgment.cannot_verify", int64(s.CannotVerify)))
+	}
+	// A stage file is stamped with when it finished, the evaluation's own
+	// time, never the conversation's.
+	now := uint64(b.p.Now().UnixNano())
+	stamp := parseTime(h.Finished)
+	if stamp == 0 {
+		stamp = now
+	}
+	if _, known := b.services[session]; !known {
+		files, err := storage.LandedFiles(b.p.Zone, session)
+		if err == nil {
+			b.services[session] = b.p.serviceOf(session, files)
+		}
+	}
+	return b.add(session, record(stamp, now, data, attrs), rel, digest)
 }
 
 // session is one session of the root with its landed files, and when the

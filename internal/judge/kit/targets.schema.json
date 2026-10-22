@@ -1,0 +1,131 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "targets",
+    "inputs"
+  ],
+  "properties": {
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "key",
+          "statement",
+          "criteria",
+          "drop_criteria",
+          "status",
+          "replaced_by",
+          "talks",
+          "cite"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "the id of a target found so far that this entry changes, or empty for a new target"
+          },
+          "key": {
+            "type": "string",
+            "description": "your own key for a new target, such as n1, or empty for a change"
+          },
+          "statement": {
+            "type": "string",
+            "description": "the outcome, or empty when it does not change"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "criteria to add"
+          },
+          "drop_criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "ids of criteria the person dropped"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "",
+              "open",
+              "closed",
+              "cancelled",
+              "replaced"
+            ],
+            "description": "empty when it does not change"
+          },
+          "replaced_by": {
+            "type": "string",
+            "description": "the id or key of the target that replaced this one, or empty"
+          },
+          "talks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "talks to add"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "node",
+          "actions"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target",
+                "action"
+              ],
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "a target id or key, or empty for none, not_from_person and unknown"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "refine",
+                    "steer",
+                    "accept",
+                    "correct",
+                    "cancel",
+                    "none",
+                    "not_from_person",
+                    "unknown"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

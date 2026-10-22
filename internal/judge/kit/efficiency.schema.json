@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["labels"],
+  "properties": {
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "talk", "from", "label", "subtask", "note", "cite"],
+        "properties": {
+          "target": {"type": "string"},
+          "talk": {"type": "string"},
+          "from": {"type": "string", "description": "the first step of the part, or empty for the whole talk"},
+          "label": {"type": "string", "enum": ["useful", "exploration", "verification", "avoidable_attempt", "repeated", "redundant_delegation", "repair_own_mistake", "rework_requirement_change", "misled_by_subtask"]},
+          "subtask": {"type": "string", "description": "for misled_by_subtask, the sub-task whose untrue report the work acted on; otherwise empty"},
+          "note": {"type": "string"},
+          "cite": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

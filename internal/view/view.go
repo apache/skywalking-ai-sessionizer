@@ -191,11 +191,44 @@ func (s *Server) Load(id string) (*Conversation, error) {
 		}
 		delete(s.loaded, id)
 	}
+	c, err := s.fold(id, 0, generation)
+	if err != nil {
+		return nil, err
+	}
+	s.loaded[id] = c
+	return c, nil
+}
+
+// LoadAt folds a conversation through one round, as it was when that round
+// was its head, however many rounds came after. A judge run reads the head it
+// measures this way, so what it cites does not move under it. Nothing is
+// kept: the next LoadAt folds again.
+func (s *Server) LoadAt(id string, round uint64) (*Conversation, error) {
+	if round == 0 {
+		return nil, fmt.Errorf("view: %s: no round to load at", id)
+	}
+	generation, _, err := storage.RemovalGeneration(s.zone, id)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.fold(id, round, generation)
+	if err != nil {
+		return nil, err
+	}
+	if c.head != round {
+		return nil, fmt.Errorf("view: %s: the chain stops at round %d, before round %d", id, c.head, round)
+	}
+	return c, nil
+}
+
+// fold reads a chain through a round, or every round for zero, and builds
+// the lookups a document needs.
+func (s *Server) fold(id string, through uint64, generation int) (*Conversation, error) {
 	// The fold goes as far as the chain holds. A round that is missing or
 	// broken is reported in the document, not returned as an error, so a
 	// reader sees what could be folded and what could not; only a chain with
 	// no usable round at all is an error, because there is nothing to show.
-	v, problems, ferr := sessionflow.OpenChain(s.zone.Root(), id).FoldPartial()
+	v, problems, ferr := sessionflow.OpenChain(s.zone.Root(), id).FoldPartialThrough(through)
 	if ferr != nil {
 		return nil, ferr
 	}
@@ -233,7 +266,6 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	}
 	c.paths = c.scanPaths()
 	c.pathsScan = time.Now()
-	s.loaded[id] = c
 	return c, nil
 }
 

@@ -39,6 +39,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/remove"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
 // everyKind is one session holding every kind of file a removal deletes: a
@@ -387,6 +388,79 @@ func TestNothingIsRemovedBeforeAllOfItIsSent(t *testing.T) {
 	if len(res.Removed) != 1 {
 		t.Fatalf("once all of it was sent: removed %v, kept %v, waiting %v", res.Removed, res.Kept, res.Waiting)
 	}
+}
+
+// TestAJudgeRunGoesOnlyOnceSent. The removal takes a session's judge runs
+// with it, so it waits for each to be sent whole: a run not closed, which
+// the pusher does not send yet, and a closed run whose files are not sent.
+func TestAJudgeRunGoesOnlyOnceSent(t *testing.T) {
+	r := newRoot(t)
+	b := r.build(load(t, everyKind), "", scenario.Options{})
+	r.pipeline()
+	rm := r.remover()
+
+	// A run that stopped before its close file.
+	if _, _, err := storage.ReserveRun(r.zone, b.Session); err != nil {
+		t.Fatal(err)
+	}
+	res := rm.Pass(r.input())
+	noErrors(t, res)
+	if len(res.Removed) != 0 || !waitingFor(res, b.Session, "is not closed") {
+		t.Fatalf("with a run not closed: removed %v, waiting %v", res.Removed, res.Waiting)
+	}
+	if err := os.RemoveAll(filepath.Join(r.zone.SessionDir(b.Session), storage.JudgmentsDir)); err != nil {
+		t.Fatal(err)
+	}
+
+	judged(t, r.zone, b.Session)
+	res = rm.Pass(r.input())
+	noErrors(t, res)
+	if len(res.Removed) != 0 || !waitingFor(res, b.Session, "judge runs not sent yet") {
+		t.Fatalf("with a closed run not sent: removed %v, waiting %v", res.Removed, res.Waiting)
+	}
+	r.push(r.endpoint)
+	res = rm.Pass(r.input())
+	noErrors(t, res)
+	if len(res.Removed) != 1 {
+		t.Fatalf("once the run was sent: removed %v, kept %v, waiting %v", res.Removed, res.Kept, res.Waiting)
+	}
+}
+
+// judged adds a closed judge run to a session, as asz judge writes one: a
+// ledger stage, and the close file that lists it.
+func judged(t *testing.T, z *storage.Zone, session string) {
+	t.Helper()
+	run, dir, err := storage.ReserveRun(z, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := func(stage string) sessionjudge.Header {
+		return sessionjudge.Header{Conversation: session, Session: session, Run: run, Stage: stage,
+			Head: sessionjudge.Head{Round: 1, Digest: "digest"}, Evaluator: sessionjudge.Evaluator{Name: "asz", Kind: sessionjudge.EvaluatorComputed},
+			Status: sessionjudge.StatusComplete, Started: "2026-01-01T00:00:00Z", Finished: "2026-01-01T00:00:01Z"}
+	}
+	publish := func(order int, stage string, frames ...any) (string, string) {
+		w, err := sessionjudge.NewWriter(header(stage))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range frames {
+			if err := w.Write(f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		data, digest, err := w.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		path, err := storage.PublishStage(z, session, dir, order, stage, digest, data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Base(path), digest
+	}
+	file, digest := publish(1, sessionjudge.StageLedger)
+	publish(9, sessionjudge.StageClose, &sessionjudge.Stage{Stage: sessionjudge.StageLedger, File: file, Digest: digest})
 }
 
 func waitingFor(res *remove.Result, session, reason string) bool {

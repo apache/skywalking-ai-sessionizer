@@ -205,6 +205,32 @@ explicit tombstone; order is chain order and never timestamp order.
 **Revision** — the round number that produced a version of an entity. Derived from chain position,
 not counted per entity, so a round can be re-derived without replaying the chain.
 
+## Judging
+
+**Judge run** — one measurement of a conversation at one head of its chain: the ledger, then the
+targets, their achievement and the labels of their work, each stage given to an evaluator, then the
+close. Made only when a person asks, as often as they ask. See
+[Conversation Judge](conversation-judge.md).
+*Not:* a round. A run is a judgment about the conversation, not part of it, and never changes the chain.
+
+**Target** — an outcome the person asked for, with criteria that could be checked. Its cost is the cost
+of the talks that serve it.
+*Not:* a topic, a talk, or an input. One input can set two targets, and one target can take many talks.
+
+**Evaluator** — what decides a judged stage: an agent CLI asz runs, or a model API asz calls. It reads
+the conversation only through the navigation, and it names and labels. It never gives a number.
+*Not:* the judge stream role, which is reserved for an evaluator's own work recorded as a stream.
+
+**Ledger** — what every model call of a conversation consumed and cost, computed by asz with no model.
+Each call is counted once, under one owner.
+*Not:* a bill. A call with unknown usage is counted as unknown, and one with no price is unpriced.
+
+**Kit** — the prompts and answer schemas that drive every evaluator, named in every stage file by its
+digest.
+
+**Navigation** — the read-only tools an evaluator reads a conversation through, from an overview down
+to one record, every answer bounded and pinned to the run's head.
+
 ## Adapters
 
 **Adapter** — what turns one runtime's data into landed records. Named for the runtime **and** the

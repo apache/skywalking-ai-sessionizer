@@ -83,6 +83,17 @@ func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
 	return out
 }
 
+// Records reads many landed positions with one pass per file, whole. A
+// reader that needs what several records of one call say, such as the usage
+// a call recorded on each of its fragments, reads them at once this way.
+func (c *Conversation) Records(refs []sessionflow.Ref) map[[2]uint64]*sessiondata.Record {
+	ptrs := make([]*sessionflow.Ref, len(refs))
+	for i := range refs {
+		ptrs[i] = &refs[i]
+	}
+	return c.records(ptrs, nil)
+}
+
 // records reads many landed positions with one pass per file. A record
 // carrying any of the hide names is withheld as it is read.
 func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]uint64]*sessiondata.Record {
@@ -224,7 +235,7 @@ func (c *Conversation) step(n *sessionflow.Node, depth int, recs map[[2]uint64]*
 	// from summing fragments: a main transcript stamps usage on every one.
 	if r := usageAt(n); r != nil {
 		if rec := recs[[2]uint64{r.Seq, r.Row}]; rec != nil && rec.Usage != nil {
-			out.Usage = rec.Usage
+			out.Usage, out.Model = rec.Usage, rec.Model
 		}
 	}
 	if depth < 12 {
@@ -776,6 +787,24 @@ func readProviderBody(path string) ([]byte, sessiondata.Kind, error) {
 	}
 	rest, err := io.ReadAll(f)
 	return append(head.Bytes(), rest...), kind, err
+}
+
+// Record reads one landed record by its address, withheld as the record
+// endpoint withholds it. A provider body is refused to a reader that
+// withholds anything, since its request carries what is withheld again.
+func (c *Conversation) Record(seq, row uint64, hide []string) (*sessiondata.Record, error) {
+	if err := sessiondata.CheckWithholdable(hide); err != nil {
+		return nil, fmt.Errorf("view: hide: %w", err)
+	}
+	rec, kind, err := c.record(seq, row)
+	if err != nil {
+		return nil, err
+	}
+	if kind == sessiondata.KindProviderBody && len(hide) > 0 {
+		return nil, errBodiesWithheld(hide)
+	}
+	withholdRecord(rec, hiddenSet(hide))
+	return rec, nil
 }
 
 // record reads one landed record whole, with the kind of the file it landed

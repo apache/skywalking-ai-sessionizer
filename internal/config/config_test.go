@@ -309,21 +309,48 @@ func keysWritten(typ reflect.Type, node *yaml.Node, prefix string, missing *[]st
 			*missing = append(*missing, prefix+tag)
 			continue
 		}
+		path := prefix + tag
 		switch {
 		case f.Type.Kind() == reflect.Struct && child.Kind == yaml.MappingNode:
-			keysWritten(f.Type, child, prefix+tag+".", missing)
+			keysWritten(f.Type, child, path+".", missing)
 		case f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Struct && child.Kind == yaml.SequenceNode:
 			for j, el := range child.Content {
-				for _, must := range []string{"name", "enabled"} {
-					found := false
-					for k := 0; k+1 < len(el.Content); k += 2 {
-						found = found || el.Content[k].Value == must
-					}
-					if !found {
-						*missing = append(*missing, fmt.Sprintf("%s%s[%d].%s", prefix, tag, j, must))
-					}
+				at := fmt.Sprintf("%s[%d]", path, j)
+				if must, ok := entryKeys[path]; ok {
+					mustCarry(el, at, must, missing)
+					continue
 				}
+				keysWritten(f.Type.Elem(), el, at+".", missing)
 			}
+		case f.Type.Kind() == reflect.Map && f.Type.Elem().Kind() == reflect.Struct && child.Kind == yaml.MappingNode:
+			for j := 0; j+1 < len(child.Content); j += 2 {
+				at := path + "." + child.Content[j].Value
+				if must, ok := entryKeys[path]; ok {
+					mustCarry(child.Content[j+1], at, must, missing)
+					continue
+				}
+				keysWritten(f.Type.Elem(), child.Content[j+1], at+".", missing)
+			}
+		}
+	}
+}
+
+// entryKeys names the keys every entry of a list must carry, for the lists
+// whose entries spell out different settings: a receiver and a local adapter,
+// an agent CLI and an API. Every other list's entries spell out every key.
+var entryKeys = map[string][]string{
+	"adapters":         {"name", "enabled"},
+	"judge.evaluators": {"kind", "program"},
+}
+
+func mustCarry(el *yaml.Node, at string, must []string, missing *[]string) {
+	for _, key := range must {
+		found := false
+		for k := 0; k+1 < len(el.Content); k += 2 {
+			found = found || el.Content[k].Value == key
+		}
+		if !found {
+			*missing = append(*missing, at+"."+key)
 		}
 	}
 }
@@ -573,6 +600,66 @@ func TestTheTwoRetentionLevelsGoTogether(t *testing.T) {
 		}
 		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%q was taken, or refused without saying %q: %v", body, c.says, err)
+		}
+	}
+}
+
+// A judge section is read: a file that names a price file, an API evaluator
+// and a plan gets them, and keeps the default agent CLIs.
+func TestTheJudgeSectionIsRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "asz.yaml")
+	body := "judge:\n  pricing: prices.yaml\n  timeout: 5m\n  evaluators:\n" +
+		"    haiku:\n      kind: api\n      program: anthropic\n      model: claude-haiku-4-5\n" +
+		"    codex:\n      kind: cli\n      program: codex\n      model: gpt-6-astra\n" +
+		"  plan:\n    - stage: targets\n      evaluator: haiku\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := cfg.Judge
+	if j.Pricing != "prices.yaml" || j.Timeout != "5m" || len(j.Plan) != 1 || j.Plan[0].Evaluator != "haiku" {
+		t.Fatalf("judge %+v", j)
+	}
+	if j.Evaluators["haiku"].Model != "claude-haiku-4-5" || j.Evaluators["codex"].Model != "gpt-6-astra" || j.Evaluators["claude"].Program != "claude" {
+		t.Fatalf("evaluators %+v", j.Evaluators)
+	}
+	if def := Default(); def.Judge.Evaluators["codex"].Model != "" {
+		t.Fatal("loading changed the defaults")
+	}
+}
+
+// Every judge setting a file sets is taken, a zero among them: read_bytes 0
+// is no bound. A setting a run could not use is refused.
+func TestEveryJudgeSettingIsTaken(t *testing.T) {
+	load := func(body string) (*Config, error) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "asz.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(path)
+	}
+	cfg, err := load("judge:\n  read_bytes: 0\n  mode: stream\n  single_bytes: 1000\n  chunk_bytes: 2000\n  concurrency: 1\n" +
+		"  state_bytes: 3000\n  progress: 0s\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := cfg.Judge
+	if j.ReadBytes != 0 || j.Mode != "stream" || j.SingleBytes != 1000 || j.ChunkBytes != 2000 || j.Concurrency != 1 ||
+		j.StateBytes != 3000 || j.Progress != "0s" {
+		t.Fatalf("judge %+v", j)
+	}
+	// What the file does not set keeps its default.
+	cfg, _ = load("judge:\n  mode: single\n")
+	if d := Default().Judge; cfg.Judge.ReadBytes != d.ReadBytes || cfg.Judge.Concurrency != d.Concurrency {
+		t.Fatalf("judge %+v", cfg.Judge)
+	}
+	for _, body := range []string{"judge:\n  mode: fast\n", "judge:\n  concurrency: 0\n", "judge:\n  chunk_bytes: -1\n", "judge:\n  progress: soon\n"} {
+		if _, err := load(body); err == nil {
+			t.Errorf("%q was taken", body)
 		}
 	}
 }

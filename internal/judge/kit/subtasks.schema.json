@@ -1,0 +1,94 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subtasks"
+  ],
+  "properties": {
+    "subtasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ids",
+          "outcome",
+          "report",
+          "use",
+          "dispatch",
+          "work",
+          "note",
+          "cite"
+        ],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "one sub-task id, or several started by the same step and judged alike"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "achieved",
+              "partly",
+              "not_achieved",
+              "cannot_verify"
+            ]
+          },
+          "report": {
+            "type": "string",
+            "enum": [
+              "accurate",
+              "inaccurate",
+              "unverifiable"
+            ]
+          },
+          "use": {
+            "type": "string",
+            "enum": [
+              "used",
+              "unused",
+              "misled",
+              "unknown"
+            ]
+          },
+          "dispatch": {
+            "type": "string",
+            "enum": [
+              "reasonable",
+              "redundant",
+              "misdirected",
+              "unknown"
+            ]
+          },
+          "work": {
+            "type": "string",
+            "enum": [
+              "useful",
+              "exploration",
+              "verification",
+              "avoidable_attempt",
+              "repeated",
+              "redundant_delegation",
+              "repair_own_mistake",
+              "rework_requirement_change",
+              "misdirected_delegation",
+              "not_reviewed"
+            ]
+          },
+          "note": {
+            "type": "string"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
