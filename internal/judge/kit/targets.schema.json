@@ -3,7 +3,8 @@
   "additionalProperties": false,
   "required": [
     "targets",
-    "inputs"
+    "inputs",
+    "goals"
   ],
   "properties": {
     "targets": {
@@ -87,7 +88,8 @@
         "additionalProperties": false,
         "required": [
           "node",
-          "actions"
+          "actions",
+          "relations"
         ],
         "properties": {
           "node": {
@@ -123,6 +125,108 @@
                 }
               }
             }
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "goal",
+                "follows",
+                "request",
+                "statement"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "new",
+                    "continue",
+                    "adjust",
+                    "return",
+                    "unclear",
+                    "not_from_person"
+                  ]
+                },
+                "goal": {
+                  "type": "string",
+                  "description": "the goal's id or your key; empty for unclear and not_from_person"
+                },
+                "follows": {
+                  "type": "string",
+                  "description": "for continue, adjust and return, the earlier input of the goal this one follows; empty otherwise"
+                },
+                "request": {
+                  "type": "string",
+                  "description": "for an input with several relations, the part of it this one concerns; empty otherwise"
+                },
+                "statement": {
+                  "type": "string",
+                  "description": "for new and adjust, the goal's result after this input; empty otherwise"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "key",
+          "statement",
+          "members",
+          "main",
+          "main_reason",
+          "main_cite",
+          "cite"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "the id of a goal found so far that this entry changes, or empty for a new goal"
+          },
+          "key": {
+            "type": "string",
+            "description": "your own key for a new goal, such as ga, or empty for a change"
+          },
+          "statement": {
+            "type": "string",
+            "description": "the result the goal is for, or empty when it does not change"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "targets to add, by id or key"
+          },
+          "main": {
+            "type": "string",
+            "description": "the member the goal is for, undetermined, or empty when it does not change"
+          },
+          "main_reason": {
+            "type": "string"
+          },
+          "main_cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the person's inputs that show which member is main"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the inputs that show these targets serve one result"
           }
         }
       }

@@ -83,6 +83,32 @@ type Judge struct {
 	// Plan is what asz judge runs when it is not told one stage: the
 	// stages after the ledger, in order, each with its evaluator.
 	Plan []JudgeStage `yaml:"plan"`
+	// References are how the sources a run is judged against are fetched.
+	References References `yaml:"references"`
+}
+
+// References are how asz fetches a source a run is judged against. A file
+// and a plain http or https URL need no setting. A source that needs a
+// login, such as a ticket system, goes through a command.
+type References struct {
+	// MaxBytes bounds a saved copy. A larger source is saved cut, and its
+	// manifest says so.
+	MaxBytes int `yaml:"max_bytes"`
+	// Timeout bounds one fetch, as a duration such as 1m.
+	Timeout string `yaml:"timeout"`
+	// Fetch are the commands that fetch sources, the first whose prefix a
+	// source starts with taking it.
+	Fetch []Fetcher `yaml:"fetch"`
+}
+
+// Fetcher is a command that fetches the sources that start with a prefix.
+// It is given the source as its last argument and writes the content on
+// its standard output. It never sees the conversation.
+type Fetcher struct {
+	Prefix  string   `yaml:"prefix"`
+	Command []string `yaml:"command"`
+	// ContentType is what the command writes, text/plain when empty.
+	ContentType string `yaml:"content_type"`
 }
 
 // Evaluator is one model or agent CLI a stage is given to.
@@ -143,6 +169,20 @@ func (j Judge) check() error {
 	if j.Progress != "" {
 		if d, err := time.ParseDuration(j.Progress); err != nil || d < 0 {
 			return fmt.Errorf("config: judge.progress %q is not a duration", j.Progress)
+		}
+	}
+	r := j.References
+	if r.MaxBytes < 0 {
+		return fmt.Errorf("config: judge.references.max_bytes %d must not be negative", r.MaxBytes)
+	}
+	if r.Timeout != "" {
+		if d, err := time.ParseDuration(r.Timeout); err != nil || d <= 0 {
+			return fmt.Errorf("config: judge.references.timeout %q is not a positive duration", r.Timeout)
+		}
+	}
+	for i, f := range r.Fetch {
+		if f.Prefix == "" || len(f.Command) == 0 || f.Command[0] == "" {
+			return fmt.Errorf("config: judge.references.fetch[%d] needs a prefix and a command", i)
 		}
 	}
 	return nil
@@ -559,6 +599,7 @@ func Default() *Config {
 				{Stage: "subtasks", Evaluator: "claude"},
 				{Stage: "efficiency", Evaluator: "claude"},
 			},
+			References: References{MaxBytes: 1 << 20, Timeout: "1m", Fetch: []Fetcher{}},
 		},
 		Adapters: []Adapter{{
 			Name:    AdapterClaudeCodeLocal,
@@ -682,6 +723,9 @@ func Load(path string) (*Config, error) {
 			ChunkBytes  *int `yaml:"chunk_bytes"`
 			Concurrency *int `yaml:"concurrency"`
 			StateBytes  *int `yaml:"state_bytes"`
+			References  struct {
+				MaxBytes *int `yaml:"max_bytes"`
+			} `yaml:"references"`
 		} `yaml:"judge"`
 	}
 	if err := yaml.Unmarshal(data, &set); err != nil {
@@ -783,6 +827,15 @@ func Load(path string) (*Config, error) {
 	}
 	if len(j.Plan) > 0 {
 		cfg.Judge.Plan = j.Plan
+	}
+	if set.Judge.References.MaxBytes != nil {
+		cfg.Judge.References.MaxBytes = *set.Judge.References.MaxBytes
+	}
+	if j.References.Timeout != "" {
+		cfg.Judge.References.Timeout = j.References.Timeout
+	}
+	if len(j.References.Fetch) > 0 {
+		cfg.Judge.References.Fetch = j.References.Fetch
 	}
 	return cfg, cfg.Validate()
 }

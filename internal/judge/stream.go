@@ -53,11 +53,13 @@ type chunk struct {
 // item is one thing a stage answers for, with the row it is shown as, and
 // need, what reading its work takes: its outline, every page.
 type item struct {
-	id     string
-	target *sessionjudge.Target
-	rows   []any
-	bytes  int
-	need   int
+	id         string
+	target     *sessionjudge.Target
+	source     *SourceDoc
+	conclusion *sessionjudge.Conclusion
+	rows       []any
+	bytes      int
+	need       int
 }
 
 // stageItems are what a stage answers for, in order: the inputs of the
@@ -90,6 +92,17 @@ func stageItems(stage string, nav *Nav, targets []sessionjudge.Target) []item {
 			rows := nav.SubtaskRows([]string{st.ID})
 			out = append(out, item{id: st.ID, rows: rows, bytes: size(rows), need: rows[0].(subtaskRow).OutlineBytes})
 		}
+	case sessionjudge.StageReference:
+		return sourceItems(nav.sourceDocs, nav.sources)
+	case sessionjudge.StageDivergence:
+		return conclusionItems(nav.conclusions)
+	case sessionjudge.StageRegroup:
+		// A target's words, never its goal: the call places targets in the
+		// person's goals without seeing how the judge grouped them.
+		for i := range targets {
+			rows := []any{map[string]any{"id": targets[i].ID, "statement": clip(targets[i].Statement, 300), "status": targets[i].Status}}
+			out = append(out, item{id: targets[i].ID, target: &targets[i], rows: rows, bytes: size(rows)})
+		}
 	case sessionjudge.StageEfficiency:
 		claimed := map[string]bool{}
 		for _, t := range targets {
@@ -119,7 +132,11 @@ func stageItems(stage string, nav *Nav, targets []sessionjudge.Target) []item {
 // one call, with a 128 KiB budget, left 80% of the cost unreviewed.
 func planChunks(stage, mode string, singleBytes, chunkBytes, readBytes int, nav *Nav, targets []sessionjudge.Target) (string, []chunk) {
 	items := stageItems(stage, nav, targets)
-	if len(items) == 0 {
+	switch {
+	// A regroup with no target still answers for the person's goals.
+	case len(items) == 0 && stage == sessionjudge.StageRegroup:
+		return ModeSingle, []chunk{{}}
+	case len(items) == 0:
 		return ModeSingle, nil
 	}
 	// The outlines a call reads may take three quarters of its budget; the
@@ -139,7 +156,14 @@ func planChunks(stage, mode string, singleBytes, chunkBytes, readBytes int, nav 
 	// and left three of them uninvestigated, where one call per target read
 	// what each needed.
 	perTarget := stage == sessionjudge.StageAchievement && mode != ModeSingle
-	if !perTarget && (mode == ModeSingle || (mode == ModeAuto && total <= singleBytes && fits)) || len(items) <= 1 {
+	// A reference stage is always one call: what a conclusion builds on, or
+	// disagrees with, can be in another source, and its id must be unique
+	// among all of them. Each item is a source's manifest, so the call
+	// stays small; it reads the sources through the source tool. A regroup
+	// is one call too, since two targets are compared by the goals each is
+	// placed in.
+	whole := stage == sessionjudge.StageReference || stage == sessionjudge.StageRegroup
+	if whole || !perTarget && (mode == ModeSingle || (mode == ModeAuto && total <= singleBytes && fits)) || len(items) <= 1 {
 		ch := chunk{}
 		for _, it := range items {
 			ch.add(stage, it)
@@ -175,6 +199,12 @@ func (c *chunk) add(stage string, it item) {
 		c.assign.Subtasks = append(c.assign.Subtasks, it.id)
 	case sessionjudge.StageEfficiency:
 		c.assign.Talks = append(c.assign.Talks, it.id)
+	case sessionjudge.StageReference:
+		c.assign.Sources = append(c.assign.Sources, *it.source)
+	case sessionjudge.StageDivergence:
+		c.assign.Conclusions = append(c.assign.Conclusions, *it.conclusion)
+	case sessionjudge.StageRegroup:
+		c.assign.Targets = append(c.assign.Targets, it.id)
 	}
 	c.rows = append(c.rows, it.rows...)
 }
@@ -187,18 +217,25 @@ func (c *chunk) add(stage string, it item) {
 // The rows take at most rowsBytes. A chunk holds at least one item, and one
 // item, such as a target with many talks, can be larger than a chunk: its
 // rows past the bound are named by count, and the tools list them.
-func pushText(stage string, part, of int, ch chunk, catalogue []sessionjudge.Target, stateBytes, rowsBytes int) string {
+func pushText(stage string, part, of int, ch chunk, cat catalogue, stateBytes, rowsBytes int) string {
 	var b strings.Builder
 	if of > 1 {
 		fmt.Fprintf(&b, "\nThis call answers for part %d of %d of this stage. Everything outside it is context.\n", part, of)
 	}
 	if stage == sessionjudge.StageTargets {
 		b.WriteString("\nThe targets found so far by earlier parts of this run")
-		if len(catalogue) == 0 {
+		if len(cat.targets) == 0 {
 			b.WriteString(": none yet.\n")
 		} else {
 			b.WriteString(", one per line. Update one by its id; set a new one under a key such as n1. The targets tool gives any of them whole:\n\n")
-			b.WriteString(catalogueLines(catalogue, stateBytes))
+			b.WriteString(catalogueLines(cat.targets, stateBytes))
+		}
+		b.WriteString("\nThe goals found so far by earlier parts of this run")
+		if len(cat.goals) == 0 {
+			b.WriteString(": none yet.\n")
+		} else {
+			b.WriteString(", one per line. Update one by its id; start a new one under a key such as ga. A relation follows an earlier input of its goal, such as its last_input:\n\n")
+			b.WriteString(goalLines(cat.goals, cat.latest, stateBytes))
 		}
 	}
 	what := map[string]string{
@@ -206,6 +243,9 @@ func pushText(stage string, part, of int, ch chunk, catalogue []sessionjudge.Tar
 		sessionjudge.StageAchievement: "The talks of the targets this call judges",
 		sessionjudge.StageSubtasks:    "The sub-tasks this call judges",
 		sessionjudge.StageEfficiency:  "The talks this call labels",
+		sessionjudge.StageReference:   "The sources this call reads, each as asz saved it",
+		sessionjudge.StageDivergence:  "The conclusions this call compares with the conversation",
+		sessionjudge.StageRegroup:     "The targets this call places in the person's goals",
 	}[stage]
 	fmt.Fprintf(&b, "\n%s, one per line, as the tools show them:\n\n", what)
 	var lines []string
@@ -218,6 +258,9 @@ func pushText(stage string, part, of int, ch chunk, catalogue []sessionjudge.Tar
 		sessionjudge.StageAchievement: "talks",
 		sessionjudge.StageSubtasks:    "subtasks",
 		sessionjudge.StageEfficiency:  "talks",
+		sessionjudge.StageReference:   "source",
+		sessionjudge.StageDivergence:  "conclusions",
+		sessionjudge.StageRegroup:     "targets",
 	}[stage]
 	b.WriteString(boundedLines(lines, rowsBytes, "rows, which the "+tool+" tool lists"))
 	return b.String()
@@ -285,11 +328,18 @@ type stageRun struct {
 	session, dir string
 	schema       json.RawMessage
 	targets      []sessionjudge.Target
+	goals        []sessionjudge.Goal
+	inputs       []*sessionjudge.Input
 	achievements []*sessionjudge.Achievement
 	misled       []*sessionjudge.Subtask
 	subtaskStage bool
 	timeout      time.Duration
 	mcp          MCPArgs
+	// work names the stage's work directory, the stage's order and name
+	// when empty; a regroup, which a run can have many of, its version.
+	work string
+	// personGoals are the person's goals a regroup places targets in.
+	personGoals []string
 
 	mu   sync.Mutex
 	used used
@@ -447,7 +497,7 @@ func (s *stageRun) total() used {
 // chunk that fails. Other stages run their chunks side by side, up to the
 // configured concurrency, and merge them in order, so the stage file does
 // not depend on which call finished first.
-func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, []sessionjudge.Target, used, error) {
+func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, catalogue, used, error) {
 	var m merged
 	s.running = map[string]*Nav{}
 	// What the stage has consumed so far, said every so often while it
@@ -470,21 +520,21 @@ func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, []sessionju
 		}()
 	}
 	if s.stage == sessionjudge.StageTargets {
-		var catalogue []sessionjudge.Target
+		var cat catalogue
 		for i, ch := range chunks {
-			c, err := s.chunk(ctx, i, len(chunks), ch, catalogue)
+			c, err := s.chunk(ctx, i, len(chunks), ch, cat)
 			if err != nil {
 				if storageError(err) {
-					return m, nil, used{}, err
+					return m, catalogue{}, used{}, err
 				}
 				m.failed++
 				m.problems = append(m.problems, fmt.Sprintf("part %d failed: %v", i+1, err))
-				return m, nil, s.total(), nil
+				return m, catalogue{}, s.total(), nil
 			}
-			catalogue = c.targets
+			cat = catalogue{targets: c.targets, goals: c.goals, relations: c.relations, latest: c.latest}
 			m.add(i+1, len(chunks), c)
 		}
-		return m, catalogue, s.total(), nil
+		return m, cat, s.total(), nil
 	}
 	results := make([]*checked, len(chunks))
 	errs := make([]error, len(chunks))
@@ -500,7 +550,7 @@ func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, []sessionju
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i], errs[i] = s.chunk(ctx, i, len(chunks), chunks[i], nil)
+			results[i], errs[i] = s.chunk(ctx, i, len(chunks), chunks[i], catalogue{})
 		}(i)
 	}
 	// Every chunk ends, or is cancelled, before the stage is merged and
@@ -509,7 +559,7 @@ func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, []sessionju
 	for i := range chunks {
 		if errs[i] != nil {
 			if storageError(errs[i]) {
-				return m, nil, used{}, errs[i]
+				return m, catalogue{}, used{}, errs[i]
 			}
 			m.failed++
 			m.problems = append(m.problems, fmt.Sprintf("part %d failed: %v", i+1, errs[i]))
@@ -518,7 +568,7 @@ func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, []sessionju
 		}
 		m.add(i+1, len(chunks), results[i])
 	}
-	return m, nil, s.total(), nil
+	return m, catalogue{}, s.total(), nil
 }
 
 // errStorage marks an error of the storage root, which ends the run rather
@@ -574,6 +624,9 @@ func unjudged(stage string, ch chunk, targets []sessionjudge.Target) sessionjudg
 	case sessionjudge.StageAchievement:
 		n = len(ch.targets)
 		return sessionjudge.Coverage{Targets: &n, TargetsJudged: &zero}
+	case sessionjudge.StageRegroup:
+		n = len(ch.assign.Targets)
+		return sessionjudge.Coverage{Targets: &n, TargetsJudged: &zero}
 	case sessionjudge.StageSubtasks:
 		n = len(ch.assign.Subtasks)
 		return sessionjudge.Coverage{Subtasks: &n, SubtasksJudged: &zero}
@@ -595,22 +648,40 @@ func unjudged(stage string, ch chunk, targets []sessionjudge.Target) sessionjudg
 // that could be read. Each attempt has its own directory, so a retry never
 // writes over what the first left, and what a failed attempt consumed still
 // counts.
-func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, catalogue []sessionjudge.Target) (*checked, error) {
+func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue) (*checked, error) {
 	targets := s.chunkTargets(ch)
 	var last error
 	for attempt := 1; attempt <= 2; attempt++ {
-		dir, err := storage.MakeWorkDir(s.runner.Zone, s.session, s.dir, fmt.Sprintf("%d-%s/c%03d/a%d", s.order, s.stage, i+1, attempt))
+		work := s.work
+		if work == "" {
+			work = fmt.Sprintf("%d-%s", s.order, s.stage)
+		}
+		dir, err := storage.MakeWorkDir(s.runner.Zone, s.session, s.dir, fmt.Sprintf("%s/c%03d/a%d", work, i+1, attempt))
 		if err != nil {
 			return nil, errStorage{err}
 		}
 		nav := s.nav.Fork()
 		// The call's task names the catalogue too, so the targets tool can
 		// give whole what the prompt gives compactly.
-		ch.assign.Catalogue = catalogue
+		ch.assign.Catalogue, ch.assign.Goals = cat.targets, cat.goals
 		if s.stage != sessionjudge.StageTargets {
-			ch.assign.Catalogue = s.targets
+			ch.assign.Catalogue, ch.assign.Goals = s.targets, s.goals
+		}
+		// A regroup places targets without seeing the judge's goals, so the
+		// comparison measures them.
+		if s.stage == sessionjudge.StageRegroup {
+			ch.assign.Goals = nil
 		}
 		ch.assign.Decided = s.nav.decisions()
+		// A divergence call reads the sources its conclusions came from, and
+		// names the deliveries its conclusions show wrong.
+		if s.stage == sessionjudge.StageDivergence {
+			ch.assign.Sources = s.nav.sourceDocs
+			ch.assign.Events = map[string][]sessionjudge.Event{}
+			for _, a := range s.achievements {
+				ch.assign.Events[a.Target] = a.Events
+			}
+		}
 		nav.Assign(ch.assign)
 		nav.ResetBudget(s.runner.Config.ReadBytes)
 		task, _ := json.Marshal(ch.assign)
@@ -618,8 +689,12 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, catalogue []s
 		if err := os.WriteFile(taskPath, task, 0o600); err != nil {
 			return nil, errStorage{err}
 		}
-		prompt, _, err := s.kit.Prompt(s.stage, taskText(s.stage, nav, given{targets: targets, achievements: s.achievements, misled: s.misled,
-			subtaskStage: s.subtaskStage, limit: s.runner.Config.StateBytes})+pushText(s.stage, i+1, of, ch, catalogue, s.runner.Config.StateBytes, s.runner.Config.ChunkBytes))
+		text := taskText(s.stage, nav, given{targets: targets, achievements: s.achievements, misled: s.misled, subtaskStage: s.subtaskStage,
+			limit: s.runner.Config.StateBytes})
+		if s.stage == sessionjudge.StageRegroup {
+			text += personGoalsText(s.personGoals)
+		}
+		prompt, _, err := s.kit.Prompt(s.stage, text+pushText(s.stage, i+1, of, ch, cat, s.runner.Config.StateBytes, s.runner.Config.ChunkBytes))
 		if err != nil {
 			return nil, err
 		}
@@ -647,13 +722,19 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, catalogue []s
 			var c *checked
 			switch s.stage {
 			case sessionjudge.StageTargets:
-				c, err = checkTargets(nav, catalogue, res.Output)
+				c, err = checkTargets(nav, cat, res.Output)
 			case sessionjudge.StageAchievement:
 				c, err = checkAchievement(nav, targets, res.Output)
 			case sessionjudge.StageSubtasks:
 				c, err = checkSubtasks(nav, res.Output)
 			case sessionjudge.StageEfficiency:
 				c, err = checkEfficiency(nav, targets, misledSet(s.misled), s.subtaskStage, res.Output)
+			case sessionjudge.StageReference:
+				c, err = checkReference(nav, res.Output)
+			case sessionjudge.StageDivergence:
+				c, err = checkDivergence(nav, targets, s.inputs, s.achievements, s.misled, res.Output)
+			case sessionjudge.StageRegroup:
+				c, err = checkRegroup(nav, s.personGoals, targets, s.goals, res.Output)
 			}
 			if err == nil {
 				s.mu.Lock()
@@ -730,6 +811,25 @@ func catalogueLines(catalogue []sessionjudge.Target, limit int) string {
 		lines = append(lines, string(line))
 	}
 	return boundedLines(lines, limit, "targets; the targets tool lists them")
+}
+
+// goalLines writes the goals found so far, one per line, within limit bytes:
+// each goal's id, statement, members and main target, and the last input
+// related to it, which a later relation can follow.
+func goalLines(goals []sessionjudge.Goal, latest map[string]string, limit int) string {
+	var lines []string
+	for _, g := range goals {
+		row := map[string]any{"id": g.ID, "statement": clip(g.Statement, 200), "members": g.Members}
+		if g.Main != "" {
+			row["main"] = g.Main
+		}
+		if in := latest[g.ID]; in != "" {
+			row["last_input"] = in
+		}
+		line, _ := json.Marshal(row)
+		lines = append(lines, string(line))
+	}
+	return boundedLines(lines, limit, "goals; the targets tool lists them")
 }
 
 // boundedLines writes lines, one each, while they fit limit bytes, and then

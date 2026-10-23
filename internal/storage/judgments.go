@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -43,13 +44,19 @@ const WorkDir = "work"
 var (
 	runDirRe    = regexp.MustCompile(`^j(\d{6,})$`)
 	stageFileRe = regexp.MustCompile(`^s(\d)-([a-z]+)-([0-9a-f]{12})\.sj$`)
+	// regroupRe names a regroup of a closed run, by its version. It is not
+	// a stage of the run, so nothing that reads or sends a run's stages
+	// takes it for one.
+	regroupRe = regexp.MustCompile(`^g(\d+)-regroup-([0-9a-f]{12})\.sj$`)
 )
 
-// JudgmentRun is one run of a conversation as the directory holds it.
+// JudgmentRun is one run of a conversation as the directory holds it: its
+// stage files, and the regroups made over it, each by its version.
 type JudgmentRun struct {
-	Run   int
-	Dir   string
-	Files []JudgmentFile
+	Run      int
+	Dir      string
+	Files    []JudgmentFile
+	Regroups []JudgmentFile
 }
 
 // JudgmentFile is one stage file of a run.
@@ -94,6 +101,11 @@ func JudgmentRuns(z *Zone, session string) ([]JudgmentRun, error) {
 			return nil, err
 		}
 		for _, f := range files {
+			if gm := regroupRe.FindStringSubmatch(f.Name()); gm != nil {
+				version, _ := strconv.Atoi(gm[1])
+				run.Regroups = append(run.Regroups, JudgmentFile{Path: filepath.Join(run.Dir, f.Name()), Order: version, Stage: "regroup"})
+				continue
+			}
 			fm := stageFileRe.FindStringSubmatch(f.Name())
 			if fm == nil {
 				continue
@@ -102,6 +114,7 @@ func JudgmentRuns(z *Zone, session string) ([]JudgmentRun, error) {
 			run.Files = append(run.Files, JudgmentFile{Path: filepath.Join(run.Dir, f.Name()), Order: order, Stage: fm[2]})
 		}
 		sort.Slice(run.Files, func(i, j int) bool { return run.Files[i].Order < run.Files[j].Order })
+		sort.Slice(run.Regroups, func(i, j int) bool { return run.Regroups[i].Order < run.Regroups[j].Order })
 		runs = append(runs, run)
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].Run < runs[j].Run })
@@ -185,10 +198,59 @@ func PublishStage(z *Zone, session, runDir string, order int, stage, digest stri
 	return path, err
 }
 
-// MakeWorkDir makes the directory a stage's evaluator works in, under the root
-// lock and only while the session is not retired. It is inside the session's
-// directory, so making it for a retired session would make that session again.
-func MakeWorkDir(z *Zone, session, runDir, name string) (string, error) {
+// regroupWorkRe names a regroup's work directory, by its version.
+var regroupWorkRe = regexp.MustCompile(`^g(\d+)-regroup$`)
+
+// ReserveRegroup reserves the next version of a closed run's regroup, under
+// the root lock and only while the session is not retired: the version
+// after every regroup written and every regroup begun, whose work directory
+// it makes, so two regroups made at once never share one.
+func ReserveRegroup(z *Zone, session, runDir string) (int, error) {
+	work := filepath.Join(runDir, WorkDir)
+	l, err := LockRootWait(z.Root(), 30*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = l.Unlock() }()
+	if retired, err := Retired(z, session); err != nil || retired {
+		if err == nil {
+			err = ErrRetiredSession
+		}
+		return 0, err
+	}
+	files, err := os.ReadDir(runDir)
+	if err != nil {
+		return 0, err
+	}
+	begun, err := os.ReadDir(work)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return 0, err
+	}
+	version := 0
+	for _, it := range files {
+		if m := regroupRe.FindStringSubmatch(it.Name()); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			version = max(version, n)
+		}
+	}
+	for _, it := range begun {
+		if m := regroupWorkRe.FindStringSubmatch(it.Name()); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			version = max(version, n)
+		}
+	}
+	version++
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		return 0, err
+	}
+	return version, os.Mkdir(filepath.Join(work, fmt.Sprintf("g%d-regroup", version)), 0o700)
+}
+
+// PublishRegroup writes one regroup of a closed run, once and read-only,
+// under the root lock and only while the session is not retired. version
+// is the next after the run's regroups, which the file's header names too;
+// a version already written is an error, never written over.
+func PublishRegroup(z *Zone, session, runDir string, version int, digest string, data []byte) (string, error) {
 	l, err := LockRootWait(z.Root(), 30*time.Second)
 	if err != nil {
 		return "", err
@@ -200,9 +262,89 @@ func MakeWorkDir(z *Zone, session, runDir, name string) (string, error) {
 		}
 		return "", err
 	}
-	if _, err := os.Stat(runDir); err != nil {
+	if len(digest) < 12 {
+		return "", fmt.Errorf("storage: digest %q is too short", digest)
+	}
+	items, err := os.ReadDir(runDir)
+	if err != nil {
 		return "", err
 	}
+	for _, it := range items {
+		if m := regroupRe.FindStringSubmatch(it.Name()); m != nil && m[1] == strconv.Itoa(version) {
+			return "", fmt.Errorf("storage: the run already has regroup %d, %s; a regroup is written once", version, it.Name())
+		}
+	}
+	path := filepath.Join(runDir, fmt.Sprintf("g%d-regroup-%s.sj", version, digest[:12]))
+	err = WriteAtomic(path, 0o444, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
+	return path, err
+}
+
+// MakeWorkDir makes the directory a stage's evaluator works in, under the root
+// lock and only while the session is not retired. It is inside the session's
+// directory, so making it for a retired session would make that session again.
+func MakeWorkDir(z *Zone, session, runDir, name string) (string, error) {
+	dir, unlock, err := openWorkDir(z, session, runDir, name)
+	if err != nil {
+		return "", err
+	}
+	unlock()
+	return dir, nil
+}
+
+// WorkFile is a file written into a run's work directory.
+type WorkFile struct {
+	Name string
+	Data []byte
+}
+
+// WriteWorkFiles writes files into one of a run's work directories, each
+// once and read-only, holding the root lock for all of them: a write makes
+// its directory, which for a session retired in between would make the
+// session again.
+func WriteWorkFiles(z *Zone, session, runDir, name string, files []WorkFile) error {
+	dir, unlock, err := openWorkDir(z, session, runDir, name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	for _, f := range files {
+		if err := WriteAtomic(filepath.Join(dir, f.Name), 0o444, func(w io.Writer) error {
+			_, err := w.Write(f.Data)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// openWorkDir takes the root lock, and makes one of a run's work
+// directories while the session is not retired and the run is there.
+// unlock releases the lock.
+func openWorkDir(z *Zone, session, runDir, name string) (string, func(), error) {
+	l, err := LockRootWait(z.Root(), 30*time.Second)
+	if err != nil {
+		return "", nil, err
+	}
+	unlock := func() { _ = l.Unlock() }
+	if retired, err := Retired(z, session); err != nil || retired {
+		if err == nil {
+			err = ErrRetiredSession
+		}
+		unlock()
+		return "", nil, err
+	}
 	dir := filepath.Join(runDir, WorkDir, name)
-	return dir, os.MkdirAll(dir, 0o700)
+	if _, err := os.Stat(runDir); err != nil {
+		unlock()
+		return "", nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		unlock()
+		return "", nil, err
+	}
+	return dir, unlock, nil
 }

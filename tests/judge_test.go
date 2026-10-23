@@ -34,6 +34,7 @@ import (
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp/otlptest"
@@ -74,26 +75,40 @@ func (standIn) Run(_ context.Context, t judge.Task) (judge.Result, error) {
 		if first {
 			ref, action = "n1", "create"
 		}
+		// Every input serves one goal: the first starts it, the rest go on
+		// with it from the input before.
+		goal := "g1"
+		if first {
+			goal = "ga"
+		}
 		var acts []map[string]any
 		var talks []string
 		for i, in := range mine {
 			a := "steer"
+			rel := map[string]string{"kind": "continue", "goal": goal, "follows": inputs[max(slices.Index(inputs, in)-1, 0)]}
 			if i == 0 {
 				a = action
+				if first {
+					rel = map[string]string{"kind": "new", "goal": goal, "statement": "build it"}
+				}
 			}
-			acts = append(acts, map[string]any{"node": in, "actions": []any{map[string]string{"target": ref, "action": a}}})
+			acts = append(acts, map[string]any{"node": in, "actions": []any{map[string]string{"target": ref, "action": a}}, "relations": []any{rel}})
 			talks = append(talks, t.Nav.TalkOf(in))
 		}
 		entry := map[string]any{"id": "", "key": "n1", "statement": "build it", "criteria": []string{"it builds"}, "drop_criteria": []string{},
 			"status": "closed", "replaced_by": "", "talks": talks, "cite": []string{mine[0]}}
-		if !first {
+		goals := []any{}
+		if first {
+			goals = append(goals, map[string]any{"id": "", "key": "ga", "statement": "build it", "members": []string{"n1"}, "main": "n1",
+				"main_reason": "the only target", "main_cite": []string{}, "cite": []string{mine[0]}})
+		} else {
 			entry["id"], entry["key"], entry["statement"], entry["criteria"] = "t1", "", "", []string{}
 		}
-		out = map[string]any{"targets": []any{entry}, "inputs": acts}
+		out = map[string]any{"targets": []any{entry}, "inputs": acts, "goals": goals}
 	case sessionjudge.StageAchievement:
 		// A tool step that returned shows the work; with none, nothing
 		// shows it, and an honest answer says so.
-		var shown []string
+		var shown, replies []string
 		for _, tk := range main {
 			outline, err := t.Nav.Call("talk", json.RawMessage(`{"id":"`+tk+`"}`))
 			if err != nil {
@@ -109,18 +124,92 @@ func (standIn) Run(_ context.Context, t judge.Task) (judge.Result, error) {
 			}
 			_ = json.Unmarshal(b, &rows)
 			for _, r := range rows.Rows {
-				if r.Kind == "tool" && r.Result != "" {
+				switch {
+				case r.Kind == "tool" && r.Result != "":
 					shown = append(shown, r.ID)
+				case r.Kind == "message.assistant":
+					replies = append(replies, r.ID)
 				}
 			}
 		}
 		state, basis := "met", "observed_result"
+		// The first step that returned delivered the result, or with none,
+		// the agent's first reply delivered an answer.
+		events := []any{}
+		switch {
+		case len(shown) > 0:
+			events = append(events, map[string]any{"key": "e1", "kind": "delivered", "artifact": "file", "text": "built it", "cite": shown[:1]})
+		case len(replies) > 0:
+			events = append(events, map[string]any{"key": "e1", "kind": "delivered", "artifact": "answer", "text": "answered", "cite": replies[:1]})
+		}
 		if len(shown) == 0 {
 			state, basis = "unknown", "no_evidence"
 		}
-		out = map[string]any{"achievements": []any{map[string]any{"target": "t1", "basis": basis,
+		entry := map[string]any{"target": "t1", "basis": basis,
 			"criteria": []any{map[string]any{"id": "t1.c1", "state": state, "delivered": false, "cite": shown}},
-			"claims":   []any{}, "note": "", "cite": shown}}}
+			"claims":   []any{}, "events": events, "contradictions": []any{}, "note": "", "cite": shown}
+		// Every file operation the record shows is one group of the change.
+		if ans, err := t.Nav.Call("operations", nil); err == nil {
+			b, _ := json.Marshal(ans)
+			var pg struct {
+				Rows []struct {
+					ID string `json:"id"`
+				} `json:"rows"`
+			}
+			_ = json.Unmarshal(b, &pg)
+			var ids []string
+			for _, r := range pg.Rows {
+				ids = append(ids, r.ID)
+			}
+			if len(ids) > 0 {
+				entry["account"] = map[string]any{"files": []any{map[string]any{"area": "parser", "category": "code", "summary": "the parser", "operations": ids}}}
+			}
+		}
+		out = map[string]any{"achievements": []any{entry}}
+	case sessionjudge.StageRegroup:
+		// Every target serves the person's first goal, as the first input
+		// asked; the first goal was worked on and the rest were not. A
+		// first goal that asks for a failure fails the call.
+		if !strings.Contains(t.Prompt, "- P1: ") || strings.Contains(t.Prompt, "- P1: fail the regroup") {
+			return judge.Result{}, errors.New("the stand-in was asked to fail")
+		}
+		// The call is never shown the judge's goals. Its prompt is kept, so a
+		// test can read what it was given.
+		if strings.Contains(t.Prompt, `"g1"`) {
+			return judge.Result{}, errors.New("the regroup was shown the judge's goals")
+		}
+		if err := os.WriteFile(filepath.Join(t.Dir, "prompt.md"), []byte(t.Prompt), 0o600); err != nil {
+			return judge.Result{}, err
+		}
+		placed := []any{}
+		for _, id := range t.Nav.Assigned().Targets {
+			placed = append(placed, map[string]any{"target": id, "goal": "P1", "note": "", "cite": []string{inputs[0]}})
+		}
+		goals := []any{map[string]any{"goal": "P1", "worked": true, "note": "", "cite": []string{inputs[0]}}}
+		for i := 2; strings.Contains(t.Prompt, fmt.Sprintf("- P%d: ", i)); i++ {
+			goals = append(goals, map[string]any{"goal": fmt.Sprintf("P%d", i), "worked": false, "note": "", "cite": []string{}})
+		}
+		out = map[string]any{"targets": placed, "goals": goals}
+	case sessionjudge.StageReference:
+		// Each source concludes what its first line says, about the first
+		// input, the line its evidence.
+		conclusions := []any{}
+		for i, d := range t.Nav.Assigned().Sources {
+			first, _, _ := strings.Cut(d.Text, "\n")
+			conclusions = append(conclusions, map[string]any{"id": fmt.Sprintf("r%d", i+1), "source": d.ID, "kind": "final", "statement": first,
+				"expectation": "required", "scope": []string{inputs[0]}, "context": []any{map[string]any{"source": d.ID, "lines": []int{1, 1}, "note": ""}},
+				"builds_on": []string{}, "support": "saved", "author": "", "revision": "", "environment": "", "conflicts": []string{}, "ambiguity": "", "not_covered": ""})
+		}
+		out = map[string]any{"conclusions": conclusions}
+	case sessionjudge.StageDivergence:
+		// Each conclusion shows t1's first criterion not met, at its first
+		// delivery, as the person's first input says.
+		divs := []any{}
+		for _, k := range t.Nav.Assigned().Conclusions {
+			divs = append(divs, map[string]any{"conclusion": k.ID, "verdict": "contradicted", "target": "t1", "event": "t1.e1", "criteria": []string{"t1.c1"},
+				"whole": false, "note": "", "cite": []string{inputs[len(inputs)-1]}})
+		}
+		out = map[string]any{"divergences": divs, "rollbacks": []any{}, "findings": []any{}}
 	case sessionjudge.StageSubtasks:
 		// Every sub-task the navigation lists at the top, judged useful on
 		// the step that started it.
@@ -183,6 +272,7 @@ func (standIn) Run(_ context.Context, t judge.Task) (judge.Result, error) {
 		out = map[string]any{"subtasks": decisions}
 	case sessionjudge.StageEfficiency:
 		var labels []any
+		findings := []any{}
 		labelled := main
 		if a := t.Nav.Assigned().Talks; len(a) > 0 {
 			labelled = a
@@ -207,8 +297,13 @@ func (standIn) Run(_ context.Context, t judge.Task) (judge.Result, error) {
 				}
 			}
 			labels = append(labels, map[string]any{"target": "t1", "talk": tk, "from": "", "label": label, "note": "", "cite": []string{step}})
+			// The repeated work is a finding at the step it repeated.
+			if i == 0 && step != "" {
+				findings = append(findings, map[string]any{"target": "t1", "at": step, "problem": "the work was repeated", "explanation": "",
+					"improvement": "", "cite": []string{step}})
+			}
 		}
-		out = map[string]any{"labels": labels}
+		out = map[string]any{"labels": labels, "findings": findings}
 	}
 	b, _ := json.Marshal(out)
 	return judge.Result{Output: b, Usage: &sessiondata.Usage{Input: 1, Output: 2}}, nil
@@ -783,6 +878,393 @@ func TestARunNotAsItsCloseListsIsNotSent(t *testing.T) {
 	}
 }
 
+// oneFile is one request whose agent writes a file with an editing tool and
+// changes another with a command a change record captured.
+const oneFile = `steps:
+  - input: write the parser
+  - call:
+      text: Writing it.
+      tool:
+        name: Write
+        input: {file_path: parser.go, content: package parser}
+        result: {text: ok}
+  - call:
+      tool:
+        name: Bash
+        input: {command: go generate}
+        result: {text: ok}
+        changes:
+          - path: parser_gen.go
+            before: "package parser\n"
+            after: "package parser\n\nvar x = 1\n"
+  - call: {text: The parser is written.}
+`
+
+// The close says how each target ended and what its work changed: its class
+// and two scores, the file operations of its calls, read through the
+// runtime's decoder and from the change record, and how its goal did.
+func TestTheCloseSaysHowEachTargetEnded(t *testing.T) {
+	z, id := built(t, writeScenario(t, oneFile))
+	r := runner(z)
+	r.Decoder = func(dialect string) judge.PathDecoder {
+		if dialect != "claude-code/1" {
+			return nil
+		}
+		return claudecode.Requested
+	}
+	run, err := r.Run(context.Background(), id, 0, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var closeFile, achievement *sessionjudge.File
+	for _, p := range run.Files {
+		switch f := readStage(t, p); f.Header.Stage {
+		case "close":
+			closeFile = f
+		case "achievement":
+			achievement = f
+		}
+	}
+	// The account groups the operations of the target's own calls.
+	if acc := achievement.Achievements[0].Account; acc == nil || len(acc.Files) != 1 || fmt.Sprint(acc.Files[0].Operations) != "[o1 o2]" {
+		t.Fatalf("account %+v; %s", acc, achievement.Header.Note)
+	}
+	o := closeFile.Outcomes[0]
+	if o.Class != sessionjudge.ClassAchieved || o.ScoreRecord == nil || *o.ScoreRecord != 1 || o.ScoreFinal == nil || *o.ScoreFinal != 1 || fmt.Sprint(o.Standing) != "[t1.e1]" {
+		t.Fatalf("outcome %+v", o)
+	}
+	if fmt.Sprint(o.Operations) != "[{o1 <nil>} {o2 <nil>}]" {
+		t.Fatalf("operations %+v", o.Operations)
+	}
+	// The close holds the operations the outcome names: the file the
+	// editing tool's request named, and the one the change record captured.
+	if ops := closeFile.Operations; len(ops) != 2 || ops[0].Path != "parser.go" || ops[0].Source != sessionjudge.SourceToolRequest ||
+		ops[0].Status != sessionjudge.ObservedReturned || ops[1].Path != "parser_gen.go" || ops[1].Source != sessionjudge.SourceChangeRecord {
+		t.Fatalf("operations %+v", ops)
+	}
+	s := closeFile.Header.Summary
+	if s.Score.Final == nil || *s.Score.Final != 1 || len(s.Goals) != 1 || s.Goals[0].Main != "t1" || s.Goals[0].Worst != sessionjudge.ClassAchieved ||
+		s.Goals[0].First == nil || s.Goals[0].First.Source != sessionjudge.StageEfficiency || len(s.UnassignedOperations) != 0 {
+		t.Fatalf("summary %+v goals %+v", s.Score, s.Goals)
+	}
+}
+
+// A run given a source saves it before any evaluator runs, finds the
+// conclusions it holds, compares the conversation with each, and applies
+// what contradicts a standing delivery to the final score.
+func TestARunIsComparedWithItsSources(t *testing.T) {
+	z, id := builtThree(t)
+	r := runner(z)
+	path := filepath.Join(t.TempDir(), "OPS-1.md")
+	if err := os.WriteFile(path, []byte("the parser must reject empty input\nseen in CI\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.Sources = []string{path, filepath.Join(t.TempDir(), "absent.md")}
+	// Every source is in the run's work directory before the first evaluator
+	// call: the saved one whole, the failed one its manifest.
+	r.Executor = func(string, config.Evaluator) (judge.Executor, error) {
+		return sourcesFirst{once: &sync.Once{}, check: func(dir string) {
+			work := dir
+			for filepath.Base(work) != storage.WorkDir && filepath.Dir(work) != work {
+				work = filepath.Dir(work)
+			}
+			for name, want := range map[string]bool{"R1.json": true, "R1.fetched": true, "R1.txt": true, "R2.json": true, "R2.fetched": false} {
+				if _, err := os.Stat(filepath.Join(work, "sources", name)); (err == nil) != want {
+					t.Errorf("before the first call, %s kept: %v", name, err == nil)
+				}
+			}
+		}}, nil
+	}
+	refPlan := append(slices.Clone(plan[:2]), config.JudgeStage{Stage: "reference", Evaluator: "stand-in"}, config.JudgeStage{Stage: "divergence", Evaluator: "stand-in"})
+	run, err := r.Run(context.Background(), id, 0, refPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byStage := map[string]*sessionjudge.File{}
+	for _, p := range run.Files {
+		f := readStage(t, p)
+		byStage[f.Header.Stage] = f
+	}
+	ref, div, cl := byStage["reference"], byStage["divergence"], byStage["close"]
+	if ref == nil || len(ref.Sources) != 2 || ref.Sources[0].Outcome != sessionjudge.SourceSaved || ref.Sources[1].Outcome != sessionjudge.SourceFailed ||
+		len(ref.SourceTexts) != 1 || !strings.HasPrefix(ref.SourceTexts[0].Text, "the parser must reject") || len(ref.Conclusions) != 1 ||
+		ref.Conclusions[0].Statement != "the parser must reject empty input" {
+		t.Fatalf("reference %+v", ref)
+	}
+	if div == nil || len(div.Divergences) != 1 || div.Divergences[0].Verdict != sessionjudge.VerdictContradicted {
+		t.Fatalf("divergence %+v", div)
+	}
+	// A divergence call is given each target's deliveries, which its
+	// targets tool serves.
+	var task judge.Assignment
+	if b, err := os.ReadFile(filepath.Join(run.Dir, storage.WorkDir, "7-divergence", "c001", "a1", "task.json")); err != nil || json.Unmarshal(b, &task) != nil ||
+		len(task.Events["t1"]) == 0 {
+		t.Fatalf("divergence task %+v %v", task.Events, err)
+	}
+	if o := cl.Outcomes[0]; o.Class != sessionjudge.ClassContradicted || fmt.Sprint(o.References) != "[r1]" || o.ScoreFinal == nil || *o.ScoreFinal != 0 {
+		t.Fatalf("outcome %+v", o)
+	}
+	// Sources and the stages that read them go together.
+	r.Sources = nil
+	if _, err := r.Run(context.Background(), id, 0, refPlan); err == nil || !strings.Contains(err.Error(), "need a source") {
+		t.Fatalf("stages with no source: %v", err)
+	}
+	r.Sources = []string{path}
+	if _, err := r.Run(context.Background(), id, 0, plan); err == nil || !strings.Contains(err.Error(), "needs the reference and divergence stages") {
+		t.Fatalf("a source with no stage: %v", err)
+	}
+}
+
+// sourcesFirst is the stand-in, checking once, before its first call, what
+// the run's work directory holds.
+type sourcesFirst struct {
+	standIn
+	once  *sync.Once
+	check func(dir string)
+}
+
+func (s sourcesFirst) Run(ctx context.Context, t judge.Task) (judge.Result, error) {
+	s.once.Do(func() { s.check(t.Dir) })
+	return s.standIn.Run(ctx, t)
+}
+
+// A regroup reads the conversation as its run read it: through the run's
+// window, at its head, priced by its ledger's rates, whatever the runner is
+// set to now; an agent CLI's navigation server is started the same way.
+func TestARegroupReadsAsItsRunRead(t *testing.T) {
+	z, id := builtThree(t)
+	r := runner(z)
+	first, err := r.Run(context.Background(), id, 0, plan[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var talk string
+	for _, p := range first.Files {
+		if f := readStage(t, p); f.Header.Stage == "targets" {
+			talk = f.Inputs[1].Talk
+		}
+	}
+	r.Window = judge.Window{FromTalk: talk}
+	run, err := r.Run(context.Background(), id, 0, plan[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Now the runner reads the whole conversation, and prices every call.
+	r.Window = judge.Window{}
+	prices := filepath.Join(t.TempDir(), "prices.yaml")
+	if err := os.WriteFile(prices, []byte("currency: USD\nmodels:\n  - model: claude-opus-5\n    per_million: {in: 1, out: 10, cache_read: 0.1, cache_write: 2}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r.Pricing, err = judge.LoadPricing(prices); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var served []judge.MCPArgs
+	r.MCP = func(a judge.MCPArgs) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		served = append(served, a)
+		return []string{"unused"}
+	}
+	labels := filepath.Join(t.TempDir(), "goals.yaml")
+	if err := os.WriteFile(labels, []byte("goals:\n  - add tests for the parser\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	l, err := judge.ReadLabels(labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := storage.JudgmentRuns(z, id)
+	if _, _, err := r.Regroup(context.Background(), id, runs[1], l, "stand-in"); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(run.Dir, storage.WorkDir, "g1-regroup", "c001", "a1", "prompt.md"))
+	if err != nil || !strings.Contains(string(prompt), "This run judges a window") || strings.Contains(string(prompt), `"money"`) {
+		t.Fatalf("the regroup's prompt: %v\n%s", err, prompt)
+	}
+	var ledger string
+	for _, p := range run.Files {
+		if strings.Contains(p, "-ledger-") {
+			ledger = p
+		}
+	}
+	if len(served) != 1 || served[0].Window.FromTalk != talk || served[0].Head != run.Head || served[0].Ledger != ledger {
+		t.Fatalf("navigation started with %+v, want the window from %s, head %+v and ledger %s", served, talk, run.Head, ledger)
+	}
+}
+
+// withTargets is a copy of a run whose targets stage file is written again
+// with change applied, beside the test, its other files the run's.
+func withTargets(t *testing.T, run storage.JudgmentRun, targets *sessionjudge.File, change func(h *sessionjudge.Header, f *sessionjudge.File)) storage.JudgmentRun {
+	t.Helper()
+	f := *targets
+	f.Targets, f.Goals = slices.Clone(targets.Targets), slices.Clone(targets.Goals)
+	f.Inputs = nil
+	for _, in := range targets.Inputs {
+		in.Actions = slices.Clone(in.Actions)
+		f.Inputs = append(f.Inputs, in)
+	}
+	h := targets.Header
+	change(&h, &f)
+	w, err := sessionjudge.NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range f.Targets {
+		_ = w.Write(&f.Targets[i])
+	}
+	for i := range f.Goals {
+		_ = w.Write(&f.Goals[i])
+	}
+	for i := range f.Inputs {
+		_ = w.Write(&f.Inputs[i])
+	}
+	data, _, err := w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := run
+	out.Files = nil
+	for _, file := range run.Files {
+		if file.Stage == "targets" {
+			file.Path = filepath.Join(t.TempDir(), filepath.Base(file.Path))
+			if err := os.WriteFile(file.Path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out.Files = append(out.Files, file)
+	}
+	return out
+}
+
+// A closed run is regrouped by the person's goals in a versioned file
+// beside it: one call places each target in the goal it serves, without
+// seeing the judge's goals, and asz compares the two groupings. The run's
+// own files are never changed, a second regroup is a second version, and a
+// regroup whose call failed is kept, failed.
+func TestARunIsRegroupedByThePersonsGoals(t *testing.T) {
+	z, id := builtThree(t)
+	r := runner(z)
+	run, err := r.Run(context.Background(), id, 0, plan[:2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var targets *sessionjudge.File
+	for _, p := range run.Files {
+		if f := readStage(t, p); f.Header.Stage == "targets" {
+			targets = f
+		}
+	}
+	path := filepath.Join(t.TempDir(), "goals.yaml")
+	write := func(text string) *judge.Labels {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		labels, err := judge.ReadLabels(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return labels
+	}
+	labels := write("goals:\n  - build the parser and test it\n  - write the release note\n")
+	runs, err := storage.JudgmentRuns(z, id)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs %v %v", runs, err)
+	}
+	before := len(runs[0].Files)
+	first, a, err := r.Regroup(context.Background(), id, runs[0], labels, "stand-in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t1 serves the first goal, in the judge's g1 alone; nothing worked on
+	// the second.
+	if a.Goals != 2 || a.Classes[sessionjudge.CompareAgree] != 1 || a.Classes[sessionjudge.CompareAbsent] != 1 || len(a.Extra) != 0 || len(a.Unknown) != 0 {
+		t.Fatalf("agreement %+v", a)
+	}
+	g := readStage(t, first)
+	h := g.Header
+	if h.Stage != sessionjudge.StageRegroup || h.Status != sessionjudge.StatusComplete || h.Labels == nil || h.Labels.Version != 1 ||
+		h.Labels.SHA256 != labels.SHA256 || len(h.BuildsOn) != 1 || h.BuildsOn[0].Digest != targets.Commit.Digest || h.Evaluator.Name != "stand-in" ||
+		h.Kit == nil || h.Attempts != 1 || len(g.LabelTexts) != 1 || !strings.HasPrefix(g.LabelTexts[0].Text, "goals:\n  - build the parser") ||
+		len(g.LabelGoals) != 2 || fmt.Sprint(g.LabelGoals[0].Members) != "[t1]" || fmt.Sprint(g.LabelGoals[0].Judge) != "[g1]" ||
+		g.LabelGoals[0].Main != "t1" || len(g.Placements) != 1 || g.Placements[0].Goal != "P1" {
+		t.Fatalf("regroup %+v goals %+v placements %+v", h, g.LabelGoals, g.Placements)
+	}
+	// The call was given the targets and not the judge's goals.
+	var task judge.Assignment
+	if b, err := os.ReadFile(filepath.Join(runs[0].Dir, storage.WorkDir, "g1-regroup", "c001", "a1", "task.json")); err != nil ||
+		json.Unmarshal(b, &task) != nil || len(task.Goals) != 0 || len(task.Catalogue) != 1 || fmt.Sprint(task.Targets) != "[t1]" {
+		t.Fatalf("task %+v %v", task, err)
+	}
+	// A second regroup is a second version, with a work directory of its
+	// own; the run's stage files are as they were.
+	runs, _ = storage.JudgmentRuns(z, id)
+	second, _, err := r.Regroup(context.Background(), id, runs[0], labels, "stand-in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, _ = storage.JudgmentRuns(z, id)
+	if len(runs[0].Regroups) != 2 || runs[0].Regroups[1].Path != second || runs[0].Regroups[1].Order != 2 || len(runs[0].Files) != before {
+		t.Fatalf("regroups %+v files %d of %d", runs[0].Regroups, len(runs[0].Files), before)
+	}
+	if _, err := os.Stat(filepath.Join(runs[0].Dir, storage.WorkDir, "g2-regroup", "c001", "a1", "task.json")); err != nil {
+		t.Fatalf("the second regroup's work: %v", err)
+	}
+	if v := readStage(t, second).Header.Labels.Version; v != 2 {
+		t.Fatalf("version %d", v)
+	}
+	// A version is written once.
+	if _, err := storage.PublishRegroup(z, id, runs[0].Dir, 2, strings.Repeat("a", 64), []byte("x")); err == nil {
+		t.Fatal("a regroup was written over")
+	}
+	// A regroup whose call failed is kept, failed, with the label file.
+	failing := write("goals:\n  - fail the regroup\n")
+	third, _, err := r.Regroup(context.Background(), id, runs[0], failing, "stand-in")
+	if err == nil || !strings.Contains(err.Error(), "failed") {
+		t.Fatalf("a failed regroup: %v", err)
+	}
+	if f := readStage(t, third); f.Header.Status != sessionjudge.StatusFailed || f.Header.Labels.Version != 3 || len(f.LabelTexts) != 1 || len(f.LabelGoals) != 0 {
+		t.Fatalf("failed regroup %+v", f.Header)
+	}
+	// A run whose round now holds other content is not regrouped: its
+	// targets were found at another head.
+	moved := withTargets(t, runs[0], targets, func(h *sessionjudge.Header, _ *sessionjudge.File) { h.Head.Digest = strings.Repeat("0", 64) })
+	if _, _, err := r.Regroup(context.Background(), id, moved, labels, "stand-in"); err == nil || !strings.Contains(err.Error(), "is not the head run") {
+		t.Fatalf("another head: %v", err)
+	}
+	// An input the targets stage found was not the person's shows nothing:
+	// the stand-in's placement, citing it, is not placed.
+	hook := withTargets(t, runs[0], targets, func(_ *sessionjudge.Header, f *sessionjudge.File) {
+		f.Inputs[0].Actions = append(f.Inputs[0].Actions, sessionjudge.Action{Action: sessionjudge.ActionNotPerson})
+	})
+	if _, a, err := r.Regroup(context.Background(), id, hook, labels, "stand-in"); err != nil || fmt.Sprint(a.Unknown) != "[t1]" {
+		t.Fatalf("an input not the person's: %+v %v", a, err)
+	}
+	// A run whose targets stage failed found nothing to compare.
+	failed := withTargets(t, runs[0], targets, func(h *sessionjudge.Header, f *sessionjudge.File) {
+		h.Status, h.Note = sessionjudge.StatusFailed, "every call failed"
+		f.Targets, f.Goals, f.Inputs = nil, nil, nil
+	})
+	if _, _, err := r.Regroup(context.Background(), id, failed, labels, "stand-in"); err == nil || !strings.Contains(err.Error(), "its targets stage failed") {
+		t.Fatalf("a failed targets stage: %v", err)
+	}
+	// A run whose targets stage found none is regrouped: the goal the
+	// conversation worked on was missed.
+	none := withTargets(t, runs[0], targets, func(_ *sessionjudge.Header, f *sessionjudge.File) { f.Targets, f.Goals = nil, nil })
+	if _, a, err := r.Regroup(context.Background(), id, none, labels, "stand-in"); err != nil || a.Classes[sessionjudge.CompareMissed] != 1 {
+		t.Fatalf("no target: %+v %v", a, err)
+	}
+	// A run that is not closed, or an evaluator no configuration names, is
+	// refused.
+	if _, _, err := r.Regroup(context.Background(), id, storage.JudgmentRun{Run: 9}, labels, "stand-in"); err == nil || !strings.Contains(err.Error(), "is not closed") {
+		t.Fatalf("an open run: %v", err)
+	}
+	if _, _, err := r.Regroup(context.Background(), id, runs[0], labels, "nobody"); err == nil || !strings.Contains(err.Error(), `"nobody"`) {
+		t.Fatalf("an evaluator not configured: %v", err)
+	}
+}
+
 // A stage cut into chunks reaches the same targets as one call: the scan
 // carries the catalogue from chunk to chunk, each chunk answers for its own
 // inputs, and each stage says how it ran and how many calls it made.
@@ -809,8 +1291,35 @@ func TestAStreamedRunScansItsChunks(t *testing.T) {
 	if tg.Inputs[0].Actions[0].Action != "create" || tg.Inputs[1].Actions[0] != (sessionjudge.Action{Target: "t1", Action: "steer"}) {
 		t.Fatalf("inputs %+v", tg.Inputs)
 	}
+	// The goal a first chunk started goes on through the later ones, each
+	// input following the one before it across chunks, and the header
+	// counts the goals of the whole scan once.
+	if len(tg.Goals) != 1 || tg.Goals[0].ID != "g1" || fmt.Sprint(tg.Goals[0].Members) != "[t1]" || tg.Goals[0].Main != "t1" {
+		t.Fatalf("goals %+v", tg.Goals)
+	}
+	for i, in := range tg.Inputs {
+		want := sessionjudge.Relation{Kind: "new", Goal: "g1", Statement: "build it"}
+		if i > 0 {
+			want = sessionjudge.Relation{Kind: "continue", Goal: "g1", Follows: tg.Inputs[i-1].Node}
+		}
+		if len(in.Relations) != 1 || in.Relations[0] != want {
+			t.Fatalf("input %d relations %+v", i, in.Relations)
+		}
+	}
+	if c := tg.Header.Coverage; c.Goals == nil || *c.Goals != 1 || c.Unplaced == nil || *c.Unplaced != 0 {
+		t.Fatalf("targets coverage %+v", c)
+	}
+	// The achievement keeps the delivery, with the id asz gave it.
+	if a := byStage["achievement"].Achievements; len(a) != 1 || len(a[0].Events) != 1 || a[0].Events[0].ID != "t1.e1" || a[0].Events[0].Kind != "delivered" {
+		t.Fatalf("achievement %+v", a)
+	}
 	if eff := byStage["efficiency"]; eff.Header.Chunks != len(tg.Targets[0].Talks) || len(eff.Labels) != eff.Header.Chunks {
 		t.Fatalf("efficiency %+v labels %d", eff.Header, len(eff.Labels))
+	}
+	// Each chunk's first talk was repeated work, which each records as a
+	// finding of its own beside its labels.
+	if eff := byStage["efficiency"]; len(eff.Findings) != eff.Header.Chunks || eff.Findings[0].Target != "t1" || eff.Findings[0].Problem != "the work was repeated" {
+		t.Fatalf("efficiency findings %+v", eff.Findings)
 	}
 	if u := tg.Header.Usage; u == nil || u.Input != tg.Header.Attempts {
 		t.Fatalf("the targets stage's usage %+v adds up its %d calls", u, tg.Header.Attempts)
@@ -1176,14 +1685,17 @@ func (p perInput) Run(ctx context.Context, t judge.Task) (judge.Result, error) {
 	p.prompts[t.Dir] = t.Prompt
 	p.mu.Unlock()
 	if t.Stage == sessionjudge.StageTargets {
-		var acts, targets []any
+		var acts, targets, goals []any
 		for i, in := range t.Nav.Assigned().Inputs {
-			key := fmt.Sprintf("n%d", i+1)
-			acts = append(acts, map[string]any{"node": in, "actions": []any{map[string]string{"target": key, "action": "create"}}})
+			key, goal := fmt.Sprintf("n%d", i+1), fmt.Sprintf("ga%d", i+1)
+			acts = append(acts, map[string]any{"node": in, "actions": []any{map[string]string{"target": key, "action": "create"}},
+				"relations": []any{map[string]string{"kind": "new", "goal": goal, "statement": "do " + in}}})
 			targets = append(targets, map[string]any{"id": "", "key": key, "statement": "do " + in, "criteria": []string{"it is done"},
 				"drop_criteria": []string{}, "status": "closed", "replaced_by": "", "talks": []string{t.Nav.TalkOf(in)}, "cite": []string{in}})
+			goals = append(goals, map[string]any{"id": "", "key": goal, "statement": "do " + in, "members": []string{key}, "main": key,
+				"main_reason": "the only target", "main_cite": []string{}, "cite": []string{in}})
 		}
-		b, _ := json.Marshal(map[string]any{"targets": targets, "inputs": acts})
+		b, _ := json.Marshal(map[string]any{"targets": targets, "inputs": acts, "goals": goals})
 		return judge.Result{Output: b, Usage: &sessiondata.Usage{Input: 1, Output: 2}}, nil
 	}
 	if t.Stage == sessionjudge.StageEfficiency {
@@ -1305,17 +1817,22 @@ func (s lastNotPerson) Run(ctx context.Context, t judge.Task) (judge.Result, err
 		var acts []any
 		for i, n := range in {
 			a := map[string]string{"target": "n1", "action": "steer"}
+			rel := map[string]string{"kind": "continue", "goal": "ga", "follows": in[max(i-1, 0)]}
 			switch {
 			case i == 0:
 				a["action"] = "create"
+				rel = map[string]string{"kind": "new", "goal": "ga", "statement": "build it"}
 			case n == last:
 				a = map[string]string{"target": "", "action": "not_from_person"}
+				rel = map[string]string{"kind": "not_from_person"}
 			}
-			acts = append(acts, map[string]any{"node": n, "actions": []any{a}})
+			acts = append(acts, map[string]any{"node": n, "actions": []any{a}, "relations": []any{rel}})
 		}
 		out = map[string]any{"inputs": acts, "targets": []any{map[string]any{"id": "", "key": "n1", "statement": "build it",
 			"criteria": []string{"it builds"}, "drop_criteria": []string{}, "status": "closed", "replaced_by": "",
-			"talks": []string{t.Nav.TalkOf(in[0])}, "cite": []string{in[0]}}}}
+			"talks": []string{t.Nav.TalkOf(in[0])}, "cite": []string{in[0]}}},
+			"goals": []any{map[string]any{"id": "", "key": "ga", "statement": "build it", "members": []string{"n1"}, "main": "n1",
+				"main_reason": "the only target", "main_cite": []string{}, "cite": []string{in[0]}}}}
 	case sessionjudge.StageAchievement:
 		out = map[string]any{"achievements": []any{map[string]any{"target": "t1", "basis": "person_accepted",
 			"criteria": []any{map[string]any{"id": "t1.c1", "state": "unknown", "delivered": false, "cite": []string{}}},

@@ -50,11 +50,55 @@ asz judge -show 2 0438c73b-2367-4ed5-9de3-13ef9a17ed01        # one run
 asz judge -show 2 -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01  # its stage files
 ```
 
+To compare the run with what a person concluded, such as a ticket or an incident report, give each
+source with `-reference`: a file, an http or https URL, or a source a configured command fetches. The
+run then finds the conclusions each source holds, and compares the conversation with each.
+
+```sh
+asz judge -reference OPS-4412.md -reference https://example.com/postmortem 0438c73b-2367-4ed5-9de3-13ef9a17ed01
+```
+
+A source that needs a login goes through a command you configure, given the source as its last
+argument; it writes the content on its standard output and never sees the conversation:
+
+```yaml
+judge:
+  references:
+    fetch:
+      - prefix: https://example.atlassian.net/browse/
+        command: [jira-export, --markdown]
+        content_type: text/markdown
+```
+
+To compare the judge's grouping with your own, list your goals for the conversation in your own words:
+
+```yaml
+goals:
+  - Finish the post-vote steps of the 0.4.0 release
+  - Remove the website pull request step from the post-vote script
+```
+
+```sh
+asz judge -labels goals.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01              # a new run, regrouped
+asz judge -regroup 2 -labels goals.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01   # a closed run
+```
+
+One call of an evaluator places each target of the run in the goal it serves: the one `-evaluator`
+names, or the plan's targets stage's.
+
+`-show` then follows your goals and says where the judge's grouping differed.
+
+`-show` prints a run goal by goal, the most severe outcome first. Each target has its final score out
+of 100, with the record's score beside it when they differ. Then come why it holds, what was done for
+it, the person's corrections, its rework, what it still misses, and what it cost. A text the evaluator
+wrote is marked `read:`, apart from what asz checked.
+
 A run is kept in the session's directory, under `judgments/`. Its `work/` directory holds what each
 evaluator was given, every navigation call it made, and what it answered. For an agent CLI it also
 holds the CLI's output. For an API evaluator it holds what the model said on each turn, up to 2,000
 bytes, and what it called. What a tool answered is not kept: the run is pinned to its head, so the
-same call answers the same again.
+same call answers the same again. `work/sources/` holds each source as asz saved it: `R1.json`, its
+manifest, `R1.fetched`, the bytes fetched, and `R1.txt`, the text the evaluators read.
 
 When `export.otlp.endpoint` is set, `asz collect`, `asz server` and `asz push` send each run once it has
 closed. See [Export over OpenTelemetry](export-otlp.md).

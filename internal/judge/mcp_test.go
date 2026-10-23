@@ -420,16 +420,26 @@ func TestARecordPartIsReadFromItsOffset(t *testing.T) {
 	}
 }
 
-// The targets tool gives the targets the call was given, and no other.
+// The targets tool gives the targets and goals the call was given, and no
+// other.
 func TestTheTargetsToolGivesWhatTheCallWasGiven(t *testing.T) {
 	nav := NewNav(doc(), Compute(doc(), "claude-code/1", nil, nil), nil)
 	nav.Assign(Assignment{Catalogue: []sessionjudge.Target{
 		{ID: "t1", Statement: "fix the build", Status: sessionjudge.TargetOpen, Criteria: []sessionjudge.Criterion{{ID: "t1.c1", Text: "it builds"}},
 			Cite: []sessionjudge.Cite{{Node: "in/1"}}},
-		{ID: "t2", Statement: "add a page", Status: sessionjudge.TargetClosed}}})
+		{ID: "t2", Statement: "add a page", Status: sessionjudge.TargetClosed}},
+		Goals: []sessionjudge.Goal{{ID: "g1", Statement: "fix the build", Members: []string{"t1"}, Main: "t1",
+			Evolution: []sessionjudge.Evolution{{Input: "in/1", Statement: "fix it"}, {Input: "in/2", Statement: "fix the build"}}}}})
 	ans, err := nav.Call("targets", nil)
-	if err != nil || ans.(page).Total != 2 {
-		t.Fatalf("targets %+v %v", ans, err)
+	if b, _ := json.Marshal(ans); err != nil || ans.(page).Total != 3 || !strings.Contains(string(b), `"goal":"g1","id":"t1"`) ||
+		!strings.Contains(string(b), `"goal":"","id":"t2"`) || !strings.Contains(string(b), `{"goal":"g1","main":"t1","members":["t1"],"statement":"fix the build"}`) {
+		t.Fatalf("targets %s %v", b, err)
+	}
+	// A goal whole: its members and main target, then how it changed.
+	g, err := nav.Call("targets", json.RawMessage(`{"id":"g1"}`))
+	if b, _ := json.Marshal(g); err != nil || !strings.Contains(string(b), `"members":["t1"]`) ||
+		!strings.Contains(string(b), `{"input":"in/1","piece":1,"statement":"fix it"}`) || !strings.Contains(string(b), `{"input":"in/2","piece":1,"statement":"fix the build"}`) {
+		t.Fatalf("g1 %s %v", b, err)
 	}
 	one, err := nav.Call("targets", json.RawMessage(`{"id":"t1"}`))
 	if err != nil {
@@ -470,6 +480,9 @@ func TestTheTargetsToolGivesWhatTheCallWasGiven(t *testing.T) {
 	}
 	if _, err := nav.Call("targets", json.RawMessage(`{"id":"t9"}`)); err == nil {
 		t.Fatal("a target the call was not given was answered")
+	}
+	if _, err := nav.Call("targets", json.RawMessage(`{"id":"g1"}`)); err == nil {
+		t.Fatal("a goal the call was not given was answered")
 	}
 }
 

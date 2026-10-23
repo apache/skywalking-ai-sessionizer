@@ -23,6 +23,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/kiro"
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
+	"github.com/apache/skywalking-ai-sessionizer/internal/judge"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
@@ -39,6 +40,19 @@ func glossaries() map[string]*model.Glossary {
 		kiro.Dialect:       kiro.Glossary(),
 		langsmith.Dialect:  langsmith.Glossary(),
 	}
+}
+
+// decoderOf gives the decoder of a dialect's tool requests: the files a
+// runtime's editing tools name. A dialect whose runtime has no editing tool,
+// such as LangSmith's, has none.
+func decoderOf(dialect string) judge.PathDecoder {
+	switch dialect {
+	case claudecode.Dialect:
+		return claudecode.Requested
+	case kiro.Dialect:
+		return kiro.Requested
+	}
+	return nil
 }
 
 // dialectNames lists what a reader can ask for.

@@ -42,6 +42,13 @@ type Runner struct {
 	Pricing *Pricing
 	// Dialect says which dialect a session's records were read in.
 	Dialect func(session string) string
+	// Decoder gives the decoder of a dialect's tool requests, nil for a
+	// dialect with none.
+	Decoder func(dialect string) PathDecoder
+	// Sources are the sources the run is compared with: files, URLs, or
+	// sources a configured command fetches. They are saved before any
+	// evaluator runs.
+	Sources []string
 	// MCP returns the command line that starts the navigation server for a
 	// stage.
 	MCP func(MCPArgs) []string
@@ -101,7 +108,8 @@ func (r *Runner) now() time.Time {
 // stageOrder is where each stage's file sorts in its run.
 var stageOrder = map[string]int{
 	sessionjudge.StageLedger: 1, sessionjudge.StageTargets: 2, sessionjudge.StageAchievement: 3,
-	sessionjudge.StageSubtasks: 4, sessionjudge.StageEfficiency: 5, sessionjudge.StageClose: 9,
+	sessionjudge.StageSubtasks: 4, sessionjudge.StageEfficiency: 5, sessionjudge.StageReference: 6, sessionjudge.StageDivergence: 7,
+	sessionjudge.StageClose: 9,
 }
 
 // Run judges a conversation at a round of its chain, or at its current head
@@ -141,6 +149,17 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		}
 		executors[p.Stage] = ex
 	}
+	// The sources and the stages that read them go together: a source no
+	// stage reads would be saved for nothing, and a stage with no source
+	// would compare with nothing.
+	_, reads := executors[sessionjudge.StageReference]
+	_, compares := executors[sessionjudge.StageDivergence]
+	switch {
+	case len(r.Sources) > 0 && (!reads || !compares):
+		return nil, fmt.Errorf("judge: a run given sources needs the reference and divergence stages in its plan")
+	case len(r.Sources) == 0 && (reads || compares):
+		return nil, fmt.Errorf("judge: the reference and divergence stages need a source to compare with")
+	}
 	timeout, err := r.Config.TimeoutDuration()
 	if err != nil {
 		return nil, err
@@ -168,11 +187,25 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	if err != nil {
 		return nil, err
 	}
-	ledger := Compute(doc, r.Dialect(c.Session), r.Pricing, c.Records)
+	dialect := r.Dialect(c.Session)
+	ledger := Compute(doc, dialect, r.Pricing, c.Records)
 	ledger.Select(sel)
 	nav := NewNav(doc, ledger, func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, r.Config.Hide) })
-	nav.Within(sel)
-	nav.MarkImages(c.Records)
+	var decode PathDecoder
+	if r.Decoder != nil {
+		decode = r.Decoder(dialect)
+	}
+	nav.Prepare(sel, c.Records, decode)
+	// The sources are fetched before any evaluator runs, and kept in the
+	// run's work directory whether or not the stages that read them run.
+	saved := fetchSources(ctx, r.Sources, r.Config.References, r.now)
+	for _, s := range saved {
+		nav.sources = append(nav.sources, s.manifest)
+		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: s.manifest.ID, Source: s.manifest.Source, Text: s.text})
+		if s.manifest.Outcome == sessionjudge.SourceFailed {
+			r.logf("source %s could not be saved: %s", s.manifest.Source, s.manifest.Error)
+		}
+	}
 
 	number, dir, err := storage.ReserveRun(r.Zone, c.Session)
 	if err != nil {
@@ -180,6 +213,15 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	}
 	run := &Run{Number: number, Dir: dir, Head: head, Status: sessionjudge.StatusComplete}
 	r.logf("run %d of %s at round %d", number, conversation, head.Round)
+	if len(saved) > 0 {
+		files, err := sourceFiles(saved)
+		if err == nil {
+			err = storage.WriteWorkFiles(r.Zone, c.Session, dir, "sources", files)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	base := sessionjudge.Header{Conversation: conversation, Session: c.Session, Run: number, Head: head,
 		Parser: doc.Parser, Policy: doc.Policy, Window: sel.Header(r.Window)}
 	computed := sessionjudge.Evaluator{Name: "asz", Kind: sessionjudge.EvaluatorComputed, Program: "asz", Version: r.Version}
@@ -223,6 +265,7 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	stages := []any{ledgerStage}
 
 	var targets []sessionjudge.Target
+	var goals []sessionjudge.Goal
 	var inputs []*sessionjudge.Input
 	var targetsDigest string
 	// judging adds up what the run's evaluators consumed, priced by the
@@ -234,6 +277,13 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	// judgingFrom and judgingTo bound the time the evaluator stages took.
 	var judgingFrom, judgingTo time.Time
 	var achievements []*sessionjudge.Achievement
+	// findings are the efficiency and divergence stages', each naming its
+	// target; the achievement stage's are inside its achievements.
+	var findings []*sessionjudge.Finding
+	// divergences and rollbacks are how the conversation compares with the
+	// conclusions of its sources.
+	var divergences []*sessionjudge.Divergence
+	var rollbacks []*sessionjudge.Rollback
 	// labels stays nil until an efficiency stage is accepted, so the close
 	// file prices work as not reviewed only when that stage ran; subtasks
 	// likewise for the sub-task stage.
@@ -276,11 +326,14 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		h.Mode, h.Chunks = mode, len(chunks)
 		r.logf("  %s by %s, %s, %d calls ...", p.Stage, p.Evaluator, mode, len(chunks))
 		stageStart := r.now()
+		if p.Stage == sessionjudge.StageAchievement {
+			nav.Own(targets, inputs)
+		}
 		sr := &stageRun{runner: r, kit: kit, ex: ex, nav: nav, stage: p.Stage, order: stageOrder[p.Stage], session: c.Session,
-			dir: dir, schema: schema, targets: targets, achievements: achievements, misled: misledOf(subtasks, ledger),
+			dir: dir, schema: schema, targets: targets, goals: goals, inputs: inputs, achievements: achievements, misled: misledOf(subtasks, ledger),
 			subtaskStage: ran[sessionjudge.StageSubtasks],
 			timeout:      timeout, mcp: MCPArgs{Conversation: conversation, Head: head, Ledger: ledgerPath, Window: r.Window, ReadBytes: r.Config.ReadBytes}}
-		m, catalogue, used, err := sr.run(ctx, chunks)
+		m, cat, used, err := sr.run(ctx, chunks)
 		if err != nil {
 			return nil, err
 		}
@@ -372,15 +425,28 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 			}
 		}
 		h.PromptBytes = used.promptBytes
+		// A reference stage keeps every source it was given, saved or not,
+		// whatever its evaluator answered.
+		if p.Stage == sessionjudge.StageReference {
+			var kept []any
+			for _, s := range saved {
+				kept = append(kept, sourceFrames(s)...)
+			}
+			frames = append(kept, frames...)
+		}
 		var chk *checked
 		if h.Status != sessionjudge.StatusFailed {
-			chk = &checked{frames: m.frames, targets: catalogue}
+			chk = &checked{frames: m.frames, targets: cat.targets, goals: cat.goals}
 			if p.Stage == sessionjudge.StageTargets {
-				for i := range catalogue {
-					frames = append(frames, &catalogue[i])
+				for i := range cat.targets {
+					frames = append(frames, &cat.targets[i])
 				}
-				n := len(catalogue)
-				h.Coverage.Targets = &n
+				for i := range cat.goals {
+					frames = append(frames, &cat.goals[i])
+				}
+				n := len(cat.targets)
+				found, unplaced := goalCoverage(cat.targets, cat.goals)
+				h.Coverage.Targets, h.Coverage.Goals, h.Coverage.Unplaced = &n, &found, &unplaced
 				chk.frames = m.inputs
 			}
 		}
@@ -402,7 +468,7 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		}
 		switch p.Stage {
 		case sessionjudge.StageTargets:
-			targets, targetsDigest = chk.targets, digest
+			targets, goals, targetsDigest = chk.targets, chk.goals, digest
 			for _, f := range chk.frames {
 				inputs = append(inputs, f.(*sessionjudge.Input))
 			}
@@ -418,10 +484,33 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 				subtasks[st.ID] = st
 			}
 			nav.Decided(subtasks)
+		case sessionjudge.StageReference:
+			for _, f := range chk.frames {
+				if k, ok := f.(*sessionjudge.Conclusion); ok {
+					nav.conclusions = append(nav.conclusions, *k)
+				}
+			}
+		case sessionjudge.StageDivergence:
+			for _, f := range chk.frames {
+				switch f := f.(type) {
+				case *sessionjudge.Divergence:
+					divergences = append(divergences, f)
+				case *sessionjudge.Rollback:
+					rollbacks = append(rollbacks, f)
+				case *sessionjudge.Finding:
+					findings = append(findings, f)
+				}
+			}
 		case sessionjudge.StageEfficiency:
 			labels = []*sessionjudge.Label{}
+			// The stage's findings are frames of their own beside its labels.
 			for _, f := range chk.frames {
-				labels = append(labels, f.(*sessionjudge.Label))
+				switch f := f.(type) {
+				case *sessionjudge.Label:
+					labels = append(labels, f)
+				case *sessionjudge.Finding:
+					findings = append(findings, f)
+				}
 			}
 		}
 	}
@@ -437,6 +526,8 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		reportedCost = &reported
 	}
 	more, summary := closeFrames(ledger, targets, inputs, achievements, labels, subtasks, judging)
+	more = append(more, report(nav, ledger, targets, goals, inputs, achievements, findings, labels, subtasks, references{conclusions: nav.conclusions,
+		divergences: divergences, rollbacks: rollbacks}, more, summary)...)
 	summary.JudgingReportedUSD = reportedCost
 	if !judgingFrom.IsZero() {
 		summary.JudgingMs = judgingTo.Sub(judgingFrom).Milliseconds()

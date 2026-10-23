@@ -19,6 +19,7 @@ package storage_test
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -139,6 +140,9 @@ func TestNothingOfARetiredSessionIsWritten(t *testing.T) {
 			if _, err := storage.MakeWorkDir(z, "s1", dir, "w"); !tc.want(err) {
 				t.Errorf("a work directory was made: %v", err)
 			}
+			if err := storage.WriteWorkFiles(z, "s1", dir, "w", []storage.WorkFile{{Name: "a", Data: []byte("x")}}); !tc.want(err) {
+				t.Errorf("work files were written: %v", err)
+			}
 			if _, err := storage.PublishStage(z, "s1", dir, 1, "ledger", strings.Repeat("a", 64), []byte("x\n")); !tc.want(err) {
 				t.Errorf("a stage was published: %v", err)
 			}
@@ -163,7 +167,65 @@ func TestAWorkDirectoryNeedsItsRun(t *testing.T) {
 	if _, err := storage.MakeWorkDir(z, "s1", dir, "w"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a work directory for a run that is gone: %v", err)
 	}
+	if err := storage.WriteWorkFiles(z, "s1", dir, "w", []storage.WorkFile{{Name: "a", Data: []byte("x")}}); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("work files for a run that is gone: %v", err)
+	}
 	if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("the run was made again: %v", err)
+	}
+}
+
+// A regroup's version is reserved with its work directory, after every
+// regroup written and every one begun, so two at once never share one; a
+// retired session gets none.
+func TestARegroupVersionIsReservedOnce(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	_, dir, err := storage.ReserveRun(z, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for want := 1; want <= 2; want++ {
+		v, err := storage.ReserveRegroup(z, "s1", dir)
+		if err != nil || v != want {
+			t.Fatalf("reserved %d, %v; want %d", v, err, want)
+		}
+		if _, err := os.Stat(filepath.Join(dir, storage.WorkDir, fmt.Sprintf("g%d-regroup", want))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := storage.PublishRegroup(z, "s1", dir, 5, strings.Repeat("a", 64), []byte("x\n")); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := storage.ReserveRegroup(z, "s1", dir); err != nil || v != 6 {
+		t.Fatalf("after version 5 written: %d, %v", v, err)
+	}
+	if err := os.MkdirAll(filepath.Join(z.Root(), storage.RetiredDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(z.Root(), storage.RetiredDir, "s1"), nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.ReserveRegroup(z, "s1", dir); !errors.Is(err, storage.ErrRetiredSession) {
+		t.Fatalf("a retired session: %v", err)
+	}
+}
+
+// Work files are written into the run's work directory, each read-only.
+func TestWorkFilesAreWrittenOnce(t *testing.T) {
+	z := storage.NewZone(t.TempDir())
+	_, dir, err := storage.ReserveRun(z, "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.WriteWorkFiles(z, "s1", dir, "sources", []storage.WorkFile{{Name: "R1.json", Data: []byte("{}\n")}, {Name: "R1.txt", Data: []byte("text")}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"R1.json": "{}\n", "R1.txt": "text"} {
+		path := filepath.Join(dir, storage.WorkDir, "sources", name)
+		b, err := os.ReadFile(path)
+		info, _ := os.Stat(path)
+		if err != nil || string(b) != want || info.Mode().Perm()&0o222 != 0 {
+			t.Errorf("%s: %q %v %v", name, b, err, info.Mode())
+		}
 	}
 }

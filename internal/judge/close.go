@@ -566,27 +566,13 @@ func exactOf(l *Ledger, calls []int, share func(int) float64) [2]float64 {
 }
 
 func (s *scoreSum) add(o *sessionjudge.Outcome, ex exactAmounts) {
+	// A partly target counts the share of its criteria met, so one
+	// criterion nobody could verify does not halve a target whose other
+	// criteria were. A contradicted claim counts as one more requirement not
+	// met, so a target kept from achieved by one is not scored as if it were.
 	if o.Status != sessionjudge.TargetCancelled && o.Status != sessionjudge.TargetReplaced {
-		switch o.Level {
-		case sessionjudge.LevelAchieved:
-			s.value, s.judged = s.value+1, s.judged+1
-		case sessionjudge.LevelPartly:
-			// The share of its criteria met, so one criterion nobody could
-			// verify does not halve a target whose other criteria were.
-			// A contradicted claim counts as one more requirement not met,
-			// so a target kept from achieved by one is not scored as if it
-			// were.
-			share := 0.5
-			if o.Met != nil && o.Criteria != nil && *o.Criteria > 0 {
-				against := 0
-				if o.Contradicted != nil {
-					against = *o.Contradicted
-				}
-				share = float64(*o.Met) / float64(*o.Criteria+against)
-			}
-			s.value, s.judged = s.value+share, s.judged+1
-		case sessionjudge.LevelNotAchieved:
-			s.judged++
+		if v := recordScore(o.Level, o.Met, o.Criteria, o.Contradicted); v != nil {
+			s.value, s.judged = s.value+*v, s.judged+1
 		}
 	}
 	if o.Cost.Unpriced > 0 || o.Cost.Unknown > 0 || (o.Cost.Money == nil && o.Cost.Tokens() > 0) {

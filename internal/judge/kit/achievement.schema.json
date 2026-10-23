@@ -15,6 +15,11 @@
           "basis",
           "criteria",
           "claims",
+          "events",
+          "contradictions",
+          "rework",
+          "account",
+          "findings",
           "note",
           "cite"
         ],
@@ -41,6 +46,8 @@
                 "id",
                 "state",
                 "delivered",
+                "reason",
+                "observations",
                 "cite"
               ],
               "properties": {
@@ -60,6 +67,35 @@
                 "delivered": {
                   "type": "boolean",
                   "description": "the criterion asks for an answer or an explanation, and a reply delivered it"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "why the state holds, in one sentence"
+                },
+                "observations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "node",
+                      "excerpt",
+                      "interpretation"
+                    ],
+                    "properties": {
+                      "node": {
+                        "type": "string",
+                        "description": "a step the criterion cites, its id copied exactly"
+                      },
+                      "excerpt": {
+                        "type": "string",
+                        "description": "one passage copied exactly from the step, at most 300 bytes, never parts joined by ..."
+                      },
+                      "interpretation": {
+                        "type": "string"
+                      }
+                    }
+                  }
                 },
                 "cite": {
                   "type": "array",
@@ -92,6 +128,448 @@
                     "no_evidence",
                     "not_captured"
                   ]
+                },
+                "cite": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "kind",
+                "artifact",
+                "criteria",
+                "replaces",
+                "undoes",
+                "text",
+                "cite"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "a key of your own, such as e1, that contradictions name"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "delivered",
+                    "undone",
+                    "delivered_again"
+                  ]
+                },
+                "artifact": {
+                  "type": "string",
+                  "enum": [
+                    "answer",
+                    "revision",
+                    "file",
+                    "remote"
+                  ]
+                },
+                "criteria": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "for an undoing, the criteria it took back, or none for the whole result; none for a delivery"
+                },
+                "replaces": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "for a delivery again, the keys of the earlier deliveries it corrects, or none for every one before it; none otherwise"
+                },
+                "undoes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "for an undoing, the keys of the deliveries it took back, or none for every one standing; none otherwise"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "cite": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "contradictions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "event",
+                "conclusion",
+                "criteria",
+                "text",
+                "cite"
+              ],
+              "properties": {
+                "event": {
+                  "type": "string",
+                  "description": "the key of the delivery event it concerns"
+                },
+                "conclusion": {
+                  "type": "boolean",
+                  "description": "the evidence shows the delivered conclusion itself wrong"
+                },
+                "criteria": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "the criteria it shows not met, when not the conclusion"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "cite": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "rework": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "attempt",
+                "trigger",
+                "trigger_cite",
+                "cause",
+                "redo",
+                "finished",
+                "note"
+              ],
+              "properties": {
+                "attempt": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "the agent's steps of the earlier attempt"
+                },
+                "trigger": {
+                  "type": "string",
+                  "enum": [
+                    "person",
+                    "verification",
+                    "tool"
+                  ]
+                },
+                "trigger_cite": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "the input or the tool step that showed it had to be done again"
+                },
+                "cause": {
+                  "type": "string",
+                  "enum": [
+                    "agent_error",
+                    "requirement_change",
+                    "unknown"
+                  ]
+                },
+                "redo": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "the agent's steps that did it again"
+                },
+                "finished": {
+                  "type": "boolean"
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "account": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "answer",
+              "files",
+              "remote"
+            ],
+            "properties": {
+              "answer": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "asked",
+                  "checked",
+                  "ruled_out",
+                  "answered"
+                ],
+                "properties": {
+                  "asked": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "text",
+                      "cite"
+                    ],
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "cite": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "checked": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "what",
+                        "found",
+                        "limits",
+                        "cite"
+                      ],
+                      "properties": {
+                        "what": {
+                          "type": "string"
+                        },
+                        "found": {
+                          "type": "string"
+                        },
+                        "limits": {
+                          "type": "string"
+                        },
+                        "cite": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "ruled_out": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "what",
+                        "found",
+                        "limits",
+                        "cite"
+                      ],
+                      "properties": {
+                        "what": {
+                          "type": "string"
+                        },
+                        "found": {
+                          "type": "string"
+                        },
+                        "limits": {
+                          "type": "string"
+                        },
+                        "cite": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "answered": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "text",
+                      "cite"
+                    ],
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "cite": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "area",
+                    "category",
+                    "summary",
+                    "operations"
+                  ],
+                  "properties": {
+                    "area": {
+                      "type": "string"
+                    },
+                    "category": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "operation ids, as the operations tool gives them"
+                    }
+                  }
+                }
+              },
+              "remote": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "system",
+                    "operation",
+                    "via",
+                    "request",
+                    "response",
+                    "confirmed"
+                  ],
+                  "properties": {
+                    "system": {
+                      "type": "string"
+                    },
+                    "operation": {
+                      "type": "string"
+                    },
+                    "via": {
+                      "type": "string",
+                      "description": "the tool or API the operation went through"
+                    },
+                    "request": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "text",
+                        "cite"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "cite": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "response": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "text",
+                        "cite"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "cite": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "confirmed": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "text",
+                        "cite"
+                      ],
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "cite": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "at",
+                "problem",
+                "explanation",
+                "improvement",
+                "cite"
+              ],
+              "properties": {
+                "at": {
+                  "type": "string",
+                  "description": "the step or input where the problem happened"
+                },
+                "problem": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                },
+                "improvement": {
+                  "type": "string"
                 },
                 "cite": {
                   "type": "array",

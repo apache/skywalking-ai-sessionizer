@@ -76,6 +76,91 @@ talk, from the joins the runtime recorded. The evaluator only decides which talk
 target. A talk can serve two targets when its inputs act on both. Of the 5,437 talks in 63 local
 conversations, child agents' talks included, 649 held more than one input.
 
+### Goals
+
+A **goal** is the targets that serve one result the person asked for. A conversation can hold one
+goal or several, since a person often keeps working in one session on unrelated things. A goal has no
+criteria and no score of its own. It groups targets for the report.
+
+The evaluator says how each input relates to the inputs before it:
+
+- `new` starts a goal.
+- `continue` goes on with a goal without changing what it asks.
+- `adjust` changes what a goal asks: it refines, steers, corrects, adds or cancels a target in it.
+- `return` goes back to a goal that the input just before did not act on.
+- `unclear` names no goal.
+- `not_from_person` is an input the person did not write, as its actions say.
+
+An input that asks for two unrelated things has one relation for each. A `continue`, `adjust` or
+`return` names the earlier input of its goal that it follows. The statements given with `new` and
+`adjust` are the goal's evolution: what the goal asked for after each input that set or changed it.
+
+asz keeps a relation only when the record allows it. A relation to a goal must follow an earlier
+input of that goal. A `new` must start a goal that no earlier input relates to. A `return` after an
+input of the same goal is a `continue`. Anything else becomes `unclear`, the relation that claims
+nothing. asz gives a new goal the next id, such as `g2`, in the order its first input came.
+
+A target belongs to the goal of the input that created it, and to one goal only. A goal's main target
+is the member whose result the goal is for. It is the only member, or the member the person's words
+point to, which the evaluator must cite. Otherwise the main target is undetermined, as it becomes
+when a goal whose only member was its main gains members and nothing cited says which is main. It is
+never chosen by cost, recency or size. The header of the targets stage counts the goals and the targets
+that no goal holds.
+
+### The person's goals
+
+Grouping is the judge's unless a person gives their own. A person knows what they wanted from a
+conversation, but not which of its inputs or steps each part took: an agent conversation is too long
+to group by hand. So a label file is a plain list of the person's goals, in their own words:
+
+```yaml
+goals:
+  - Finish the post-vote steps of the 0.4.0 release
+  - Remove the website pull request step from the post-vote script
+```
+
+asz gives them ids in order, `P1`, `P2` and so on. A file that lists none, or a goal that is empty,
+longer than 2,000 bytes or given twice, is not read.
+
+A regroup is made over a closed run, as a file of its own beside it, and the run is never changed.
+Goals given with a new run are applied once it closes, never shown to the stages of the run: a
+grouping made with the person's goals in view would measure nothing against them. Each regroup has a
+version, names the label file and its SHA-256, and keeps the file's text, so each change of the prompts
+or the model can be measured against the same goals, even after the file changed.
+
+Placing a target in a goal is a judgment of meaning, so one evaluator call makes it: the one
+`-evaluator` names, or the plan's targets stage's. It reads the conversation as the run did, at its
+head, through its window, with the calls priced at the rates of the run's ledger, and an input the
+targets stage found was not the person's shows nothing. It is given the person's goals and the run's
+targets, but not the judge's goals, so the comparison measures them. For each target it
+names the person's goal the target serves, citing the person's input that shows it, or none. A target
+placed in a goal with no input of the person that shows it, or in a goal the person did not give, is
+unknown, and so is one the answer left out. A target in none of the goals is the evaluator's judgment,
+which no record can show. For each goal it says whether the conversation worked on it, citing the
+person's input that asked for it; a goal worked on with nothing that shows it is unknown.
+
+asz then compares the two groupings, goal by goal:
+
+| Class | When |
+| --- | --- |
+| `agree` | its targets are in one goal of the judge, which holds no other of the person's goals |
+| `split` | its targets are in several goals of the judge |
+| `merged` | its targets are in one goal of the judge that also holds another of the person's goals |
+| `missed` | no target serves it, though the conversation worked on it, and every target was placed |
+| `absent` | no target serves it, and nothing in the conversation worked on it |
+| `unknown` | no target serves it, and the regroup cannot tell why: the answer left it out, a target put in it has nothing that shows it, a target was left out, or nothing shows it was worked on |
+
+A target the judge put in no goal stands alone. The targets that serve none of the person's goals are
+listed apart. A goal's main target is its only member still wanted, or the main target of a goal of
+the judge that holds the same targets: the person's words that made it main were about those targets
+alone. The goals change only how the report groups targets and the goals' scores. A target's scores,
+and the run's, are the same in both views. A run whose targets stage found no target is regrouped too,
+and a goal the conversation worked on is then missed. A decision the answer leaves out is none it
+made: a target with no goal given, or a goal with no answer to whether it was worked on, is not
+answered. Each regroup reserves its version with its work directory, so two made at once never share
+one. A regroup whose call failed is kept, failed, with what the call consumed, and the report follows
+the latest regroup that compared anything.
+
 ## Achievement
 
 Each criterion of a target has an id, such as `t2.c1`, which asz gives when the targets stage is
@@ -115,6 +200,105 @@ every input that set the target for `person_accepted`, a tool step for `observed
 is weakened to `agent_claim_only` or `no_evidence`. The agent's own claims about the outcome, such as
 "the tests pass", are checked against the tool results: `supported`, `contradicted`, `no_evidence` or
 `not_captured`. A claim only the agent's words support or contradict is `no_evidence`.
+
+### Reasons, observations and accounts
+
+Each criterion carries a reason: why its state holds. When asz changes a state, the reason is asz's,
+such as "nothing it cites shows it", and the evaluator's own reason is kept apart. A criterion can also
+carry observations of the steps it cites. An observation is an excerpt of a step, what the record says
+of the step, and what the evaluator reads in it. The excerpt must be in the step word for word, with
+whitespace folded and a JSON escape of a line break read as one, and asz reads the step's record whole
+when the document clipped it. An excerpt longer than 300 bytes is cut to its first 300. On a run of
+2026-10-23, an evaluator quoted aligned output as one line, and gave excerpts of 318 and 313 bytes, the
+second in 161 characters. asz reads what
+the record says of the step itself: a tool step that `failed`, `returned` or gave `no_result`, an
+`error` of the model API, or an interrupt. That is a fact. The interpretation is not: a query that ran
+without error can report a test run that failed.
+
+A target also carries an account of what was done for it, by what it was for. For a question, the
+account says what was asked, what was checked or tried with what it found and how far that holds, what
+was ruled out, and the answer. The answer must cite a reply of the agent, what was asked must be the
+person's input, and each check must cite a step that shows what it found. For a change to another
+system, the account lists each operation: the system, the operation, the tool or API it went through,
+the request, the response, and what confirmed it later. The request must cite the tool step that sent
+it, the response a step that returned, and the confirmation a step after the request that shows
+something happened, or the person's input after the inputs that set the target. A call shows neither
+that a change was accepted nor that it was completed, so a confirmation is kept only when something
+later shows it. A part that nothing it cites shows is left out.
+
+For changes to files, the account groups the target's file operations by what they were for: the
+area, such as a package, the category, such as code, tests or documents, and what the group changed.
+A group names operations by id, and only the target's own, each in one group: those of the calls the
+target received, as the close gives calls to targets. A talk two targets share can hold calls only one
+of them received, after an input that directed the other.
+
+### The files a target changed
+
+asz lists the file operations the record shows, never a claim of everything that changed. An
+operation is a file that a workspace change record captured, or a file that the request of a tool
+step names and no change record of that step names, as the request names it or within the record's
+workspace. A capture can name some of a step's files and not others. A request shows an attempt, not a change, so such
+an operation says whether its tool returned, failed or never returned. Which tools edit files, and
+where their requests name the file, is the runtime's vocabulary, so each runtime's adapter reads its
+own requests. In the 60 most recent Claude Code transcripts of one machine, every `Edit` (1,040)
+and `Write` (666) named its file in `file_path`. In the 4 Kiro session files of one machine that held
+`fs_write`, all 47 calls named theirs in `path`. LangSmith has no editing tools. A change record whose
+file list was taken out to fit is one operation, `unlisted`: files changed, which are not named; the
+request of its step still names its files.
+
+The list is history, not a net diff. An edit repeated, two captures of one change and a later revert
+are operations of their own. Operations take ids, such as `o3`, in the order they landed, so a run at
+one head gives the same ids. The navigation's `operations` tool lists them.
+
+### Deliveries and contradictions
+
+A target's result can be delivered, taken back and delivered again. The evaluator lists these
+**events** in recorded order: `delivered`, the result or one part of it reaching the person; `undone`,
+a revert, a deletion, a rollback, or the agent withdrawing its answer; and `delivered_again`, a
+corrected or redone result. A reply that only repeats a result already delivered, such as a closing
+summary, is no event. On a run of 2026-10-23, an evaluator gave such a summary as a delivery again, and
+a source's contradiction of the first answer then reached no score. Each event says what it concerns: an `answer`, a `revision` such as a commit or a
+pull request, a `file`, or a `remote` change. asz gives each event an id, such as `t1.e2`, and keeps it
+only when what it cites shows it. A reply shows an answer given or withdrawn. A tool step that
+returned shows anything else. A request to revert is not a revert. The events must also come in
+order: a delivery first, in one part or several, an undoing only after a delivery, after an undoing a
+delivery again, and each event recorded after the one before it. On a run of 2026-10-23, an evaluator
+gave one result as three deliveries: a script, the guide that describes it, and the reply that reported
+both. asz places an event at the earliest step that shows it. A target with criteria met and no
+delivery kept leaves the stage partial, since nothing a source reports of it could reach its score. On
+the same run, an evaluator gave a code change no delivery.
+
+A **contradiction** is evidence that a delivered result is wrong. It names the delivery event it
+concerns. It disproves either the delivered conclusion itself, such as the answer or the cause named,
+or some criteria, which it names. It must cite evidence beyond the agent's words: a tool result, an
+error, or the person's input after the inputs that set the target. A contradiction stays tied to its
+delivery. The deliveries standing at the end are every delivery except those a later delivery again
+replaced. A delivery again names the earlier deliveries it corrects, such as one of two files, or none
+when it replaces all of them. So when a corrected result is delivered again, the contradictions of the
+earlier delivery remain in the history, and the parts it did not correct still stand. An undoing names
+the criteria it took back, or none for the whole result, and the deliveries it took back, or none for
+every one standing then. It applies at the end while one of those deliveries still stands, so
+correcting another part does not clear it. One that names criteria, none of them the target's, or
+deliveries, none of them earlier deliveries, is left out rather than read as the whole, and so is a
+delivery again that names only what is no earlier delivery. The level is still derived from the criteria. Events and contradictions are kept
+for the final statement.
+
+### Rework
+
+A **round of rework** is work the agent did again for a target. It has an earlier attempt, a trigger
+that showed the attempt had to be done again, and the redo. The trigger is `person`, an input of the
+person, including a correction typed while the agent was still working; `verification`, a check such
+as a test or a build that failed; or `tool`, another tool result. The cause is `agent_error`,
+`requirement_change` or `unknown`.
+
+asz keeps a round only when the attempt, the trigger and the redo come in that order, each shown by
+what it cites. The trigger can be the attempt's own step, as a command whose error shows it must be
+run again. The attempt is the agent's work for the target, or the agent's work before the judged
+window. The redo is the agent's work for the target, a sub-task it started included. A person's
+trigger is an input of the person, and another trigger is a tool step that returned. Only the person
+can change a requirement, so a round with that cause and another trigger has an unknown cause. A
+round runs from its trigger to the last step of its redo, and asz gives it an id, such as `t1.r1`.
+Rework never lowers the level of a target.
 
 ## Sub-tasks
 
@@ -220,6 +404,79 @@ a step of the talk it labels, the one read to decide it, and a label other than 
 the step that shows why. A talk id is not a step. A label with no step of its talk is left out, and its
 cost counts as not reviewed rather than reviewed or avoidable.
 
+## Findings
+
+A **finding** is a problem a stage observed: what went wrong, why, and what would have avoided it. It
+is anchored at the step or input where the problem happened, and it cites what shows it. The
+achievement stage records findings in a target's work. The efficiency stage records them for the work
+it labels avoidable, each naming its target, as frames of their own. asz keeps a finding only when its
+anchor is a step of the work it concerns: a step of the target's talks or of their sub-tasks, or, in
+the achievement stage, a step before the judged window. A finding proposes. It never changes a state,
+a level, a label or a cost.
+
+## Judging against a source
+
+A person often knows what the conversation should have found, such as the cause an incident report
+names or the decision a ticket records. A run given such a source compares the conversation with it.
+Before any evaluator runs, asz saves each source with a manifest: where it came from, when asz took
+the copy, how it was fetched, its content type, size and SHA-256, and what the source says of its
+revision, its publication and its author. A file and a plain http or https URL need no setting. A
+source that needs a login goes through a configured command, given the source and never the
+conversation. The copy is kept in the run's `work/sources/`, write-once, before any evaluator runs:
+the manifest, the fetched bytes and the text an evaluator reads, which for a page is the text taken
+out of it, with its own digest. So a run whose reference stage never runs still holds what it was given,
+and a page's digest can be checked after the page changed. A copy is bounded, and saved cut when larger;
+what a command writes is bounded too, and a file is read only when it is a regular file, since a named
+pipe waits for a writer and a device never ends. A source that cannot be fetched is kept as failed, and
+its comparison is unavailable, which is not the same as no contradiction found. A source is data to
+judge by, never instructions. The time of the copy says when asz took it, never when what it says was
+knowable.
+
+The `reference` stage finds the conclusions each source holds, and how far each can be trusted. Each
+conclusion is `final` or `intermediate`, `required` or `explanatory`, and names the inputs of the
+conversation it is about. Its support is `saved` when the source holds the evidence, `linked` when it
+only names or links it, such as a heap dump it mentions, and `asserted` when it is the author's word
+alone. A conclusion the source corrects later names the correction in `superseded_by`, and changes no
+score; the correction does. `conflicts` is for conclusions that disagree with neither correcting the
+other. asz keeps the ids unique, a support of `saved` only with cited lines of the source, cited lines
+within the source, `builds_on` and `superseded_by` free of cycles, and a correction from the same source.
+Inputs its scope names that the conversation does not hold are kept apart as unbound. The stage is one
+call however many sources there are, so these hold across all of them.
+
+The `divergence` stage compares the conversation with each conclusion:
+
+| Verdict | When |
+| --- | --- |
+| `reached` | the agent's reply, or a step of its work, reached it |
+| `contradicted` | it shows a delivered result wrong: the delivered conclusion itself, or some criteria |
+| `not_observed` | nothing reached or contradicted it |
+| `unknown` | the evaluator could not tell |
+| `not_applicable` | it is about something the conversation did not set out to do |
+
+A contradiction names a target the conclusion is about, through an input of its scope that set or
+changed the target, a delivery event of that target, and the criteria it shows not met, or the
+delivered conclusion, which it cites. A source that says a delivered result was undone outside the
+conversation, such as a release rolled back, gives a rollback of the same shape. The stage is told
+which deliveries stand at the end, and asked to name one of those. What does not hold is
+unknown. A verdict of absence, `not_observed`, rests on reading all of where the conclusion would show,
+which the record cannot show, so it is marked as the evaluator's judgment.
+
+A contradiction or a rollback of a delivery standing at the end applies to the final score as one the
+conversation shows does: the delivered conclusion leaves 0, and criteria count as not met. A rollback
+of a correct result makes the target `reverted`; it is `contradicted` only when evidence also shows it
+wrong. When two conclusions about the same target disagree, neither applies, since the sources do not
+agree. A conclusion about no input changes no score. A contradiction or a rollback that changes no
+score is kept, and the report says why: its delivery no longer stands, or another conclusion about the
+target disagrees.
+
+The stage also records why the work went another way, at the step where it did, with a cause the
+evidence supports: a misleading tool result, a result read wrong, a sub-task's untrue report, context
+that never arrived, context that was there and not used, a question never asked, or a premise never
+checked. Missing context needs evidence of what failed to arrive. A misleading sub-task needs one the
+sub-task stage found misled the agent, started in the target's work before the step the finding is
+at, which the finding cites: a step of it, or the step that started it. A question never asked and a premise never checked rest on absence, so they are
+the evaluator's judgment. Where the record supports none, the cause is unavailable.
+
 ## Cost
 
 The ledger counts each model call once, under one owner: the talk that contains it, or the calls of
@@ -296,8 +553,9 @@ which are context. One item can be larger than a chunk, such as a target with ma
 
 - **Targets** is a scan in order. Each call answers for its own inputs and is given the catalogue the
   calls before it left. It may change a target found earlier, by its id, or set a new one, under a key of
-  its own. asz gives a new target the next id in the order its first input came, numbers its criteria,
-  and removes nothing: a criterion the person dropped is marked dropped and is never judged. The
+  its own. It is given the goals found so far the same way, each with the last input related to it,
+  and a relation of its own inputs can follow an input of an earlier call. asz gives a new target the
+  next id in the order its first input came, numbers its criteria, and removes nothing: a criterion the person dropped is marked dropped and is never judged. The
   catalogue takes at most `judge.state_bytes` of the prompt: past it, the open targets stay whole and
   the others are shortened, then all are, then only their ids and status remain, as many as fit with a
   line saying how many more, and the `targets` tool gives any of them whole. The targets a later stage's
@@ -330,11 +588,56 @@ spans of the main stream's avoidable work: a run of avoidable calls lasts from i
 talk's next call, or to the talk's end. Child agents' work can run beside the main stream, so it adds
 cost, not time. Waits inside a talk are inside these spans and cannot be told apart.
 
+### How each target ended
+
+Each outcome has a **class**, most severe first:
+
+| Class | When |
+| --- | --- |
+| `contradicted` | evidence shows a delivery standing at the end wrong, its conclusion or some of its criteria |
+| `reverted` | an undoing applies: it took back a delivery that still stands at the end |
+| `not_achieved`, `partly`, `achieved` | the level, as the criteria give it |
+| `cannot_verify` | nothing shows the result either way |
+| `cancelled`, `replaced` | the person no longer wanted the result; never scored |
+
+Only the contradictions of the deliveries standing at the end apply: when a corrected result was
+delivered again, the contradictions of the earlier delivery stay in the history. A correct result rolled
+back is `reverted`; it is `contradicted` only when evidence also shows it wrong.
+Rework shows beside the class, never as a class of its own.
+
+Each target has two scores, from 0 to 1. The **record's score** is what the criteria give, counted as
+the achievement score counts a target. The **final score** starts from the same criteria and applies
+each contradiction of the deliveries standing, and their undoing, once. A contradiction of the delivered
+conclusion leaves 0, and so does an undoing of the whole result. A contradiction of some criteria, or
+an undoing of them, counts those criteria as not met, and the score is taken again. Rework never
+lowers a score: it shows in what it cost and in the efficiency.
+
+The outcome also says what the target's rounds of rework cost. A round holds the target's calls from
+its trigger to the last step of its redo. The calls of every round, each counted once however many
+rounds hold it, are priced as the target's cost is: by the label the efficiency or sub-task stage gave
+each, with the target's share of a shared call and a sub-task's own label first. A round's cause does
+not price it: work labeled a changed requirement stays the person's cost, and work no stage labeled
+stays not reviewed. It lists the person's inputs that corrected the target, and the target's file
+operations: those of the calls the target received, with its share when a call was shared. A step that
+no model call asked for, as some runtimes record, belongs to the targets of its talk. The operations
+no target's calls made are listed for the conversation.
+
+asz records findings of its own, anchored where each problem happened: each criterion not met, at its
+first cited evidence; each contradiction of a standing delivery, and an undoing, at the event; each
+round of rework at its trigger; and each correction at the person's input, unless a round of rework
+began there. A target cancelled or replaced keeps only the findings of its rework and corrections,
+since what its result missed was no longer wanted.
+
+Each goal has an outcome too: its main target, left undetermined when that target was cancelled or
+replaced by the end; the most severe class of its targets; the finding that happened first in it, in
+recorded order; the main target's final score; and the mean of its targets' final scores. Grouping
+targets into goals never changes a target's score or the run's.
+
 A run has two scores, which are never combined into one:
 
 | Score | Is |
 | --- | --- |
-| achievement | the mean over the targets judged `achieved`, `partly` or `not_achieved`, counting `achieved` 1, `not_achieved` 0, and `partly` the share of its criteria met, each contradicted claim counting as one more not met. Cancelled and replaced targets, and targets that cannot be verified, are left out and counted apart |
+| achievement | the mean over the targets judged `achieved`, `partly` or `not_achieved`, counting `achieved` 1, `not_achieved` 0, and `partly` the share of its criteria met, each contradicted claim counting as one more not met. Cancelled and replaced targets, and targets that cannot be verified, are left out and counted apart. Beside it, `final` is the mean of the targets' final scores, over every target that has one |
 | efficiency | 1 less the avoidable part of the reviewed cost. The share of the targets' cost a label covers is given beside it |
 
 Beside them, `delivered` is the part of the targets' cost that went to targets achieved. The scores
@@ -385,8 +688,11 @@ It reads through navigation, from the overview to the details:
 | `step` | one step whole |
 | `record` | one landed record, in 8 KiB slices; with `part`, that part's text from a byte offset |
 | `search` | text in the steps of the conversation, or of some talks: what the document holds of each step, its text and its result up to 2,000 bytes each. A search that finds nothing does not show the text is absent. With `node`, one step's whole recorded text: only the part its reference names, since one record can hold several tools' results, each match with its part and byte offset, and at most 50 matches, after which it says how to go on with `skip` |
-| `targets` | the targets the call was given, one row each, or one whole: its status, talks and the inputs it cites, then its statement and each criterion, a long text in pieces |
+| `targets` | the targets and goals the call was given, one row each, or one whole: a target's status, goal, talks and the inputs it cites, then its statement and each criterion; a goal's members, main target and the inputs that support it, then its statement and each step of its evolution; a long text in pieces |
 | `changes`, `diff` | the workspace changes recorded per tool call, and one file's diff |
+| `source` | the saved sources the call was given, a row each; with an id, that one's lines, numbered from 1, from a line on, a line over 2,000 bytes in parts numbered from 1 |
+| `conclusions` | the conclusions a divergence call compares with the conversation, a row each, whole |
+| `operations` | the file operations, in the order they landed: each one's id, step, talk, path and operation, and whether a change record captured it or a tool's request named it, with whether that tool returned |
 
 Every page is cut at 16 KiB by what its rows take once written, so no answer is larger however long
 the conversation is. A row too large for a page stands as a note naming its item, which the same tool
@@ -418,7 +724,8 @@ that differ can be told apart by their evaluators and their kits.
 asz keeps an answer only as far as the conversation holds what it names. An id the conversation does
 not hold is left out, since it was not read. A talk that is not a main talk, a label on a talk of
 another target, and an action on a target that does not exist are left out. An input left unanswered
-is `unknown`. A stage with anything left out or filled in is `partial`, and its note says what.
+is `unknown`. A relation the record does not allow becomes `unclear`, and a target whose goal cannot
+be shown stays in no goal. A stage with anything left out or filled in is `partial`, and its note says what.
 
 ## What a run cannot know
 

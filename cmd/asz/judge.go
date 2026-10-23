@@ -49,10 +49,22 @@ const judgeUsage = `Usage:
       ledger, then each stage of the plan given to its evaluator, then the close
       file. The plan is judge.plan, every stage given to -evaluator, or -plan,
       such as targets=claude,achievement=codex,efficiency=claude
+  asz judge [-config FILE] -reference SRC ... CONVERSATION
+      judge it as above, and compare it with what each source concludes: a
+      file, an http or https URL, or a source judge.references.fetch names
+      a command for; repeat -reference for several
+  asz judge [-config FILE] -labels FILE ... CONVERSATION
+      judge it as above, then regroup the run by the person's goals, a plain
+      list in the file, and compare the judge's grouping with theirs
+  asz judge [-config FILE] -regroup RUN -labels FILE [-evaluator NAME] CONVERSATION
+      regroup a closed run by the person's goals, in a new version beside
+      it: one call of the evaluator, or of the plan's targets stage, places
+      each target in the goal it serves
   asz judge [-config FILE] -list CONVERSATION
       list the conversation's runs
   asz judge [-config FILE] -show RUN [-json] CONVERSATION
-      print one run: its stages and each target's outcome and cost
+      print one run: its stages, then goal by goal each target's score out
+      of 100, why, what was done, its rework and what it cost
   asz judge mcp -root DIR -conversation ID -round N -digest D [-hide FLAGS] [-ledger FILE] [-log FILE]
       the read-only navigation server an agent CLI evaluator is given
 
@@ -77,6 +89,10 @@ func cmdJudge(args []string) int {
 	fromID := fs.String("from-id", "", "judge the main talks from this talk id on")
 	toID := fs.String("to-id", "", "judge the main talks up to this talk id")
 	mode := fs.String("mode", "", "auto, single or stream: how each stage is given to its evaluator")
+	var references repeated
+	fs.Var(&references, "reference", "a source to compare the run with: a file, a URL, or one a configured command fetches; repeat for several")
+	labelsPath := fs.String("labels", "", "a file listing the person's goals in their own words: regroup the run by them")
+	regroup := fs.Int("regroup", 0, "with -labels, regroup this closed run instead of making a new one")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, judgeUsage) }
 	_ = fs.Parse(args)
 	if fs.NArg() != 1 {
@@ -98,10 +114,23 @@ func cmdJudge(args []string) int {
 	case *show > 0:
 		return judgeShow(storage.NewZone(root), sessionOfChain(root, id), id, *show, *asJSON)
 	}
+	// A label file is read before a run, so a run is not made for labels
+	// that cannot be read.
+	var labels *judge.Labels
+	if *labelsPath != "" {
+		if labels, err = judge.ReadLabels(*labelsPath); err != nil {
+			return fail(err)
+		}
+	}
+	if *regroup > 0 && labels == nil {
+		return fail(errors.New("-regroup needs -labels"))
+	}
 	plan, err := judgePlan(cfg.Judge, *evaluator, *planFlag)
 	if err != nil {
 		return fail(err)
 	}
+	regrouper := regrouperOf(*evaluator, plan)
+	plan = withReferences(plan, references, *evaluator)
 	window, err := windowOf(*from, *to, *fromID, *toID)
 	if err != nil {
 		return fail(err)
@@ -125,6 +154,8 @@ func cmdJudge(args []string) int {
 	r := &judge.Runner{
 		Zone: zone, Config: cfg.Judge, Pricing: pricing, Version: version, Window: window,
 		Dialect: func(session string) string { return dialectOf(zone, session) },
+		Decoder: decoderOf,
+		Sources: references,
 		MCP: func(a judge.MCPArgs) []string {
 			cmd := []string{self, "judge", "mcp", "-root", root, "-conversation", a.Conversation,
 				"-round", fmt.Sprint(a.Head.Round), "-digest", a.Head.Digest, "-log", a.Log}
@@ -146,12 +177,62 @@ func cmdJudge(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if *regroup > 0 {
+		return judgeRegroup(ctx, r, sessionOfChain(root, id), id, *regroup, labels, regrouper)
+	}
 	run, err := r.Run(ctx, id, *round, plan)
 	if err != nil {
 		return fail(err)
 	}
 	fmt.Printf("run %d of %s at round %d: %s\n", run.Number, id, run.Head.Round, run.Status)
+	if labels != nil {
+		if code := judgeRegroup(ctx, r, sessionOfChain(root, id), id, run.Number, labels, regrouper); code != 0 {
+			return code
+		}
+	}
 	return judgeShow(zone, sessionOfChain(root, id), id, run.Number, false)
+}
+
+// judgeRegroup regroups a closed run by a person's goals and says how the
+// judge's grouping compared.
+func judgeRegroup(ctx context.Context, r *judge.Runner, session, id string, number int, labels *judge.Labels, evaluator string) int {
+	runs, err := storage.JudgmentRuns(r.Zone, session)
+	if err != nil {
+		return fail(err)
+	}
+	for _, run := range runs {
+		if run.Run != number {
+			continue
+		}
+		path, a, err := r.Regroup(ctx, id, run, labels, evaluator)
+		if err != nil {
+			return fail(err)
+		}
+		var classes []string
+		for _, class := range sessionjudge.Compares {
+			if n := a.Classes[class]; n > 0 && class != sessionjudge.CompareAgree {
+				classes = append(classes, fmt.Sprintf("%s %d", class, n))
+			}
+		}
+		line := fmt.Sprintf("run %d regrouped by %s: the judge agreed on %d of %s", number, labels.File, a.Classes[sessionjudge.CompareAgree], plural(a.Goals, "goal"))
+		if len(classes) > 0 {
+			line += "; " + strings.Join(classes, ", ")
+		}
+		fmt.Printf("%s\n  %s\n", line, path)
+		return 0
+	}
+	return fail(fmt.Errorf("%s has no run %d", id, number))
+}
+
+// regrouperOf is the evaluator a regroup takes: the one named, or the
+// targets stage's, since a regroup places targets as that stage found them.
+func regrouperOf(evaluator string, plan []config.JudgeStage) string {
+	for _, p := range plan {
+		if evaluator == "" && p.Stage == sessionjudge.StageTargets {
+			return p.Evaluator
+		}
+	}
+	return evaluator
 }
 
 // judgePlan is the plan a run takes: -plan, every stage to -evaluator, or the
@@ -174,6 +255,28 @@ func judgePlan(conf config.Judge, evaluator, plan string) ([]config.JudgeStage, 
 			{Stage: sessionjudge.StageEfficiency, Evaluator: evaluator}}, nil
 	}
 	return conf.Plan, nil
+}
+
+// repeated is a flag given as often as needed, in the order given.
+type repeated []string
+
+func (r *repeated) String() string     { return strings.Join(*r, ",") }
+func (r *repeated) Set(v string) error { *r = append(*r, v); return nil }
+
+// withReferences adds to a plan the stages that read the sources a run is
+// compared with, when it is given any and lists neither: each given to
+// -evaluator, or to the evaluator of the plan's last stage.
+func withReferences(plan []config.JudgeStage, sources []string, evaluator string) []config.JudgeStage {
+	if len(sources) == 0 || len(plan) == 0 || slices.ContainsFunc(plan, func(p config.JudgeStage) bool {
+		return p.Stage == sessionjudge.StageReference || p.Stage == sessionjudge.StageDivergence
+	}) {
+		return plan
+	}
+	if evaluator == "" {
+		evaluator = plan[len(plan)-1].Evaluator
+	}
+	return append(slices.Clone(plan), config.JudgeStage{Stage: sessionjudge.StageReference, Evaluator: evaluator},
+		config.JudgeStage{Stage: sessionjudge.StageDivergence, Evaluator: evaluator})
 }
 
 // sessionOfChain is the session a conversation's chain was assembled from,
@@ -208,8 +311,12 @@ func judgeList(zone *storage.Zone, session, id string) int {
 		}
 		h := closeFile.Header
 		s := h.Summary
-		fmt.Printf("run %d  round %d  %s  %s  targets %d: achieved %d, partly %d, not %d, cannot verify %d\n",
+		line := fmt.Sprintf("run %d  round %d  %s  %s  targets %d: achieved %d, partly %d, not %d, cannot verify %d",
 			run.Run, h.Head.Round, h.Finished, h.Status, s.Targets, s.Achieved, s.Partly, s.NotAchieved, s.CannotVerify)
+		if s.Score != nil && s.Score.Final != nil {
+			line += "  score " + scoreOf(s.Score.Final)
+		}
+		fmt.Println(line)
 	}
 	return 0
 }
@@ -241,17 +348,27 @@ func judgeShow(zone *storage.Zone, session, id string, number int, asJSON bool) 
 		}
 		var files []*sessionjudge.File
 		for _, f := range run.Files {
-			file, err := os.Open(f.Path)
+			sj, err := readJudgment(f.Path)
 			if err != nil {
 				return fail(err)
 			}
-			sj, err := sessionjudge.Read(file)
-			file.Close()
-			if err != nil {
-				return fail(fmt.Errorf("%s: %w", f.Path, err))
-			}
 			files = append(files, sj)
 		}
+		// The latest regroup that compared anything comes after the run's
+		// stages, and the report follows the person's goals in it. A later
+		// one that failed comes after it, so its failure shows.
+		var regroups []*sessionjudge.File
+		for i := len(run.Regroups) - 1; i >= 0; i-- {
+			sj, err := readJudgment(run.Regroups[i].Path)
+			if err != nil {
+				return fail(err)
+			}
+			regroups = append([]*sessionjudge.File{sj}, regroups...)
+			if sj.Header.Status != sessionjudge.StatusFailed {
+				break
+			}
+		}
+		files = append(files, regroups...)
 		if asJSON {
 			out, _ := json.MarshalIndent(files, "", "  ")
 			fmt.Println(string(out))
@@ -261,6 +378,20 @@ func judgeShow(zone *storage.Zone, session, id string, number int, asJSON bool) 
 		return 0
 	}
 	return fail(fmt.Errorf("%s has no run %d", id, number))
+}
+
+// readJudgment reads one judgment file.
+func readJudgment(path string) (*sessionjudge.File, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	sj, err := sessionjudge.Read(file)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return sj, nil
 }
 
 // stageUsage says what one stage consumed: computed by asz, no call when it
@@ -286,7 +417,7 @@ func stageUsage(h sessionjudge.Header) string {
 
 func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
 	fmt.Printf("run %d  %s\n", run.Run, run.Dir)
-	var closeFile, subtaskFile *sessionjudge.File
+	var closeFile, subtaskFile, regroup *sessionjudge.File
 	statements := map[string]string{}
 	for _, f := range files {
 		h := f.Header
@@ -303,6 +434,10 @@ func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
 			closeFile = f
 		case sessionjudge.StageSubtasks:
 			subtaskFile = f
+		case sessionjudge.StageRegroup:
+			if h.Status != sessionjudge.StatusFailed {
+				regroup = f
+			}
 		}
 	}
 	if closeFile == nil {
@@ -342,15 +477,12 @@ func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
 	if s == nil {
 		s = &sessionjudge.Summary{}
 	}
-	fmt.Println()
-	for _, o := range closeFile.Outcomes {
+	costLines := func(o *sessionjudge.Outcome) {
 		c := cost[o.Target]
 		if c == nil {
 			c = &alloc{}
 		}
-		fmt.Printf("  %s  %s\n", o.Target, trunc(oneLine(o.Statement), 100))
-		fmt.Printf("      %s\n", verdict(o))
-		fmt.Printf("      cost %s calls, %s, observed %s\n", share(c.calls), amount(o.Cost, s.Currency), minutes(o.Span))
+		fmt.Printf("        cost      %s calls, %s, observed %s\n", share(c.calls), amount(o.Cost, s.Currency), minutes(o.Span))
 		// The counts are shares, as the cost's calls are: a call two targets
 		// share is half of each, and a half is never shown as none.
 		var notes []string
@@ -364,10 +496,10 @@ func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
 			notes = append(notes, share(c.unpriced)+" calls unpriced")
 		}
 		if len(notes) > 0 {
-			fmt.Printf("      %s\n", strings.Join(notes, "; "))
+			fmt.Printf("                  %s\n", strings.Join(notes, "; "))
 		}
 		if o.Avoidable != nil {
-			line := fmt.Sprintf("      avoidable %s and %.1f min", amount(*o.Avoidable, s.Currency), float64(*o.AvoidableSpan)/60000)
+			line := fmt.Sprintf("                  avoidable %s and %.1f min", amount(*o.Avoidable, s.Currency), float64(*o.AvoidableSpan)/60000)
 			// The part sub-tasks caused by their own work going wrong; the
 			// rest is the main agent's.
 			if b := o.AvoidableBySubtasks; b != nil && b.Tokens() > 0 {
@@ -385,9 +517,10 @@ func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
 					parts = append(parts, fmt.Sprintf("%s %s", label, tokensOf(n)))
 				}
 			}
-			fmt.Printf("      work: %s\n", strings.Join(parts, "; "))
+			fmt.Printf("                  work: %s\n", strings.Join(parts, "; "))
 		}
 	}
+	printGoals(gather(files, closeFile, regroup), costLines)
 	printSubtasks(subtaskFile, closeFile)
 	printScore(s, closeFile.Outcomes)
 }
@@ -497,8 +630,8 @@ func printScore(s *sessionjudge.Summary, outcomes []sessionjudge.Outcome) {
 	}
 	fmt.Println("\n  score")
 	if sc.Achievement != nil {
-		line := fmt.Sprintf("    achievement  %.2f over %d targets judged: achieved %d, partly %d, not achieved %d; %d cannot be verified",
-			*sc.Achievement, sc.Judged, levels[sessionjudge.LevelAchieved], levels[sessionjudge.LevelPartly],
+		line := fmt.Sprintf("    achievement  %s over %d targets judged: achieved %d, partly %d, not achieved %d; %d cannot be verified",
+			scoreOf(sc.Achievement), sc.Judged, levels[sessionjudge.LevelAchieved], levels[sessionjudge.LevelPartly],
 			levels[sessionjudge.LevelNotAchieved], levels[sessionjudge.LevelCannotVerify])
 		if unscored > 0 {
 			line += fmt.Sprintf("; %d cancelled or replaced, not scored", unscored)
@@ -507,9 +640,18 @@ func printScore(s *sessionjudge.Summary, outcomes []sessionjudge.Outcome) {
 	} else {
 		fmt.Printf("    achievement  unavailable: no target could be verified (%d cannot be verified)\n", levels[sessionjudge.LevelCannotVerify])
 	}
+	// The final score applies what contradicted or undid each delivered
+	// result; the record's mean is beside it when the two differ.
+	if sc.Final != nil {
+		line := fmt.Sprintf("    final        %s over the targets scored", scoreOf(sc.Final))
+		if sc.Achievement != nil && scoreOf(sc.Achievement) != scoreOf(sc.Final) {
+			line += fmt.Sprintf(", %s by the record", strings.TrimSuffix(scoreOf(sc.Achievement), "/100"))
+		}
+		fmt.Println(line)
+	}
 	if sc.Efficiency != nil {
-		fmt.Printf("    efficiency   %.2f: avoidable %s of the reviewed cost, by %s; %s of the targets' cost reviewed\n",
-			*sc.Efficiency, pct(ptr(1-*sc.Efficiency)), sc.Unit, pct(sc.Reviewed))
+		fmt.Printf("    efficiency   %s: avoidable %s of the reviewed cost, by %s; %s of the targets' cost reviewed\n",
+			scoreOf(sc.Efficiency), pct(ptr(1-*sc.Efficiency)), sc.Unit, pct(sc.Reviewed))
 	} else {
 		fmt.Println("    efficiency   unavailable: no work was labeled")
 	}
@@ -669,8 +811,7 @@ func cmdJudgeMCP(args []string) int {
 	ledger := judge.Compute(doc, dialectOf(zone, c.Session), pricing, c.Records)
 	ledger.Select(sel)
 	nav := judge.NewNav(doc, ledger, func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, hidden) })
-	nav.Within(sel)
-	nav.MarkImages(c.Records)
+	nav.Prepare(sel, c.Records, decoderOf(dialectOf(zone, c.Session)))
 	nav.ResetBudget(*readBytes)
 	if *taskPath != "" {
 		b, err := os.ReadFile(*taskPath)

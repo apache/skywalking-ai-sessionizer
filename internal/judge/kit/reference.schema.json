@@ -1,0 +1,133 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "conclusions"
+  ],
+  "properties": {
+    "conclusions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "source",
+          "kind",
+          "statement",
+          "expectation",
+          "scope",
+          "context",
+          "builds_on",
+          "support",
+          "author",
+          "revision",
+          "environment",
+          "conflicts",
+          "superseded_by",
+          "ambiguity",
+          "not_covered"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "final",
+              "intermediate"
+            ]
+          },
+          "statement": {
+            "type": "string"
+          },
+          "expectation": {
+            "type": "string",
+            "enum": [
+              "required",
+              "explanatory"
+            ]
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "input node ids of the conversation"
+          },
+          "context": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "lines",
+                "note"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "note": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "builds_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "support": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "linked",
+              "asserted"
+            ]
+          },
+          "author": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "environment": {
+            "type": "string"
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "superseded_by": {
+            "type": "string",
+            "description": "the id of a later conclusion of the same source that corrects this one; empty when none"
+          },
+          "ambiguity": {
+            "type": "string"
+          },
+          "not_covered": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

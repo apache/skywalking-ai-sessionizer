@@ -216,6 +216,23 @@ func TestChunksAreCutByWhatTheyAreGiven(t *testing.T) {
 	if _, chunks := planChunks("efficiency", ModeStream, 1, 1<<20, 0, nav, nil); chunks != nil {
 		t.Fatalf("a stage with nothing to answer: %+v", chunks)
 	}
+	// A reference stage is one call whatever it is given, so its conclusions
+	// are checked together.
+	for _, id := range []string{"R1", "R2"} {
+		nav.sources = append(nav.sources, sessionjudge.Source{ID: id, Outcome: sessionjudge.SourceSaved})
+		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: id, Text: "x\n"})
+	}
+	if mode, chunks := planChunks("reference", ModeStream, 1, 1, 0, nav, nil); mode != ModeSingle || len(chunks) != 1 || len(chunks[0].assign.Sources) != 2 {
+		t.Fatalf("reference %s %+v", mode, chunks)
+	}
+	// A regroup is one call, even with no target: it answers for the
+	// person's goals.
+	if mode, chunks := planChunks("regroup", ModeStream, 1, 1, 0, nav, targets); mode != ModeSingle || len(chunks) != 1 || len(chunks[0].assign.Targets) != 2 {
+		t.Fatalf("regroup %s %+v", mode, chunks)
+	}
+	if _, chunks := planChunks("regroup", ModeStream, 1, 1, 0, nav, nil); len(chunks) != 1 || len(chunks[0].assign.Targets) != 0 {
+		t.Fatalf("regroup of no target %+v", chunks)
+	}
 }
 
 // A step that started before the window ends keeps only what was recorded
