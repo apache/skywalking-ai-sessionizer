@@ -68,6 +68,21 @@ const (
 	OpTypeChange = "type_change"
 )
 
+// Requested is a file a tool's request names, and what the request asks to
+// do with it, as a runtime's adapter reads the request. It is what was asked,
+// never what happened: the tool may have failed, or never returned.
+type Requested struct {
+	Path      string
+	Operation string
+}
+
+// What a request can ask to do with a file: write it whole, or edit part of
+// it.
+const (
+	RequestWrite = "write"
+	RequestEdit  = "edit"
+)
+
 // Diff says whether hunks are available for a file, and why not.
 const (
 	DiffAvailable   = "available"

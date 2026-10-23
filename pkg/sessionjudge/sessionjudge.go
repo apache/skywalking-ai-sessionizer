@@ -54,6 +54,18 @@ const (
 	FrameCost        FrameType = "cost"
 	FrameTarget      FrameType = "target"
 	FrameInput       FrameType = "input"
+	FrameGoal        FrameType = "goal"
+	FrameFinding     FrameType = "finding"
+	FrameOperation   FrameType = "operation"
+	FrameLabelGoal   FrameType = "label_goal"
+	FramePlacement   FrameType = "placement"
+	FrameAgreement   FrameType = "agreement"
+	FrameLabelText   FrameType = "label_text"
+	FrameSource      FrameType = "source"
+	FrameSourceText  FrameType = "source_text"
+	FrameConclusion  FrameType = "conclusion"
+	FrameDivergence  FrameType = "divergence"
+	FrameRollback    FrameType = "rollback"
 	FrameAchievement FrameType = "achievement"
 	FrameLabel       FrameType = "label"
 	FrameSubtask     FrameType = "subtask"
@@ -77,13 +89,27 @@ const (
 	// StageEfficiency is what each piece of a target's work was: label
 	// frames, and the cost frames asz priced them at.
 	StageEfficiency = "efficiency"
+	// StageReference is the sources a run is judged against, as asz saved
+	// them, and the conclusions each holds: source, source_text and
+	// conclusion frames. It runs only when the run is given a source.
+	StageReference = "reference"
+	// StageDivergence is how the conversation compares with each
+	// conclusion: divergence, rollback and finding frames.
+	StageDivergence = "divergence"
 	// StageClose ends a run: a stage frame for every stage written, and the
 	// outcome and cost of each target. A run is sent once it is closed.
 	StageClose = "close"
 )
 
 // Stages lists the stages in run order.
-var Stages = []string{StageLedger, StageTargets, StageAchievement, StageSubtasks, StageEfficiency, StageClose}
+var Stages = []string{StageLedger, StageTargets, StageAchievement, StageSubtasks, StageEfficiency, StageReference, StageDivergence, StageClose}
+
+// StageRegroup is not a stage of a run: it is made over a run already
+// closed, from a person's goals in their own words. An evaluator places each
+// of the judge's targets in the person's goal it serves, and asz compares
+// the two groupings. It writes a file of its own beside the run's, so the
+// run is never rewritten.
+const StageRegroup = "regroup"
 
 // The status of a stage, and of a run on its close file.
 const (
@@ -132,6 +158,9 @@ type Header struct {
 	// BuildsOn names the earlier stages of the run this one read, by
 	// digest.
 	BuildsOn []Dependency `json:"builds_on,omitempty"`
+	// Labels is the label file a regroup read: its name, its SHA-256 and
+	// the regroup's version, counted from 1 over the regroups of a run.
+	Labels *LabelFile `json:"labels,omitempty"`
 
 	Evaluator Evaluator `json:"evaluator"`
 	// Kit is the prompts and schemas the evaluator was driven by. Absent
@@ -260,8 +289,11 @@ type Coverage struct {
 	InputsRead    *int `json:"inputs_read,omitempty"`
 	Targets       *int `json:"targets,omitempty"`
 	TargetsJudged *int `json:"targets_judged,omitempty"`
-	Talks         *int `json:"talks,omitempty"`
-	TalksLabeled  *int `json:"talks_labeled,omitempty"`
+	// Goals counts the goals found, and Unplaced the targets no goal holds.
+	Goals        *int `json:"goals,omitempty"`
+	Unplaced     *int `json:"unplaced,omitempty"`
+	Talks        *int `json:"talks,omitempty"`
+	TalksLabeled *int `json:"talks_labeled,omitempty"`
 	// Subtasks counts the sub-tasks a run could judge, and SubtasksJudged
 	// those it did.
 	Subtasks       *int `json:"subtasks,omitempty"`
@@ -297,8 +329,12 @@ type Summary struct {
 	Unpriced int      `json:"unpriced,omitempty"`
 	// Score is the run's two scores, and Judging what the run's evaluators
 	// consumed.
-	Score   *Score  `json:"score,omitempty"`
-	Judging *Amount `json:"judging,omitempty"`
+	Score *Score `json:"score,omitempty"`
+	// Goals is how each goal did, in the order of their ids.
+	Goals []GoalOutcome `json:"goals,omitempty"`
+	// UnassignedOperations are the file operations no target's calls made.
+	UnassignedOperations []string `json:"unassigned_operations,omitempty"`
+	Judging              *Amount  `json:"judging,omitempty"`
 	// JudgingReportedUSD adds up what the evaluators said the run's stages
 	// cost, present only when every stage that ran said.
 	JudgingReportedUSD *float64 `json:"judging_reported_usd,omitempty"`
@@ -317,7 +353,10 @@ type Score struct {
 	// counting as one more not met. Cancelled and replaced
 	// targets, and targets that cannot be verified, are left out.
 	Achievement *float64 `json:"achievement,omitempty"`
-	Judged      int      `json:"judged"`
+	// Final is the mean of the same targets' final scores, which apply the
+	// contradictions and undoings of what each delivered.
+	Final  *float64 `json:"final,omitempty"`
+	Judged int      `json:"judged"`
 	// Efficiency is 1 less the avoidable part of the reviewed cost, and
 	// Reviewed the part of the targets' cost a label covers. Unit says which
 	// cost: money when every call of the targets was priced, tokens if not.
@@ -467,12 +506,75 @@ const (
 	TargetReplaced  = "replaced"
 )
 
-// Input is what one input from outside the agent did to the targets.
+// Input is what one input from outside the agent did to the targets, and
+// how it relates to the inputs before it.
 type Input struct {
 	T       FrameType `json:"t,omitempty"`
 	Node    string    `json:"node"`
 	Talk    string    `json:"talk"`
 	Actions []Action  `json:"actions"`
+	// Relations say which goal the input acts on and how. An input with
+	// mixed requests has one for each; every input has at least one.
+	Relations []Relation `json:"relations,omitempty"`
+}
+
+// Relation is how an input, or one request in it, relates to the inputs
+// before it. New starts a goal; continue, adjust and return act on a goal
+// and name the earlier input of it they follow; unclear and not from the
+// person name no goal.
+type Relation struct {
+	Kind string `json:"kind"`
+	Goal string `json:"goal,omitempty"`
+	// Follows is the earlier input of the goal this one follows.
+	Follows string `json:"follows,omitempty"`
+	// Request says which part of a mixed input this relation concerns, in
+	// the person's words.
+	Request string `json:"request,omitempty"`
+	// Statement is the goal's result as the person meant it after this
+	// input, for new and adjust: the steps of the goal's evolution.
+	Statement string `json:"statement,omitempty"`
+}
+
+// The relations an input can have.
+const (
+	RelationNew       = "new"
+	RelationContinue  = "continue"
+	RelationAdjust    = "adjust"
+	RelationReturn    = "return"
+	RelationUnclear   = "unclear"
+	RelationNotPerson = "not_from_person"
+)
+
+// Relations lists every relation kind.
+var Relations = []string{RelationNew, RelationContinue, RelationAdjust, RelationReturn, RelationUnclear, RelationNotPerson}
+
+// Goal is the targets that serve one result the person asked for: a group
+// for the report, with no criteria or score of its own. Its id, such as
+// g2, is given by asz and never reused.
+type Goal struct {
+	T         FrameType `json:"t,omitempty"`
+	ID        string    `json:"id"`
+	Statement string    `json:"statement"`
+	// Members are the targets in the goal, by id.
+	Members []string `json:"members"`
+	// Main is the member whose result the goal is for, or empty when it is
+	// undetermined; MainReason says why either way, and MainCite holds the
+	// person's words that make it the main one.
+	Main       string `json:"main,omitempty"`
+	MainReason string `json:"main_reason,omitempty"`
+	MainCite   []Cite `json:"main_cite,omitempty"`
+	// Evolution is the goal's result after each input that set or
+	// adjusted it, in order.
+	Evolution []Evolution `json:"evolution"`
+	// Cite holds the inputs that show these targets serve one result.
+	Cite []Cite `json:"cite"`
+}
+
+// Evolution is one step of a goal's history: the input and what the goal
+// asked for after it.
+type Evolution struct {
+	Input     string `json:"input"`
+	Statement string `json:"statement"`
 }
 
 // Action is one thing an input did. Target is empty for none, not from a
@@ -510,8 +612,492 @@ type Achievement struct {
 	Basis    string  `json:"basis"`
 	Criteria []Check `json:"criteria,omitempty"`
 	Claims   []Check `json:"claims,omitempty"`
-	Note     string  `json:"note,omitempty"`
-	Cite     []Cite  `json:"cite"`
+	// Events are the deliveries of the target's result and their undoing,
+	// in recorded order.
+	Events []Event `json:"events,omitempty"`
+	// Contradictions are evidence in the conversation that a delivered
+	// result is wrong, each tied to the delivery it concerns.
+	Contradictions []Contradiction `json:"contradictions,omitempty"`
+	// Rework is the rounds of redoing the target's work, in recorded order.
+	Rework []Rework `json:"rework,omitempty"`
+	// Account says what was done for the target, by what it was for.
+	Account *Account `json:"account,omitempty"`
+	// Findings are the problems the stage observed in the target's work.
+	Findings []Finding `json:"findings,omitempty"`
+	Note     string    `json:"note,omitempty"`
+	Cite     []Cite    `json:"cite"`
+}
+
+// Operation is one file operation the record shows: a file a workspace change
+// record captured, or a file a tool's request named. Its id, such as o3, is
+// given in the order the operations landed, so a run at one head gives the
+// same ids. The list is history, never a net diff: an edit repeated, two
+// captures of one change and a later revert are operations of their own.
+type Operation struct {
+	T  FrameType `json:"t,omitempty"`
+	ID string    `json:"id"`
+	// Step is the tool step the operation joins, empty for a change no step
+	// joins.
+	Step string `json:"step,omitempty"`
+	// Record is the change record's id, and Workspace the root its paths
+	// are relative to.
+	Record    string `json:"record,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	// Path is the file, and Operation what happened to it: for a change
+	// record, create, modify, delete, type_change, or unlisted when its file
+	// list was taken out; for a request, write or edit.
+	Path      string `json:"path,omitempty"`
+	Operation string `json:"operation"`
+	// Source says where the operation was found. A request shows only an
+	// attempt, so Status says whether its tool returned, failed or never
+	// returned.
+	Source      string `json:"source"`
+	Status      string `json:"status,omitempty"`
+	Attribution string `json:"attribution,omitempty"`
+	Added       *int   `json:"added,omitempty"`
+	Removed     *int   `json:"removed,omitempty"`
+	Ref         *Ref   `json:"ref,omitempty"`
+}
+
+// Where an operation was found: a workspace change record, or a tool's
+// request that named the file.
+const (
+	SourceChangeRecord = "change_record"
+	SourceToolRequest  = "tool_request"
+)
+
+// SourceASZ marks a finding asz recorded itself, from what the stages
+// decided.
+const SourceASZ = "asz"
+
+// OperationUnlisted is a change record whose file list was taken out to fit
+// its landed file: files changed, which are not named.
+const OperationUnlisted = "unlisted"
+
+// Source is one source a run is judged against, as asz saved it before any
+// evaluator ran: where it came from, how it was fetched, and what was saved.
+// Its content is data, never instructions. Captured says when asz took the
+// copy, never when what it says was knowable. A source that could not be
+// fetched is kept as failed, which leaves its comparison unavailable.
+type Source struct {
+	T           FrameType `json:"t,omitempty"`
+	ID          string    `json:"id"`
+	Source      string    `json:"source"`
+	Captured    string    `json:"captured"`
+	Method      string    `json:"method"`
+	Outcome     string    `json:"outcome"`
+	Error       string    `json:"error,omitempty"`
+	ContentType string    `json:"content_type,omitempty"`
+	Bytes       int       `json:"bytes"`
+	SHA256      string    `json:"sha256,omitempty"`
+	// Cut says the source was larger than a saved copy may be, and only
+	// its start was saved.
+	Cut bool `json:"cut,omitempty"`
+	// Revision, Published and Author are what the source itself says, when
+	// it says.
+	Revision  string `json:"revision,omitempty"`
+	Published string `json:"published,omitempty"`
+	Author    string `json:"author,omitempty"`
+	// Text is the text an evaluator reads, when it was taken out of another
+	// form such as HTML, beside the fetched bytes. Lines counts its lines.
+	Text  *Extracted `json:"text,omitempty"`
+	Lines int        `json:"lines"`
+}
+
+// Extracted is the size and SHA-256 of a text taken out of a source.
+type Extracted struct {
+	Bytes  int    `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+// How a source was fetched, and whether it was saved.
+const (
+	MethodFile    = "file"
+	MethodHTTP    = "http"
+	MethodCommand = "command"
+	SourceSaved   = "saved"
+	SourceFailed  = "failed"
+)
+
+// SourceText is a run of whole lines of a saved source's text, from line
+// From, counting from 1. A source's text is these frames in order.
+type SourceText struct {
+	T      FrameType `json:"t,omitempty"`
+	Source string    `json:"source"`
+	From   int       `json:"from"`
+	Text   string    `json:"text"`
+}
+
+// Conclusion is one conclusion of a person a source holds, and how far it
+// can be trusted. Scope names the inputs of the conversation it is about; a
+// conclusion that can change a score needs a scope of its own, never one it
+// builds on. Context cites the lines of the source that show it. Support is
+// saved when the source holds the evidence, linked when it only names or
+// links it, and asserted when it is the person's word alone.
+type Conclusion struct {
+	T           FrameType    `json:"t,omitempty"`
+	ID          string       `json:"id"`
+	Source      string       `json:"source"`
+	Kind        string       `json:"kind"`
+	Statement   string       `json:"statement"`
+	Expectation string       `json:"expectation"`
+	Scope       []string     `json:"scope"`
+	Context     []SourceCite `json:"context,omitempty"`
+	BuildsOn    []string     `json:"builds_on,omitempty"`
+	Support     string       `json:"support"`
+	Author      string       `json:"author,omitempty"`
+	Revision    string       `json:"revision,omitempty"`
+	Environment string       `json:"environment,omitempty"`
+	Conflicts   []string     `json:"conflicts,omitempty"`
+	// SupersededBy names a later conclusion of the same source that
+	// corrects this one, which then changes no score.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	Ambiguity    string `json:"ambiguity,omitempty"`
+	NotCovered   string `json:"not_covered,omitempty"`
+	// Unbound lists the inputs its scope named that the conversation does
+	// not hold.
+	Unbound []string `json:"unbound,omitempty"`
+}
+
+// SourceCite is lines of a saved source, first and last included.
+type SourceCite struct {
+	Source string `json:"source"`
+	Lines  [2]int `json:"lines"`
+	Note   string `json:"note,omitempty"`
+}
+
+// The kinds, expectations and support of a conclusion.
+const (
+	ConclusionFinal        = "final"
+	ConclusionIntermediate = "intermediate"
+	ExpectRequired         = "required"
+	ExpectExplanatory      = "explanatory"
+	SupportSaved           = "saved"
+	SupportLinked          = "linked"
+	SupportAsserted        = "asserted"
+)
+
+// Divergence is how the conversation compares with one conclusion.
+// Reached cites where the conversation reached it. Contradicted names the
+// target, the delivery it disproves, and the criteria it shows not met, or
+// Whole for the delivered conclusion itself. Asserted marks a verdict of
+// absence, such as not observed, that the record cannot show was read in
+// full: it is the evaluator's judgment.
+type Divergence struct {
+	T          FrameType `json:"t,omitempty"`
+	Conclusion string    `json:"conclusion"`
+	Verdict    string    `json:"verdict"`
+	Target     string    `json:"target,omitempty"`
+	Event      string    `json:"event,omitempty"`
+	Criteria   []string  `json:"criteria,omitempty"`
+	Whole      bool      `json:"whole,omitempty"`
+	Asserted   bool      `json:"asserted,omitempty"`
+	Note       string    `json:"note,omitempty"`
+	Cite       []Cite    `json:"cite"`
+}
+
+// The verdicts of a divergence.
+const (
+	VerdictReached       = "reached"
+	VerdictContradicted  = "contradicted"
+	VerdictNotObserved   = "not_observed"
+	VerdictUnknown       = "unknown"
+	VerdictNotApplicable = "not_applicable"
+)
+
+// Verdicts lists every verdict of a divergence.
+var Verdicts = []string{VerdictReached, VerdictContradicted, VerdictNotObserved, VerdictUnknown, VerdictNotApplicable}
+
+// Rollback is a delivered result a source says was undone outside the
+// conversation, such as a release rolled back. It acts as an undoing of the
+// delivery it names, for the outcome and the final score: of the criteria
+// it names, or of the whole result.
+type Rollback struct {
+	T          FrameType `json:"t,omitempty"`
+	Conclusion string    `json:"conclusion"`
+	Target     string    `json:"target"`
+	Event      string    `json:"event"`
+	Criteria   []string  `json:"criteria,omitempty"`
+	Note       string    `json:"note,omitempty"`
+	Cite       []Cite    `json:"cite"`
+}
+
+// The causes a divergence finding can name, each needing its own evidence:
+// a tool result that misled, a result read wrong, a sub-task's untrue
+// report used, context the agent could not have had, context it had and
+// did not use, an ambiguity it acted on without asking, a premise it never
+// checked; or none the record supports.
+const (
+	CauseMisleadingResult = "misleading_tool_result"
+	CauseMisread          = "wrong_interpretation"
+	CauseMisledBySubtask  = "misled_by_subtask"
+	CauseMissingContext   = "missing_context"
+	CauseContextNotUsed   = "context_not_used"
+	CauseNoClarification  = "clarification_not_sought"
+	CauseUnsupported      = "unsupported_assumption"
+	CauseUnavailable      = "unavailable"
+)
+
+// FindingCauses lists every cause a divergence finding can name.
+var FindingCauses = []string{CauseMisleadingResult, CauseMisread, CauseMisledBySubtask, CauseMissingContext, CauseContextNotUsed,
+	CauseNoClarification, CauseUnsupported, CauseUnavailable}
+
+// LabelFile names the label file a regroup read: the person's goals, in
+// their own words.
+type LabelFile struct {
+	File    string `json:"file"`
+	SHA256  string `json:"sha256"`
+	Version int    `json:"version"`
+}
+
+// LabelGoal is one of the person's goals, by an id such as P2 in the order
+// the file gives them: its words, the judge's targets that serve it, its
+// main target, the judge's goals those targets are in, and how the judge's
+// grouping compares with it. Worked says the conversation worked on it,
+// shown by the person's input it cites. A goal with no target is not
+// scored.
+type LabelGoal struct {
+	T         FrameType `json:"t,omitempty"`
+	ID        string    `json:"id"`
+	Statement string    `json:"statement"`
+	Members   []string  `json:"members"`
+	Main      string    `json:"main,omitempty"`
+	Judge     []string  `json:"judge"`
+	Class     string    `json:"class"`
+	Worked    bool      `json:"worked,omitempty"`
+	Note      string    `json:"note,omitempty"`
+	Cite      []Cite    `json:"cite"`
+}
+
+// Placement is where a regroup put one of the judge's targets: the person's
+// goal it serves, shown by the person's input it cites, or none when it
+// serves none of them. Unknown marks a target the answer left out, or put
+// in a goal with nothing that shows it.
+type Placement struct {
+	T       FrameType `json:"t,omitempty"`
+	Target  string    `json:"target"`
+	Goal    string    `json:"goal,omitempty"`
+	Unknown bool      `json:"unknown,omitempty"`
+	Note    string    `json:"note,omitempty"`
+	Cite    []Cite    `json:"cite"`
+}
+
+// The classes of one of the person's goals: its targets are in one goal of
+// the judge, which holds no other goal's; in several of the judge's goals;
+// in one goal of the judge that also holds another goal's targets; it has
+// none, though the conversation worked on it; it has none, and nothing
+// worked on it; or the regroup cannot tell.
+const (
+	CompareAgree   = "agree"
+	CompareSplit   = "split"
+	CompareMerged  = "merged"
+	CompareMissed  = "missed"
+	CompareAbsent  = "absent"
+	CompareUnknown = "unknown"
+)
+
+// Compares lists every class of a person's goal, most severe first.
+var Compares = []string{CompareMissed, CompareSplit, CompareMerged, CompareUnknown, CompareAbsent, CompareAgree}
+
+// Agreement counts the person's goals by class, and lists the targets that
+// serve none of them, Extra, and those the regroup could not place,
+// Unknown.
+type Agreement struct {
+	T       FrameType      `json:"t,omitempty"`
+	Goals   int            `json:"goals"`
+	Classes map[string]int `json:"classes"`
+	Extra   []string       `json:"extra,omitempty"`
+	Unknown []string       `json:"unknown,omitempty"`
+}
+
+// LabelText is a run of the label file a regroup was made from, as the
+// person gave it, cut as a source's text is: the frames in order are the
+// file, so the comparison can be made again after the file changed or was
+// removed.
+type LabelText struct {
+	T    FrameType `json:"t,omitempty"`
+	From int       `json:"from"`
+	Text string    `json:"text"`
+}
+
+// Finding is a problem a stage observed, anchored at the step or input where
+// it happened. Its explanation and improvement are proposals: a finding
+// never changes a level or a cost. An achievement holds its own; the
+// efficiency stage writes each as a frame of its own, naming its target.
+type Finding struct {
+	T      FrameType `json:"t,omitempty"`
+	Target string    `json:"target,omitempty"`
+	// Source is the stage that recorded it, or asz, which records one at
+	// each criterion not met, each contradiction and undoing of a standing
+	// delivery, each correction and each round of rework.
+	Source string `json:"source,omitempty"`
+	// Conclusion and Cause are a divergence finding's: the conclusion the
+	// conversation did not reach, and why, as the evidence allows.
+	Conclusion string `json:"conclusion,omitempty"`
+	Cause      string `json:"cause,omitempty"`
+	// Asserted marks a cause that rests on something not happening, which
+	// the record cannot show was looked for everywhere: the evaluator's
+	// judgment.
+	Asserted    bool   `json:"asserted,omitempty"`
+	At          string `json:"at"`
+	Ref         *Ref   `json:"ref,omitempty"`
+	Problem     string `json:"problem"`
+	Explanation string `json:"explanation,omitempty"`
+	Improvement string `json:"improvement,omitempty"`
+	Cite        []Cite `json:"cite"`
+}
+
+// Account is what was done for a target, as a reader asks it: for a
+// question, what was checked and what was answered; for a change to another
+// system, which operations were used and what they changed.
+type Account struct {
+	Answer *Answer     `json:"answer,omitempty"`
+	Files  []FileGroup `json:"files,omitempty"`
+	Remote []Remote    `json:"remote,omitempty"`
+}
+
+// FileGroup is file operations of a target grouped by what they were for:
+// the area they touched, such as a package, the category, such as code,
+// tests or documents, and what the group changed. The operations are named
+// by id.
+type FileGroup struct {
+	Area       string   `json:"area"`
+	Category   string   `json:"category"`
+	Summary    string   `json:"summary"`
+	Operations []string `json:"operations"`
+}
+
+// Answer is how a question was answered: what was asked, what was checked or
+// tried, what was ruled out, and the answer given.
+type Answer struct {
+	Asked    Said    `json:"asked"`
+	Checked  []Tried `json:"checked,omitempty"`
+	RuledOut []Tried `json:"ruled_out,omitempty"`
+	Answered Said    `json:"answered"`
+}
+
+// Said is something stated, with where it was said.
+type Said struct {
+	Text string `json:"text"`
+	Cite []Cite `json:"cite,omitempty"`
+}
+
+// Tried is one check: what was checked or ruled out, what it found, and how
+// far that holds.
+type Tried struct {
+	What   string `json:"what"`
+	Found  string `json:"found"`
+	Limits string `json:"limits,omitempty"`
+	Cite   []Cite `json:"cite"`
+}
+
+// Remote is one operation on another system: the system, the operation and
+// the tool or API it went through, the request and the response, and what
+// later confirmed the change. A call shows neither that a change was
+// accepted nor that it was completed.
+type Remote struct {
+	System    string `json:"system"`
+	Operation string `json:"operation"`
+	Via       string `json:"via"`
+	Request   Said   `json:"request"`
+	Response  *Said  `json:"response,omitempty"`
+	Confirmed *Said  `json:"confirmed,omitempty"`
+}
+
+// Event is one delivery of a target's result, or its undoing. Its id, such
+// as t1.e2, is given by asz in recorded order.
+type Event struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Criteria are the criteria an undoing took back; none means the whole
+	// delivered result.
+	Criteria []string `json:"criteria,omitempty"`
+	// Replaces are the earlier deliveries a delivery again corrects; none
+	// means every one before it.
+	Replaces []string `json:"replaces,omitempty"`
+	// Undoes are the deliveries an undoing took back; none means every one
+	// standing then.
+	Undoes []string `json:"undoes,omitempty"`
+	// Artifact is what the event concerns: an answer, a revision such as a
+	// commit or a pull request, a file, or a change to a remote system.
+	Artifact string `json:"artifact"`
+	Text     string `json:"text"`
+	Cite     []Cite `json:"cite"`
+}
+
+// The kinds of event.
+const (
+	EventDelivered      = "delivered"
+	EventUndone         = "undone"
+	EventDeliveredAgain = "delivered_again"
+)
+
+// EventKinds lists every kind of event.
+var EventKinds = []string{EventDelivered, EventUndone, EventDeliveredAgain}
+
+// The artifacts an event concerns.
+const (
+	ArtifactAnswer   = "answer"
+	ArtifactRevision = "revision"
+	ArtifactFile     = "file"
+	ArtifactRemote   = "remote"
+)
+
+// Artifacts lists every artifact an event can concern.
+var Artifacts = []string{ArtifactAnswer, ArtifactRevision, ArtifactFile, ArtifactRemote}
+
+// Rework is one round of redoing a target's work: an earlier attempt, what
+// showed it had to be redone, and the redo. Its id, such as t1.r1, is given
+// by asz in recorded order.
+type Rework struct {
+	ID      string `json:"id"`
+	Attempt []Cite `json:"attempt"`
+	// Trigger says what showed the attempt had to be redone, and
+	// TriggerCite where.
+	Trigger     string `json:"trigger"`
+	TriggerCite []Cite `json:"trigger_cite"`
+	Cause       string `json:"cause"`
+	Redo        []Cite `json:"redo"`
+	// From and To bound the round: the step that triggered it and the last
+	// step of the redo.
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Finished bool   `json:"finished"`
+	Note     string `json:"note,omitempty"`
+}
+
+// What can trigger a round of rework: the person's input, a check such as a
+// test or a build that failed, or another tool result.
+const (
+	TriggerPerson       = "person"
+	TriggerVerification = "verification"
+	TriggerTool         = "tool"
+)
+
+// Triggers lists every trigger of a round of rework.
+var Triggers = []string{TriggerPerson, TriggerVerification, TriggerTool}
+
+// The causes of a round of rework: the agent's own error, a requirement the
+// person changed, or a cause the record does not show.
+const (
+	ReworkAgentError        = "agent_error"
+	ReworkRequirementChange = "requirement_change"
+	ReworkUnknown           = "unknown"
+)
+
+// ReworkCauses lists every cause of a round of rework.
+var ReworkCauses = []string{ReworkAgentError, ReworkRequirementChange, ReworkUnknown}
+
+// Contradiction is evidence that a delivered result is wrong. It disproves
+// the delivered conclusion itself, such as the answer or the cause named, or
+// shows some criteria not met.
+type Contradiction struct {
+	// Event is the delivery it concerns, by id.
+	Event      string   `json:"event"`
+	Conclusion bool     `json:"conclusion,omitempty"`
+	Criteria   []string `json:"criteria,omitempty"`
+	Text       string   `json:"text"`
+	Cite       []Cite   `json:"cite"`
 }
 
 // Check is one criterion or one claim, and what the evidence says of it. ID
@@ -521,7 +1107,34 @@ type Check struct {
 	Text  string `json:"text"`
 	State string `json:"state"`
 	Cite  []Cite `json:"cite,omitempty"`
+	// Reason says why the state holds. When asz changed the state, it is
+	// asz's reason, and GivenReason keeps the evaluator's own.
+	Reason       string        `json:"reason,omitempty"`
+	GivenReason  string        `json:"given_reason,omitempty"`
+	Observations []Observation `json:"observations,omitempty"`
 }
+
+// Observation is one thing a cited step shows: an excerpt of it, exactly as
+// recorded, what the record says of the step, and what the evaluator reads
+// in it. The status is a fact of the record; the interpretation is not, as a
+// query that succeeded can report a run that failed.
+type Observation struct {
+	Node           string `json:"node"`
+	Ref            *Ref   `json:"ref,omitempty"`
+	Excerpt        string `json:"excerpt,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Interpretation string `json:"interpretation"`
+}
+
+// What the record says of an observed step: a tool step that failed, that
+// returned, or that never returned; an error of the model API; an interrupt.
+const (
+	ObservedFailed      = "failed"
+	ObservedReturned    = "returned"
+	ObservedNoResult    = "no_result"
+	ObservedError       = "error"
+	ObservedInterrupted = "interrupted"
+)
 
 // The levels of achievement.
 const (
@@ -735,6 +1348,81 @@ type Outcome struct {
 	// spans of the main stream's avoidable work.
 	Span          int64  `json:"span_ms,omitempty"`
 	AvoidableSpan *int64 `json:"avoidable_span_ms,omitempty"`
+	// Class is the outcome, most severe first: contradicted, reverted,
+	// not_achieved, partly, achieved; then cannot_verify; and cancelled or
+	// replaced, which are never scored. Absent when no achievement stage
+	// judged the target.
+	Class string `json:"class,omitempty"`
+	// Standing are the deliveries standing at the end, by event id: every
+	// delivery, in parts or whole, except those a later delivery again
+	// replaced. Their contradictions apply. Undone are the undoings that
+	// apply: those that took back a delivery still standing.
+	Standing []string `json:"standing,omitempty"`
+	Undone   []string `json:"undone,omitempty"`
+	// ScoreRecord is the score the record's criteria give, from 0 to 1, as
+	// Score.Achievement counts the target. ScoreFinal applies each
+	// contradiction of the deliveries standing, and the undoings that apply,
+	// once. Both are absent when the target is not scored or cannot be
+	// verified.
+	ScoreRecord *float64 `json:"score_record,omitempty"`
+	ScoreFinal  *float64 `json:"score_final,omitempty"`
+	// Rework is what the target's rounds of rework cost, by how their calls
+	// were labeled, each call counted once.
+	Rework []ReworkCost `json:"rework,omitempty"`
+	// Corrections are the person's inputs that corrected the target.
+	Corrections []string `json:"corrections,omitempty"`
+	// Operations are the file operations of the target's calls, each with
+	// the target's share when the call was shared.
+	Operations []OperationShare `json:"operations,omitempty"`
+	// References are the conclusions of a source whose contradiction or
+	// rollback applies to the target's final score.
+	References []string `json:"references,omitempty"`
+}
+
+// The classes of an outcome.
+const (
+	ClassContradicted = "contradicted"
+	ClassReverted     = "reverted"
+	ClassNotAchieved  = LevelNotAchieved
+	ClassPartly       = LevelPartly
+	ClassAchieved     = LevelAchieved
+	ClassCannotVerify = LevelCannotVerify
+	ClassCancelled    = TargetCancelled
+	ClassReplaced     = TargetReplaced
+)
+
+// Classes lists every class of an outcome, most severe first.
+var Classes = []string{ClassContradicted, ClassReverted, ClassNotAchieved, ClassPartly, ClassAchieved, ClassCannotVerify, ClassCancelled, ClassReplaced}
+
+// ReworkCost is what a target's rounds of rework cost of one label: their
+// calls the stages gave that label, each counted once however many rounds
+// hold it, and for avoidable work whose doing it was, as a work group names
+// it. Work no stage labeled is not reviewed.
+type ReworkCost struct {
+	Work  string `json:"work"`
+	Cause string `json:"cause,omitempty"`
+	Cost  Amount `json:"cost"`
+}
+
+// OperationShare is a file operation of a target, by id, and the target's
+// share of the call that made it, absent when the call was the target's
+// alone.
+type OperationShare struct {
+	ID    string   `json:"id"`
+	Share *float64 `json:"share,omitempty"`
+}
+
+// GoalOutcome is how one goal did: its main target at the end, empty when
+// undetermined, the most severe class of its targets, the finding that
+// happened first in it, the main target's final score, and the mean of its
+// targets' final scores.
+type GoalOutcome struct {
+	Goal      string   `json:"goal"`
+	Main      string   `json:"main,omitempty"`
+	Worst     string   `json:"worst,omitempty"`
+	First     *Finding `json:"first,omitempty"`
+	ScoreMain *float64 `json:"score_main,omitempty"`
+	ScoreMean *float64 `json:"score_mean,omitempty"`
 }
 
 // Amount is an amount of tokens and, where every call in it was priced,
@@ -823,6 +1511,30 @@ func frameType(frame any) (FrameType, error) {
 		f.T = FrameTarget
 	case *Input:
 		f.T = FrameInput
+	case *Goal:
+		f.T = FrameGoal
+	case *Finding:
+		f.T = FrameFinding
+	case *Operation:
+		f.T = FrameOperation
+	case *LabelGoal:
+		f.T = FrameLabelGoal
+	case *Placement:
+		f.T = FramePlacement
+	case *Agreement:
+		f.T = FrameAgreement
+	case *LabelText:
+		f.T = FrameLabelText
+	case *Source:
+		f.T = FrameSource
+	case *SourceText:
+		f.T = FrameSourceText
+	case *Conclusion:
+		f.T = FrameConclusion
+	case *Divergence:
+		f.T = FrameDivergence
+	case *Rollback:
+		f.T = FrameRollback
 	case *Achievement:
 		f.T = FrameAchievement
 	case *Label:
@@ -849,6 +1561,30 @@ func frameOf(frame any) FrameType {
 	case *Target:
 		return f.T
 	case *Input:
+		return f.T
+	case *Goal:
+		return f.T
+	case *Finding:
+		return f.T
+	case *Operation:
+		return f.T
+	case *LabelGoal:
+		return f.T
+	case *Placement:
+		return f.T
+	case *Agreement:
+		return f.T
+	case *LabelText:
+		return f.T
+	case *Source:
+		return f.T
+	case *SourceText:
+		return f.T
+	case *Conclusion:
+		return f.T
+	case *Divergence:
+		return f.T
+	case *Rollback:
 		return f.T
 	case *Achievement:
 		return f.T
@@ -887,7 +1623,7 @@ func (h *Header) Validate() error {
 		return errors.New("sessionjudge: header has no conversation or session")
 	case h.Run < 1:
 		return fmt.Errorf("sessionjudge: run %d; runs count from 1", h.Run)
-	case !known(h.Stage, Stages):
+	case !known(h.Stage, Stages) && h.Stage != StageRegroup:
 		return fmt.Errorf("sessionjudge: unknown stage %q", h.Stage)
 	case h.Head.Round == 0 || h.Head.Digest == "":
 		return errors.New("sessionjudge: header names no head round")
@@ -917,6 +1653,18 @@ type File struct {
 	Costs        []Cost
 	Targets      []Target
 	Inputs       []Input
+	Goals        []Goal
+	Findings     []Finding
+	Operations   []Operation
+	LabelGoals   []LabelGoal
+	Placements   []Placement
+	Agreements   []Agreement
+	LabelTexts   []LabelText
+	Sources      []Source
+	SourceTexts  []SourceText
+	Conclusions  []Conclusion
+	Divergences  []Divergence
+	Rollbacks    []Rollback
 	Achievements []Achievement
 	Labels       []Label
 	Subtasks     []Subtask
@@ -981,6 +1729,42 @@ func Read(r io.Reader) (*File, error) {
 		case FrameInput:
 			out.Inputs = append(out.Inputs, Input{})
 			derr = decode(raw, &out.Inputs[len(out.Inputs)-1])
+		case FrameGoal:
+			out.Goals = append(out.Goals, Goal{})
+			derr = decode(raw, &out.Goals[len(out.Goals)-1])
+		case FrameFinding:
+			out.Findings = append(out.Findings, Finding{})
+			derr = decode(raw, &out.Findings[len(out.Findings)-1])
+		case FrameOperation:
+			out.Operations = append(out.Operations, Operation{})
+			derr = decode(raw, &out.Operations[len(out.Operations)-1])
+		case FrameLabelGoal:
+			out.LabelGoals = append(out.LabelGoals, LabelGoal{})
+			derr = decode(raw, &out.LabelGoals[len(out.LabelGoals)-1])
+		case FramePlacement:
+			out.Placements = append(out.Placements, Placement{})
+			derr = decode(raw, &out.Placements[len(out.Placements)-1])
+		case FrameAgreement:
+			out.Agreements = append(out.Agreements, Agreement{})
+			derr = decode(raw, &out.Agreements[len(out.Agreements)-1])
+		case FrameLabelText:
+			out.LabelTexts = append(out.LabelTexts, LabelText{})
+			derr = decode(raw, &out.LabelTexts[len(out.LabelTexts)-1])
+		case FrameSource:
+			out.Sources = append(out.Sources, Source{})
+			derr = decode(raw, &out.Sources[len(out.Sources)-1])
+		case FrameSourceText:
+			out.SourceTexts = append(out.SourceTexts, SourceText{})
+			derr = decode(raw, &out.SourceTexts[len(out.SourceTexts)-1])
+		case FrameConclusion:
+			out.Conclusions = append(out.Conclusions, Conclusion{})
+			derr = decode(raw, &out.Conclusions[len(out.Conclusions)-1])
+		case FrameDivergence:
+			out.Divergences = append(out.Divergences, Divergence{})
+			derr = decode(raw, &out.Divergences[len(out.Divergences)-1])
+		case FrameRollback:
+			out.Rollbacks = append(out.Rollbacks, Rollback{})
+			derr = decode(raw, &out.Rollbacks[len(out.Rollbacks)-1])
 		case FrameAchievement:
 			out.Achievements = append(out.Achievements, Achievement{})
 			derr = decode(raw, &out.Achievements[len(out.Achievements)-1])

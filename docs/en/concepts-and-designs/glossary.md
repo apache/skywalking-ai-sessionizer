@@ -217,6 +217,15 @@ close. Made only when a person asks, as often as they ask. See
 of the talks that serve it.
 *Not:* a topic, a talk, or an input. One input can set two targets, and one target can take many talks.
 
+**Goal** — the targets that serve one result the person asked for. A conversation can hold one goal or
+several. A goal has no criteria and no score of its own: it groups targets for the report.
+*Not:* a topic or a session. Shared words, files, a repository or neighbouring turns do not make one goal.
+
+**Input relation** — how an input from the person relates to the inputs before it: it starts a goal,
+goes on with one, adjusts one, returns to one, or is unclear. A relation to a goal names the earlier
+input of that goal it follows.
+*Not:* a [relation](#relations) of the conversation model, which joins two nodes from recorded evidence.
+
 **Evaluator** — what decides a judged stage: an agent CLI asz runs, or a model API asz calls. It reads
 the conversation only through the navigation, and it names and labels. It never gives a number.
 *Not:* the judge stream role, which is reserved for an evaluator's own work recorded as a stream.

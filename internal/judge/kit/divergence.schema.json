@@ -1,0 +1,165 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "divergences",
+    "rollbacks",
+    "findings"
+  ],
+  "properties": {
+    "divergences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conclusion",
+          "verdict",
+          "target",
+          "event",
+          "criteria",
+          "whole",
+          "note",
+          "cite"
+        ],
+        "properties": {
+          "conclusion": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "reached",
+              "contradicted",
+              "not_observed",
+              "unknown",
+              "not_applicable"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "whole": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "rollbacks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "conclusion",
+          "target",
+          "event",
+          "criteria",
+          "note",
+          "cite"
+        ],
+        "properties": {
+          "conclusion": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "at",
+          "conclusion",
+          "cause",
+          "problem",
+          "explanation",
+          "improvement",
+          "cite"
+        ],
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "description": "the step or input where the work went another way"
+          },
+          "conclusion": {
+            "type": "string"
+          },
+          "cause": {
+            "type": "string",
+            "enum": [
+              "misleading_tool_result",
+              "wrong_interpretation",
+              "misled_by_subtask",
+              "missing_context",
+              "context_not_used",
+              "clarification_not_sought",
+              "unsupported_assumption",
+              "unavailable"
+            ]
+          },
+          "problem": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          },
+          "improvement": {
+            "type": "string"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -657,9 +657,26 @@ func TestEveryJudgeSettingIsTaken(t *testing.T) {
 	if d := Default().Judge; cfg.Judge.ReadBytes != d.ReadBytes || cfg.Judge.Concurrency != d.Concurrency {
 		t.Fatalf("judge %+v", cfg.Judge)
 	}
-	for _, body := range []string{"judge:\n  mode: fast\n", "judge:\n  concurrency: 0\n", "judge:\n  chunk_bytes: -1\n", "judge:\n  progress: soon\n"} {
+	for _, body := range []string{"judge:\n  mode: fast\n", "judge:\n  concurrency: 0\n", "judge:\n  chunk_bytes: -1\n", "judge:\n  progress: soon\n",
+		"judge:\n  references:\n    max_bytes: -1\n", "judge:\n  references:\n    timeout: soon\n", "judge:\n  references:\n    timeout: 0s\n",
+		"judge:\n  references:\n    fetch:\n      - prefix: https://x/\n", "judge:\n  references:\n    fetch:\n      - command: [x]\n"} {
 		if _, err := load(body); err == nil {
 			t.Errorf("%q was taken", body)
 		}
+	}
+	// How references are fetched is read, and what is not set keeps its
+	// default.
+	cfg, err = load("judge:\n  references:\n    max_bytes: 0\n    timeout: 2m\n    fetch:\n      - prefix: https://jira.example/browse/\n" +
+		"        command: [jira-export, --markdown]\n        content_type: text/markdown\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := cfg.Judge.References; r.MaxBytes != 0 || r.Timeout != "2m" || len(r.Fetch) != 1 || r.Fetch[0].Prefix != "https://jira.example/browse/" ||
+		len(r.Fetch[0].Command) != 2 || r.Fetch[0].ContentType != "text/markdown" {
+		t.Fatalf("references %+v", r)
+	}
+	cfg, _ = load("judge:\n  references:\n    timeout: 2m\n")
+	if r, d := cfg.Judge.References, Default().Judge.References; r.MaxBytes != d.MaxBytes || len(r.Fetch) != 0 {
+		t.Fatalf("references %+v", r)
 	}
 }

@@ -226,6 +226,22 @@ func taskText(stage string, nav *Nav, g given) string {
 			cited = append(cited, *a)
 		}
 	}
+	// A divergence call names a delivery when it finds one contradicted, so
+	// it is given each target's events by id, and which stand at the end:
+	// only what a source shows of those changes a score.
+	if stage == sessionjudge.StageDivergence && len(cited) > 0 {
+		b.WriteString("\nThe deliveries the achievement stage recorded for each target, by event id:\n\n")
+		var lines []string
+		for _, a := range cited {
+			standing := set(standingOf(a.Events))
+			for _, e := range a.Events {
+				line, _ := json.Marshal(map[string]any{"target": a.Target, "event": e.ID, "kind": e.Kind, "standing": standing[e.ID],
+					"artifact": e.Artifact, "text": clip(e.Text, 200), "cite": e.Cite})
+				lines = append(lines, string(line))
+			}
+		}
+		b.WriteString(boundedLines(lines, g.limit, "events; the targets tool gives each target whole, with its deliveries"))
+	}
 	if (stage == sessionjudge.StageEfficiency || stage == sessionjudge.StageSubtasks) && len(cited) > 0 {
 		b.WriteString("\nThe steps the achievement stage cited for each target, where its work was found:\n\n")
 		var lines []string

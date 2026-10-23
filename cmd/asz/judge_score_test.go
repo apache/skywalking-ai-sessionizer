@@ -18,7 +18,7 @@
 package main
 
 import (
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -83,17 +83,16 @@ func TestAStageSaysWhatItConsumed(t *testing.T) {
 // printed runs f and returns what it wrote to standard output.
 func printed(t *testing.T, f func()) string {
 	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	return stdoutOf(t, f)
+}
+
+// What is printed is read while it is written: a pipe holds a few KB on
+// Windows, so a report read only afterwards would wait for ever.
+func TestAReportLargerThanAPipeIsRead(t *testing.T) {
+	big := strings.Repeat("x", 1<<20)
+	if out := printed(t, func() { fmt.Print(big) }); out != big {
+		t.Fatalf("read %d bytes of %d", len(out), len(big))
 	}
-	old := os.Stdout
-	os.Stdout = w
-	f()
-	os.Stdout = old
-	_ = w.Close()
-	out, _ := io.ReadAll(r)
-	return string(out)
 }
 
 // What a person reads: the share of the conversation's cost only beside whole
@@ -187,7 +186,8 @@ func threeRuns(t *testing.T) *storage.Zone {
 	}
 	publishStage(t, z, dirs[0], 1, 1, sessionjudge.StageLedger, nil)
 	publishStage(t, z, dirs[1], 2, 1, sessionjudge.StageLedger, nil)
-	publishStage(t, z, dirs[1], 2, 6, sessionjudge.StageClose, &sessionjudge.Summary{Targets: 2, Achieved: 1, NotAchieved: 1})
+	publishStage(t, z, dirs[1], 2, 6, sessionjudge.StageClose, &sessionjudge.Summary{Targets: 2, Achieved: 1, NotAchieved: 1,
+		Score: &sessionjudge.Score{Final: ptr(0.5)}})
 	return z
 }
 
@@ -199,7 +199,7 @@ func TestARunIsListedFromItsCloseFile(t *testing.T) {
 	code := 0
 	out := stdoutOf(t, func() { code = judgeList(z, "s1", "s1") })
 	want := "run 1  unfinished, 1 stage files\n" +
-		"run 2  round 3  2026-10-20T10:05:00Z  complete  targets 2: achieved 1, partly 0, not 1, cannot verify 0\n" +
+		"run 2  round 3  2026-10-20T10:05:00Z  complete  targets 2: achieved 1, partly 0, not 1, cannot verify 0  score 50/100\n" +
 		"run 3  unfinished, 0 stage files\n"
 	if code != 0 || out != want {
 		t.Fatalf("exit %d, listed:\n%s\nwant:\n%s", code, out, want)
@@ -218,6 +218,45 @@ func TestShowPrintsTheRunAskedFor(t *testing.T) {
 	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 1, false) })
 	if code != 0 || !strings.HasPrefix(out, "run 1  ") || !strings.Contains(out, "not closed") {
 		t.Fatalf("exit %d, run 1 printed as:\n%s", code, out)
+	}
+	// The run's latest regroup is shown with it, and the report follows the
+	// person's goals.
+	runs, _ := storage.JudgmentRuns(z, "s1")
+	// The third regroup's call failed: it is shown, and the report follows
+	// the latest one that compared anything.
+	for version, statement := range []string{"the first grouping", "the latest grouping", ""} {
+		status := sessionjudge.StatusComplete
+		if statement == "" {
+			status = sessionjudge.StatusFailed
+		}
+		w, err := sessionjudge.NewWriter(sessionjudge.Header{Conversation: "s1", Session: "s1", Run: 2, Stage: sessionjudge.StageRegroup,
+			Head: sessionjudge.Head{Round: 3, Digest: strings.Repeat("a", 64)}, Evaluator: sessionjudge.Evaluator{Name: "stand-in", Kind: sessionjudge.EvaluatorCLI},
+			Labels:  &sessionjudge.LabelFile{File: "goals.yaml", SHA256: strings.Repeat("c", 64), Version: version + 1},
+			Started: "2026-10-20T10:00:00Z", Finished: "2026-10-20T10:05:00Z", Status: status})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Write(&sessionjudge.LabelText{From: 1, Text: "goals:\n  - " + statement + "\n"}); err != nil {
+			t.Fatal(err)
+		}
+		if statement != "" {
+			if err := w.Write(&sessionjudge.LabelGoal{ID: "P1", Statement: statement, Members: []string{}, Judge: []string{}, Class: sessionjudge.CompareAbsent,
+				Cite: []sessionjudge.Cite{}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		data, digest, err := w.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := storage.PublishRegroup(z, "s1", runs[1].Dir, version+1, digest, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 2, false) })
+	if code != 0 || !strings.Contains(out, "regroup      complete") || !strings.Contains(out, "regroup      failed") ||
+		!strings.Contains(out, "goal P1  the latest grouping") || strings.Contains(out, "the first grouping") {
+		t.Fatalf("exit %d, run 2 with its regroups printed as:\n%s", code, out)
 	}
 	said := stderrOf(t, func() { out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 4, false) }) })
 	if code != 1 || out != "" || !strings.Contains(said, "s1 has no run 4") {

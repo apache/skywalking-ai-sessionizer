@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["labels"],
+  "required": ["labels", "findings"],
   "properties": {
     "labels": {
       "type": "array",
@@ -16,6 +16,22 @@
           "label": {"type": "string", "enum": ["useful", "exploration", "verification", "avoidable_attempt", "repeated", "redundant_delegation", "repair_own_mistake", "rework_requirement_change", "misled_by_subtask"]},
           "subtask": {"type": "string", "description": "for misled_by_subtask, the sub-task whose untrue report the work acted on; otherwise empty"},
           "note": {"type": "string"},
+          "cite": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target", "at", "problem", "explanation", "improvement", "cite"],
+        "properties": {
+          "target": {"type": "string"},
+          "at": {"type": "string", "description": "the step or input where the problem happened"},
+          "problem": {"type": "string"},
+          "explanation": {"type": "string"},
+          "improvement": {"type": "string"},
           "cite": {"type": "array", "items": {"type": "string"}}
         }
       }

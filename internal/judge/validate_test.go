@@ -51,7 +51,7 @@ func TestATargetsAnswerIsCheckedAgainstTheConversation(t *testing.T) {
 	  {"id":"t1","statement":"again","criteria":[],"status":"open","replaced_by":"","talks":[],"cite":[]}],
 	 "inputs":[{"node":"in/talk/1","actions":[{"target":"t1","action":"create"},{"target":"t2","action":"refine"}]},
 	           {"node":"not/an/input","actions":[{"target":"","action":"none"}]}]}`)
-	c, err := checkTargets(nav, nil, raw)
+	c, err := checkTargets(nav, catalogue{}, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,19 +289,19 @@ func TestSubtaskDecisionsAreChecked(t *testing.T) {
 func TestATargetsScanMergesItsChunks(t *testing.T) {
 	nav := navWithInputs()
 	nav.Assign(Assignment{Inputs: []string{"in/talk/2"}})
-	catalogue := []sessionjudge.Target{{ID: "t1", Statement: "build it", Status: sessionjudge.TargetOpen, Talks: []string{"talk/1"},
+	found := []sessionjudge.Target{{ID: "t1", Statement: "build it", Status: sessionjudge.TargetOpen, Talks: []string{"talk/1"},
 		Criteria: []sessionjudge.Criterion{{ID: "t1.c1", Text: "it builds"}}, Cite: []sessionjudge.Cite{}}}
 	raw := json.RawMessage(`{"targets":[
 	  {"id":"","key":"n7","statement":"ship it","criteria":["a release exists"],"drop_criteria":[],"status":"open","replaced_by":"","talks":["talk/2"],"cite":["in/talk/2"]},
 	  {"id":"t1","key":"","statement":"","criteria":["tests pass"],"drop_criteria":["t1.c1"],"status":"closed","replaced_by":"","talks":["talk/2"],"cite":[]}],
 	 "inputs":[{"node":"in/talk/2","actions":[{"target":"n7","action":"create"},{"target":"t1","action":"refine"}]},
 	           {"node":"in/talk/1","actions":[{"target":"t1","action":"steer"}]}]}`)
-	c, err := checkTargets(nav, catalogue, raw)
+	c, err := checkTargets(nav, catalogue{targets: found}, raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.targets) != 2 || len(catalogue[0].Criteria) != 1 || catalogue[0].Status != sessionjudge.TargetOpen {
-		t.Fatalf("targets %+v, the catalogue passed in %+v", c.targets, catalogue)
+	if len(c.targets) != 2 || len(found[0].Criteria) != 1 || found[0].Status != sessionjudge.TargetOpen {
+		t.Fatalf("targets %+v, the catalogue passed in %+v", c.targets, found)
 	}
 	t1, t2 := c.targets[0], c.targets[1]
 	if t1.Status != sessionjudge.TargetClosed || t1.Statement != "build it" || len(t1.Criteria) != 2 ||
@@ -933,9 +933,9 @@ func TestARedundantDispatchIsChargedToItsGiver(t *testing.T) {
 func TestANewTargetCannotTakeAnExistingId(t *testing.T) {
 	nav := navWithInputs()
 	nav.Assign(Assignment{Inputs: []string{"in/talk/2"}})
-	catalogue := []sessionjudge.Target{{ID: "t1", Statement: "build it", Status: sessionjudge.TargetOpen, Talks: []string{"talk/1"},
+	found := []sessionjudge.Target{{ID: "t1", Statement: "build it", Status: sessionjudge.TargetOpen, Talks: []string{"talk/1"},
 		Criteria: []sessionjudge.Criterion{{ID: "t1.c1", Text: "it builds"}}, Cite: []sessionjudge.Cite{}}}
-	c, err := checkTargets(nav, catalogue, json.RawMessage(`{"targets":[
+	c, err := checkTargets(nav, catalogue{targets: found}, json.RawMessage(`{"targets":[
 	  {"id":"","key":"t1","statement":"ship it","criteria":["a release exists"],"drop_criteria":[],"status":"open","replaced_by":"","talks":["talk/2"],"cite":["in/talk/2"]}],
 	 "inputs":[{"node":"in/talk/2","actions":[{"target":"t1","action":"create"}]}]}`))
 	if err != nil {
@@ -958,8 +958,8 @@ func TestAClashingKeyDirectsNothing(t *testing.T) {
 		return sessionjudge.Target{ID: id, Statement: id, Status: sessionjudge.TargetOpen, Talks: []string{"talk/1"},
 			Criteria: []sessionjudge.Criterion{}, Cite: []sessionjudge.Cite{}}
 	}
-	catalogue := []sessionjudge.Target{open("t1"), open("t2")}
-	c, err := checkTargets(nav, catalogue, json.RawMessage(`{"targets":[
+	found := []sessionjudge.Target{open("t1"), open("t2")}
+	c, err := checkTargets(nav, catalogue{targets: found}, json.RawMessage(`{"targets":[
 	  {"id":"","key":"t1","statement":"ship it","criteria":[],"drop_criteria":[],"status":"open","replaced_by":"","talks":["talk/1"],"cite":["input/2"]},
 	  {"id":"t2","key":"","statement":"","criteria":[],"drop_criteria":[],"status":"","replaced_by":"t1","talks":[],"cite":[]}],
 	 "inputs":[{"node":"input/2","actions":[{"target":"t1","action":"create"}]}]}`))
@@ -1048,7 +1048,7 @@ func TestATalkIsLabeledOnlyWhenEveryCallIs(t *testing.T) {
 // Each check of a targets answer, on its own: every case is a valid answer
 // with one thing changed, and says what was left out and what stayed.
 func TestEachTargetsCheckStandsAlone(t *testing.T) {
-	catalogue := func() []sessionjudge.Target {
+	found := func() []sessionjudge.Target {
 		return []sessionjudge.Target{{ID: "t1", Statement: "build it", Status: sessionjudge.TargetOpen, Talks: []string{"talk/1"},
 			Criteria: []sessionjudge.Criterion{{ID: "t1.c1", Text: "it builds"}}, Cite: []sessionjudge.Cite{}}}
 	}
@@ -1056,8 +1056,8 @@ func TestEachTargetsCheckStandsAlone(t *testing.T) {
 		return `{"id":"","key":"","statement":"","criteria":[],"drop_criteria":[],"status":"","replaced_by":"","talks":[],"cite":[],` + fields + `}`
 	}
 	ship := entry(`"key":"n1","statement":"ship it","criteria":["released"],"status":"open","talks":["talk/2"],"cite":["in/talk/2"]`)
-	create := `{"node":"in/talk/2","actions":[{"target":"n1","action":"create"}]}`
-	steer := `{"node":"in/talk/2","actions":[{"target":"t1","action":"steer"}]}`
+	create := `{"node":"in/talk/2","relations":[{"kind":"unclear"}],"actions":[{"target":"n1","action":"create"}]}`
+	steer := `{"node":"in/talk/2","relations":[{"kind":"unclear"}],"actions":[{"target":"t1","action":"steer"}]}`
 	for _, tc := range []struct {
 		name, targets, inputs, note string
 		check                       func(c *checked) string
@@ -1099,7 +1099,7 @@ func TestEachTargetsCheckStandsAlone(t *testing.T) {
 				}
 				return ""
 			}},
-		{"an unknown action and a known one", ship, `{"node":"in/talk/2","actions":[{"target":"","action":"unknown"},{"target":"n1","action":"create"}]}`, "",
+		{"an unknown action and a known one", ship, `{"node":"in/talk/2","relations":[{"kind":"unclear"}],"actions":[{"target":"","action":"unknown"},{"target":"n1","action":"create"}]}`, "",
 			func(c *checked) string {
 				if *c.coverage.InputsRead != 1 {
 					return fmt.Sprintf("inputs read %d", *c.coverage.InputsRead)
@@ -1134,14 +1134,14 @@ func TestEachTargetsCheckStandsAlone(t *testing.T) {
 				}
 				return ""
 			}},
-		{"an input answered twice", ship, create + `,{"node":"in/talk/2","actions":[{"target":"","action":"none"}]}`, "",
+		{"an input answered twice", ship, create + `,{"node":"in/talk/2","relations":[{"kind":"unclear"}],"actions":[{"target":"","action":"none"}]}`, "",
 			func(c *checked) string {
 				if in := inputOf(c, "in/talk/2"); in == nil || in.Actions[0].Action != sessionjudge.ActionCreate {
 					return fmt.Sprintf("input %+v", in)
 				}
 				return ""
 			}},
-		{"unknown action", ship, `{"node":"in/talk/2","actions":[{"target":"n1","action":"approve"}]}`, `input in/talk/2 had action "approve", left out`,
+		{"unknown action", ship, `{"node":"in/talk/2","relations":[{"kind":"unclear"}],"actions":[{"target":"n1","action":"approve"}]}`, `input in/talk/2 had action "approve", left out`,
 			func(c *checked) string {
 				if in := inputOf(c, "in/talk/2"); in == nil || in.Actions[0].Action != sessionjudge.ActionUnknown {
 					return fmt.Sprintf("input %+v", in)
@@ -1159,7 +1159,7 @@ func TestEachTargetsCheckStandsAlone(t *testing.T) {
 		nav := navWithInputs()
 		nav.Assign(Assignment{Inputs: []string{"in/talk/2"}})
 		raw := `{"targets":[` + tc.targets + `],"inputs":[` + tc.inputs + `]}`
-		c, err := checkTargets(nav, catalogue(), json.RawMessage(raw))
+		c, err := checkTargets(nav, catalogue{targets: found()}, json.RawMessage(raw))
 		switch {
 		case err != nil:
 			t.Errorf("%s: %v", tc.name, err)
@@ -1213,7 +1213,7 @@ func TestEachAchievementCheckStandsAlone(t *testing.T) {
 				}
 				return ""
 			}},
-		{"a claim with no evidence", `{"target":"t1","basis":"observed_result","criteria":[{"id":"t1.c1","state":"met","cite":["s1"]}],"claims":[{"text":"x","state":"no_evidence","cite":[]}],"note":"","cite":["s1"]}`,
+		{"a claim with no evidence", `{"target":"t1","basis":"observed_result","criteria":[{"id":"t1.c1","state":"met","cite":["s1"]}],"claims":[{"text":"x","state":"no_evidence","cite":[]}],"events":[{"key":"e1","kind":"delivered","artifact":"file","criteria":[],"text":"written","cite":["s1"]}],"note":"","cite":["s1"]}`,
 			"", func(c *checked) string {
 				if a := c.frames[0].(*sessionjudge.Achievement); a.Claims[0].State != sessionjudge.CheckNoEvidence {
 					return "claim " + a.Claims[0].State
@@ -1227,7 +1227,7 @@ func TestEachAchievementCheckStandsAlone(t *testing.T) {
 				}
 				return ""
 			}},
-		{"a citation twice", `{"target":"t1","basis":"observed_result","criteria":[{"id":"t1.c1","state":"met","cite":["s1"]}],"claims":[],"note":"","cite":["s1","s1"]}`,
+		{"a citation twice", `{"target":"t1","basis":"observed_result","criteria":[{"id":"t1.c1","state":"met","cite":["s1"]}],"claims":[],"events":[{"key":"e1","kind":"delivered","artifact":"file","criteria":[],"text":"written","cite":["s1"]}],"note":"","cite":["s1","s1"]}`,
 			"", func(c *checked) string {
 				if a := c.frames[0].(*sessionjudge.Achievement); len(a.Cite) != 1 {
 					return fmt.Sprintf("cites %+v", a.Cite)
@@ -1364,7 +1364,7 @@ func TestEveryAnswerIsDecodedWhole(t *testing.T) {
 		key   string
 		check func(json.RawMessage) error
 	}{
-		{"targets", func(r json.RawMessage) error { _, err := checkTargets(navWithInputs(), nil, r); return err }},
+		{"targets", func(r json.RawMessage) error { _, err := checkTargets(navWithInputs(), catalogue{}, r); return err }},
 		{"achievements", func(r json.RawMessage) error { _, err := checkAchievement(navWithInputs(), nil, r); return err }},
 		{"labels", func(r json.RawMessage) error {
 			_, err := checkEfficiency(navWithInputs(), nil, nil, false, r)

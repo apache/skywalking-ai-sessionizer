@@ -1,0 +1,76 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "targets",
+    "goals"
+  ],
+  "properties": {
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "target",
+          "goal",
+          "cite",
+          "note"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "a target's id, such as t3"
+          },
+          "goal": {
+            "type": "string",
+            "description": "the person's goal it serves, such as P2, or empty for none"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the person's inputs that show it serves that goal"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "goal",
+          "worked",
+          "cite",
+          "note"
+        ],
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "one of the person's goals, such as P2"
+          },
+          "worked": {
+            "type": "boolean",
+            "description": "whether the conversation worked on it at all"
+          },
+          "cite": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "the person's inputs that asked for it"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

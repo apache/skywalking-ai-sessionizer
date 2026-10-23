@@ -27,6 +27,45 @@
   sub-task it started. The talks before the window are context, and nothing after it is shown.
 - A run ends with a final statement: each target's level, basis, criteria met, cost, avoidable cost and
   time, and two scores, achievement and efficiency, with what the judging itself consumed.
+- Each target ends in a class, most severe first: contradicted, reverted, not achieved, partly,
+  achieved, cannot be verified, or cancelled or replaced. It has a record's score and a final score
+  that applies the contradictions and undoing of the deliveries standing at the end; what its rework
+  cost, priced by how its calls were labeled; the person's corrections; and its file operations. asz records a finding where each
+  problem happened, and each goal says its main target, its worst class, the problem that came first
+  and its scores.
+- The targets stage groups targets into goals, the targets that serve one result the person asked for,
+  since a person often works on unrelated things in one session. It says how each input relates to the
+  inputs before it: it starts, goes on with, adjusts or returns to a goal, or is unclear. A goal keeps
+  how what it asked for changed, and its main target when the person's words show one.
+- The achievement stage records each target's deliveries in order: delivered, undone and delivered
+  again, each shown by the reply or the tool step that did it. A contradiction ties evidence that a
+  delivered result is wrong to the delivery it concerns, and names the conclusion or the criteria it
+  disproves.
+- Each criterion says why its state holds, and what the steps it cites show: an excerpt exactly as
+  recorded, the step's status as the record gives it, and the evaluator's reading. When asz changes a
+  state, its own reason is shown and the evaluator's kept apart.
+- Each target has an account of what was done for it: for a question, what was checked, what was ruled
+  out and the answer; for a change to another system, each operation with its request, its response and
+  what confirmed it.
+- A run lists the file operations the record shows: the files workspace change records captured, and
+  the files the requests of editing tools name that no record of their step names, read by each runtime's
+  adapter. A target's account groups its operations by what they were for.
+- The achievement and efficiency stages record findings: a problem anchored at the step where it
+  happened, why, and what would have avoided it. A finding proposes and never changes a score.
+- The achievement stage records each round of rework: an earlier attempt, what showed it had to be
+  done again, the person, a check or a tool, and the redo, in that order, with the cause: the agent's
+  error, a changed requirement, or unknown.
+- `asz judge -reference SRC` compares a run with what a person concluded: a file, an http or https
+  URL, or a source a configured command fetches, such as a ticket. Each source is saved with a
+  manifest before any evaluator runs. A `reference` stage finds the conclusions it holds and how far
+  each can be trusted, and a `divergence` stage says how the conversation compares with each: reached,
+  contradicted, not observed, unknown or not applicable, with rollbacks the source reports and why the
+  work went another way. What contradicts or rolls back a standing delivery applies to the final score.
+- `asz judge -labels FILE` regroups a run by a person's goals, a plain list in their own words, and
+  `-regroup N` regroups a closed run. One evaluator call places each target in the goal it serves, and
+  asz compares the two groupings goal by goal: agree, split, merged, missed, absent or unknown. The
+  regroup is a versioned file beside the run, which is never changed. `-show` follows the person's
+  goals.
 - asz derives a target's level from its criteria, which carry ids. Evidence that does not hold weakens
   the decision: a criterion with no valid citation, or resting only on the agent's own words, is
   unknown, and an avoidable label with no citation is left out.

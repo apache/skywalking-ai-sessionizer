@@ -190,6 +190,49 @@ func TestAPromptLeavesTheKitAsLoaded(t *testing.T) {
 	}
 }
 
+// codex gives a stage's answer schema to a model that takes only strict
+// schemas: every object closed to other keys, and every key it names
+// required. A part an answer leaves out is then given empty, never missing.
+func TestEveryAnswerSchemaIsStrict(t *testing.T) {
+	kit, err := LoadKit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var walk func(path string, node map[string]any)
+	walk = func(path string, node map[string]any) {
+		if props, ok := node["properties"].(map[string]any); ok {
+			if node["additionalProperties"] != false {
+				t.Errorf("%s is open to other keys", path)
+			}
+			required := map[string]bool{}
+			for _, r := range node["required"].([]any) {
+				required[r.(string)] = true
+			}
+			for k, v := range props {
+				if !required[k] {
+					t.Errorf("%s.%s is not required", path, k)
+				}
+				walk(path+"."+k, v.(map[string]any))
+			}
+		}
+		if items, ok := node["items"].(map[string]any); ok {
+			walk(path+"[]", items)
+		}
+	}
+	for _, stage := range []string{sessionjudge.StageTargets, sessionjudge.StageAchievement, sessionjudge.StageSubtasks, sessionjudge.StageEfficiency,
+		sessionjudge.StageReference, sessionjudge.StageDivergence, sessionjudge.StageRegroup} {
+		raw, err := kit.Schema(stage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var root map[string]any
+		if err := json.Unmarshal(raw, &root); err != nil {
+			t.Fatalf("%s: %v", stage, err)
+		}
+		walk(stage, root)
+	}
+}
+
 // The targets found so far are given within the state budget: whole while
 // they fit, then the open ones whole and the rest short, then all short,
 // then only their ids and status.
@@ -217,8 +260,22 @@ func TestTheCatalogueStaysWithinItsBudget(t *testing.T) {
 	if strings.Contains(bare, `"statement"`) || len(lines(bare)) != 3 {
 		t.Fatalf("bare %s", bare)
 	}
-	if got := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, cat, len(short)-1, 0); !strings.Contains(got, bare) {
+	if got := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, catalogue{targets: cat}, len(short)-1, 0); !strings.Contains(got, bare) {
 		t.Fatalf("the prompt's catalogue %s", got)
+	}
+	// The goals found so far come after the targets, each with the last
+	// input a later relation can follow, and within the same budget.
+	goals := []sessionjudge.Goal{{ID: "g1", Statement: "build it", Members: []string{"t1"}, Main: "t1"}, {ID: "g2", Statement: long, Members: []string{"t2", "t3"}}}
+	got := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, catalogue{targets: cat, goals: goals, latest: map[string]string{"g1": "in/4"}}, 0, 0)
+	if !strings.Contains(got, `{"id":"g1","last_input":"in/4","main":"t1","members":["t1"],"statement":"build it"}`) ||
+		!strings.Contains(got, `{"id":"g2","members":["t2","t3"],"statement":"`) {
+		t.Fatalf("the prompt's goals %s", got)
+	}
+	if tiny := goalLines(goals, nil, 120); len(tiny) > 120 || !strings.Contains(tiny, "1 more goals; the targets tool lists them") {
+		t.Fatalf("tiny goals %s", tiny)
+	}
+	if got := pushText(sessionjudge.StageTargets, 1, 3, chunk{}, catalogue{}, 0, 0); !strings.Contains(got, "goals found so far by earlier parts of this run: none yet") {
+		t.Fatalf("no goals yet %s", got)
 	}
 	// Even ids and status alone are bounded: past the budget, a line says
 	// how many more there are.
@@ -236,7 +293,7 @@ func TestTheCatalogueStaysWithinItsBudget(t *testing.T) {
 	for i := range 200 {
 		rows = append(rows, map[string]any{"talk": fmt.Sprintf("talk/%d", i), "label": long})
 	}
-	pushed := pushText(sessionjudge.StageAchievement, 1, 1, chunk{rows: rows}, nil, 0, 8192)
+	pushed := pushText(sessionjudge.StageAchievement, 1, 1, chunk{rows: rows}, catalogue{}, 0, 8192)
 	if len(pushed) > 8192+200 || !strings.Contains(pushed, "more rows, which the talks tool lists") {
 		t.Fatalf("pushed %d bytes:\n%s", len(pushed), pushed)
 	}
@@ -273,6 +330,37 @@ func TestTheLabelingStagesStartFromTheCitedSteps(t *testing.T) {
 		if strings.Contains(text, `"target":"t2"`) {
 			t.Errorf("%s was given the steps of a target it does not judge", stage)
 		}
+	}
+}
+
+// A divergence call is given each target's deliveries by id, marked standing
+// or not, so it names one whose contradiction can change a score; and no
+// other stage is.
+func TestADivergenceCallIsToldWhichDeliveriesStand(t *testing.T) {
+	nav := NewNav(doc(), Compute(doc(), "claude-code/1", nil, nil), nil)
+	targets := []sessionjudge.Target{{ID: "t1", Talks: []string{"talk/1"}}}
+	achievements := []*sessionjudge.Achievement{{Target: "t1", Events: []sessionjudge.Event{
+		{ID: "t1.e1", Kind: "delivered", Artifact: "answer", Cite: []sessionjudge.Cite{{Node: "s1"}}},
+		{ID: "t1.e2", Kind: "delivered_again", Artifact: "answer", Cite: []sessionjudge.Cite{{Node: "s3a"}}},
+		{ID: "t1.e3", Kind: "delivered", Artifact: "file", Cite: []sessionjudge.Cite{{Node: "s3b"}}}}}}
+	text := taskText(sessionjudge.StageDivergence, nav, given{targets: targets, achievements: achievements})
+	for _, want := range []string{`"event":"t1.e1","kind":"delivered","standing":false`, `"event":"t1.e2","kind":"delivered_again","standing":true`,
+		`"event":"t1.e3","kind":"delivered","standing":true`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %s in\n%s", want, text)
+		}
+	}
+	if strings.Contains(taskText("efficiency", nav, given{targets: targets, achievements: achievements}), `"event":"t1.e1"`) {
+		t.Error("efficiency was given the deliveries")
+	}
+	// The targets tool gives them too, so a delivery a bounded prompt left
+	// out can still be named.
+	nav.Assign(Assignment{Catalogue: targets, Events: map[string][]sessionjudge.Event{"t1": achievements[0].Events}})
+	rows, err := nav.targetRows("t1")
+	b, _ := json.Marshal(rows)
+	if err != nil || !strings.Contains(string(b), `"event":"t1.e1","kind":"delivered","replaces":null,"standing":false`) ||
+		!strings.Contains(string(b), `"event":"t1.e3","kind":"delivered","replaces":null,"standing":true`) {
+		t.Fatalf("targets tool %s %v", b, err)
 	}
 }
 

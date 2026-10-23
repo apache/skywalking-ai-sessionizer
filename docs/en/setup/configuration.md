@@ -183,7 +183,10 @@ judge`.
 | `state_bytes` | `16384` | What one call of a targets scan is given of the targets found so far. Past it they are shortened, and the `targets` tool gives the rest whole |
 | `progress` | `30s` | How often a running stage prints what it has consumed so far. `0` prints it only when the stage ends |
 | `concurrency` | `4` | How many calls of one stage run at once. A targets scan always runs one at a time |
-| `plan` | `targets`, `achievement`, `subtasks` and `efficiency`, each by `claude` | The stages `asz judge` runs when it is not told a plan, in order, each with its `stage` and `evaluator`. The first is `targets`. |
+| `plan` | `targets`, `achievement`, `subtasks` and `efficiency`, each by `claude` | The stages `asz judge` runs when it is not told a plan, in order, each with its `stage` and `evaluator`. The first is `targets`. A run given `-reference` adds `reference` and `divergence` when the plan lists neither. |
+| `references.max_bytes` | `1048576` | The bytes a saved copy of a source may take. A larger source is saved cut, and says so |
+| `references.timeout` | `1m` | How long fetching one source may take |
+| `references.fetch` | `[]` | Commands that fetch the sources a login guards, such as tickets: each a `prefix` the source starts with, a `command` given the source as its last argument, which writes the content on its standard output and never sees the conversation, and the `content_type` it writes, `text/plain` when empty |
 
 ## The changes adapter
 

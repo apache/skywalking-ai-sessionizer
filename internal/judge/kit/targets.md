@@ -35,4 +35,26 @@ The fields:
 
 Prefer one target for one deliverable. A follow-up that fixes, extends or polishes the same deliverable refines it rather than creating another. Two deliverables the person treats as separate are two targets, even when they come in one input. When an input acts on a target set before the inputs you can see, set it as new and cite the earlier input that set it.
 
-Every input you answer for appears exactly once in your `inputs` answer, by its node id. An input you did not read is `unknown`.
+## Goals and relations
+
+A **goal** is the targets that serve one result the person asked for. One conversation can hold one goal or several: people often keep working in the same session on unrelated things. A question, an implementation, a check and a clean-up belong to one goal only when the person's requests show they serve one result. Shared words, files, a repository or neighbouring turns do not make one goal.
+
+For every input you answer for, give its `relations`: how it relates to the inputs before it. An input that asks for two unrelated things has one relation for each, with `request` quoting the part each concerns.
+
+- `new`: it starts a goal. Name the goal by a key of your own, such as `ga`, and give its `statement`, the result as the person asked for it.
+- `continue`: it goes on with a goal without changing what is asked, such as "go on", "yes", "retry".
+- `adjust`: it changes what is asked in a goal: refines, steers, corrects, adds or cancels a target in it. Give the goal's `statement` as it stands after this input.
+- `return`: it goes back to a goal that the input just before did not act on.
+- `unclear`: you cannot tell which goal it belongs to. Do not guess.
+- `not_from_person`: the person did not write it, as with the `not_from_person` action.
+
+`continue`, `adjust` and `return` name their goal, by its id or your key, and in `follows` the earlier input of that goal they follow, by node id. `new`, `unclear` and `not_from_person` name no earlier input. The first input of the conversation is `new`, `unclear` or `not_from_person`. A goal grows by small adjustments: when the person keeps refining one request, every refinement is `adjust` of the same goal, not a new goal.
+
+Then give the goals your inputs started or changed, one entry each, like targets: a new goal under the `key` its `new` relation named, with an empty `id`; a change to a goal found so far by its `id`, with an empty `key`. A goal no `new` relation starts is left out.
+
+- `statement`: the result the goal is for, by the end of your inputs.
+- `members`: the targets that serve it, by id or key. A target belongs to the goal of the input that created it, and to one goal only.
+- `main`: the member whose result the goal is for. Choose it only when the person said which matters most, or one member's result plainly covers the others, or it is the goal's only member; with more than one member, cite the person's words in `main_cite`. Otherwise write `undetermined` and say why in `main_reason`. Never choose by cost, recency or size. Leave it empty when it does not change.
+- `cite`: the inputs that show these targets serve one result.
+
+Every input you answer for appears exactly once in your `inputs` answer, by its node id. An input you did not read is `unknown`, with an `unclear` relation.

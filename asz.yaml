@@ -413,3 +413,18 @@ judge:
       evaluator: claude
     - stage: efficiency
       evaluator: claude
+  # The sources asz judge -reference compares a run with: a ticket, an
+  # incident report, a person's conclusions. A file and a plain http or https
+  # URL need nothing here. A source that needs a login goes through a command
+  # given the source as its last argument, which writes the content on its
+  # standard output and never sees the conversation, for example:
+  #   fetch:
+  #     - prefix: https://example.atlassian.net/browse/
+  #       command: [jira-export, --markdown]
+  #       content_type: text/markdown
+  references:
+    # A saved copy is cut at this many bytes, and says so.
+    max_bytes: 1048576
+    # How long one fetch may take.
+    timeout: 1m
+    fetch: []

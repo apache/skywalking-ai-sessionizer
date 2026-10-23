@@ -23,6 +23,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -47,7 +48,11 @@ func write(t *testing.T) ([]byte, string) {
 		Talks: []string{"talk/main/1"}, Cite: []Cite{{Node: "msg/1"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Write(&Input{Node: "msg/1", Talk: "talk/main/1", Actions: []Action{{Target: "t1", Action: ActionCreate}}}); err != nil {
+	if err := w.Write(&Input{Node: "msg/1", Talk: "talk/main/1", Actions: []Action{{Target: "t1", Action: ActionCreate}},
+		Relations: []Relation{{Kind: RelationNew, Goal: "g1", Request: "fix <login>", Statement: "fix the login"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(goal()); err != nil {
 		t.Fatal(err)
 	}
 	data, digest, err := w.Close()
@@ -55,6 +60,11 @@ func write(t *testing.T) ([]byte, string) {
 		t.Fatal(err)
 	}
 	return data, digest
+}
+
+func goal() *Goal {
+	return &Goal{ID: "g1", Statement: "fix the login", Members: []string{"t1"}, Main: "t1", MainReason: "the only member",
+		Evolution: []Evolution{{Input: "msg/1", Statement: "fix the login"}}, Cite: []Cite{{Node: "msg/1"}}}
 }
 
 // A file reads back as it was written, with its text unescaped.
@@ -72,6 +82,15 @@ func TestAStageFileReadsBack(t *testing.T) {
 	}
 	if f.Header.Schema != Schema || f.Header.T != FrameHeader || f.Targets[0].T != FrameTarget {
 		t.Fatalf("frame types not set: %+v", f.Header)
+	}
+	// A goal, and the relations of an input, read back whole.
+	want := goal()
+	want.T = FrameGoal
+	if len(f.Goals) != 1 || !reflect.DeepEqual(f.Goals[0], *want) {
+		t.Fatalf("goals %+v", f.Goals)
+	}
+	if r := f.Inputs[0].Relations; len(r) != 1 || r[0] != (Relation{Kind: RelationNew, Goal: "g1", Request: "fix <login>", Statement: "fix the login"}) {
+		t.Fatalf("relations %+v", r)
 	}
 }
 
@@ -131,6 +150,8 @@ func TestAHeaderIsFirstAndOnlyFirst(t *testing.T) {
 func TestWhatNoWriterWritesIsRefused(t *testing.T) {
 	data, _ := write(t)
 	lines := strings.SplitAfter(string(data), "\n")
+	// The commit is the last line, before the empty string after it.
+	commit := len(lines) - 2
 	cases := map[string]struct{ body, err string }{
 		// A header alone has no frame to count, so only the missing commit
 		// says the file was cut short.
@@ -138,7 +159,7 @@ func TestWhatNoWriterWritesIsRefused(t *testing.T) {
 		// A second commit, closing the first, is content after the commit.
 		"two commits": {rehash(string(data)), "content after the commit"},
 		// The counts name exactly the frames there are, no more.
-		"extra count": {lines[0] + lines[1] + lines[2] + strings.Replace(lines[3], `"counts":{`, `"counts":{"label":0,`, 1), "counts"},
+		"extra count": {strings.Join(lines[:commit], "") + strings.Replace(lines[commit], `"counts":{`, `"counts":{"label":0,`, 1), "counts"},
 		// A line cut off after the commit is a file cut short too.
 		"no newline": {string(data) + `{"t":"target","id":"t2"}`, "last line has no newline"},
 		"empty":      {"", "empty file"},
@@ -295,6 +316,223 @@ func TestASubtaskStageReadsBack(t *testing.T) {
 	}
 	if len(f.Subtasks) != 1 || f.Subtasks[0].Report != ReportAccurate || f.Commit.Counts["subtask"] != 1 {
 		t.Fatalf("read back %+v counts %v", f.Subtasks, f.Commit.Counts)
+	}
+}
+
+// An achievement reads back with the history of its result: each event,
+// each contradiction tied to the delivery it disproves, each round of
+// rework, what each criterion's steps show, the account and the findings.
+func TestAnAchievementReadsBackWithItsEvents(t *testing.T) {
+	h := header()
+	h.Stage = StageAchievement
+	w, err := NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Achievement{T: FrameAchievement, Target: "t1", Level: LevelAchieved, Basis: BasisObserved, Cite: []Cite{{Node: "tool/3"}},
+		Events: []Event{{ID: "t1.e1", Kind: EventDelivered, Artifact: ArtifactRevision, Text: "committed", Cite: []Cite{{Node: "tool/1"}}},
+			{ID: "t1.e2", Kind: EventUndone, Artifact: ArtifactRevision, Text: "reverted", Cite: []Cite{{Node: "tool/2"}}}},
+		Contradictions: []Contradiction{{Event: "t1.e1", Criteria: []string{"t1.c2"}, Text: "the test failed", Cite: []Cite{{Node: "tool/2"}}},
+			{Event: "t1.e1", Conclusion: true, Text: "the cause was another", Cite: []Cite{{Node: "msg/2"}}}},
+		Rework: []Rework{{ID: "t1.r1", Attempt: []Cite{{Node: "tool/1"}}, Trigger: TriggerPerson, TriggerCite: []Cite{{Node: "msg/2"}},
+			Cause: ReworkAgentError, Redo: []Cite{{Node: "tool/3"}}, From: "msg/2", To: "tool/3", Finished: true, Note: "fixed again"}},
+		Criteria: []Check{{ID: "t1.c1", Text: "it builds", State: CheckUnknown, Cite: []Cite{{Node: "tool/3"}}, Reason: "nothing it cites shows it",
+			GivenReason: "the build passed", Observations: []Observation{{Node: "tool/3", Ref: &Ref{Seq: 2, Row: 7}, Excerpt: "ok", Status: ObservedReturned,
+				Interpretation: "the build passed"}}}},
+		Account: &Account{Answer: &Answer{Asked: Said{Text: "why", Cite: []Cite{{Node: "msg/1"}}}, Checked: []Tried{{What: "the log", Found: "a timeout",
+			Limits: "one run", Cite: []Cite{{Node: "tool/1"}}}}, Answered: Said{Text: "the clock", Cite: []Cite{{Node: "reply/1"}}}},
+			Files: []FileGroup{{Area: "internal/judge", Category: "code", Summary: "goals", Operations: []string{"o1", "o3"}}},
+			Remote: []Remote{{System: "GitHub", Operation: "merge", Via: "gh", Request: Said{Text: "merge 87", Cite: []Cite{{Node: "tool/4"}}},
+				Confirmed: &Said{Text: "merged", Cite: []Cite{{Node: "tool/5"}}}}}},
+		Findings: []Finding{{At: "tool/1", Ref: &Ref{Seq: 2, Row: 3}, Problem: "it guessed the cause", Explanation: "it read no log",
+			Improvement: "read the log first", Cite: []Cite{{Node: "msg/2"}}}}}
+	if err := w.Write(&want); err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Read(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Achievements) != 1 || !reflect.DeepEqual(f.Achievements[0], want) {
+		t.Fatalf("read back %+v", f.Achievements)
+	}
+}
+
+// A close reads back with how each target ended and how each goal did.
+func TestACloseReadsBackWithItsReport(t *testing.T) {
+	h := header()
+	h.Stage = StageClose
+	half, one, zero := 0.5, 1.0, 0.0
+	h.Summary = &Summary{Targets: 1, Score: &Score{Achievement: &half, Final: &zero, Judged: 1},
+		Goals: []GoalOutcome{{Goal: "g1", Main: "t1", Worst: ClassContradicted, ScoreMain: &zero, ScoreMean: &zero,
+			First: &Finding{Target: "t1", Source: SourceASZ, At: "tool/1", Problem: "criterion t1.c2 was not met"}}},
+		UnassignedOperations: []string{"o3"}}
+	w, err := NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Outcome{T: FrameOutcome, Target: "t1", Statement: "fix it", Status: TargetClosed, Level: LevelPartly, Class: ClassContradicted,
+		Standing: []string{"t1.e3"}, ScoreRecord: &half, ScoreFinal: &zero, Corrections: []string{"msg/2"},
+		Rework:     []ReworkCost{{Work: WorkRepair, Cause: CauseMain, Cost: Amount{Money: &one}}, {Work: WorkNotReviewed, Cost: Amount{Money: &one}}},
+		Operations: []OperationShare{{ID: "o1"}, {ID: "o2", Share: &half}}}
+	if err := w.Write(&want); err != nil {
+		t.Fatal(err)
+	}
+	asz := Finding{T: FrameFinding, Target: "t1", Source: SourceASZ, At: "tool/1", Problem: "criterion t1.c2 was not met", Cite: []Cite{{Node: "tool/1"}}}
+	if err := w.Write(&asz); err != nil {
+		t.Fatal(err)
+	}
+	two := 2
+	op := Operation{T: FrameOperation, ID: "o1", Step: "tool/1", Record: "c1", Workspace: "/w", Path: "a.go", Operation: "modify",
+		Source: SourceChangeRecord, Added: &two, Ref: &Ref{Seq: 3, Row: 4}}
+	if err := w.Write(&op); err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Read(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Outcomes) != 1 || !reflect.DeepEqual(f.Outcomes[0], want) || len(f.Findings) != 1 || !reflect.DeepEqual(f.Findings[0], asz) ||
+		len(f.Operations) != 1 || !reflect.DeepEqual(f.Operations[0], op) {
+		t.Fatalf("read back %+v %+v %+v", f.Outcomes, f.Findings, f.Operations)
+	}
+	if !reflect.DeepEqual(f.Header.Summary, h.Summary) {
+		t.Fatalf("summary %+v", f.Header.Summary)
+	}
+}
+
+// A regroup reads back with its label file, the person's goals, where each
+// target went and how the two groupings compared; it is no stage of a run,
+// yet its stage is known.
+func TestARegroupReadsBack(t *testing.T) {
+	h := header()
+	h.Stage = StageRegroup
+	h.Labels = &LabelFile{File: "labels.yaml", SHA256: strings.Repeat("b", 64), Version: 3}
+	w, err := NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal := LabelGoal{T: FrameLabelGoal, ID: "P1", Statement: "build and test it", Members: []string{"t1", "t2"}, Main: "t1", Judge: []string{"g1", "g2"},
+		Class: CompareSplit, Worked: true, Note: "both serve it", Cite: []Cite{{Node: "msg/2"}}}
+	missed := LabelGoal{T: FrameLabelGoal, ID: "P2", Statement: "ship it", Members: []string{}, Judge: []string{}, Class: CompareMissed, Worked: true,
+		Cite: []Cite{{Node: "msg/3"}}}
+	placed := Placement{T: FramePlacement, Target: "t1", Goal: "P1", Note: "asked first", Cite: []Cite{{Node: "msg/1"}}}
+	unknown := Placement{T: FramePlacement, Target: "t3", Unknown: true, Cite: []Cite{}}
+	agree := Agreement{T: FrameAgreement, Goals: 2, Classes: map[string]int{CompareSplit: 1, CompareMissed: 1}, Extra: []string{"t4"}, Unknown: []string{"t3"}}
+	text := LabelText{T: FrameLabelText, From: 1, Text: "goals:\n  - build and test it\n  - ship it\n"}
+	for _, f := range []any{&text, &goal, &missed, &placed, &unknown, &agree} {
+		if err := w.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _, err := w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Read(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.Header.Labels, h.Labels) || !reflect.DeepEqual(f.LabelGoals, []LabelGoal{goal, missed}) ||
+		!reflect.DeepEqual(f.Placements, []Placement{placed, unknown}) || !reflect.DeepEqual(f.Agreements, []Agreement{agree}) ||
+		!reflect.DeepEqual(f.LabelTexts, []LabelText{text}) {
+		t.Fatalf("read back %+v %+v %+v %+v %+v", f.Header.Labels, f.LabelGoals, f.Placements, f.Agreements, f.LabelTexts)
+	}
+	// A stage no run takes and no regroup is is refused.
+	h.Stage = "relabel"
+	if _, err := NewWriter(h); err == nil {
+		t.Fatal("an unknown stage was written")
+	}
+}
+
+// The reference and divergence stages read back with their sources, their
+// conclusions, and how the conversation compared.
+func TestTheReferenceStagesReadBack(t *testing.T) {
+	h := header()
+	h.Stage = StageReference
+	w, err := NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := Source{T: FrameSource, ID: "R1", Source: "https://x/OPS-1", Captured: "2026-10-23T09:00:00Z", Method: MethodHTTP, Outcome: SourceSaved,
+		ContentType: "text/html", Bytes: 120, SHA256: strings.Repeat("d", 64), Cut: true, Revision: `"v2"`, Published: "Wed, 21 Oct 2026 07:28:00 GMT",
+		Author: "ops", Text: &Extracted{Bytes: 40, SHA256: strings.Repeat("e", 64)}, Lines: 3}
+	text := SourceText{T: FrameSourceText, Source: "R1", From: 1, Text: "a\nb\nc\n"}
+	k := Conclusion{T: FrameConclusion, ID: "r1", Source: "R1", Kind: ConclusionFinal, Statement: "b", Expectation: ExpectRequired, Scope: []string{"msg/1"},
+		Context: []SourceCite{{Source: "R1", Lines: [2]int{2, 2}, Note: "the cause"}}, BuildsOn: []string{"r0"}, Support: SupportSaved, Author: "ops",
+		Revision: "0.4.0", Environment: "prod", Conflicts: []string{"r2"}, Ambiguity: "which node", NotCovered: "the fix", Unbound: []string{"msg/9"}}
+	for _, f := range []any{&src, &text, &k} {
+		if err := w.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _, err := w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Read(bytes.NewReader(data))
+	if err != nil || !reflect.DeepEqual(f.Sources, []Source{src}) || !reflect.DeepEqual(f.SourceTexts, []SourceText{text}) || !reflect.DeepEqual(f.Conclusions, []Conclusion{k}) {
+		t.Fatalf("reference read back %v %+v %+v %+v", err, f.Sources, f.SourceTexts, f.Conclusions)
+	}
+	h.Stage = StageDivergence
+	w, err = NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Divergence{T: FrameDivergence, Conclusion: "r1", Verdict: VerdictContradicted, Target: "t1", Event: "t1.e2", Criteria: []string{"t1.c1"},
+		Note: "n", Cite: []Cite{{Node: "msg/2"}}}
+	rb := Rollback{T: FrameRollback, Conclusion: "r1", Target: "t1", Event: "t1.e2", Criteria: []string{"t1.c2"}, Note: "rolled back", Cite: []Cite{{Node: "tool/1"}}}
+	fd := Finding{T: FrameFinding, Target: "t1", Source: StageDivergence, Conclusion: "r1", Cause: CauseNoClarification, Asserted: true, At: "msg/1",
+		Problem: "it never asked", Cite: []Cite{}}
+	for _, f := range []any{&d, &rb, &fd} {
+		if err := w.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _, err = w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err = Read(bytes.NewReader(data))
+	if err != nil || !reflect.DeepEqual(f.Divergences, []Divergence{d}) || !reflect.DeepEqual(f.Rollbacks, []Rollback{rb}) || !reflect.DeepEqual(f.Findings, []Finding{fd}) {
+		t.Fatalf("divergence read back %v %+v %+v %+v", err, f.Divergences, f.Rollbacks, f.Findings)
+	}
+}
+
+// The efficiency stage's findings are frames of their own beside its labels,
+// each naming its target.
+func TestAFindingFrameReadsBack(t *testing.T) {
+	h := header()
+	h.Stage = StageEfficiency
+	w, err := NewWriter(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Finding{T: FrameFinding, Target: "t1", At: "tool/2", Problem: "the build ran twice", Improvement: "reuse the first", Cite: []Cite{{Node: "tool/2"}}}
+	if err := w.Write(&Label{Target: "t1", Talk: "talk/1", Label: WorkRepeated, Cite: []Cite{{Node: "tool/2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Write(&want); err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := w.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := Read(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Labels) != 1 || len(f.Findings) != 1 || !reflect.DeepEqual(f.Findings[0], want) || f.Commit.Counts["finding"] != 1 {
+		t.Fatalf("read back %+v %+v counts %v", f.Labels, f.Findings, f.Commit.Counts)
 	}
 }
 

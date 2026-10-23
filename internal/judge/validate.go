@@ -32,8 +32,14 @@ import (
 // checked is what a stage's answer became once asz checked it: the frames it
 // writes, and what was taken out or filled in, which makes the stage partial.
 type checked struct {
-	frames   []any
-	targets  []sessionjudge.Target
+	frames  []any
+	targets []sessionjudge.Target
+	goals   []sessionjudge.Goal
+	// relations are the settled relations of every input answered so far,
+	// by node, which a later part of a targets scan follows.
+	relations map[string][]sessionjudge.Relation
+	// latest is the last input related to each goal, by goal id.
+	latest   map[string]string
 	coverage sessionjudge.Coverage
 	problems []string
 }
@@ -103,7 +109,7 @@ var (
 // keys. Criteria are numbered as they are added and never renumbered, and
 // nothing is removed: a criterion the person dropped is marked dropped. One
 // chunk with no catalogue is the whole stage in one call.
-func checkTargets(nav *Nav, catalogue []sessionjudge.Target, raw json.RawMessage) (*checked, error) {
+func checkTargets(nav *Nav, cat catalogue, raw json.RawMessage) (*checked, error) {
 	var a struct {
 		Targets []struct {
 			ID           string   `json:"id"`
@@ -117,9 +123,11 @@ func checkTargets(nav *Nav, catalogue []sessionjudge.Target, raw json.RawMessage
 			Cite         []string `json:"cite"`
 		} `json:"targets"`
 		Inputs []struct {
-			Node    string                `json:"node"`
-			Actions []sessionjudge.Action `json:"actions"`
+			Node      string                  `json:"node"`
+			Actions   []sessionjudge.Action   `json:"actions"`
+			Relations []sessionjudge.Relation `json:"relations"`
 		} `json:"inputs"`
+		Goals []goalEntry `json:"goals"`
 	}
 	if err := decodeAnswer(raw, "targets", &a); err != nil {
 		return nil, err
@@ -132,8 +140,8 @@ func checkTargets(nav *Nav, catalogue []sessionjudge.Target, raw json.RawMessage
 	}
 	mine := set(assigned)
 	known := map[string]int{}
-	merged := make([]sessionjudge.Target, len(catalogue))
-	for i, t := range catalogue {
+	merged := make([]sessionjudge.Target, len(cat.targets))
+	for i, t := range cat.targets {
 		t.Criteria, t.Talks, t.Cite = slices.Clone(t.Criteria), slices.Clone(t.Talks), slices.Clone(t.Cite)
 		merged[i] = t
 		known[t.ID] = i
@@ -322,16 +330,26 @@ func checkTargets(nav *Nav, catalogue []sessionjudge.Target, raw json.RawMessage
 	}
 	missing := 0
 	for _, node := range assigned {
-		acts, ok := byNode[node]
-		if !ok {
+		if _, ok := byNode[node]; !ok {
 			missing++
-			acts = []sessionjudge.Action{{Action: sessionjudge.ActionUnknown}}
+			byNode[node] = []sessionjudge.Action{{Action: sessionjudge.ActionUnknown}}
 		}
+	}
+	// The relations of each input's first answer, as with its actions. An
+	// answer for another call's input is never read.
+	rels := map[string][]sessionjudge.Relation{}
+	for _, in := range a.Inputs {
+		if _, seen := rels[in.Node]; !seen {
+			rels[in.Node] = in.Relations
+		}
+	}
+	checkGoals(c, nav, cat, a.Goals, rels, assigned, byNode, merged, resolve)
+	for _, node := range assigned {
 		talk := nav.TalkOf(node)
 		if talk == "" {
 			talk = node
 		}
-		c.frames = append(c.frames, &sessionjudge.Input{Node: node, Talk: talk, Actions: acts})
+		c.frames = append(c.frames, &sessionjudge.Input{Node: node, Talk: talk, Actions: byNode[node], Relations: c.relations[node]})
 	}
 	c.targets = merged
 	if missing > 0 {
@@ -344,7 +362,7 @@ func checkTargets(nav *Nav, catalogue []sessionjudge.Target, raw json.RawMessage
 		c.problem("%d citations of nodes that do not exist were left out", dropped)
 	}
 	total, nTargets := len(assigned), len(merged)
-	c.coverage = sessionjudge.Coverage{Inputs: &total, InputsRead: &read, Targets: &nTargets}
+	c.coverage.Inputs, c.coverage.InputsRead, c.coverage.Targets = &total, &read, &nTargets
 	return c, nil
 }
 
@@ -375,9 +393,7 @@ func shows(nav *Nav, cites []sessionjudge.Cite, people bool, asked map[string]bo
 		}
 		switch n.Kind {
 		case model.KindTool:
-			// A result came when a result part was read, even an empty one,
-			// as a LangChain tool can return; the view then sets its state.
-			if n.ResultState != "" || n.Result != "" || n.ResultBytes > 0 || (n.Failed != nil && *n.Failed) {
+			if toolReturned(n) {
 				return true
 			}
 		case model.KindErrorAPI, model.KindControlInterrupt:
@@ -392,6 +408,13 @@ func shows(nav *Nav, cites []sessionjudge.Cite, people bool, asked map[string]bo
 		}
 	}
 	return false
+}
+
+// toolReturned says whether a step is a tool step whose result came: a
+// result part was read, even an empty one, as a LangChain tool can return;
+// the view then sets its state.
+func toolReturned(n *sessionview.Node) bool {
+	return n.Kind == model.KindTool && (n.ResultState != "" || n.Result != "" || n.ResultBytes > 0 || (n.Failed != nil && *n.Failed))
 }
 
 // laterInput says whether a citation names the person's own reaction to the
@@ -537,18 +560,25 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 			Target   string `json:"target"`
 			Basis    string `json:"basis"`
 			Criteria []struct {
-				ID        string   `json:"id"`
-				State     string   `json:"state"`
-				Delivered bool     `json:"delivered"`
-				Cite      []string `json:"cite"`
+				ID           string             `json:"id"`
+				State        string             `json:"state"`
+				Delivered    bool               `json:"delivered"`
+				Reason       string             `json:"reason"`
+				Observations []observationEntry `json:"observations"`
+				Cite         []string           `json:"cite"`
 			} `json:"criteria"`
 			Claims []struct {
 				Text  string   `json:"text"`
 				State string   `json:"state"`
 				Cite  []string `json:"cite"`
 			} `json:"claims"`
-			Note string   `json:"note"`
-			Cite []string `json:"cite"`
+			Events         []eventEntry         `json:"events"`
+			Contradictions []contradictionEntry `json:"contradictions"`
+			Rework         []reworkEntry        `json:"rework"`
+			Account        accountEntry         `json:"account"`
+			Findings       []findingEntry       `json:"findings"`
+			Note           string               `json:"note"`
+			Cite           []string             `json:"cite"`
 		} `json:"achievements"`
 	}
 	if err := decodeAnswer(raw, "achievements", &a); err != nil {
@@ -577,6 +607,10 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 		given := map[string][]sessionjudge.Cite{}
 		state := map[string]string{}
 		delivered := map[string]bool{}
+		// Why each state holds: the evaluator's reason, or asz's when asz
+		// changed the state, the evaluator's then kept apart.
+		why, theirs := map[string]string{}, map[string]string{}
+		seen := map[string][]observationEntry{}
 		for _, k := range x.Criteria {
 			if _, ok := state[k.ID]; ok {
 				continue
@@ -585,11 +619,13 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 				c.problem("target %s answered %q, which is none of its criteria", x.Target, k.ID)
 				continue
 			}
+			why[k.ID] = k.Reason
 			if !slices.Contains(criterionStates, k.State) {
 				c.problem("criterion %s in state %q was read as unknown", k.ID, k.State)
 				k.State = sessionjudge.CheckUnknown
+				why[k.ID], theirs[k.ID] = "the state given is not one asz knows", k.Reason
 			}
-			state[k.ID], given[k.ID], delivered[k.ID] = k.State, c.cites(nav, k.Cite, &dropped), k.Delivered
+			state[k.ID], given[k.ID], delivered[k.ID], seen[k.ID] = k.State, c.cites(nav, k.Cite, &dropped), k.Delivered, k.Observations
 		}
 		all := slices.Clone(f.Cite)
 		for _, cs := range given {
@@ -628,6 +664,7 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 				f.Basis = sessionjudge.BasisClaimOnly
 			}
 		}
+		unseen := 0
 		for _, cr := range t.Criteria {
 			// A criterion the person dropped is kept on the target and
 			// never judged.
@@ -639,6 +676,7 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 			if !ok {
 				missing++
 				st = sessionjudge.CheckUnknown
+				why[cr.ID] = "the evaluator did not answer it"
 			}
 			// A criterion is met or not met when what it cites shows it.
 			// A reply shows an answer was delivered: for a criterion marked
@@ -657,8 +695,13 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 			if (st == sessionjudge.CheckMet || st == sessionjudge.CheckNotMet) && !shown {
 				weakened++
 				st = sessionjudge.CheckUnknown
+				why[cr.ID], theirs[cr.ID] = "nothing it cites shows it", why[cr.ID]
 			}
-			f.Criteria = append(f.Criteria, sessionjudge.Check{ID: cr.ID, Text: cr.Text, State: st, Cite: cites})
+			f.Criteria = append(f.Criteria, sessionjudge.Check{ID: cr.ID, Text: cr.Text, State: st, Cite: cites,
+				Reason: why[cr.ID], GivenReason: theirs[cr.ID], Observations: checkObservations(nav, cites, seen[cr.ID], &unseen)})
+		}
+		if unseen > 0 {
+			c.problem("%d observations of target %s that are not of a step it cites, whose excerpt the step does not hold, or given twice, were left out", unseen, x.Target)
 		}
 		for _, k := range x.Claims {
 			if !slices.Contains(claimStates, k.State) {
@@ -674,12 +717,26 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 			}
 			f.Claims = append(f.Claims, sessionjudge.Check{Text: k.Text, State: st, Cite: cites})
 		}
-		f.Level = levelOf(f.Criteria)
-		// A target whose outcome the record contradicts somewhere is not
-		// achieved, whatever its criteria say.
-		if f.Level == sessionjudge.LevelAchieved && slices.ContainsFunc(f.Claims, func(k sessionjudge.Check) bool { return k.State == sessionjudge.CheckContradicted }) {
-			f.Level = sessionjudge.LevelPartly
+		f.Events, f.Contradictions = checkEvents(c, nav, t, x.Events, x.Contradictions, asked, &dropped)
+		f.Rework = checkRework(c, nav, t, x.Rework, &dropped)
+		f.Account = checkAccount(c, nav, t, x.Account, asked, &dropped)
+		// A finding is of the target's work, or of work before the judged
+		// window that it went on from.
+		talks := set(t.Talks)
+		var unanchored int
+		f.Findings, unanchored = checkFindings(c, nav, x.Findings, func(main string) bool { return talks[main] || nav.beforeWindow(main) }, &dropped)
+		if unanchored > 0 {
+			c.problem("%d findings of target %s not anchored at a step of its work were left out", unanchored, x.Target)
+		}
+		f.Level = levelWith(f.Criteria, f.Claims)
+		if f.Level != levelOf(f.Criteria) {
 			c.problem("target %s has a contradicted claim, so it is partly rather than achieved", x.Target)
+		}
+		// A result met in whole or in part was delivered somewhere. With no
+		// delivery kept, nothing a source reports of it can reach its score.
+		// On a run of 2026-10-23, an evaluator gave a code change none.
+		if (f.Level == sessionjudge.LevelAchieved || f.Level == sessionjudge.LevelPartly) && len(f.Events) == 0 {
+			c.problem("target %s has criteria met but no delivery, so nothing a source reports of it can change its score", x.Target)
 		}
 		c.frames = append(c.frames, f)
 	}
@@ -698,6 +755,17 @@ func checkAchievement(nav *Nav, targets []sessionjudge.Target, raw json.RawMessa
 	total, done := len(targets), len(judged)
 	c.coverage = sessionjudge.Coverage{Targets: &total, TargetsJudged: &done}
 	return c, nil
+}
+
+// levelWith is a target's level from its criteria and its claims: a target
+// whose outcome the record contradicts somewhere is not achieved, whatever
+// its criteria say.
+func levelWith(criteria, claims []sessionjudge.Check) string {
+	level := levelOf(criteria)
+	if level == sessionjudge.LevelAchieved && slices.ContainsFunc(claims, func(k sessionjudge.Check) bool { return k.State == sessionjudge.CheckContradicted }) {
+		return sessionjudge.LevelPartly
+	}
+	return level
 }
 
 // levelOf derives a target's level from the states of its criteria:
@@ -744,6 +812,7 @@ func checkEfficiency(nav *Nav, targets []sessionjudge.Target, misled map[string]
 			Note    string   `json:"note"`
 			Cite    []string `json:"cite"`
 		} `json:"labels"`
+		Findings []findingEntry `json:"findings"`
 	}
 	if err := decodeAnswer(raw, "labels", &a); err != nil {
 		return nil, err
@@ -820,6 +889,19 @@ func checkEfficiency(nav *Nav, targets []sessionjudge.Target, misled map[string]
 			Subtask: x.Subtask, Note: x.Note, Cite: cites}
 		labeled[k] = append(labeled[k], lb)
 		c.frames = append(c.frames, lb)
+	}
+	// A finding is of work this call labels, for one of its targets.
+	unanchored := 0
+	for _, x := range a.Findings {
+		kept, left := checkFindings(c, nav, []findingEntry{x}, func(main string) bool { return talksOf[x.Target][main] }, &dropped)
+		unanchored += left
+		for i := range kept {
+			kept[i].Target = x.Target
+			c.frames = append(c.frames, &kept[i])
+		}
+	}
+	if unanchored > 0 {
+		c.problem("%d findings not anchored at a step of a talk this call labels, for its target, were left out", unanchored)
 	}
 	if dropped > 0 {
 		c.problem("%d citations of nodes that do not exist were left out", dropped)
