@@ -16,40 +16,40 @@
 # under the License.
 
 # Written by the homebrew skill in apache/skywalking-ai-sessionizer from the
-# voted binary packages of 0.5.0.
+# voted binary packages of 0.6.0.
 class Asz < Formula
   desc "Conversation-level observability for long-lived AI agents"
   homepage "https://github.com/apache/skywalking-ai-sessionizer"
   license "Apache-2.0"
 
-  # Each package comes from the GitHub release of v0.5.0, which carries
+  # Each package comes from the GitHub release of v0.6.0, which carries
   # the voted files. Its URL keeps working after a newer version replaces
   # this one on the download site. The mirror, archive.apache.org, keeps
   # every version too, and Homebrew tries it only when GitHub fails.
   # Homebrew reads the version from the release tag in each URL.
   on_macos do
     on_arm do
-      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-darwin-arm64.tgz"
-      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-darwin-arm64.tgz"
-      sha256 "6bbcebdbe73186c1dd09171cd311d9c3d66634ddbfc33f545979cb0b0fb6150d"
+      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-darwin-arm64.tgz"
+      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-darwin-arm64.tgz"
+      sha256 "118d0a506ee11a2e1ca277aed92c72bc95c1fb39a93f830ef49e1a50aab7d9d3"
     end
     on_intel do
-      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-darwin-amd64.tgz"
-      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-darwin-amd64.tgz"
-      sha256 "1cabfb8ca4321999583e956d0d3a233ed00f591d8a77ea8fd03f75e243ac3033"
+      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-darwin-amd64.tgz"
+      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-darwin-amd64.tgz"
+      sha256 "cd4ce7e71511b1b45352972849b3ef1ecff3e0f41ec5e98fa83dbf5ebf495abd"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-linux-arm64.tgz"
-      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-linux-arm64.tgz"
-      sha256 "a673adff0819e00be280122ee4c5a8520cd860e1fbfcf409d127241b3615130a"
+      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-linux-arm64.tgz"
+      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-linux-arm64.tgz"
+      sha256 "c05130360c5dc2b492561dbf161f849d65930a2ba4c56aa0c47b7b8451cded14"
     end
     on_intel do
-      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-linux-amd64.tgz"
-      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.5.0/apache-skywalking-ai-sessionizer-0.5.0-bin-linux-amd64.tgz"
-      sha256 "2c906aed003cd3733e4afc92240df2dfbfb928f233d09759f5558809dc5d9187"
+      url "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-linux-amd64.tgz"
+      mirror "https://archive.apache.org/dist/skywalking/ai-sessionizer/0.6.0/apache-skywalking-ai-sessionizer-0.6.0-bin-linux-amd64.tgz"
+      sha256 "6a382ca35704224e3b194559d1605411c0759c7cf8a2a7d3a84af96f6b1c8d3f"
     end
   end
 
