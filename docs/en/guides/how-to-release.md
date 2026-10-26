@@ -30,8 +30,8 @@ A GitHub release alone cannot provide that approval. See the
   to a full GitHub release.
 - **The container image** is a convenience. The promotion of the GitHub release starts CI's image
   job. A tag push and a default manual CI run publish no image.
-- **Homebrew, apt, Scoop and winget** are conveniences too. Each is written after the release,
-  from its voted packages.
+- **Homebrew, apt and PyPI** are conveniences too. Each is written after the release, from its
+  voted packages.
 
 0.3.0 is the first version to go through this process. 0.1.0 and 0.2.0 were published on GitHub
 before it, as full GitHub releases carrying binary packages that CI built. No vote was held for
@@ -54,16 +54,12 @@ convenience made from its voted files.
 | The Homebrew tap, `Formula/` on main in this repository | `brew install` | [Homebrew](#homebrew), the `homebrew` skill, a pull request | after Publish |
 | The apt repository, `static/apt` in apache/skywalking-website | `apt install` | [apt](#apt), the `apt` skill, a pull request | at least one hour after the move |
 | PyPI, `apache-skywalking-asz-langchain` | `pip install` | [PyPI](#pypi), the `pypi` skill, by hand | after Publish |
-| A Scoop bucket | `scoop install` | [Scoop](#scoop), by hand | after Publish, once the PMC agrees |
-| microsoft/winget-pkgs | `winget install` | [winget](#winget), by hand | after Publish, once the PMC agrees |
 
-**Before the first submission to each package manager, the PMC agrees to it on
-dev@skywalking.apache.org.** A manifest distributes the project under the ASF's name in a new
-place: the winget manifests name The Apache Software Foundation as their publisher. The ASF allows
-other distribution platforms only for binaries that follow its release, licensing, branding and
-trademark policies. The Homebrew tap is this repository, and the apt repository is the website, so
-neither needs a new repository. A Scoop bucket under github.com/apache would be one, which the PMC
-asks INFRA to create.
+**A package manager the project is not in yet needs the PMC's agreement first, on
+dev@skywalking.apache.org.** It would distribute the project under the ASF's name in a new place,
+and the ASF allows other distribution platforms only for binaries that follow its release,
+licensing, branding and trademark policies. The Homebrew tap is this repository, and the apt
+repository is the website, so neither needs a new repository.
 
 The skills are in `.claude/skills/`, and run with Claude Code. Each checks what it wrote before it
 publishes it. The `homebrew` and `apt` skills change nothing but their pull request. The `pypi`
@@ -83,7 +79,6 @@ skill uploads to PyPI, which cannot be undone. Their files are what they write f
 | [Homebrew](#homebrew) | the release manager, with the `homebrew` skill | a pull request to `Formula/` on main in this repository |
 | [apt](#apt) | the release manager, with the `apt` skill | a pull request to `static/apt` in apache/skywalking-website |
 | [PyPI](#pypi) | the release manager, with the `pypi` skill | the LangChain plugin, built from the voted source package and uploaded |
-| [Scoop](#scoop) and [winget](#winget) | the release manager, once the PMC agrees to each | the manifests, submitted by hand |
 | [Later: remove old versions](#later-remove-old-versions) | a PMC member | the release directory without the versions the new one replaces |
 
 Between step 1 and step 2, the release manager waits for CI by hand. Nothing in the script waits.
@@ -1064,205 +1059,6 @@ wheel into a fresh environment and runs `asz-langchain status`, and uploads both
 `twine upload`. Then it checks that PyPI holds the same two files and that they install. The wheel
 carries `LICENSE` and `NOTICE`, which `pyproject.toml` names.
 
-## Scoop
-
-A Scoop bucket holds one manifest, for the newest version. It downloads the Windows packages from
-dlcdn.apache.org, the content delivery network in front of the download site, and reads their
-checksums from downloads.apache.org itself, never from a mirror. A bucket holds only its newest
-manifest, so its URL always names a version the download site still holds, as long as the bucket
-moves on before the previous version is removed. The Apache packages in Scoop's main bucket do the
-same.
-
-The manifest names the sha512 of each Windows package. Read them from downloads.apache.org:
-
-```sh
-for a in amd64 arm64; do
-  curl -fsSL "https://downloads.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-$a.zip.sha512"
-done
-```
-
-`skywalking-ai-sessionizer.json`, with `$VERSION` and the two hashes filled in:
-
-```json
-{
-    "version": "$VERSION",
-    "description": "Conversation-level observability for long-lived AI agents",
-    "homepage": "https://github.com/apache/skywalking-ai-sessionizer",
-    "license": "Apache-2.0",
-    "architecture": {
-        "64bit": {
-            "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-amd64.zip",
-            "hash": "sha512:<sha512 of the windows-amd64 package>"
-        },
-        "arm64": {
-            "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-arm64.zip",
-            "hash": "sha512:<sha512 of the windows-arm64 package>"
-        }
-    },
-    "bin": [
-        "asz.exe",
-        "asz-changes.exe"
-    ],
-    "notes": [
-        "asz-changes, the binary of the Claude Code plugin, is on the path. Install the plugin itself into Claude Code with the two commands below, with VERSION replaced by the version asz version prints.",
-        "claude plugin marketplace add \"https://github.com/apache/skywalking-ai-sessionizer.git#vVERSION\" --sparse .claude-plugin plugins/claude-code/plugin",
-        "claude plugin install file-changes@skywalking-ai-sessionizer",
-        "See https://github.com/apache/skywalking-ai-sessionizer/blob/main/docs/en/setup/claude-code-plugin.md"
-    ],
-    "checkver": {
-        "url": "https://downloads.apache.org/skywalking/ai-sessionizer/?C=N;O=D;V=1",
-        "regex": "href=\"(\\d+\\.\\d+\\.\\d+)/\""
-    },
-    "autoupdate": {
-        "architecture": {
-            "64bit": {
-                "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$version/apache-skywalking-ai-sessionizer-$version-bin-windows-amd64.zip"
-            },
-            "arm64": {
-                "url": "https://dlcdn.apache.org/skywalking/ai-sessionizer/$version/apache-skywalking-ai-sessionizer-$version-bin-windows-arm64.zip"
-            }
-        },
-        "hash": {
-            "url": "https://downloads.apache.org/skywalking/ai-sessionizer/$version/$basename.sha512"
-        }
-    }
-}
-```
-
-The notes name the plugin's tag as `VERSION` for the reader to fill in, because `autoupdate` moves
-the manifest to a new version without writing its notes again. `$version` and `$basename` in
-`autoupdate` are Scoop's own, and stay as they are.
-
-Test it on Windows, in PowerShell. If dlcdn.apache.org answers 404 while downloads.apache.org has
-the file, it is serving a 404 it cached earlier: wait and try again.
-
-```powershell
-scoop install .\skywalking-ai-sessionizer.json
-asz version
-scoop uninstall skywalking-ai-sessionizer
-```
-
-Commit the file under `bucket/` in the bucket repository: one the project keeps, or
-ScoopInstaller/Main by pull request, which has its own rules for what it takes. From the bucket
-repository, Scoop's own scripts check the version lookup and the hashes, and `checkver.ps1` with
-`-Update` moves the manifest to a later version:
-
-```powershell
-& "$(scoop prefix scoop)\bin\checkver.ps1" -App skywalking-ai-sessionizer -Dir .\bucket
-& "$(scoop prefix scoop)\bin\checkhashes.ps1" -App skywalking-ai-sessionizer -Dir .\bucket
-```
-
-## winget
-
-microsoft/winget-pkgs keeps the manifests of every version, and `winget install --version` can still
-ask for an old one. So the manifests download from the GitHub release, whose URL never moves.
-winget runs in scripts and on shared CI machines, the heavy use archive.apache.org stops. The GitHub
-release holds the voted files, which [3. Publish](#3-publish) checked before it promoted it.
-
-The manifests name the sha256 of each Windows package, in capitals:
-
-```sh
-for a in amd64 arm64; do
-  curl -fsSL "https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-$a.zip" | shasum -a 256 | tr a-f A-F
-done
-```
-
-Three files go in `manifests/a/Apache/SkyWalkingAISessionizer/$VERSION/` of a fork of
-microsoft/winget-pkgs, with `$VERSION` and the two hashes filled in. Schema 1.12.0 is what
-winget-pkgs' own `Tools/YamlCreate.ps1` writes.
-
-`Apache.SkyWalkingAISessionizer.yaml`:
-
-```yaml
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
-
-PackageIdentifier: Apache.SkyWalkingAISessionizer
-PackageVersion: $VERSION
-DefaultLocale: en-US
-ManifestType: version
-ManifestVersion: 1.12.0
-```
-
-`Apache.SkyWalkingAISessionizer.installer.yaml`:
-
-```yaml
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
-
-PackageIdentifier: Apache.SkyWalkingAISessionizer
-PackageVersion: $VERSION
-InstallerType: zip
-NestedInstallerType: portable
-NestedInstallerFiles:
-- RelativeFilePath: asz.exe
-  PortableCommandAlias: asz
-- RelativeFilePath: asz-changes.exe
-  PortableCommandAlias: asz-changes
-Commands:
-- asz
-- asz-changes
-Installers:
-- Architecture: x64
-  InstallerUrl: https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-amd64.zip
-  InstallerSha256: <SHA256 OF THE WINDOWS-AMD64 PACKAGE>
-- Architecture: arm64
-  InstallerUrl: https://github.com/apache/skywalking-ai-sessionizer/releases/download/v$VERSION/apache-skywalking-ai-sessionizer-$VERSION-bin-windows-arm64.zip
-  InstallerSha256: <SHA256 OF THE WINDOWS-ARM64 PACKAGE>
-ManifestType: installer
-ManifestVersion: 1.12.0
-```
-
-`Apache.SkyWalkingAISessionizer.locale.en-US.yaml`:
-
-```yaml
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
-
-PackageIdentifier: Apache.SkyWalkingAISessionizer
-PackageVersion: $VERSION
-PackageLocale: en-US
-Publisher: The Apache Software Foundation
-PublisherUrl: https://www.apache.org/
-PublisherSupportUrl: https://github.com/apache/skywalking/issues
-Author: Apache SkyWalking
-PackageName: Apache SkyWalking AI Sessionizer
-PackageUrl: https://github.com/apache/skywalking-ai-sessionizer
-License: Apache-2.0
-LicenseUrl: https://www.apache.org/licenses/LICENSE-2.0
-ShortDescription: Conversation-level observability for long-lived AI agents.
-Description: Apache SkyWalking AI Sessionizer, asz, assembles fragmented agent telemetry, such as transcripts, subagent streams and workflow journals, into one durable conversation structure.
-Moniker: asz
-Tags:
-- ai-agents
-- claude-code
-- observability
-- skywalking
-ReleaseNotesUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/changes/changes.md
-InstallationNotes: asz-changes, the binary of the Claude Code plugin, is added as a command. Install the plugin itself into Claude Code with claude plugin marketplace add "https://github.com/apache/skywalking-ai-sessionizer.git#v$VERSION" --sparse .claude-plugin plugins/claude-code/plugin, then claude plugin install file-changes@skywalking-ai-sessionizer. See https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/en/setup/claude-code-plugin.md
-Documentations:
-- DocumentLabel: Documentation
-  DocumentUrl: https://github.com/apache/skywalking-ai-sessionizer/blob/v$VERSION/docs/README.md
-ManifestType: defaultLocale
-ManifestVersion: 1.12.0
-```
-
-Validate and test them on Windows, from the winget-pkgs checkout:
-
-```powershell
-$dir = ".\manifests\a\Apache\SkyWalkingAISessionizer\$VERSION"
-winget validate --manifest $dir
-winget settings --enable LocalManifestFiles   # once, as administrator
-winget install --manifest $dir
-asz version
-winget uninstall --id Apache.SkyWalkingAISessionizer
-```
-
-`.\Tools\SandboxTest.ps1 $dir` runs the same install in Windows Sandbox, so nothing stays on your
-machine. Then open a pull request to microsoft/winget-pkgs that adds only this directory. Its
-pipeline validates the manifests and downloads both packages. The directory of an older version
-stays, and keeps working, because it downloads from that version's GitHub release.
-
-When a package manager accepts the project for the first time, add the command that installs from
-it to [Install](../setup/install.md).
-
 ## Later: remove old versions
 
 The release directory should hold only the versions users should choose, and archive.apache.org
@@ -1284,9 +1080,6 @@ these:
    through the mirrors, from the files that would be removed.
 3. archive.apache.org holds every file of each version to remove. The website and apt send users
    there once the version is gone.
-4. If a Scoop bucket carries the project, it names the new version. Its manifest downloads the
-   version it names from the download site, and that URL stops working when the version is
-   removed.
 
 The move is not repeated, and the steps after it run again. For each version older than
 `$VERSION`, it runs:

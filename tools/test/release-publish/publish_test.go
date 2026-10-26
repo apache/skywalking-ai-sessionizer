@@ -264,7 +264,7 @@ func TestPublishMovesTheCandidateAndPromotesThePrerelease(t *testing.T) {
 	// The steps it prints are the guide's sections after Publish, in order.
 	steps := output[strings.Index(output, "Next, in this order:"):]
 	at := -1
-	for _, want := range []string{"skywalking-website", "announce.txt", "homebrew skill", "apt skill", "pypi skill", "Scoop and winget"} {
+	for _, want := range []string{"skywalking-website", "announce.txt", "homebrew skill", "apt skill", "pypi skill"} {
 		i := strings.Index(steps, want)
 		if i < 0 || i < at {
 			t.Fatalf("the next steps do not name %q after the step before it:\n%s", want, steps)
