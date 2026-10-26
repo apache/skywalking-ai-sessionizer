@@ -1169,6 +1169,25 @@ if [ "$cmd" = publish ]; then
   fi
 
   step "Promote the GitHub release $tag"
+  # unwrap_lines joins the lines of each paragraph and list item into one.
+  # changes.md wraps its lines, and a Markdown page reads a wrapped line as
+  # part of its paragraph. A GitHub release draws every line break as a
+  # break: the 0.6.0 release broke its sentences at 662 places. A blank line
+  # or a new list item starts a new line. A heading, a table row, a quote,
+  # an HTML line, a rule and a fenced code block are kept as they are, and so
+  # is a hard break, a line that ends in two spaces or a backslash.
+  unwrap_lines() {
+    perl -ne '
+      sub flush { print $p if defined $p; undef $p }
+      if ($fence) { print; $fence = 0 if /^\s*(```|~~~)/; next }
+      if (/^\s*(```|~~~)/) { flush(); print; $fence = 1; next }
+      if (/^\s*$/ || /^\s*(#{1,6}\s|>|\||<)/ || /^\s*([-*_=])(\s*\1){2,}\s*$/) { flush(); print; next }
+      if (defined $p && !/^\s*([-*+]|\d+[.)])\s/ && $p !~ /(  |\\)\n\z/) {
+        $p =~ s/\s+\z//; s/^\s+//; $p .= " " . $_; next
+      }
+      flush(); $p = $_;
+      END { flush() }'
+  }
   # release_text prints the text of the GitHub release: the tag's
   # changes.md without its heading, because the release has its own title,
   # then where to get the version. It is built from the tag each time and
@@ -1184,7 +1203,8 @@ if [ "$cmd" = publish ]; then
       BASE="$github/blob/$tag/$changes_dir/" perl -pe '
         sub absolute { my $u = shift; $u = "changes.md$u" if $u =~ /^#/; $u = $ENV{BASE} . $u;
           1 while $u =~ s{/(?!\.\./)[^/]+/\.\./}{/}; $u =~ s{/\./}{/}g; return $u }
-        s{\]\((?![A-Za-z][A-Za-z0-9+.-]*:)([^)\s]+)\)}{"](" . absolute($1) . ")"}ge'
+        s{\]\((?![A-Za-z][A-Za-z0-9+.-]*:)([^)\s]+)\)}{"](" . absolute($1) . ")"}ge' |
+      unwrap_lines
     cat <<TEXT
 
 #### Where to get it

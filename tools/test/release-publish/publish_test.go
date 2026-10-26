@@ -649,7 +649,7 @@ if tool == "git":
     elif args == ["cat-file", "-e", tag + ":plugins/langchain/pyproject.toml"]:
         sys.exit(1 if (root / "no-plugin").exists() else 0)
     elif args == ["show", tag + ":docs/en/changes/changes.md"]:
-        print("# Changes in 0.3.0\n\nFixture release. See [Install](../setup/install.md#verify-a-package), [this](#fixes) and [KEYS](https://downloads.apache.org/skywalking/KEYS).")
+        print("# Changes in 0.3.0\n\nFixture release. See [Install](../setup/install.md#verify-a-package), [this](#fixes) and\n[KEYS](https://downloads.apache.org/skywalking/KEYS).\n\n## Fixes\n\n- An item that goes on\n  past its first line.\n  - A nested item that goes on\n    past its first line.\n\n  A second paragraph of the item\n  that goes on too.\n- A line that ends in a hard break  \n  keeps it.\n\n\x60\x60\x60sh\nkept as\nit is\n\x60\x60\x60\n\n| a | b |\n| --- | --- |")
     else:
         raise AssertionError("unexpected git command: " + repr(args))
     sys.exit(0)
@@ -775,6 +775,12 @@ elif action == "edit":
     assert "[Install](https://github.com/apache/skywalking-ai-sessionizer/blob/v0.3.0/docs/en/setup/install.md#verify-a-package)" in notes, notes
     assert "[this](https://github.com/apache/skywalking-ai-sessionizer/blob/v0.3.0/docs/en/changes/changes.md#fixes)" in notes, notes
     assert "[KEYS](https://downloads.apache.org/skywalking/KEYS)" in notes, notes
+    # A release draws every line break as a break, so each paragraph and
+    # list item is one line. A hard break, a code block and a table stay.
+    assert "\n- An item that goes on past its first line.\n  - A nested item that goes on past its first line.\n\n  A second paragraph of the item that goes on too.\n" in notes, notes
+    assert "and [KEYS](https://downloads.apache.org/skywalking/KEYS).\n\n## Fixes\n\n" in notes, notes
+    assert "\n- A line that ends in a hard break  \n  keeps it.\n" in notes, notes
+    assert "\n\x60\x60\x60sh\nkept as\nit is\n\x60\x60\x60\n\n| a | b |\n| --- | --- |\n" in notes, notes
     latest = [arg for arg in rest if arg.startswith("--latest=")]
     assert len(latest) == 1 and latest[0] in ("--latest=true", "--latest=false"), rest
     record("promote")

@@ -843,8 +843,10 @@ It does these steps in order.
    ```
 
    The text is the tag's `docs/en/changes/changes.md` without its heading, followed by "Where to
-   get it" below. If this step stops, the move is still done. Run `publish` again: it skips the move
-   and resumes here. A release promoted already is not promoted again.
+   get it" below. Each paragraph and list item of the changelog becomes one line, because a GitHub
+   release draws every line break as a break. If this step stops, the move is still done. Run
+   `publish` again: it skips the move and resumes here. A release promoted already is not promoted
+   again.
 8. **Write the files for the later steps** into `dist/$VERSION/`:
    - `announce.txt`, the announcement mail.
    - `website.txt`, the release for `data/projects.yml` on the website. It is marked the latest

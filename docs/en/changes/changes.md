@@ -105,3 +105,8 @@
   and none is planned. `publish` no longer prints them as a next step, and `--remove-old` no longer
   waits for a Scoop bucket. A package manager the project is not in yet still needs the PMC's
   agreement first.
+- The text `publish` writes for the GitHub release has each paragraph and list item of the
+  changelog on one line. A GitHub release draws every line break as a break, so the wrapped lines
+  of `changes.md` broke sentences in the middle: 662 times on the 0.6.0 release, and 351, 147 and 88
+  times on 0.3.0, 0.4.0 and 0.5.0. The four release pages were written again the same way, and
+  only their line breaks changed.
