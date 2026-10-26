@@ -72,12 +72,12 @@
 #       newer than every full release, and no for a patch of an older line.
 #       --latest and --not-latest give the answer without asking. Then write the announcement
 #       and the website entries into dist/VERSION, and print what is left
-#       to do: the website, the announcement, the homebrew, apt and pypi
-#       skills, and Scoop and winget. A run after the move skips the move
-#       and runs every later step again. --remove-old removes older versions
-#       from the release directory, and archive.apache.org keeps them. It is
-#       refused in the run that moves: run publish again with it once the
-#       website links the older versions from the archive.
+#       to do: the website, the announcement, and the homebrew, apt and pypi
+#       skills. A run after the move skips the move and runs every later
+#       step again. --remove-old removes older versions from the release
+#       directory, and archive.apache.org keeps them. It is refused in the
+#       run that moves: run publish again with it once the website links
+#       the older versions from the archive.
 #
 # When VERSION is not given, candidate and publish offer the newest version
 # with a page docs/en/changes/changes-X.Y.Z.md. prepare gives a version that
@@ -1068,13 +1068,12 @@ if [ "$cmd" = publish ]; then
     files="$dev_files"
   fi
   # The downloads page links the older versions in the release directory
-  # until the website pull request points them at the archive, the apt
+  # until the website pull request points them at the archive, and the apt
   # repository on the website sends apt to the mirrors for the previous
-  # version until it lists this one, and a Scoop bucket, where there is one,
-  # names the previous version until it moves on. Removing them in the run
-  # that moves would break them, so removal is a later run.
+  # version until it lists this one. Removing them in the run that moves
+  # would break them, so removal is a later run.
   if [ "$remove_old" = true ] && [ "$moved" = false ]; then
-    fail "--remove-old runs only after the move, in a later run. Run publish without it now. Once the website pull requests that point the older versions at archive.apache.org and add $version to the apt repository have merged, archive.apache.org holds the older versions, and any Scoop bucket names $version, run: tools/release/release.sh publish $version --remove-old"
+    fail "--remove-old runs only after the move, in a later run. Run publish without it now. Once the website pull requests that point the older versions at archive.apache.org and add $version to the apt repository have merged, and archive.apache.org holds the older versions, run: tools/release/release.sh publish $version --remove-old"
   fi
   for p in $packages; do
     for f in "$p" "$p.asc" "$p.sha512"; do has_line "$files" "$f" || fail "$from has no $f"; done
@@ -1357,12 +1356,10 @@ YAML
     say "     undone, and the skill builds it from the voted source package."
     n=$((n + 1))
   fi
-  say "  $n. Once the PMC has agreed on dev@skywalking.apache.org to each, move Scoop and winget"
-  say "     to $version, as docs/en/guides/how-to-release.md says."
   if [ -n "$old" ] && [ "$remove_old" = false ]; then
-    say "  $((n + 1)). Later, once the website pull requests that point$old at archive.apache.org"
-    say "     and add $version to the apt repository have merged, archive.apache.org holds"
-    say "     the older versions, and any Scoop bucket names $version:"
+    say "  $n. Later, once the website pull requests that point$old at archive.apache.org"
+    say "     and add $version to the apt repository have merged, and archive.apache.org"
+    say "     holds the older versions:"
     say "     tools/release/release.sh publish $version --remove-old"
   fi
   exit 0

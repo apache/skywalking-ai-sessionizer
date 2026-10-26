@@ -98,3 +98,10 @@
   agent's transcript the final fragment is often missing; in one conversation, 698 of 1,309 child-agent
   calls, whose cache reads alone added 36% to the conversation's.
 - The asz.view document carries each model call's `model`, read from the same record as its usage.
+
+## Release
+
+- The release guide no longer has steps for Scoop and winget. No version was submitted to either,
+  and none is planned. `publish` no longer prints them as a next step, and `--remove-old` no longer
+  waits for a Scoop bucket. A package manager the project is not in yet still needs the PMC's
+  agreement first.
