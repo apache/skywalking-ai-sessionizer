@@ -110,3 +110,23 @@
   of `changes.md` broke sentences in the middle: 662 times on the 0.6.0 release, and 351, 147 and 88
   times on 0.3.0, 0.4.0 and 0.5.0. The four release pages were written again the same way, and
   only their line breaks changed.
+
+## Pull from another asz
+
+- `asz pull` copies conversations from another asz, to judge and read them here. Each copy is a
+  snapshot of the conversation's head, checked against the digests its rounds carry, that never
+  changes and expires after `remote_snapshot_ttl`. A pull reuses what the newest valid snapshot here
+  holds and fetches the rest, as one archive in ranges that resume where a connection broke. No
+  production deployment has been measured: speed, compression and memory at production size are
+  unavailable. See [Pull from Another asz](../setup/remote-pull.md).
+- `asz pull -list` lists what each remote holds, newest activity first, with filters, pages, and the
+  head of the newest copy here.
+- `asz view` and `asz server` answer pulls when `remote_server.tokens_file` is set and their root is not
+  itself a snapshot: every request on the address then needs a token, the page too, and TLS is served
+  from `remote_server.tls`. `asz token create` makes a token. Removing a token's line revokes it
+  within five seconds.
+- `asz judge -remote-conversation REMOTE/ID[:TAG]` judges a copy, and `-pull` pulls its head first. A
+  run lives in the copy it judged and expires with it.
+- `asz view` lists the pulled conversations beside the root's own, each title starting with
+  `[remote, NAME]`.
+- The wire format is [asz.pull](../formats/asz-pull.md), version 1.

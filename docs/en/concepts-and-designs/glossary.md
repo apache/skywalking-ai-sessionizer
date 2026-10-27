@@ -174,7 +174,7 @@ Write-once and read-only: temporary file, fsync, `chmod 0444`, rename. Never app
 **Skeleton** — what takes a landed file's place when retention removes it: a `.sk` file that keeps
 every record and part in its place, with every identifier the index reads, and no content (see
 [Skeletons](../formats/session-data.md#skeletons)). The index, and so the chain, are the same with
-it as with the landed file. Local and never sent.
+it as with the landed file. Never sent to a receiver; a pull copies it with the snapshot it is in.
 *Not:* a summary of the file, and not a landed file: its text is gone from the root.
 
 **Delta** — one file of landed records, covering a contiguous run of a source. A source becomes many
@@ -239,6 +239,45 @@ digest.
 
 **Navigation** — the read-only tools an evaluator reads a conversation through, from an overview down
 to one record, every answer bounded and pinned to the run's head.
+
+## Pulling
+
+**Remote** — an asz server this machine pulls conversations from, named in its configuration. Its name
+names its copies here and stays the same when its address changes.
+*Not:* an OpenTelemetry receiver asz pushes to, and not a source asz collects from.
+
+**Snapshot** — one conversation's evidence as of one head, frozen: its rounds through that head, its
+landed files and skeletons through the head's last sequence, and every published entry of its
+session's provider store. A server freezes one for a pull, and a pull makes one here. Its evidence
+never changes, nothing collects into it, and it expires. The judge runs in it expire with it.
+*Not:* a round, and not a backup of a root: it holds one conversation as of one head.
+
+**Tag** — a snapshot's name: the time it was published, to the nanosecond, such as
+`20261025T103200.123456789Z`. It is never used twice in a conversation's history.
+*Not:* a round number, and not a version of the data.
+
+**Freeze** — what a server does for a pull. It lists the head's evidence, links or copies each file
+into a private directory with its size and digest checked, checks the source held still, and publishes
+the result as a snapshot.
+*Not:* a lock on the source. Collection never waits for it.
+
+**Manifest** — the list of a snapshot's files, each with its kind, size and SHA-256, and the head they
+hold. Its digest is taken over a canonical form of that list.
+*Not:* the evidence itself, and not a round.
+
+**Lease** — a reader's hold on a snapshot. Here, a snapshot is not removed while a lease on it is
+open. On a server, a lease is bound to the token that took it, and does not keep its snapshot from
+expiring: only a request at work on it does.
+*Not:* a lock. It keeps no other reader out.
+
+**Archive** — the files of a snapshot that one pull asks for, as one gzip-compressed tar, fetched in
+ranges and checked against its digest.
+*Not:* a snapshot, and not a complete export of a conversation. It holds only the files the pulling
+machine lacks.
+
+**Token** — what a client sends with every request to a server that serves pulls. The server keeps
+only its SHA-256.
+*Not:* a lease. A token says who asks. A lease says which snapshot is held.
 
 ## Adapters
 

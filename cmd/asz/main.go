@@ -51,13 +51,15 @@ Usage:
   asz repack [-config FILE] DEST [SESSION]  re-cut landed files into DEST under the configured budget and build its chains
   asz conversation [-config FILE] [-json|-yaml] ID   fold a conversation's rounds and show the structure, or print the asz.view document
   asz server [-config FILE] [ADDR]     collect and serve in one process (default 127.0.0.1:8787)
-  asz view [-config FILE] [ADDR]       serve an existing storage root as a page; reads only
+  asz view [-config FILE] [ADDR]       serve an existing storage root as a page; changes no collected data
   asz push [-config FILE]              send a storage root to an OpenTelemetry logs receiver, in one pass
   asz measure [-config FILE] [-pricing FILE] [-json] ID   what a conversation's model calls consumed, per talk; calls no model
   asz judge ID ...                     judge a conversation: its targets, whether each was achieved, what the work was; see asz judge
   asz glossary                         what the runtime calls the things the model names
   asz verify [-config FILE] [SESSION]  check landed data and round chains are intact
   asz scenario build|check FILE ...    build a session from a scenario, or check one; see asz scenario
+  asz token create [-file FILE] NAME   make a token for an asz server that serves pulls
+  asz pull [-config FILE] REMOTE/CONVERSATION ...   copy conversations from asz servers to judge here; see asz pull
   asz version                          print the version
 
 Flags:
@@ -108,6 +110,12 @@ func main() {
 	if cmd == "judge" {
 		os.Exit(cmdJudge(os.Args[2:]))
 	}
+	if cmd == "token" {
+		os.Exit(cmdToken(os.Args[2:]))
+	}
+	if cmd == "pull" {
+		os.Exit(cmdPull(os.Args[2:]))
+	}
 	if cmd == "version" {
 		fmt.Printf("asz %s (%s %s/%s)\n", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 		return
@@ -146,6 +154,11 @@ func main() {
 		fatal(err)
 	}
 
+	if err := admitCommand(cmd, cfg); err != nil {
+		fatal(err)
+	}
+	defer releaseAdmission()
+
 	var run func(*config.Config, config.Adapter, bool) error
 	switch cmd {
 	case "sources":
@@ -180,7 +193,7 @@ func main() {
 	// The receiver adapter listens beside whatever else the command does.
 	// Only the two that write for as long as the process runs host it:
 	// collect and server. A receiver lands what it is sent, and asz view
-	// only reads.
+	// changes no collected data.
 	var local []config.Adapter
 	for _, ad := range cfg.Adapters {
 		if !ad.Enabled {
@@ -257,6 +270,42 @@ func main() {
 	}
 }
 
+// admitCommand applies what a command may do with its storage root, before
+// anything else touches it: a command that writes refuses pulled copies,
+// which keep the remote's session ids and sequence numbers, and a reader of
+// a pulled snapshot is admitted and holds a lease until it ends. asz server
+// listens before its first pass and goes on serving when a pass fails, and a
+// receiver starts before any pass, so the root lock's own refusal would come
+// too late for them. Identities given on the command line are held to the
+// rule every name follows before any path is made from them.
+func admitCommand(cmd string, cfg *config.Config) error {
+	root, err := cfg.ResolvedRoot()
+	if err != nil {
+		return err
+	}
+	switch cmd {
+	case "sources", "collect", "server", "parse", "push", "repack":
+		return refuseCopyRoot(cmd, root)
+	case "index", "verify":
+		if err := checkIdentity("session", arg(0), true); err != nil {
+			return err
+		}
+	case "show":
+		if err := checkIdentity("session", arg(0), true); err != nil {
+			return err
+		}
+	case "conversation":
+		if err := checkIdentity("conversation", arg(0), false); err != nil {
+			return err
+		}
+	case "view":
+	default:
+		return nil
+	}
+	_, err = admitRoot(cmd, cfg, root)
+	return err
+}
+
 // startLangSmith opens a langsmith-ingest receiver and leaves it listening for
 // the life of the process. What it accepts waits in the inbox; the pipeline's
 // next pass converts it, which is why this only starts the listener.
@@ -268,7 +317,20 @@ func startLangSmith(cfg *config.Config, ad config.Adapter) error {
 	if err := os.MkdirAll(zoneRoot, 0o755); err != nil {
 		return err
 	}
+	// A receiver can start on an empty root, and a pull admits only an empty
+	// directory. Checking for copies and making the inbox in one hold of the
+	// root lock means exactly one of the two proceeds: a pull that comes after
+	// finds the inbox, and one that came before left its marker.
+	lock, err := storage.LockRootWait(zoneRoot, rootWait)
+	if err != nil {
+		return fmt.Errorf("%s: %w", ad.Name, err)
+	}
 	r := &langsmith.Receiver{Zone: storage.NewZone(zoneRoot), Listen: ad.Listen, Token: ad.Token}
+	err = os.MkdirAll(langsmith.NewInbox(r.Zone).Dir(), 0o755)
+	_ = lock.Unlock()
+	if err != nil {
+		return err
+	}
 	if err := r.Start(); err != nil {
 		return err
 	}
@@ -414,7 +476,7 @@ func cmdIndex(cfg *config.Config, _ config.Adapter, _ bool) error {
 
 	want := arg(0)
 
-	sessions, err := os.ReadDir(zoneRoot)
+	sessions, err := sessionDirs(zoneRoot)
 	if err != nil {
 		return err
 	}
@@ -423,11 +485,7 @@ func cmdIndex(cfg *config.Config, _ config.Adapter, _ bool) error {
 	var totE, totB int
 	var detail *index.Index
 	var detailID string
-	for _, d := range sessions {
-		if !d.IsDir() {
-			continue
-		}
-		id := d.Name()
+	for _, id := range sessions {
 		if want != "" && id != want {
 			continue
 		}
@@ -581,21 +639,24 @@ func cmdVerify(cfg *config.Config, _ config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
+	if admitted != nil {
+		return verifySnapshot(admitted)
+	}
 	z := storage.NewZone(zoneRoot)
 
 	want := arg(0)
-	entries, err := os.ReadDir(zoneRoot)
+	ids, err := sessionDirs(zoneRoot)
 	if err != nil {
 		return err
 	}
 
 	var sessions, streams, records, problems, relanded, tooLarge, unbuilt, removing int
 	removed := map[string]int{}
-	for _, d := range entries {
-		if !d.IsDir() || (want != "" && d.Name() != want) {
+	for _, id := range ids {
+		if want != "" && id != want {
 			continue
 		}
-		rep, err := verify.Session(z, d.Name())
+		rep, err := verify.Session(z, id)
 		if err != nil {
 			return err
 		}
@@ -957,5 +1018,6 @@ func humanBytes(n int64) string {
 
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "%s: %v\n", filepath.Base(os.Args[0]), err)
+	releaseAdmission()
 	os.Exit(1)
 }

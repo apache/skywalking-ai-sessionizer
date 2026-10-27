@@ -46,7 +46,7 @@ import (
 func (s *Server) apiView(w http.ResponseWriter, id string, hide []string) {
 	c, err := s.Load(id)
 	if err != nil {
-		fail(w, err, http.StatusNotFound)
+		fail(w, err, loadStatus(err))
 		return
 	}
 	v, err := c.BuildWithheld(hide)
@@ -112,7 +112,10 @@ func (c *Conversation) BuildWithheld(names []string) (*sessionview.Conversation,
 // build makes the document, with every record carrying one of the named
 // flags withheld as it is read.
 func (c *Conversation) build(hide []string) (*sessionview.Conversation, error) {
-	o := c.overview(hide)
+	o, err := c.overview(hide)
+	if err != nil {
+		return nil, err
+	}
 	v := &sessionview.Conversation{
 		Format: sessionview.Format, Version: sessionview.Version,
 		Conversation: c.ID, Sessions: c.sessions(),
@@ -151,7 +154,10 @@ func (c *Conversation) build(hide []string) (*sessionview.Conversation, error) {
 	for _, n := range loose {
 		refs = append(refs, c.refsUnder(n)...)
 	}
-	recs := c.records(refs, hide)
+	recs, err := c.recordsChecked(refs, hide)
+	if err != nil && c.snap != nil {
+		return nil, err
+	}
 	hidden := hiddenSet(hide)
 	withheld := withheldCounts(c.named, hide)
 	rows := map[string]talkRow{}
@@ -199,7 +205,9 @@ func (c *Conversation) build(hide []string) (*sessionview.Conversation, error) {
 
 	// The workspace changes, joined to their steps by tool-use id, and
 	// each step told which records are its own.
-	v.WorkspaceChanges = c.workspaceChanges(landed, recs)
+	if v.WorkspaceChanges, err = c.workspaceChanges(landed, recs); err != nil {
+		return nil, err
+	}
 	byStep := map[string][]string{}
 	for _, wc := range v.WorkspaceChanges {
 		if wc.Step != "" {
@@ -211,7 +219,9 @@ func (c *Conversation) build(hide []string) (*sessionview.Conversation, error) {
 	v.Summary.Changes = len(v.WorkspaceChanges)
 
 	// The tool execution records, joined to their steps the same way.
-	v.ToolExecutions = c.toolExecutions(landed, recs)
+	if v.ToolExecutions, err = c.toolExecutions(landed, recs); err != nil {
+		return nil, err
+	}
 	execsByStep := map[string][]string{}
 	for _, te := range v.ToolExecutions {
 		if te.Step != "" {
@@ -260,7 +270,7 @@ func (c *Conversation) foldParts() (*parts, error) {
 	if c.shared != nil {
 		return c.shared, nil
 	}
-	landed, err := storage.LandedFiles(c.zone, c.Session)
+	landed, err := c.landedFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -269,6 +279,11 @@ func (c *Conversation) foldParts() (*parts, error) {
 		return nil, err
 	}
 	rounds, roundFiles, problems, state := c.rounds(digests)
+	// A snapshot's chain was checked whole when it was folded; a check of
+	// it that does not pass now is damage, never a warning in a document.
+	if c.snap != nil && (state != sessionview.StateVerified || len(problems) > 0) {
+		return nil, c.snap.evidenceError("the chain does not verify: %s", strings.Join(problems, "; "))
+	}
 	if len(c.problems) > 0 {
 		problems = append(append([]string{}, c.problems...), problems...)
 		if state == sessionview.StateVerified {
@@ -328,9 +343,20 @@ func (c *Conversation) sessions() []string {
 func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.Round, files []sessionview.File, problems []string, state string) {
 	problems = []string{}
 	state = sessionview.StateVerified
-	rep, err := verify.Chain(c.zone, c.ID, digests)
-	if err != nil {
-		return nil, nil, append(problems, err.Error()), sessionview.StateIncomplete
+	var rep *verify.ChainReport
+	if c.snap != nil {
+		// A snapshot's rounds are the ones its load checked, verified as
+		// they were read, never read again.
+		read := make([]verify.ReadRound, len(c.checked))
+		for i, r := range c.checked {
+			read[i] = r.ReadRound
+		}
+		rep = verify.Rounds(c.ID, read, digests)
+	} else {
+		var err error
+		if rep, err = verify.Chain(c.zone, c.ID, digests); err != nil {
+			return nil, nil, append(problems, err.Error()), sessionview.StateIncomplete
+		}
 	}
 	for _, rr := range rep.Rounds {
 		problems = append(problems, rr.Problems...)
@@ -347,7 +373,24 @@ func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.R
 			state = sessionview.StateIncomplete
 		}
 		h := rr.Header
-		data, _ := os.ReadFile(rr.Path)
+		var lines int
+		var size int64
+		var sum string
+		if c.snap != nil {
+			// What the load read of the round's file describes it. The
+			// load checked rounds 1 to the head in order.
+			if rr.Round >= 1 && rr.Round <= uint64(len(c.checked)) {
+				r := c.checked[rr.Round-1]
+				lines, size, sum = r.lines, r.bytes, r.digest
+			}
+		} else {
+			data, rerr := os.ReadFile(rr.Path)
+			if rerr != nil {
+				problems = append(problems, rerr.Error())
+				state = sessionview.StateIncomplete
+			}
+			lines, size, sum = countByte(data, '\n'), int64(len(data)), digestOf(data)
+		}
 		var previous *string
 		if h.Previous != "" {
 			p := h.Previous
@@ -362,8 +405,8 @@ func (c *Conversation) rounds(digests map[uint64]string) (rounds []sessionview.R
 		round := h.Round
 		files = append(files, sessionview.File{
 			File: c.relPath(rr.Path), Format: "sf", Kind: "round", Round: &round,
-			Lines: countByte(data, '\n'), Bytes: int64(len(data)),
-			Digest: digestOf(data), FromTime: millisPtr(h.FromTime), ThroughTime: millisPtr(h.ThroughTime),
+			Lines: lines, Bytes: size,
+			Digest: sum, FromTime: millisPtr(h.FromTime), ThroughTime: millisPtr(h.ThroughTime),
 		})
 	}
 	return rounds, files, problems, state
@@ -390,7 +433,17 @@ func (c *Conversation) files(landed []storage.LandedFile) ([]sessionview.File, m
 	out := make([]sessionview.File, 0, len(landed))
 	digests := map[uint64]string{}
 	for _, lf := range landed {
-		data, err := readLanded(lf)
+		var data []byte
+		var err error
+		if c.snap != nil {
+			// A snapshot's file is described by what reads of it whole.
+			var w *whole
+			if w, err = c.readSnapshot(lf.Seq, lf.Path); err == nil {
+				data = w.data
+			}
+		} else {
+			data, err = readLanded(lf)
+		}
 		if err != nil {
 			return nil, nil, err
 		}

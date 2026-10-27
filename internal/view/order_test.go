@@ -114,7 +114,11 @@ func TestAStreamsOriginsKeepOneOrder(t *testing.T) {
 	want := "tool/b tool/d tool/c tool/a"
 	for i := 0; i < 50; i++ {
 		var got []string
-		for _, st := range streamRows(c, nil) {
+		rows, err := streamRows(c, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, st := range rows {
 			if st.ID != "stream/c1" {
 				continue
 			}
@@ -258,7 +262,11 @@ func TestEachStreamsOriginsAreOrderedOnTheirOwn(t *testing.T) {
 	c := &Conversation{View: &sessionflow.View{Nodes: nodes, Relations: rels}, Session: "s", zone: storage.NewZone(t.TempDir()),
 		at: map[[2]uint64]int64{{1, 2}: 10, {2, 1}: 50}, lanes: map[uint64]string{1: "stream/A", 2: "stream/B"}}
 	found := false
-	for _, st := range streamRows(c, nil) {
+	rows, err := streamRows(c, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range rows {
 		if st.ID != "stream/S" {
 			continue
 		}

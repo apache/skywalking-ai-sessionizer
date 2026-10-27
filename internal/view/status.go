@@ -17,7 +17,10 @@
 
 package view
 
-import "net/http"
+import (
+	"net/http"
+	"time"
+)
 
 // ModeStatic is the status mode of a server nothing refreshes.
 const ModeStatic = "static"
@@ -51,10 +54,20 @@ type Status struct {
 	TookMS  int64 `json:"took_ms"`
 }
 
-// SetStatus records the state of whatever keeps the zone current.
+// SetStatus records the state of whatever keeps the zone current. The last
+// refresh never moves back: a Touch made while a pass was writing its status
+// is kept.
 func (s *Server) SetStatus(st Status) {
 	s.statusMu.Lock()
+	st.LastRefresh = max(st.LastRefresh, s.status.LastRefresh)
 	s.status = st
+	s.statusMu.Unlock()
+}
+
+// Touch marks the list changed now, so an open page loads it again.
+func (s *Server) Touch(now time.Time) {
+	s.statusMu.Lock()
+	s.status.LastRefresh = max(s.status.LastRefresh+1, now.UnixMilli())
 	s.statusMu.Unlock()
 }
 

@@ -31,7 +31,6 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
-	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
@@ -157,7 +156,11 @@ func parseToIndex(z *storage.Zone, id string, maxRound int64, rounds *int) (*par
 // would keep nothing from them. The page stays the page, and this is the
 // document for a pipeline or a diff.
 func printDocument(zoneRoot, id, format string) error {
-	c, err := view.New(storage.NewZone(zoneRoot), nil).Load(id)
+	srv, _, err := viewServer(storage.NewZone(zoneRoot), nil)
+	if err != nil {
+		return err
+	}
+	c, err := srv.Load(id)
 	if err != nil {
 		return err
 	}
@@ -177,6 +180,32 @@ func printDocument(zoneRoot, id, format string) error {
 	}
 	_, err = os.Stdout.Write(append(out, '\n'))
 	return err
+}
+
+// foldForPrint folds the chain the conversation command prints. A pulled
+// snapshot folds through exactly the head its marker names, read checked,
+// and a fold that stops short fails the command.
+func foldForPrint(zoneRoot, id string) (*sessionflow.View, error) {
+	srv, snap, err := viewServer(storage.NewZone(zoneRoot), nil)
+	if err != nil {
+		return nil, err
+	}
+	if snap != nil {
+		c, err := srv.Load(id)
+		if err != nil {
+			return nil, err
+		}
+		return c.View, nil
+	}
+	chain := sessionflow.OpenChain(zoneRoot, id)
+	files, err := chain.Verify()
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no rounds for conversation %s; run asz parse first", id)
+	}
+	return chain.Fold()
 }
 
 // termsFor returns how to render a name, from the -terms flag.
@@ -261,15 +290,7 @@ func cmdConversation(cfg *config.Config, _ config.Adapter, _ bool) error {
 		return printDocument(zoneRoot, id, docFormat)
 	}
 
-	chain := sessionflow.OpenChain(zoneRoot, id)
-	files, err := chain.Verify()
-	if err != nil {
-		return err
-	}
-	if len(files) == 0 {
-		return fmt.Errorf("no rounds for conversation %s; run asz parse first", id)
-	}
-	v, err := chain.Fold()
+	v, err := foldForPrint(zoneRoot, id)
 	if err != nil {
 		return err
 	}

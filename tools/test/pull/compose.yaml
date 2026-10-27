@@ -1,0 +1,75 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# The servers tools/test/e2e-pull.sh pulls from. WORK is the script's work
+# directory: each server's configuration, the certificates, the tokens file,
+# the root they start from and the asz binary built for the containers,
+# which run it on the base the released image uses. Each server's root is
+# a copy on a volume: a directory shared from a macOS host can answer a
+# check of a directory's identity from stale attributes. Every server runs
+# as the user that made the files.
+x-asz: &asz
+  image: ${ASZ_BASE_IMAGE}
+  user: "${E2E_UID}:${E2E_GID}"
+  entrypoint: ["/work/asz"]
+  volumes:
+    - ${WORK}:/work
+    - roots:/roots
+  depends_on:
+    seed:
+      condition: service_completed_successfully
+volumes:
+  roots:
+services:
+  # Copies the root each server starts from onto the volume.
+  seed:
+    image: ${NGINX_IMAGE}
+    volumes:
+      - ${WORK}:/work:ro
+      - roots:/roots
+    entrypoint: ["sh", "-c"]
+    command:
+      - for s in tls mtls plain open; do rm -rf /roots/$$s; cp -a /work/built /roots/$$s; done; chown -R ${E2E_UID}:${E2E_GID} /roots
+  # Tokens and TLS: what asz pull reaches.
+  tls:
+    <<: *asz
+    command: ["view", "-config", "/work/tls.yaml", "0.0.0.0:8788"]
+    ports:
+      - "127.0.0.1:${TLS_PORT}:8788"
+  # Tokens, TLS and a client certificate.
+  mtls:
+    <<: *asz
+    command: ["view", "-config", "/work/mtls.yaml", "0.0.0.0:8788"]
+    ports:
+      - "127.0.0.1:${MTLS_PORT}:8788"
+  # Tokens without TLS, behind the cache.
+  plain:
+    <<: *asz
+    command: ["view", "-config", "/work/plain.yaml", "0.0.0.0:8788"]
+  # No tokens: the page as it always was, behind the cache.
+  open:
+    <<: *asz
+    command: ["view", "-config", "/work/open.yaml", "0.0.0.0:8788"]
+  # A shared cache in front of plain and open, which stores what RFC 9111
+  # lets it store and says whether an answer came from it.
+  cache:
+    image: ${NGINX_IMAGE}
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${CACHE_PORT}:8080"
+    depends_on: [plain, open]

@@ -124,7 +124,10 @@ func holds(nav *Nav, id, excerpt string) bool {
 	if strings.Contains(folded(n.Text), want) || strings.Contains(folded(n.Result), want) {
 		return true
 	}
-	return slices.ContainsFunc(nav.recordedParts(n), func(p recordedPart) bool { return strings.Contains(folded(p.text), want) })
+	// A read that fails on a pulled snapshot is kept by the run's strict
+	// reading, which fails the answer this excerpt belongs to.
+	parts, _ := nav.recordedParts(n)
+	return slices.ContainsFunc(parts, func(p recordedPart) bool { return strings.Contains(folded(p.text), want) })
 }
 
 // folded is text with every run of whitespace, a JSON escape of a line

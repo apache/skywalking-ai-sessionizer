@@ -28,7 +28,6 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/judge"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
-	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
@@ -61,10 +60,21 @@ func cmdMeasure(args []string) int {
 		return 2
 	}
 	id := fs.Arg(0)
+	if err := checkIdentity("conversation", id, false); err != nil {
+		return fail(err)
+	}
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return fail(err)
 	}
+	root, err := cfg.ResolvedRoot()
+	if err != nil {
+		return fail(err)
+	}
+	if _, err := admitRoot("measure", cfg, root); err != nil {
+		return fail(err)
+	}
+	defer releaseAdmission()
 	if *pricingPath == "" {
 		*pricingPath = cfg.Judge.Pricing
 	}
@@ -90,18 +100,27 @@ func measure(cfg *config.Config, id, pricingPath string) (*judge.Ledger, error) 
 	if err != nil {
 		return nil, err
 	}
-	pricing, err := judge.LoadPricing(pricingPath)
+	pricing, err := judge.LoadPricing(pricingPath, admittedRoot())
 	if err != nil {
 		return nil, err
 	}
 	zone := storage.NewZone(root)
-	c, err := view.New(zone, nil).Load(id)
+	srv, snap, err := viewServer(zone, nil)
+	if err != nil {
+		return nil, err
+	}
+	c, err := srv.Load(id)
 	if err != nil {
 		return nil, err
 	}
 	doc, err := c.Build()
 	if err != nil {
 		return nil, err
+	}
+	if snap != nil {
+		// A pulled snapshot's records are read checked: one that cannot be
+		// read stops the ledger rather than leaving its usage out.
+		return judge.ComputeChecked(doc, dialectOf(zone, c.Session), pricing, c.RecordsChecked)
 	}
 	return judge.Compute(doc, dialectOf(zone, c.Session), pricing, c.Records), nil
 }

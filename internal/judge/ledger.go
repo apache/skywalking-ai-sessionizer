@@ -188,6 +188,26 @@ const (
 // read, when given, reads the records of calls that never finished, whose
 // input side Claude Code recorded when they started.
 func Compute(doc *sessionview.Conversation, dialect string, pricing *Pricing, read RecordsReader) *Ledger {
+	l, _ := ComputeChecked(doc, dialect, pricing, unchecked(read))
+	return l
+}
+
+// RecordsReaderChecked is RecordsReader for a reader that must know of
+// every failure, as a pulled snapshot's: a record that cannot be read is an
+// error, never one left out.
+type RecordsReaderChecked func(refs []sessionflow.Ref) (map[[2]uint64]*sessiondata.Record, error)
+
+// unchecked gives a RecordsReader the checked form, with no failure to tell.
+func unchecked(read RecordsReader) RecordsReaderChecked {
+	if read == nil {
+		return nil
+	}
+	return func(refs []sessionflow.Ref) (map[[2]uint64]*sessiondata.Record, error) { return read(refs), nil }
+}
+
+// ComputeChecked is Compute with a reader that tells of its failures, which
+// stop the ledger.
+func ComputeChecked(doc *sessionview.Conversation, dialect string, pricing *Pricing, read RecordsReaderChecked) (*Ledger, error) {
 	l := &Ledger{
 		Dialect: dialect, owner: map[string]*sessionjudge.Cost{}, inclusive: map[string]*sessionjudge.Cost{},
 		callsOf: map[string][]int{}, ownersOf: map[string][]string{}, talks: map[string]*sessionview.Node{},
@@ -234,7 +254,9 @@ func Compute(doc *sessionview.Conversation, dialect string, pricing *Pricing, re
 		}
 		walk(n, o, "")
 	}
-	l.readStarted(read)
+	if err := l.readStarted(read); err != nil {
+		return nil, err
+	}
 	for i := range l.Calls {
 		l.price(&l.Calls[i], pricing)
 	}
@@ -248,7 +270,7 @@ func Compute(doc *sessionview.Conversation, dialect string, pricing *Pricing, re
 	}
 	l.Total = l.sum(sessionjudge.ScopeConversation, doc.Conversation, allCalls(len(l.Calls)))
 	l.rollUp(doc, ownerOfNode)
-	return l
+	return l, nil
 }
 
 func scopeOf(owner string) string {
@@ -297,18 +319,21 @@ func unfinished(n *sessionview.Node) bool {
 // fragment was never written, as happens inside a child agent's transcript,
 // therefore has a known input side and an unknown output, and is counted that
 // way. This is Claude Code's behavior, so it applies to its dialect only.
-func (l *Ledger) readStarted(read RecordsReader) {
+func (l *Ledger) readStarted(read RecordsReaderChecked) error {
 	if read == nil || l.Dialect != "claude-code/1" {
-		return
+		return nil
 	}
 	var refs []sessionflow.Ref
 	for _, c := range l.Calls {
 		refs = append(refs, c.refs...)
 	}
 	if len(refs) == 0 {
-		return
+		return nil
 	}
-	recs := read(refs)
+	recs, err := read(refs)
+	if err != nil {
+		return err
+	}
 	for i := range l.Calls {
 		c := &l.Calls[i]
 		for _, r := range c.refs {
@@ -331,6 +356,7 @@ func (l *Ledger) readStarted(read RecordsReader) {
 		}
 		c.refs = nil
 	}
+	return nil
 }
 
 // price prices a call whose usage is known, by its own model.

@@ -29,12 +29,13 @@ every sub-task it started: by the time they start, or by their ids.
 ```sh
 asz judge -from 2026-10-19 -to 2026-10-20 0438c73b-2367-4ed5-9de3-13ef9a17ed01
 asz judge -from 2026-10-19T14:00 0438c73b-2367-4ed5-9de3-13ef9a17ed01
-asz judge -from-id talk/main/3f1c… -to-id talk/main/9a07… 0438c73b-2367-4ed5-9de3-13ef9a17ed01
+asz judge -from-id talk/main/3f1c2a9e-5b7d-4c11-9e2a-6d0b8f4a1c3e -to-id talk/main/9a07e4d2-8c1b-4f6a-b3e5-2d7c9f0a4b18 0438c73b-2367-4ed5-9de3-13ef9a17ed01
 ```
 
 `-from` takes the talks that start at that time or later, and `-to` those that start before it. A time
 is RFC 3339, or a date with or without a time of day, in the local time zone. `-from-id` and `-to-id`
-name the first and the last talk, both included, as `asz judge -show` and the page name them.
+name the first and the last talk, both included, by their whole identifiers, as `asz judge -show`
+and the page name them.
 
 `-mode single` gives each stage to one call, and `-mode stream` cuts each into calls; the default,
 `judge.mode`, is `auto`.
@@ -101,12 +102,13 @@ same call answers the same again. `work/sources/` holds each source as asz saved
 manifest, `R1.fetched`, the bytes fetched, and `R1.txt`, the text the evaluators read.
 
 When `export.otlp.endpoint` is set, `asz collect`, `asz server` and `asz push` send each run once it has
-closed. See [Export over OpenTelemetry](export-otlp.md).
+closed. A run of a pulled snapshot is not sent: it stays in the snapshot, and expires with it. See
+[Export over OpenTelemetry](export-otlp.md).
 
 ## Evaluators
 
-`judge.evaluators` names the evaluators a stage can be given to. The defaults are the three agent
-CLIs:
+`judge.evaluators` names the evaluators a stage can be given to. The defaults are three agents'
+command-line programs:
 
 ```yaml
 judge:
@@ -135,7 +137,7 @@ the CLI's model; empty leaves its default. `command` is its path when it is not 
 `kiro-cli` keeps every session it runs in Kiro's history, by directory, so a `kiro-cli` stage leaves its
 session there. `kiro-local` collects the sessions of Kiro's V3 engine. When `kiro-cli` runs that engine,
 exclude the storage root, where a stage runs, so asz does not collect its own judge sessions. A file that
-lists `adapters` replaces the whole default list, so keep the others you use:
+lists one or more `adapters` replaces the whole default list, so keep the others you use:
 
 ```yaml
 adapters:
@@ -224,3 +226,13 @@ asz measure -pricing pricing.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01
 
 `judge.hide` lists the flags whose records the evaluators are never shown, as `view.hide` does for the
 page: `system_prompt`, `tool_schemas`.
+
+## Judge a conversation from another asz
+
+A conversation an asz elsewhere collected is judged here once `asz pull` copied it:
+
+```sh
+asz judge -pull -remote-conversation prod/7722b6a5-2f0b-4a7e-9a8b-4b4f1e9f6c11
+```
+
+See [Pull from Another asz](remote-pull.md#judge-a-pulled-conversation).

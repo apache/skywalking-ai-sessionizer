@@ -172,7 +172,14 @@ type RoundFile struct {
 // publishing a round and saving state leaves a round on disk that state does
 // not mention, and recovery has to see it.
 func (c *Chain) List() ([]RoundFile, error) {
-	ents, err := os.ReadDir(c.RoundsDir())
+	return c.ListAtMost(-1)
+}
+
+// ListAtMost is List that stops with storage.ErrTooMany once the rounds
+// directory holds more than most entries, before it holds them. A most
+// below zero takes every round.
+func (c *Chain) ListAtMost(most int) ([]RoundFile, error) {
+	ents, err := storage.ReadDirAtMost(c.RoundsDir(), most)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

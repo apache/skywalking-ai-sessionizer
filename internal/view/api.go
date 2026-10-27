@@ -106,6 +106,12 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 	for _, id := range ids {
 		c, err := s.Load(id)
 		if err != nil {
+			// A snapshot's conversation that does not load is damage, and
+			// a list without it would say nothing of that.
+			if s.snap != nil {
+				fail(w, err, http.StatusInternalServerError)
+				return
+			}
 			continue
 		}
 		row := summary{ID: id, Rounds: c.View.Round, Open: len(c.View.OpenUnresolved()),
@@ -159,7 +165,12 @@ func (s *Server) apiList(w http.ResponseWriter, _ *http.Request) {
 // runtime's word for it. The rest are the landed envelope's own fields, and
 // the format describes those itself.
 func (s *Server) apiGlossary(w http.ResponseWriter, r *http.Request) {
-	g := s.glossaryFor(r.URL.Query().Get("dialect"))
+	dialects, err := s.dialects()
+	if err != nil {
+		fail(w, err, loadStatus(err))
+		return
+	}
+	g := s.glossaryFor(r.URL.Query().Get("dialect"), dialects)
 	if g == nil {
 		writeJSONStatus(w, http.StatusNotFound, map[string]string{"error": "no glossary was supplied for this storage root"})
 		return
@@ -174,7 +185,7 @@ func (s *Server) apiGlossary(w http.ResponseWriter, r *http.Request) {
 		"dialect": g.Dialect,
 		// dialects says what else this root holds, for a reader that wants
 		// another. The page asks for one and ignores this.
-		"dialects": s.dialects(),
+		"dialects": dialects,
 		"terms":    terms,
 		"fields":   sessiondata.Fields(),
 	})
@@ -186,14 +197,14 @@ func (s *Server) apiGlossary(w http.ResponseWriter, r *http.Request) {
 // files were read in, so a root of LangChain conversations is not described in
 // Claude Code's words. A root holding both answers with whichever its sessions
 // name first, which is why dialects is in the response.
-func (s *Server) glossaryFor(asked string) *model.Glossary {
+func (s *Server) glossaryFor(asked string, dialects []string) *model.Glossary {
 	if len(s.glossaries) == 0 {
 		return s.glossary
 	}
 	if asked != "" {
 		return s.glossaries[asked]
 	}
-	for _, dialect := range s.dialects() {
+	for _, dialect := range dialects {
 		if g, ok := s.glossaries[dialect]; ok {
 			return g
 		}
@@ -246,13 +257,18 @@ func dialectOf(z *storage.Zone, session string) string {
 	return fallback
 }
 
-// dialects are the vocabularies the root's landed files were read in.
-func (s *Server) dialects() []string {
+// dialects are the vocabularies the root's landed files were read in. Only
+// a snapshot's read fails: what does not read on any other root is passed
+// over, as it always was.
+func (s *Server) dialects() ([]string, error) {
+	if s.snap != nil {
+		return s.snapshotDialects()
+	}
 	seen := map[string]bool{}
 	var out []string
 	listed, err := s.List()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	for _, session := range listed {
 		if d := dialectOf(s.zone, session); d != "" && !seen[d] {
@@ -261,7 +277,42 @@ func (s *Server) dialects() []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
+}
+
+// snapshotDialects is the dialect of a snapshot's one session, chosen as
+// dialectOf chooses it, from its frozen inventory. Each file is read whole
+// as the loaded conversation read it, so a file replaced since is damage the
+// page is told of, and the request fails with it.
+func (s *Server) snapshotDialects() ([]string, error) {
+	c, err := s.Load(s.snap.Conversation)
+	if err != nil {
+		return nil, err
+	}
+	files, err := c.landedFiles()
+	if err != nil {
+		return nil, err
+	}
+	var fallback string
+	for _, lf := range files {
+		w, err := c.readSnapshot(lf.Seq, lf.Path)
+		if err != nil {
+			return nil, err
+		}
+		if w.hdr.Dialect == "" {
+			continue
+		}
+		if w.hdr.Kind == sessiondata.KindTranscript {
+			return []string{w.hdr.Dialect}, nil
+		}
+		if fallback == "" {
+			fallback = w.hdr.Dialect
+		}
+	}
+	if fallback == "" {
+		return nil, nil
+	}
+	return []string{fallback}, nil
 }
 
 var viewPath = regexp.MustCompile(`^/api/c/([^/]+)/view$`)
@@ -343,7 +394,9 @@ type overview struct {
 	open                 []map[string]string
 }
 
-func (c *Conversation) overview(hide []string) *overview {
+// overview is what the list of talks and the summary say of a conversation.
+// On a pulled snapshot a text it needed that did not read is an error.
+func (c *Conversation) overview(hide []string) (*overview, error) {
 	var title string
 	kinds := map[string]int{}
 	for _, n := range c.View.Nodes {
@@ -412,7 +465,10 @@ func (c *Conversation) overview(hide []string) *overview {
 		talks = append(talks, row)
 	}
 	// One pass per landed file, not one per talk.
-	texts, sent := c.texts(labelRefs, hide)
+	texts, sent, err := c.texts(labelRefs, hide)
+	if err != nil && c.snap != nil {
+		return nil, err
+	}
 	for i := range talks {
 		for _, r := range talks[i].labelAt {
 			at := [2]uint64{r.Seq, r.Row}
@@ -446,10 +502,14 @@ func (c *Conversation) overview(hide []string) *overview {
 		open = append(open, map[string]string{"kind": u.Kind, "ref": u.RefID, "reason": u.Reason})
 	}
 
+	streams, err := streamRows(c, talks)
+	if err != nil {
+		return nil, err
+	}
 	return &overview{
 		title: title, kinds: kinds, rels: rels, quality: quality,
-		talks: talks, streams: streamRows(c, talks), segments: segmentRows(c, talks), open: open,
-	}
+		talks: talks, streams: streams, segments: segmentRows(c, talks), open: open,
+	}, nil
 }
 
 // segmentRows lists the conversation's segments, each with the span of the
@@ -494,7 +554,7 @@ func segmentRows(c *Conversation, talks []talkRow) []sessionview.Segment {
 // The parent is read from the "starts" relation, never from the stream name. A
 // call that could have started several streams reports each of them, because
 // the assembler does not choose one and neither may this.
-func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
+func streamRows(c *Conversation, talks []talkRow) ([]sessionview.Stream, error) {
 	firstTalk := map[string]string{}
 	steps := map[string]int{}
 	for i := range talks {
@@ -539,7 +599,10 @@ func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
 			from[stream] = append(from[stream], origin{r.From, n.Stream, r.Quality, c.talkOf(r.From)})
 		}
 	}
-	names := c.journalNames()
+	names, err := c.journalNames()
+	if err != nil {
+		return nil, err
+	}
 	out := []sessionview.Stream{}
 	for _, st := range c.Streams() {
 		label, namedBy := attrString(st, "label"), ""
@@ -564,7 +627,7 @@ func streamRows(c *Conversation, talks []talkRow) []sessionview.Stream {
 			OpenedBy: opened,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // labelRefs finds where a talk's name should be read from: the first
@@ -638,40 +701,32 @@ func (c *Conversation) replyRef(t *sessionflow.Node) *sessionflow.Ref {
 // The name is what the result says - a surface, else a summary, else the
 // verdict and the first claim it was about. An agent with no result row has
 // no name from here and keeps whatever it had.
-func (c *Conversation) journalNames() map[string]string {
+func (c *Conversation) journalNames() (map[string]string, error) {
 	names := map[string]string{}
-	files, err := storage.LandedFiles(c.zone, c.Session)
+	files, err := c.landedFiles()
 	if err != nil {
-		return names
+		if c.snap != nil {
+			return nil, err
+		}
+		return names, nil
 	}
 	for _, lf := range files {
 		if lf.RunID == "" {
 			continue
 		}
-		f, err := storage.OpenLanded(lf.Path)
-		if err != nil {
-			continue
-		}
-		rd, err := sessiondata.NewReader(f)
-		if err != nil {
-			f.Close()
-			continue
-		}
-		for {
-			rec, rerr := rd.Next()
-			if rerr != nil {
-				break
-			}
+		err := c.eachRecord(lf, func(_ uint64, rec *sessiondata.Record) {
 			if _, seen := names[rec.Child]; seen {
-				continue
+				return
 			}
 			if name := journalName(rec); name != "" {
 				names[rec.Child] = name
 			}
+		})
+		if err != nil {
+			return nil, err
 		}
-		f.Close()
 	}
-	return names
+	return names, nil
 }
 
 // journalName is the name a run journal's record gives the child it names,
@@ -739,16 +794,17 @@ func shortName(s string) string {
 // It also says which of them carry a flag a reader may withhold, so a caller
 // choosing among them can pass those over. A record carrying any of the hide
 // names is withheld as it is read, so its text is empty.
-func (c *Conversation) texts(refs []*sessionflow.Ref, hide []string) (map[[2]uint64]string, map[[2]uint64]bool) {
+func (c *Conversation) texts(refs []*sessionflow.Ref, hide []string) (map[[2]uint64]string, map[[2]uint64]bool, error) {
 	out := map[[2]uint64]string{}
 	sent := map[[2]uint64]bool{}
-	for at, rec := range c.records(refs, hide) {
+	recs, err := c.recordsChecked(refs, hide)
+	for at, rec := range recs {
 		out[at] = readable(rec)
 		if withholdable(rec.Flags) {
 			sent[at] = true
 		}
 	}
-	return out, sent
+	return out, sent, err
 }
 
 // talkOf walks up from a node to the talk that contains it.

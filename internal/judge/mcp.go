@@ -57,6 +57,12 @@ func ServeMCP(r io.Reader, w io.Writer, nav *Nav, onCall func(tool string, args 
 			if serr := answer(line, nav, send, onCall); serr != nil {
 				return serr
 			}
+			// A read of a pulled snapshot's evidence that failed ends the
+			// server, and with it the command: its answer was an error,
+			// and nothing after it is served over evidence known damaged.
+			if ferr := nav.Failed(); ferr != nil {
+				return ferr
+			}
 			if _, refused := nav.Spent(); refused >= budgetRefusals {
 				return nil
 			}

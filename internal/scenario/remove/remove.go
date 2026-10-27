@@ -1193,8 +1193,9 @@ func (r *Remover) removeSpool(s *session) error {
 		if owner, ok := metrics.SpoolOwner(it.Name()); !ok || owner != s.id {
 			continue
 		}
-		// A spool file is read-only, as a landed file is. DeleteTree makes it
-		// writable before it deletes it.
+		// A spool file is read-only, as a landed file is. DeleteTree deletes
+		// it without changing its mode itself; a file another tree shares
+		// keeps its mode.
 		if err := storage.DeleteTree(filepath.Join(dir, it.Name()), nil); err != nil {
 			return err
 		}

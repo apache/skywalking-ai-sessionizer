@@ -29,7 +29,9 @@
 package view
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +40,7 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/internal/verify"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/model"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
@@ -71,6 +74,9 @@ type Server struct {
 	// whether a request's hide parameter replaces it. See withhold.go.
 	hide         []string
 	hideOverride bool
+
+	// snap binds the server to a pulled snapshot. See snapshot.go.
+	snap *Snapshot
 }
 
 // New returns a server over a zone. Nothing refreshes it until a caller says
@@ -116,6 +122,16 @@ type Conversation struct {
 	to   map[string][]*sessionflow.Relation
 
 	zone *storage.Zone
+	// snap is the snapshot the conversation was read from, under a lease,
+	// or nil. Its reads are checked, and ids holds the identity of each of
+	// its files as the load read it, which every later read must find.
+	snap *Snapshot
+	ids  map[uint64]os.FileInfo
+	// checked are the snapshot's rounds as the load read and checked them,
+	// which its document is verified and described from.
+	checked []checkedRound
+	// tips is a snapshot's listed provider tips by file name.
+	tips map[string]string
 
 	// paths maps a landed sequence to the file carrying it. It is built once,
 	// here, because it is read from many request goroutines at the same time
@@ -176,6 +192,10 @@ func (s *Server) Load(id string) (*Conversation, error) {
 	// A removal replaces landed files with skeletons and leaves the chain
 	// as it is, so what was kept is good only for the removal generation it
 	// was read at, and nothing is kept while a removal is in progress.
+	if c, ok := s.loaded[id]; ok && s.snap != nil {
+		// A snapshot's evidence never changes under its lease.
+		return c, nil
+	}
 	generation, removing, gerr := storage.RemovalGeneration(s.zone, id)
 	if c, ok := s.loaded[id]; ok {
 		// It is good only while the session's files are the ones it was read
@@ -224,6 +244,9 @@ func (s *Server) LoadAt(id string, round uint64) (*Conversation, error) {
 // fold reads a chain through a round, or every round for zero, and builds
 // the lookups a document needs.
 func (s *Server) fold(id string, through uint64, generation int) (*Conversation, error) {
+	if s.snap != nil {
+		return s.foldSnapshot(id, through)
+	}
 	// The fold goes as far as the chain holds. A round that is missing or
 	// broken is reported in the document, not returned as an error, so a
 	// reader sees what could be folded and what could not; only a chain with
@@ -267,6 +290,148 @@ func (s *Server) fold(id string, through uint64, generation int) (*Conversation,
 	c.paths = c.scanPaths()
 	c.pathsScan = time.Now()
 	return c, nil
+}
+
+// foldSnapshot folds a snapshot's chain. It must fold whole through the head
+// its marker names and end at that head's digest: a partial fold, a problem
+// on the way or another head fails, and the smaller head a fold could reach
+// is never served. A fold at an earlier round is made only after the whole
+// chain was checked, and is bound to that round by the fold.
+func (s *Server) foldSnapshot(id string, through uint64) (*Conversation, error) {
+	sn := s.snap
+	if id != sn.Conversation {
+		return nil, fmt.Errorf("view: this snapshot holds conversation %s, not %s", sn.Conversation, id)
+	}
+	if through > sn.Round {
+		return nil, fmt.Errorf("view: %s holds rounds 1 to %d, not round %d", id, sn.Round, through)
+	}
+	if through == 0 {
+		through = sn.Round
+	}
+	// Every round is read once, by its digest and its link to the one
+	// before, up to the marker's head, and the rounds through the one asked
+	// for are folded as they are read: what is folded is exactly what was
+	// checked, with no second read for a replaced round to slip into.
+	v, rounds, err := sn.checkedFold(sessionflow.OpenChain(s.zone.Root(), id), id, through)
+	if err != nil {
+		return nil, sn.evidenceError("%s: %v", id, err)
+	}
+	c := &Conversation{
+		ID: id, View: v, Session: v.Session, zone: s.zone, snap: sn, head: v.Round,
+		ids: map[uint64]os.FileInfo{}, checked: rounds, tips: tipIndex(sn.Store, v.Session),
+		at:    map[[2]uint64]int64{},
+		lanes: map[uint64]string{},
+		named: map[string]int{},
+		from:  map[string][]*sessionflow.Relation{},
+		to:    map[string][]*sessionflow.Relation{},
+	}
+	if err := s.snapshotTimes(c); err != nil {
+		return nil, err
+	}
+	for _, r := range v.Relations {
+		c.from[r.From] = append(c.from[r.From], r)
+		c.to[r.To] = append(c.to[r.To], r)
+	}
+	c.paths = s.snapshotPaths()
+	c.pathsScan = time.Now()
+	// The chain is checked against the files it binds, as the document
+	// describes them: a file that changed under its round fails the load.
+	if _, err := c.foldParts(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// checkedFold reads a snapshot's rounds 1 to its marker's head, each by its
+// commit digest and its link to the one before, never through a link, and
+// folds rounds 1 to through as it reads them. The head's digest must be the
+// marker's.
+func (sn *Snapshot) checkedFold(chain *sessionflow.Chain, conversation string, through uint64) (*sessionflow.View, []checkedRound, error) {
+	files, err := chain.List()
+	if err != nil {
+		return nil, nil, err
+	}
+	if uint64(len(files)) != sn.Round {
+		return nil, nil, fmt.Errorf("the chain holds %d rounds, and the marker names round %d", len(files), sn.Round)
+	}
+	v := sessionflow.NewView(conversation)
+	previous := ""
+	var checked []checkedRound
+	for i, rf := range files {
+		if rf.Round != uint64(i+1) {
+			return nil, nil, fmt.Errorf("the chain has no round %d", i+1)
+		}
+		f, err := storage.OpenEvidence(rf.Path, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		data, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		r, err := sessionflow.Read(bytes.NewReader(data))
+		if err != nil {
+			return nil, nil, fmt.Errorf("round %d: %w", rf.Round, err)
+		}
+		if r.Header.Round != rf.Round || r.Header.Previous != previous || !strings.HasPrefix(r.Commit.Digest, rf.Digest) {
+			return nil, nil, fmt.Errorf("round %d is not the chain's round %d", r.Header.Round, rf.Round)
+		}
+		if rf.Round <= through {
+			if err := v.Apply(r); err != nil {
+				return nil, nil, fmt.Errorf("round %d does not fold: %w", rf.Round, err)
+			}
+		}
+		previous = r.Commit.Digest
+		checked = append(checked, checkedRound{
+			ReadRound: verify.ReadRound{Path: rf.Path, Round: rf.Round, Header: r.Header, Digest: r.Commit.Digest},
+			lines:     countByte(data, '\n'), bytes: int64(len(data)), digest: digestOf(data)})
+	}
+	if previous != sn.Digest {
+		return nil, nil, fmt.Errorf("the head is %s, and the marker names %s", previous, sn.Digest)
+	}
+	return v, checked, nil
+}
+
+// checkedRound is a snapshot's round as its load checked it: what the
+// chain's verification takes, and what the document says of its file, so
+// neither reads the round again.
+type checkedRound struct {
+	verify.ReadRound
+	lines  int
+	bytes  int64
+	digest string
+}
+
+// snapshotTimes is timesOf over a snapshot's frozen inventory, where every
+// file is read whole and any failure is an error.
+func (s *Server) snapshotTimes(c *Conversation) error {
+	paths := s.snapshotPaths()
+	seqs := make([]uint64, 0, len(paths))
+	for seq := range paths {
+		seqs = append(seqs, seq)
+	}
+	sort.Slice(seqs, func(i, j int) bool { return seqs[i] < seqs[j] })
+	seen := map[withheldKey]bool{}
+	for _, seq := range seqs {
+		w, err := s.snap.read(paths[seq], seq, nil)
+		if err != nil {
+			return s.snap.evidenceError("%s: %v", paths[seq], err)
+		}
+		// Every later read of the file is held to this one.
+		c.ids[seq] = w.info
+		hdr, recs := w.hdr, w.recs
+		switch {
+		case hdr.Stream != "":
+			c.lanes[seq] = "stream/" + hdr.Stream
+		case hdr.Batch != "":
+			c.lanes[seq] = "run/" + hdr.Batch
+		}
+		for i, rec := range recs {
+			noteTimes(c.at, c.named, seen, seq, uint64(i+1), rec)
+		}
+	}
+	return nil
 }
 
 // landedNames lists the paths of a session's landed files and skeletons, one
@@ -402,6 +567,12 @@ func (s *Server) Root() string { return s.zone.Root() }
 
 // List returns every conversation in the zone that has rounds.
 func (s *Server) List() ([]string, error) {
+	// A snapshot holds the one conversation its marker names, whatever its
+	// directory holds now. A list read from the directory would leave out
+	// a conversation whose rounds went, where its load fails as damage.
+	if s.snap != nil {
+		return []string{s.snap.Conversation}, nil
+	}
 	base := filepath.Join(s.zone.Root(), "_conversations")
 	items, err := os.ReadDir(base)
 	if err != nil && !os.IsNotExist(err) {
@@ -473,11 +644,7 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 	if err != nil {
 		return err
 	}
-	type counted struct {
-		flag, id string
-		seq, row uint64
-	}
-	seen := map[counted]bool{}
+	seen := map[withheldKey]bool{}
 	for _, lf := range files {
 		switch {
 		case lf.Stream != "":
@@ -499,24 +666,36 @@ func timesOf(z *storage.Zone, session string, at map[[2]uint64]int64, lanes map[
 			if err != nil {
 				break
 			}
-			if t, err := time.Parse(time.RFC3339Nano, rec.Time); err == nil && t.UnixNano() != 0 {
-				at[[2]uint64{lf.Seq, row}] = t.UnixNano()
-			}
-			for _, flag := range rec.Flags {
-				if !sessiondata.IsWithholdable(flag) {
-					continue
-				}
-				k := counted{flag: flag, id: rec.ID}
-				if rec.ID == "" {
-					k.seq, k.row = lf.Seq, row
-				}
-				if !seen[k] {
-					seen[k] = true
-					named[flag]++
-				}
-			}
+			noteTimes(at, named, seen, lf.Seq, row, rec)
 		}
 		f.Close()
 	}
 	return nil
+}
+
+// withheldKey counts a record carrying a flag once: by its id, or by its
+// place when it has none.
+type withheldKey struct {
+	flag, id string
+	seq, row uint64
+}
+
+// noteTimes takes what one record says of time and withholding.
+func noteTimes(at map[[2]uint64]int64, named map[string]int, seen map[withheldKey]bool, seq, row uint64, rec *sessiondata.Record) {
+	if t, err := time.Parse(time.RFC3339Nano, rec.Time); err == nil && t.UnixNano() != 0 {
+		at[[2]uint64{seq, row}] = t.UnixNano()
+	}
+	for _, flag := range rec.Flags {
+		if !sessiondata.IsWithholdable(flag) {
+			continue
+		}
+		k := withheldKey{flag: flag, id: rec.ID}
+		if rec.ID == "" {
+			k.seq, k.row = seq, row
+		}
+		if !seen[k] {
+			seen[k] = true
+			named[flag]++
+		}
+	}
 }

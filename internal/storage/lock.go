@@ -157,10 +157,32 @@ const RootLockDir = "_root"
 // metrics state and a session's index, and save it back, so the commands take
 // turns. Retention, still to come, replaces landed files inside a pass and
 // needs the same: no command may read a file while another replaces it. The
-// lock is taken before any shared state is loaded. Locks are taken in one order: the
-// scenario lock, this one, the export lock, the metrics lock, the provider
-// lock, a session's and a chain's.
+// lock is taken before any shared state is loaded. Locks are taken in the one
+// order CLAUDE.md gives, which places this lock among pull's and the others.
+//
+// It refuses a root that holds copies pulled from a remote, with ErrCopy: only
+// the pull and the judge write there, and they take LockRootInCopy. The marker
+// is checked before the lock is taken, so a refused command makes nothing, and
+// again under it, since a pull admits an empty directory under the same lock.
 func LockRoot(root string) (*SessionLock, error) {
+	if err := RefuseCopy(root); err != nil {
+		return nil, err
+	}
+	l, err := LockRootInCopy(root)
+	if err != nil {
+		return nil, err
+	}
+	if err := RefuseCopy(root); err != nil {
+		_ = l.Unlock()
+		return nil, err
+	}
+	return l, nil
+}
+
+// LockRootInCopy is LockRoot for the two commands that may write to a root
+// holding copies: the pull, which writes them, and the judge, which adds its
+// runs to a snapshot. On any other root it is LockRoot.
+func LockRootInCopy(root string) (*SessionLock, error) {
 	l, err := lockDir(filepath.Join(root, RootLockDir))
 	if errors.Is(err, ErrSessionBusy) {
 		return nil, ErrRootBusy
@@ -171,9 +193,19 @@ func LockRoot(root string) (*SessionLock, error) {
 // LockRootWait is LockRoot, waiting up to timeout. A command asked to do its
 // work waits; a watching pipeline tries on every pass.
 func LockRootWait(root string, timeout time.Duration) (*SessionLock, error) {
+	return waitForRoot(timeout, func() (*SessionLock, error) { return LockRoot(root) })
+}
+
+// LockRootInCopyWait is LockRootInCopy, waiting up to timeout.
+func LockRootInCopyWait(root string, timeout time.Duration) (*SessionLock, error) {
+	return waitForRoot(timeout, func() (*SessionLock, error) { return LockRootInCopy(root) })
+}
+
+// waitForRoot tries lock until it is not busy or timeout passes.
+func waitForRoot(timeout time.Duration, lock func() (*SessionLock, error)) (*SessionLock, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		l, err := LockRoot(root)
+		l, err := lock()
 		if !errors.Is(err, ErrRootBusy) || time.Now().After(deadline) {
 			return l, err
 		}

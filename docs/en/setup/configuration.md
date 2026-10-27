@@ -2,7 +2,8 @@
 
 One YAML file. asz reads the file given with `-config`, else `asz.yaml` in the working directory,
 else the built-in defaults. A file may leave keys out; anything unset takes its default. A file
-that lists `adapters` replaces the whole default list.
+that lists one or more `adapters` replaces the whole default list; `adapters: []` keeps the
+defaults.
 
 [`asz.yaml`](https://github.com/apache/skywalking-ai-sessionizer/blob/main/asz.yaml) in the
 repository holds every default, written out. Download the one of your version to start from it:
@@ -141,12 +142,12 @@ export:
 
 What `asz view` and `asz server` serve. asz knows nothing about who is reading, so these apply to
 every reader of the instance. Two audiences are two instances over the same root, each behind the
-deployment's own authentication. Or one instance with `hide_override` on serves the API through a
-host's own route, and the host sets the `hide` parameter on every request for each reader. See
+deployment's own authentication. Or one instance with `hide_override` on serves its data requests
+through a host's own route, and the host sets the `hide` parameter on every request for each reader. See
 [Withholding](../formats/asz-view.md#withholding).
 
 A key this section does not have is refused, and the refusal names the key and its line. Every
-other section is read loosely, as it always was. This one says what a reader is kept from, so a
+other section passes over a key it does not have. This one says what a reader is kept from, so a
 misspelled key here would otherwise show everything to everyone.
 
 `hide` is read only inside `view`, written there or reached by an alias or a merge key. Written
@@ -154,16 +155,16 @@ anywhere else, such as at the top level or under a misspelled `view`, it is one 
 configuration does not have: ignored, and withholding nothing.
 
 Only the first YAML document of a file is read, so a file with a later document that holds anything
-is refused. `view` is read from 0.6.0. An older asz ignores it, and withholds nothing.
+is refused.
 
-When `hide` is set, or `hide_override` is on, `asz view` and `asz server` say so as they start. A record is named for what it
-carries when it lands, so a root collected before asz named these records carries no names, and
-withholds nothing. Collect it again into a new root to withhold there.
+When `hide` is set, or `hide_override` is on, `asz view` and `asz server` say so as they start. A
+record is named for what it carries when it lands. A record that carries no such name withholds
+nothing: collect its source again into a new root to withhold there.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `hide` | `[]` | The flags whose steps the page withholds from every reader: `system_prompt`, `tool_schemas`. A withheld step keeps its place, its flags and its size, loses its text, and has state `omitted`. The provider bodies go with it, because a request carries both again. With `hide_override` on, this applies to a request that sets no `hide` parameter. |
-| `hide_override` | `false` | Whether a request's `hide` parameter replaces `hide` for that request. On, a host that serves the API through its own route decides what each reader is kept from, and `hide=` with no name withholds nothing. Off, `hide` is the whole answer, and a request that carries the parameter is refused with status 400. |
+| `hide_override` | `false` | Whether a request's `hide` parameter replaces `hide` for that request. On, a host that serves the page's data requests through its own route decides what each reader is kept from, and `hide=` with no name withholds nothing. Off, `hide` is the whole answer, and a request that carries the parameter is refused with status 400. |
 
 ## judge
 
@@ -187,6 +188,50 @@ judge`.
 | `references.max_bytes` | `1048576` | The bytes a saved copy of a source may take. A larger source is saved cut, and says so |
 | `references.timeout` | `1m` | How long fetching one source may take |
 | `references.fetch` | `[]` | Commands that fetch the sources a login guards, such as tickets: each a `prefix` the source starts with, a `command` given the source as its last argument, which writes the content on its standard output and never sees the conversation, and the `content_type` it writes, `text/plain` when empty |
+
+## remote_snapshot_ttl
+
+How long a snapshot `asz pull` made stays on this machine, counted from when it was published, with
+every judge run in it: `720h` by default, at least `2s`. The newest snapshot expires too: pull again
+for a fresh one. `asz pull` and `asz judge -remote-conversation` remove the expired ones they find
+when they start. They leave one a reader still holds, one whose records do not read, and every
+snapshot of a conversation another command holds at that moment. Nothing removes them in the
+background. See [Pull from Another asz](remote-pull.md).
+
+## remotes
+
+The asz servers `asz pull` copies conversations from. Each entry:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `name` | | The remote's name, which names its copies on this machine and stays the same when `url` changes: letters, digits, `-`, `_` and `.`, at most 255 bytes. It is not `.` or `..`, does not end in a dot, does not start with `.tmp-` in any letter case, and is not a device name such as `CON`, `NUL`, `COM1` or `LPT1`. Two names that differ only in letter case are refused. |
+| `url` | | The server's address, `http://` or `https://`, with a path when the server is behind one. It has no user, no query and no fragment. |
+| `token_file` | | A file holding the token. Spaces and line ends around it are ignored. |
+| `token_env` | | An environment variable holding the token. Give exactly one of `token_file` and `token_env`. Neither is read until the remote is contacted. |
+| `ca_file` | | Certificates to trust for this remote, in PEM, in place of the system's. |
+| `client_cert_file`, `client_key_file` | | A client certificate and its key, for a server that asks for one. Set both or neither. |
+| `server_name` | | The name the server's certificate is checked against, when it is not the host in `url`, as through a tunnel. The certificate is always checked. |
+
+A request goes direct, or through the proxy `HTTPS_PROXY` or `HTTP_PROXY` names when that proxy is an
+`http://` one. An `https://` proxy is refused.
+
+A file path in `remotes` or `remote_server` may start with `~/`, your home directory, and a relative
+one is taken from the working directory. A path may not lead, as written or through a link, into a
+directory asz keeps for itself, such as `_remote`, `_pull` or `_leases`, nor name a `.lock` file. A
+token file, a certificate and a key may each be at most 1 MiB, and the server's tokens file at most
+4 MiB.
+
+## remote_server
+
+What `asz view` and `asz server` need to answer `asz pull`.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `tokens_file` | `""` | One line per token: a name, a space, and the token's SHA-256 in lower-case hexadecimal. `asz token create` makes a token and its line. With a tokens file, every request to the address needs a token, the page and the requests it makes too, and the pull routes are served beside them, unless the root is itself a pulled snapshot, which serves no pull routes. Empty serves no pull routes, and the page is open as before. The file is read again within five seconds of a change, so a line removed revokes its token. |
+| `tls.cert_file`, `tls.key_file` | `""` | A certificate and its key, in PEM, to serve TLS on the address. Set both or neither. Without them, tokens travel in plain text, and asz warns when the address is not a loopback one. |
+| `tls.client_ca_file` | `""` | With TLS, also require a client certificate this authority signed. |
+| `max_concurrent_per_token` | `2` | How many requests one token may have running at once, 1 to 64. More are refused with status 429. |
+| `snapshot_ttl` | `1h` | How long a frozen snapshot stays on the server after it was last used, at least `2s`. |
 
 ## The changes adapter
 

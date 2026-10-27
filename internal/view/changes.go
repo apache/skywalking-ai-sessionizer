@@ -18,8 +18,6 @@
 package view
 
 import (
-	"errors"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -42,7 +40,7 @@ import (
 // files are read here, whole, since they are small. The join is the
 // tool-use id, which the change record names and the step's call part
 // carries; nothing is matched by time.
-func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2]uint64]*sessiondata.Record) []sessionview.WorkspaceChange {
+func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2]uint64]*sessiondata.Record) ([]sessionview.WorkspaceChange, error) {
 	stepOf := c.stepsByToolUse(recs)
 
 	var out []sessionview.WorkspaceChange
@@ -90,20 +88,7 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindChanges)+"-") {
 			continue
 		}
-		f, err := storage.OpenLanded(lf.Path)
-		if err != nil {
-			continue
-		}
-		rd, err := sessiondata.NewReader(f)
-		if err != nil {
-			f.Close()
-			continue
-		}
-		for row := uint64(1); ; row++ {
-			rec, err := rd.Next()
-			if errors.Is(err, io.EOF) || err != nil {
-				break
-			}
+		err := c.eachRecord(lf, func(row uint64, rec *sessiondata.Record) {
 			for b, p := range rec.Parts {
 				if p.Kind != sessiondata.PartData {
 					continue
@@ -113,15 +98,17 @@ func (c *Conversation) workspaceChanges(landed []storage.LandedFile, recs map[[2
 					add(r, sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block}, p.State)
 				}
 			}
+		})
+		if err != nil {
+			return nil, err
 		}
-		f.Close()
 	}
 
 	sort.SliceStable(out, func(i, j int) bool { return c.changeBefore(&out[i], &out[j]) })
 	if out == nil {
 		out = []sessionview.WorkspaceChange{}
 	}
-	return out
+	return out, nil
 }
 
 // stepsByToolUse says which step carries which tool-use id, from the call

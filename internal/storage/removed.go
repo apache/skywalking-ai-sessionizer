@@ -142,12 +142,14 @@ func removeDir(root, dir, name string, hook func(where string) error, sync func(
 // DeleteTree deletes dir and everything under it: every file first, then the
 // directories, deepest first.
 //
-// A landed file is read-only by contract. Each file is made writable before
-// it is deleted, as the scenario runner does, so the delete does not depend
-// on how a platform treats a read-only file. A directory is made readable
-// and writable before its entries are read. A symbolic link is deleted as a
-// link. Nothing it points at is read, changed or deleted. A dir that does not
-// exist is not an error.
+// A file's mode is never changed, even when it is read-only, as a landed file
+// is. A file here can be a hard link a pulled snapshot shares, and a change to
+// its mode would reach the snapshot too. Unix unlinks a read-only file without
+// it (src/os/file_unix.go:357), and on Windows os.Remove clears the attribute
+// itself (src/os/file_windows.go:247), where nothing is shared. A directory is
+// made readable and writable before its entries are read. A symbolic link is
+// deleted as a link. Nothing it points at is read, changed or deleted. A dir
+// that does not exist is not an error.
 //
 // after, when it is not nil, is called once, right after the first entry is
 // deleted. An error from it stops DeleteTree there, as a crash would.
@@ -168,23 +170,19 @@ func DeleteTree(dir string, after func() error) error {
 		return after()
 	}
 	if !fi.IsDir() {
-		if err := removeEntry(dir, fi.Mode().IsRegular()); err != nil {
+		if err := removeEntry(dir); err != nil {
 			return err
 		}
 		return deleted()
 	}
-	type entry struct {
-		path    string
-		regular bool
-	}
-	var files []entry
+	var files []string
 	var dirs []string
 	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if !d.IsDir() {
-			files = append(files, entry{p, d.Type().IsRegular()})
+			files = append(files, p)
 			return nil
 		}
 		// WalkDir calls this before it reads the directory, so a directory
@@ -201,7 +199,7 @@ func DeleteTree(dir string, after func() error) error {
 		return err
 	}
 	for _, f := range files {
-		if err := removeEntry(f.path, f.regular); err != nil {
+		if err := removeEntry(f); err != nil {
 			return err
 		}
 		if err := deleted(); err != nil {
@@ -211,7 +209,7 @@ func DeleteTree(dir string, after func() error) error {
 	// WalkDir lists a directory before everything under it, so the reverse
 	// order deletes every directory after its children.
 	for i := len(dirs) - 1; i >= 0; i-- {
-		if err := removeEntry(dirs[i], false); err != nil {
+		if err := removeEntry(dirs[i]); err != nil {
 			return err
 		}
 		if err := deleted(); err != nil {
@@ -274,11 +272,7 @@ func SweepRemoved(root string) error {
 
 // removeEntry deletes one entry. An entry that is already gone counts as
 // deleted, so a delete that stopped halfway can simply run again.
-func removeEntry(path string, regular bool) error {
-	if regular {
-		// A failure here is left to the delete, which reports it.
-		_ = os.Chmod(path, 0o644)
-	}
+func removeEntry(path string) error {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}

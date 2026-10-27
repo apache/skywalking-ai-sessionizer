@@ -660,6 +660,12 @@ func copyRoot(from, to string) error {
 		if rel == "asz.yaml" || (!d.IsDir() && d.Name() == ".lock") {
 			return nil
 		}
+		// Copies pulled from a remote keep the remote's session ids and
+		// sequence numbers, which must never meet a root that collects. A
+		// pull server's snapshots and controls are not the root's evidence.
+		if d.IsDir() && (rel == storage.RemoteDir || rel == storage.PullDir) {
+			return filepath.SkipDir
+		}
 		info, err := d.Info()
 		if err != nil {
 			return err

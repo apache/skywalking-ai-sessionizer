@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -715,5 +716,58 @@ func TestAMarkerThatCannotBeReadChangesNothing(t *testing.T) {
 	}
 	if st.Conflicts == 0 {
 		t.Fatal("a landed body changed after the marker could not be read is no longer reported")
+	}
+}
+
+// A pull's copy and a server's snapshot hold landed provider bodies with a
+// local session's names and headers, and here one damaged file each. A rebuilt
+// table passes over them: it reads none of their files, so it reports none of
+// their damage, and with the local session gone its body lands again from its
+// source.
+func TestARebuiltTablePassesOverPullTrees(t *testing.T) {
+	f := newFixture(t)
+	f.request(sessionA, "", 2)
+	f.pass(all)
+	session := f.zone.SessionDir(sessionA)
+	for _, dir := range []string{storage.RemoteDir, storage.PullDir} {
+		if err := filepath.WalkDir(session, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(session, path)
+			if err != nil {
+				return err
+			}
+			dest := filepath.Join(f.zone.Root(), dir, rel)
+			if d.IsDir() {
+				return os.MkdirAll(dest, 0o755)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(dest, data, 0o444)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{storage.RemoteDir, storage.PullDir} {
+		damaged := filepath.Join(f.zone.Root(), dir, "provider_body", storage.LandedName("provider_body", storage.Stamp(base), 99))
+		if err := os.WriteFile(damaged, []byte("not session data"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := storage.DeleteTree(session, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(f.zone.ProviderStatePath()); err != nil {
+		t.Fatal(err)
+	}
+	st := f.pass(all)
+	if len(st.Errors) != 0 {
+		t.Fatalf("a rebuilt table read a pull tree: %v", st.Errors)
+	}
+	if st.SourcesLanded == 0 {
+		t.Fatal("a rebuilt table took a pull's copy for the root's own landed body")
 	}
 }

@@ -44,6 +44,25 @@ func (n *Nav) Prepare(sel *Selection, records RecordsReader, decode PathDecoder)
 	n.Decode(decode)
 }
 
+// PrepareChecked is Prepare with a reader that tells of its failures: a
+// record the images or a tool step's request need that cannot be read stops
+// the preparation, where Prepare passes over it.
+func (n *Nav) PrepareChecked(sel *Selection, records RecordsReaderChecked, decode PathDecoder) error {
+	n.Within(sel)
+	if err := n.MarkImagesChecked(records); err != nil {
+		return err
+	}
+	var failed error
+	n.readFailed = func(err error) {
+		if failed == nil {
+			failed = err
+		}
+	}
+	n.Decode(decode)
+	n.readFailed = nil
+	return failed
+}
+
 // Decode finds the conversation's file operations: every file a workspace
 // change record captured, and every file the request of a tool step names
 // that no record of that step names, read with decode, which may be nil. It runs after
@@ -140,6 +159,9 @@ func (n *Nav) request(x *sessionview.Node) json.RawMessage {
 		return json.RawMessage(x.Text)
 	}
 	rec, err := n.readable(x.Ref.Seq, x.Ref.Row)
+	if err != nil && n.readFailed != nil {
+		n.readFailed(err)
+	}
 	if err != nil || rec == nil {
 		return nil
 	}

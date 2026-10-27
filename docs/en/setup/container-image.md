@@ -18,7 +18,7 @@ no shell and runs as a non-root user. The storage root is `/asz/data`, and a con
 
 ## Read a storage root
 
-`view` serves the page and only reads:
+`view` serves the page and changes no collected data:
 
 ```sh
 docker run --rm -p 8787:8787 -v "$PWD/data:/asz/data" \

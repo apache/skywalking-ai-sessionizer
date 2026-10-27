@@ -92,6 +92,12 @@ func (s *Selection) Header(w Window) *sessionjudge.Window {
 // on, and a step keeps only those recorded by the window's end: a tool whose
 // result came after it shows no result, as it showed none at that time.
 func Narrow(doc *sessionview.Conversation, w Window, read RecordsReader) (*sessionview.Conversation, *Selection, error) {
+	return NarrowChecked(doc, w, unchecked(read))
+}
+
+// NarrowChecked is Narrow with a reader that tells of its failures, which
+// stop the narrowing.
+func NarrowChecked(doc *sessionview.Conversation, w Window, read RecordsReaderChecked) (*sessionview.Conversation, *Selection, error) {
 	if w.IsZero() {
 		return doc, nil, nil
 	}
@@ -190,7 +196,9 @@ func Narrow(doc *sessionview.Conversation, w Window, read RecordsReader) (*sessi
 		}
 	}
 	if read != nil {
-		cutLater(&out, read, sel.End)
+		if err := cutLater(&out, read, sel.End); err != nil {
+			return nil, nil, err
+		}
 	}
 	// A talk that ran past the window's end ends there: its span, and its
 	// reply, which is the last of its messages the window shows.
@@ -221,7 +229,7 @@ func Narrow(doc *sessionview.Conversation, w Window, read RecordsReader) (*sessi
 // an agent call that loses any of its records loses its result, which came
 // after its request; its request stays. A change or execution record written
 // after end is taken out too.
-func cutLater(doc *sessionview.Conversation, read RecordsReader, end int64) {
+func cutLater(doc *sessionview.Conversation, read RecordsReaderChecked, end int64) error {
 	talks := doc.Talks
 	var refs []sessionflow.Ref
 	for i := range talks {
@@ -233,7 +241,10 @@ func cutLater(doc *sessionview.Conversation, read RecordsReader, end int64) {
 	for _, e := range doc.ToolExecutions {
 		refs = append(refs, e.Ref)
 	}
-	recs := read(refs)
+	recs, err := read(refs)
+	if err != nil {
+		return err
+	}
 	late := func(r sessionflow.Ref) bool {
 		rec := recs[[2]uint64{r.Seq, r.Row}]
 		if rec == nil || rec.Time == "" {
@@ -299,6 +310,7 @@ func cutLater(doc *sessionview.Conversation, read RecordsReader, end int64) {
 			n.Executions = slices.DeleteFunc(slices.Clone(n.Executions), func(id string) bool { return !keep[id] })
 		})
 	}
+	return nil
 }
 
 // countSteps counts a talk's runs, steps and tools as the view does.

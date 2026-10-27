@@ -58,56 +58,61 @@ type LandedFile struct {
 // This describes the zone's own layout, not any runtime's, which is why it
 // lives here rather than in an adapter.
 func LandedFiles(z *Zone, session string) ([]LandedFile, error) {
+	return LandedFilesAtMost(z, session, -1)
+}
+
+// LandedFilesAtMost is LandedFiles that stops with ErrTooMany once it found
+// more than most landed files, before it holds them: a reader with a bound
+// on its inventory refuses a session past it. The directories are walked
+// as they are read, and only landed files count: cursors and a writer's
+// temporaries are passed over. A most below zero takes every file.
+func LandedFilesAtMost(z *Zone, session string, most int) ([]LandedFile, error) {
 	var out []LandedFile
 	root := z.SessionDir(session)
-
+	// add takes one directory's landed files as they are read, each counted
+	// against most before it is kept.
 	add := func(dir, owner string, isRun bool) error {
-		items, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
+		err := EachDirEntry(dir, func(it fs.DirEntry) error {
+			if it.IsDir() {
 				return nil
 			}
-			return err
-		}
-		for _, it := range items {
-			name := it.Name()
-			if it.IsDir() {
-				continue
-			}
-			seq, ok := LandedFileSeq(name)
+			seq, ok := LandedFileSeq(it.Name())
 			if !ok {
-				continue
+				return nil
 			}
-			lf := LandedFile{Path: filepath.Join(dir, name), Seq: seq, Skeleton: sessiondata.IsSkeleton(name)}
+			if most >= 0 && len(out) >= most {
+				return fmt.Errorf("%w: session %s holds more than %d landed files", ErrTooMany, session, most)
+			}
+			lf := LandedFile{Path: filepath.Join(dir, it.Name()), Seq: seq, Skeleton: sessiondata.IsSkeleton(it.Name())}
 			if isRun {
 				lf.RunID = owner
 			} else {
 				lf.Stream = owner
 			}
 			out = append(out, lf)
+			return nil
+		})
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
 		}
-		return nil
+		return err
 	}
 
 	for _, group := range []struct {
 		sub   string
 		isRun bool
 	}{{"streams", false}, {"runs", true}} {
+		// Each owner's directory is walked as it is met, so no list of the
+		// owners is held.
 		base := filepath.Join(root, group.sub)
-		owners, err := os.ReadDir(base)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, err
-		}
-		for _, o := range owners {
+		err := EachDirEntry(base, func(o fs.DirEntry) error {
 			if !o.IsDir() {
-				continue
+				return nil
 			}
-			if err := add(filepath.Join(base, o.Name()), o.Name(), group.isRun); err != nil {
-				return nil, err
-			}
+			return add(filepath.Join(base, o.Name()), o.Name(), group.isRun)
+		})
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
 		}
 	}
 
@@ -194,6 +199,56 @@ func LandedDigest(lf LandedFile) (string, error) {
 		return "", fmt.Errorf("storage: skeleton %s does not say which file it took the place of", lf.Path)
 	}
 	return h.Removed.Digest, nil
+}
+
+// landedKinds maps the prefix of a landed file's name to the kind its header
+// carries. Provider verification and LangSmith's position reader choose files
+// by prefix (internal/verify/provider.go, internal/adapters/langsmith/collect.go),
+// so a file whose prefix and kind disagree hides its records from them. A new
+// producer adds its prefix here. otlp_log and otlp_span are reserved kinds with
+// no producer (pkg/sessiondata/sessiondata.go), so they have no prefix.
+var landedKinds = map[string]sessiondata.Kind{
+	"transcript":    sessiondata.KindTranscript,
+	"meta":          sessiondata.KindAgentMeta,
+	"journal":       sessiondata.KindJournal,
+	"manifest":      sessiondata.KindWorkflowManifest,
+	"script":        sessiondata.KindWorkflowScript,
+	"changes":       sessiondata.KindChanges,
+	"execution":     sessiondata.KindExecution,
+	"provider_body": sessiondata.KindProviderBody,
+}
+
+// LandedKind returns the header kind a landed file or its skeleton must carry,
+// read from the file's name, which LandedName wrote. A name not in that form,
+// or with a prefix no producer writes, reports false.
+func LandedKind(name string) (sessiondata.Kind, bool) {
+	stem, ok := strings.CutSuffix(name, sessiondata.Ext)
+	if !ok {
+		if stem, ok = strings.CutSuffix(name, sessiondata.SkeletonExt); !ok {
+			return "", false
+		}
+	}
+	rest, seq, ok := cutLast(stem)
+	if !ok || len(seq) < 6 || strings.Trim(seq, "0123456789") != "" {
+		return "", false
+	}
+	prefix, stamp, ok := cutLast(rest)
+	if !ok {
+		return "", false
+	}
+	if _, err := ParseTag(stamp); err != nil {
+		return "", false
+	}
+	kind, ok := landedKinds[prefix]
+	return kind, ok
+}
+
+func cutLast(s string) (before, after string, ok bool) {
+	i := strings.LastIndexByte(s, '-')
+	if i < 0 {
+		return "", "", false
+	}
+	return s[:i], s[i+1:], true
 }
 
 // LandedFileSeq extracts the sequence from a landed filename or a skeleton's.

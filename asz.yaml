@@ -19,8 +19,9 @@
 
 # Default configuration for asz.
 #
-# Every asz command reads this file when it is in the working directory and no
-# -config flag is given. Every value below is the built-in default, so deleting
+# Every asz command that reads a configuration reads this file when it is in
+# the working directory and no -config flag is given; asz token and asz
+# version read none. Every value below is the built-in default, so deleting
 # the file changes nothing. It is here so the defaults can be read and edited
 # without reading Go.
 
@@ -428,3 +429,53 @@ judge:
     # How long one fetch may take.
     timeout: 1m
     fetch: []
+
+# How long a snapshot asz pull made stays on this machine, counted from when
+# it was published, with every judge run in it. The newest snapshot expires
+# too: pull again for a fresh one. asz pull and asz judge
+# -remote-conversation remove the expired ones they find when they start,
+# except one a reader still holds, one whose records do not read, and those
+# of a conversation another command holds; nothing removes them in the
+# background. A duration such as 720h, at least 2s.
+remote_snapshot_ttl: 720h
+
+# The asz servers asz pull copies conversations from, to judge them here.
+# Each entry needs a name, which names its copies on this machine and stays
+# the same when the url changes, and a url. Exactly one of token_file and
+# token_env gives the token; neither is read until the remote is contacted.
+# For example:
+#   - name: prod
+#     url: https://asz.example.internal:8788
+#     token_file: ~/.asz/prod.token
+#     token_env: ""
+#     # Replaces the system's trusted roots for this remote.
+#     ca_file: ""
+#     # Set both or neither.
+#     client_cert_file: ""
+#     client_key_file: ""
+#     # The host the certificate is checked against, when it differs from
+#     # the url's, as through a tunnel.
+#     server_name: ""
+remotes: []
+
+# What asz view and asz server need to answer asz pull. With a tokens file,
+# every request to the address needs a token, the page and the requests it
+# makes too, and the pull routes are served beside them. Without one, there
+# are no pull routes and the page is open.
+remote_server:
+  # One line per token: a name, a space, and the token's SHA-256 in lower
+  # case hexadecimal. asz token create makes a token and its line.
+  tokens_file: ""
+  tls:
+    # Set both to serve TLS on the address. Without them, tokens travel in
+    # plain text, which anyone on the path can read and use.
+    cert_file: ""
+    key_file: ""
+    # With TLS, also require a client certificate this authority signed.
+    client_ca_file: ""
+  # How many requests one token may have running at once. More are refused with
+  # 429. 1 to 64.
+  max_concurrent_per_token: 2
+  # How long a frozen snapshot stays after it was last used, so a pull that
+  # stopped half way does not keep it for ever. At least 2s.
+  snapshot_ttl: 1h

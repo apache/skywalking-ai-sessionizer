@@ -33,6 +33,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // Runner runs judge runs over one storage root.
@@ -63,6 +64,72 @@ type Runner struct {
 	// tests.
 	Executor func(name string, e config.Evaluator) (Executor, error)
 	Now      func() time.Time
+	// Reserved, when set, is told the run's number as soon as it is
+	// reserved, before any stage is written or any evaluator runs. On a
+	// pulled snapshot it binds the reader's lease to the run, which alone
+	// lets an evaluator work there; an error stops the run.
+	Reserved func(number int) error
+	// Admitted is the pulled snapshot the run reads, under a lease, or
+	// empty. A file the run is given may lie inside it, and nowhere else in
+	// a tree pull owns.
+	Admitted string
+	// Snapshot binds every read of the conversation to a pulled snapshot
+	// the run holds a lease on: folds reach its marker's head, and a read
+	// that fails stops the run rather than leaving something out.
+	Snapshot *view.Snapshot
+	// Failures, on a pulled snapshot, is the random part of the run lease
+	// the run holds, which names each chunk attempt's failure marker and
+	// its chunk's gate. It is read once the lease is bound.
+	Failures func() string
+}
+
+// server is the view the run reads the conversation through.
+func (r *Runner) server() *view.Server {
+	srv := view.New(r.Zone, nil)
+	if r.Snapshot != nil {
+		srv.SetSnapshot(r.Snapshot)
+	}
+	return srv
+}
+
+// navigation narrows a document to the window, computes its ledger and
+// prepares the navigation over it, as both a run and a regroup read a
+// conversation. On a pulled snapshot every record read is checked, and a
+// failure stops it; on any other root what cannot be read is passed over, as
+// it always was.
+func (r *Runner) navigation(c *view.Conversation, doc *sessionview.Conversation, window Window, pricing *Pricing) (*sessionview.Conversation, *Selection, *Ledger, *Nav, error) {
+	dialect := r.Dialect(c.Session)
+	var decode PathDecoder
+	if r.Decoder != nil {
+		decode = r.Decoder(dialect)
+	}
+	read := func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, r.Config.Hide) }
+	if r.Snapshot == nil {
+		doc, sel, err := Narrow(doc, window, c.Records)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		ledger := Compute(doc, dialect, pricing, c.Records)
+		ledger.Select(sel)
+		nav := NewNav(doc, ledger, read)
+		nav.Prepare(sel, c.Records, decode)
+		return doc, sel, ledger, nav, nil
+	}
+	doc, sel, err := NarrowChecked(doc, window, c.RecordsChecked)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	ledger, err := ComputeChecked(doc, dialect, pricing, c.RecordsChecked)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	ledger.Select(sel)
+	nav := NewNav(doc, ledger, read)
+	if err := nav.PrepareChecked(sel, c.RecordsChecked, decode); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	nav.Strictly(NewStrict(doc, c.Holds), "")
+	return doc, sel, ledger, nav, nil
 }
 
 // MCPArgs is what the navigation server of one stage is started over.
@@ -81,6 +148,9 @@ type MCPArgs struct {
 	ReadBytes int
 	// Task is the file that says what the call answers for.
 	Task string
+	// Failure, on a pulled snapshot, is the chunk attempt's failure marker,
+	// which the server makes before each read of evidence.
+	Failure string
 }
 
 // Run is one finished run.
@@ -168,7 +238,7 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	if err != nil {
 		return nil, err
 	}
-	srv := view.New(r.Zone, nil)
+	srv := r.server()
 	var c *view.Conversation
 	if round == 0 {
 		c, err = srv.Load(conversation)
@@ -183,22 +253,13 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		return nil, err
 	}
 	head := sessionjudge.Head{Round: doc.Head.Round, Digest: doc.Head.Digest}
-	doc, sel, err := Narrow(doc, r.Window, c.Records)
+	doc, sel, ledger, nav, err := r.navigation(c, doc, r.Window, r.Pricing)
 	if err != nil {
 		return nil, err
 	}
-	dialect := r.Dialect(c.Session)
-	ledger := Compute(doc, dialect, r.Pricing, c.Records)
-	ledger.Select(sel)
-	nav := NewNav(doc, ledger, func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, r.Config.Hide) })
-	var decode PathDecoder
-	if r.Decoder != nil {
-		decode = r.Decoder(dialect)
-	}
-	nav.Prepare(sel, c.Records, decode)
 	// The sources are fetched before any evaluator runs, and kept in the
 	// run's work directory whether or not the stages that read them run.
-	saved := fetchSources(ctx, r.Sources, r.Config.References, r.now)
+	saved := fetchSources(ctx, r.Sources, r.Config.References, r.now, r.Admitted)
 	for _, s := range saved {
 		nav.sources = append(nav.sources, s.manifest)
 		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: s.manifest.ID, Source: s.manifest.Source, Text: s.text})
@@ -210,6 +271,11 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	number, dir, err := storage.ReserveRun(r.Zone, c.Session)
 	if err != nil {
 		return nil, err
+	}
+	if r.Reserved != nil {
+		if err := r.Reserved(number); err != nil {
+			return nil, err
+		}
 	}
 	run := &Run{Number: number, Dir: dir, Head: head, Status: sessionjudge.StatusComplete}
 	r.logf("run %d of %s at round %d", number, conversation, head.Round)
@@ -229,6 +295,11 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	// publish writes one stage file and returns the stage frame the close
 	// file lists it by.
 	publish := func(h sessionjudge.Header, frames []any) (*sessionjudge.Stage, error) {
+		// Nothing is published once a read of a pulled snapshot's
+		// evidence failed, whoever made it.
+		if err := nav.Failed(); err != nil {
+			return nil, err
+		}
 		w, err := sessionjudge.NewWriter(h)
 		if err != nil {
 			return nil, err

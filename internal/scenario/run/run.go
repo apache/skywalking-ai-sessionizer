@@ -99,6 +99,9 @@ func Check(scenarioPath string, opts Options) (*Report, error) {
 		}
 	}
 	rep.Out = out
+	if err := makeFormatRoots(out, formats); err != nil {
+		return rep, err
+	}
 	summaries := map[scenario.Format]*expect.Summary{}
 	sessions := map[scenario.Format]string{}
 	for _, f := range formats {
@@ -145,6 +148,29 @@ func Check(scenarioPath string, opts Options) (*Report, error) {
 		_ = os.RemoveAll(out)
 	}
 	return rep, nil
+}
+
+// makeFormatRoots makes the root of each format in the directory the check
+// was given. A pull admits only an empty directory, under that directory's
+// root lock. So the check takes the same lock, which refuses a directory
+// holding copies, and makes the roots before it lets go: a pull that comes
+// after finds them and refuses the directory, and one that came before left
+// its marker, which the lock refuses.
+func makeFormatRoots(out string, formats []scenario.Format) error {
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return err
+	}
+	lock, err := storage.LockRoot(out)
+	if err != nil {
+		return fmt.Errorf("scenario check: %s: %w", out, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+	for _, f := range formats {
+		if err := os.MkdirAll(filepath.Join(out, string(f)), 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // checkFormat builds through every checkpoint, collects when the format
@@ -598,7 +624,7 @@ func copyLanded(from, to string) error {
 			return err
 		}
 		if d.IsDir() {
-			if rel == "_conversations" || rel == "_source" || filepath.Base(rel) == "index" {
+			if rel == "_conversations" || rel == "_source" || rel == storage.RemoteDir || rel == storage.PullDir || filepath.Base(rel) == "index" {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(to, rel), 0o755)

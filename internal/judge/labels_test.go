@@ -36,7 +36,7 @@ func TestALabelFileListsThePersonsGoals(t *testing.T) {
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := ReadLabels(path)
+	l, err := ReadLabels(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestALabelFileListsThePersonsGoals(t *testing.T) {
 		if err := os.WriteFile(path, []byte(tc.text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ReadLabels(path); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, err := ReadLabels(path, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
 		}
 	}

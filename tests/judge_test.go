@@ -1055,7 +1055,7 @@ func TestARegroupReadsAsItsRunRead(t *testing.T) {
 	if err := os.WriteFile(prices, []byte("currency: USD\nmodels:\n  - model: claude-opus-5\n    per_million: {in: 1, out: 10, cache_read: 0.1, cache_write: 2}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if r.Pricing, err = judge.LoadPricing(prices); err != nil {
+	if r.Pricing, err = judge.LoadPricing(prices, ""); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -1070,7 +1070,7 @@ func TestARegroupReadsAsItsRunRead(t *testing.T) {
 	if err := os.WriteFile(labels, []byte("goals:\n  - add tests for the parser\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := judge.ReadLabels(labels)
+	l, err := judge.ReadLabels(labels, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1161,7 +1161,7 @@ func TestARunIsRegroupedByThePersonsGoals(t *testing.T) {
 		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		labels, err := judge.ReadLabels(path)
+		labels, err := judge.ReadLabels(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}

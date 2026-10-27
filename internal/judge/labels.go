@@ -31,8 +31,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
-	"github.com/apache/skywalking-ai-sessionizer/internal/view"
-	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
@@ -62,8 +60,11 @@ type Labels struct {
 //
 // A goal that is empty, longer than goalBytes, or given twice makes the file
 // unreadable, since the comparison would rest on it.
-func ReadLabels(path string) (*Labels, error) {
-	data, err := os.ReadFile(path)
+//
+// The file is a path a person gave: it is checked and opened as one, and
+// admitted is the pulled snapshot a held lease lets it lie in, or empty.
+func ReadLabels(path, admitted string) (*Labels, error) {
+	data, err := readSupplied(path, admitted, labelBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +430,7 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	if err != nil {
 		return "", nil, err
 	}
-	c, err := view.New(r.Zone, nil).LoadAt(conversation, t.Head.Round)
+	c, err := r.server().LoadAt(conversation, t.Head.Round)
 	if err != nil {
 		return "", nil, err
 	}
@@ -440,19 +441,10 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	if doc.Head.Digest != t.Head.Digest {
 		return "", nil, fmt.Errorf("judge: round %d of %s is not the head run %d read", t.Head.Round, conversation, run.Run)
 	}
-	doc, sel, err := Narrow(doc, window, c.Records)
+	_, _, _, nav, err := r.navigation(c, doc, window, pricing)
 	if err != nil {
 		return "", nil, err
 	}
-	dialect := r.Dialect(c.Session)
-	ledger := Compute(doc, dialect, pricing, c.Records)
-	ledger.Select(sel)
-	nav := NewNav(doc, ledger, func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, r.Config.Hide) })
-	var decode PathDecoder
-	if r.Decoder != nil {
-		decode = r.Decoder(dialect)
-	}
-	nav.Prepare(sel, c.Records, decode)
 	var inputs []*sessionjudge.Input
 	for i := range targets.Inputs {
 		inputs = append(inputs, &targets.Inputs[i])
@@ -504,6 +496,11 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 		}
 		frames = append(frames, m.frames...)
 		agreement, _ = frames[len(frames)-1].(*sessionjudge.Agreement)
+	}
+	// Nothing is published once a read of a pulled snapshot's evidence
+	// failed, whoever made it.
+	if err := nav.Failed(); err != nil {
+		return "", nil, err
 	}
 	w, err := sessionjudge.NewWriter(h)
 	if err != nil {

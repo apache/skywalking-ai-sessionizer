@@ -124,6 +124,14 @@ func cmdScenario(args []string) int {
 		}
 		base = t
 	}
+	// A directory given to write into is refused before anything is made in
+	// it when it is, or sits in, pulled copies.
+	if *out != "" {
+		if err := refuseCopyRoot("scenario "+sub, *out); err != nil {
+			fmt.Fprintln(os.Stderr, "asz:", err)
+			return 1
+		}
+	}
 	switch sub {
 	case "build":
 		if *format == "" || *out == "" {

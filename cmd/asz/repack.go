@@ -52,6 +52,9 @@ func cmdRepack(cfg *config.Config, ad config.Adapter, _ bool) error {
 	if err != nil {
 		return err
 	}
+	if err := refuseCopyRoot("repack", dstRoot); err != nil {
+		return err
+	}
 	// Both are compared with their symbolic links followed, since two
 	// spellings can name one directory.
 	realSrc, realDst := resolved(srcRoot), resolved(dstRoot)

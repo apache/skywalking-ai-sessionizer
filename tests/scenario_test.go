@@ -47,10 +47,12 @@ func TestScenarios(t *testing.T) {
 		name := strings.TrimSuffix(filepath.Base(path), ".yaml")
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			rep, err := run.Check(path, run.Options{Out: t.TempDir()})
+			out := t.TempDir()
+			rep, err := run.Check(path, run.Options{Out: out})
 			if err != nil {
 				t.Fatal(err)
 			}
+			checkLandedKinds(t, out)
 			for _, l := range rep.Lines {
 				t.Log(l)
 			}
