@@ -112,6 +112,11 @@ langchain-capture:
 e2e-collector: build
 	tools/test/e2e-collector.sh
 
+## e2e-pull: pull from asz servers in containers over TLS and tokens, and check a shared cache never answers for a token (needs docker and openssl)
+.PHONY: e2e-pull
+e2e-pull: build
+	tools/test/e2e-pull.sh
+
 ## conversation-view: rebuild the conversation renderer asz view embeds from the pinned Horizon commit (needs node 24 and pnpm)
 .PHONY: conversation-view
 conversation-view:

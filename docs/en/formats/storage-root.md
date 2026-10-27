@@ -77,6 +77,8 @@ session.
   _removed/                              what a removal of a scenario session, or a retirement,
     <session-id>/                        is deleting: the session directory, moved here whole,
     <session-id>.chain/                  and its conversation's directory, moved here whole
+  _remote/                               the conversations asz pull copied here, see Pulled copies
+  _pull/                                 what this root serves pulls with, see Served pulls
 ```
 
 Child streams are flat siblings of `main`, keyed by agent id. Provider bodies sit under the
@@ -89,17 +91,24 @@ retirement. [Retention](#retention) says what each is for. A session's `judgment
 [judge runs](session-judgment.md) of its conversation. They sit in the session's directory rather
 than the chain's, which is removed to parse a conversation again, so they go where the session goes.
 
-Every command that writes to a root holds `_root/.lock` for one pass: `asz collect` and `asz
-server` for each pass, `asz parse`, `asz push` and `asz repack` for their run, and `asz scenario
-build` for each session it builds. Another command over the same root waits for it, a watching
-pipeline by doing nothing that period, so two commands never write the same root at once. `asz
+Every command that writes collected data or its rounds holds `_root/.lock` for one pass: `asz collect`
+and `asz server` for each pass, `asz parse`, `asz push` and `asz repack` for their run, and `asz
+scenario build` for each session it builds. Another such command over the same root waits for it, a
+watching pipeline by doing nothing that period, so two of them never write the same data at once.
+`asz pull` writes only under `_remote/`, each conversation under its own `_pull`, and a server
+answering pulls writes only under `_pull/`, under the locks [Served pulls](#served-pulls) names;
+either runs beside a command that holds `_root/.lock`. `asz
 judge` holds it only while it reserves a run and while it writes each stage file, never while an
 evaluator works, which can take minutes. `asz view`, `asz index` and `asz measure` only read, and
-take no lock. The LangSmith receiver is the one writer outside
+take no lock on the root, though each takes a lease on a pulled snapshot it reads. `asz view` and
+`asz server` answering pulls keep their own records under `_pull/`, under the locks
+[Served pulls](#served-pulls) names. The LangSmith receiver is the one writer outside
 a pass. It only adds requests to `_langsmith/`, each under a new name, and a pass takes them under
 that directory's own lock.
-Locks are taken in one order: `_scenario`, `_root`, `_export`, `_metrics`, `_provider`, a
-session's, a chain's.
+Locks are taken in one order: the lock of the process that serves a root's pulls, `_scenario`, a
+pulled conversation's `_pull` (or, serving pulls, a worker's slot and then its job's lock), a pulled
+conversation's `_admit` (or, serving pulls, `_pull/.lock`), `_root`, `_export`, `_metrics`,
+`_provider`, `_langsmith`, a session's, a chain's.
 
 `liveness` in `session.state` is always `unknown`. asz has no check for whether a session is
 still running.
@@ -525,7 +534,8 @@ read-only. A [skeleton](session-data.md#skeletons) keeps every record and every 
 with every field the index is built from, and none of the content: text, data and media go. The
 index rebuilt from a skeleton is the index rebuilt from its file, so a conversation that becomes
 active again continues the same chain, with the same rounds, as if nothing was removed. Its text
-is kept only by a receiver that accepted it. A skeleton is never sent. Measured on 2026-10-13 on
+is kept only by a receiver that accepted it. A skeleton is never sent to a receiver; `asz pull` copies
+it with the snapshot it is in. Measured on 2026-10-13 on
 one machine's root, 7,235 landed files of 847.5 MB had skeletons of 29.6 MB, 3.5% of them: 3.5%
 for transcripts, under 5% for workflow files, and 77% for child agents' sidecars, which are mostly
 identifiers. Its 16 provider body files of 133 KB had skeletons of 13.6 KB, 10% of them, 0.7 KB of
@@ -835,3 +845,81 @@ stops listing it, and the receiver holds the only copy. A test in `tests/chain` 
 every point it reaches, including after each source file and each spool file it deletes, then runs
 the whole pipeline again as after a restart. Each time nothing is landed, derived, parsed or sent
 again, the session ends fully removed, and `_removed/` is empty.
+
+## Pulled copies
+
+`asz pull` keeps what it copies from a [remote](../concepts-and-designs/glossary.md#pulling) under
+`_remote/`, one directory per remote and conversation, one snapshot per tag. A snapshot is a storage
+root of its own, holding one conversation's evidence through one head. Commands that only read take
+a snapshot as their root, under a lease. Commands that write refuse it, except `asz judge`, which
+writes its run inside it.
+
+```text
+_remote/
+  <remote>/
+    <conversation-id>/
+      _copy                              the remote, the conversation, the greatest tag ever
+                                         reserved, a publication in progress, every tag removed
+      _pull/.lock                        one pull or sweep of this conversation at a time
+      _root/.lock                        held while the history or a publication changes
+      _admit/.lock                       the gate a reader is admitted through
+      _building/                         a pull's private work, never read as evidence
+      _removing/                         expired snapshots being deleted
+      <tag>/                             one snapshot, named by the time it was published
+        _copy                            its marker: remote, conversation, session, head round
+                                         and digest, manifest digest, publication time; written
+                                         once, before the snapshot gets its name
+        _manifest                        its files, as asz.pull lists them
+        _root/.lock                      held by a judge run in it
+        _leases/                         one empty lock file per reader
+        <session-id>/                    the landed files and skeletons the head reaches, the
+                                         provider store entries, and the snapshot's judge runs
+        _conversations/<conversation-id>/rounds/   rounds 1 to the head
+```
+
+A snapshot and every judge run in it expire [`remote_snapshot_ttl`](../setup/configuration.md#remote_snapshot_ttl)
+after it was published. `asz pull` and `asz judge -remote-conversation` remove the expired ones they
+find when they start, unless a reader still holds a lease on one. Other commands that read copies
+remove nothing.
+
+## Served pulls
+
+An asz that serves pulls keeps, under `_pull/`, the snapshots it froze for them and what it knows of
+each pull. One process owns a root's pulls at a time, through `_pull/owner/.lock`.
+
+```text
+_pull/
+  owner/.lock                            the process that serves this root's pulls
+  .lock                                  held by every change of the state below
+  _state                                 the greatest tag reserved, and a publication in progress
+  _freezes/
+    <freeze-id>.json                     a freeze: its conversation, attempt and state, its
+                                         snapshot when ready, its problem when failed
+    <freeze-id>.lock                     held by the worker that freezes it
+  building/<freeze-id>/                  a freeze's private work, never read as evidence
+  conversations/
+    <conversation-id>/
+      _history                           the greatest tag reserved, and every tag removed
+      _root/.lock                        held while a snapshot is removed
+      _removing/                         snapshots being deleted
+      <tag>/                             one snapshot
+        _manifest                        its files, as asz.pull lists them
+        _snapshot                        what it is, and the newer snapshot that superseded it
+        _last_use                        when a pull last used it, and whether it expired
+        _leases/<lease>.json             one per manifest answered, bound to its token
+        _requests/<id>.lock              held by each request that reads it
+        _archives/                       the archives asked for: names, job, bytes, failures
+        <session-id>/ _conversations/    the frozen evidence, linked to the live files where
+                                         the file system allows, else copied
+```
+
+A snapshot expires [`remote_server.snapshot_ttl`](../setup/configuration.md#remote_server) after it
+was last used. The newest snapshot of a conversation stays after its last lease is released. An
+older one expires once no lease holds it.
+
+The process that serves the pulls deletes what has expired when it starts, and then again at an
+interval of half `snapshot_ttl`, kept between one second and one minute. Each pass deletes the
+snapshots that are due, expired or older with no lease, unless a request is at work on one, which
+keeps it until the request ends. It also deletes the freeze jobs no longer needed, the builds a
+stopped process left in `_pull/building/`, and what a conversation's `_removing/` still holds.
+Expiry stops a snapshot being served at once; deletion follows on the next pass.

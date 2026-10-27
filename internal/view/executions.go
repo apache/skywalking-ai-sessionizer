@@ -18,8 +18,6 @@
 package view
 
 import (
-	"errors"
-	"io"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -41,7 +39,7 @@ import (
 // once by its own id: the same record landed twice, by a hook handed its
 // event again or by an interrupted pass, is one record. A record whose call is not a step of the document keeps no
 // step rather than being dropped.
-func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]uint64]*sessiondata.Record) []sessionview.ToolExecution {
+func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]uint64]*sessiondata.Record) ([]sessionview.ToolExecution, error) {
 	stepOf := c.stepsByToolUse(recs)
 	var out []sessionview.ToolExecution
 	seen := map[string]bool{}
@@ -49,20 +47,7 @@ func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]u
 		if !strings.HasPrefix(filepath.Base(lf.Path), string(sessiondata.KindExecution)+"-") {
 			continue
 		}
-		f, err := storage.OpenLanded(lf.Path)
-		if err != nil {
-			continue
-		}
-		rd, err := sessiondata.NewReader(f)
-		if err != nil {
-			f.Close()
-			continue
-		}
-		for row := uint64(1); ; row++ {
-			rec, err := rd.Next()
-			if errors.Is(err, io.EOF) || err != nil {
-				break
-			}
+		err := c.eachRecord(lf, func(row uint64, rec *sessiondata.Record) {
 			for b, p := range rec.Parts {
 				if p.Kind != sessiondata.PartData {
 					continue
@@ -80,14 +65,16 @@ func (c *Conversation) toolExecutions(landed []storage.LandedFile, recs map[[2]u
 				out = append(out, sessionview.ToolExecution{Step: stepOf[r.Tool],
 					Ref: sessionflow.Ref{Seq: lf.Seq, Row: row, Block: &block}, State: state, Record: *r})
 			}
+		})
+		if err != nil {
+			return nil, err
 		}
-		f.Close()
 	}
 	sort.SliceStable(out, func(i, j int) bool { return c.executionBefore(&out[i], &out[j]) })
 	if out == nil {
 		out = []sessionview.ToolExecution{}
 	}
-	return out
+	return out, nil
 }
 
 // executionBefore orders tool executions: by time, then by where each was

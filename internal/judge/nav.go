@@ -55,6 +55,14 @@ type Nav struct {
 	doc    *sessionview.Conversation
 	ledger *Ledger
 	read   RecordReader
+	// readFailed, while PrepareChecked runs, is told of a record that could
+	// not be read, which Prepare passes over.
+	readFailed func(error)
+	// strict, on a pulled snapshot, holds every record read to the
+	// snapshot's evidence, and attempt to the failure marker of the chunk
+	// attempt this navigation answers. See failure.go.
+	strict  *Strict
+	attempt *attempt
 
 	// throughSeq is the last landed sequence the head consumed. A record or
 	// a change record landed after it is not part of what the run judges,
@@ -159,6 +167,8 @@ func (n *Nav) Fork() *Nav {
 	c := *n
 	c.counts = &counts{}
 	c.assigned, c.mine = Assignment{}, nil
+	// A fork reads under no attempt's marker until it is given one.
+	c.attempt = nil
 	return &c
 }
 
@@ -328,8 +338,13 @@ type inputRow struct {
 // not know a screenshot came with it: over the local conversations, every
 // one of the 93 inputs larger than 32 KiB was one.
 func (n *Nav) MarkImages(read RecordsReader) {
+	_ = n.MarkImagesChecked(unchecked(read))
+}
+
+// MarkImagesChecked is MarkImages with a reader that tells of its failures.
+func (n *Nav) MarkImagesChecked(read RecordsReaderChecked) error {
 	if read == nil {
-		return
+		return nil
 	}
 	var refs []sessionflow.Ref
 	for _, r := range n.inputs {
@@ -337,7 +352,10 @@ func (n *Nav) MarkImages(read RecordsReader) {
 			refs = append(refs, *x.Ref)
 		}
 	}
-	recs := read(refs)
+	recs, err := read(refs)
+	if err != nil {
+		return err
+	}
 	for i := range n.inputs {
 		x := n.nodes[n.inputs[i].Node]
 		if x == nil || x.Ref == nil {
@@ -347,6 +365,7 @@ func (n *Nav) MarkImages(read RecordsReader) {
 			n.inputs[i].Images, n.inputs[i].ImageBytes = imagesOf(rec)
 		}
 	}
+	return nil
 }
 
 // imagesOf counts the images in a record: media parts of an image type, and
@@ -523,6 +542,16 @@ func Tools() []Tool {
 // answer carries the head it is about. An error is an answer the evaluator
 // reads, not a failure of the run.
 func (n *Nav) Call(name string, args json.RawMessage) (any, error) {
+	// A spent budget refuses before anything is read: every answer takes
+	// some bytes, so the call could only be refused after its reads.
+	n.counts.mu.Lock()
+	if n.counts.budget > 0 && n.counts.spent >= n.counts.budget {
+		n.counts.calls++
+		n.counts.refused++
+		n.counts.mu.Unlock()
+		return nil, ErrBudgetSpent
+	}
+	n.counts.mu.Unlock()
 	out, err := n.call(name, args)
 	var b []byte
 	if err == nil {
@@ -1175,6 +1204,9 @@ func (n *Nav) readable(seq, row uint64) (*sessiondata.Record, error) {
 	if n.refs != nil && !n.refs[[2]uint64{seq, row}] {
 		return nil, fmt.Errorf("record %d/%d is outside the part of the conversation this run judges", seq, row)
 	}
+	if n.strict != nil {
+		return n.strict.read(n.attempt, seq, row, n.read)
+	}
 	return n.read(seq, row)
 }
 
@@ -1359,9 +1391,13 @@ func (n *Nav) searchNode(query, id string, skip int) ([]any, error) {
 	if n.read == nil {
 		return nil, fmt.Errorf("records cannot be read here")
 	}
+	parts, err := n.recordedParts(x)
+	if err != nil {
+		return nil, err
+	}
 	var rows []any
 	seen := 0
-	for _, p := range n.recordedParts(x) {
+	for _, p := range parts {
 		for from := 0; q != ""; {
 			at, size := indexFold(p.text, q, from)
 			if at < 0 {
@@ -1394,8 +1430,10 @@ type recordedPart struct {
 // recordedParts reads the parts a step stands on whole from its records: a
 // data part as the record holds it. A record can hold several steps' parts,
 // as one result record holds several tools' results; a reference that names
-// a block names the step's. A record that cannot be read is passed over.
-func (n *Nav) recordedParts(x *sessionview.Node) []recordedPart {
+// a block names the step's. A record that cannot be read is passed over,
+// except on a pulled snapshot, where the error is returned: an answer there
+// never leaves out text it could not read.
+func (n *Nav) recordedParts(x *sessionview.Node) ([]recordedPart, error) {
 	refs := x.Refs
 	if len(refs) == 0 && x.Ref != nil {
 		refs = []sessionflow.Ref{*x.Ref}
@@ -1403,6 +1441,9 @@ func (n *Nav) recordedParts(x *sessionview.Node) []recordedPart {
 	var out []recordedPart
 	for _, r := range refs {
 		rec, err := n.readable(r.Seq, r.Row)
+		if err != nil && n.strict != nil {
+			return nil, err
+		}
 		if err != nil || rec == nil {
 			continue
 		}
@@ -1417,7 +1458,7 @@ func (n *Nav) recordedParts(x *sessionview.Node) []recordedPart {
 			out = append(out, recordedPart{seq: r.Seq, row: r.Row, part: pi, text: text})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // search finds text in what the document holds of each step: its text and

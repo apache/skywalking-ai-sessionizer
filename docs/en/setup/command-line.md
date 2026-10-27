@@ -4,7 +4,7 @@
 asz sources [-config FILE]                    list the sessions found, and their files
 asz collect [-config FILE] [-once]            collect, assemble and send, every interval
 asz server [-config FILE] [ADDR]              collect, and serve the page
-asz view [-config FILE] [ADDR]                serve the page for data already collected; only reads
+asz view [-config FILE] [ADDR]                serve the page for data already collected; changes no collected data
 asz push [-config FILE]                       send everything not sent yet, then exit
 asz parse [-config FILE] [SESSION]            assemble conversations from collected data
 asz conversation [-config FILE] [-json|-yaml] ID   show one conversation
@@ -14,13 +14,21 @@ asz repack [-config FILE] DEST [SESSION]      copy the data into DEST, cut to th
 asz index [-config FILE] [SESSION]            report the lookup index
 asz measure [-config FILE] [-pricing FILE] [-json] ID   what a conversation's model calls consumed
 asz judge [-config FILE] [-round N] [-from T -to T | -from-id ID -to-id ID] [-evaluator NAME | -plan ...] ID   judge a conversation; -list and -show read runs
+asz judge [-config FILE] -remote-conversation REMOTE/ID[:TAG] ...   judge a pulled conversation
+asz judge [-config FILE] -pull -remote-conversation REMOTE/ID[:latest] ...   pull its head, then judge it as a new run
+asz pull [-config FILE] REMOTE/ID ...           copy conversations from another asz, to judge and read here
+asz pull [-config FILE] -list [-remote NAME] ...   list what the remotes hold
+asz token create [-file FILE] NAME            make a token for an asz that serves pulls
 asz glossary                                  what Claude Code calls each thing asz names
 asz scenario build|check FILE ...             build or check a test scenario
 asz version                                   print the version
 ```
 
-A `SESSION` or `ID` is a Claude Code session id. [Command Line Internals](../guides/command-line-internals.md)
-explains the reports in detail.
+A `SESSION` is a session's identifier, as `asz sources` shows it, and an `ID` a conversation's, as
+the page shows it, whatever runtime recorded them. In `asz show SESSION ID` the `ID` is a record's
+or a tool use's identifier instead, and `-from-id` and `-to-id` take talks' identifiers. A
+`REMOTE/ID` names a conversation on a remote as `asz pull -list` shows it.
+[Command Line Internals](../guides/command-line-internals.md) explains the reports in detail.
 
 ## Flags
 
@@ -54,13 +62,24 @@ your own machine. The list page shows when data was last collected.
 
 ## view
 
-Serves the conversations at `ADDR`, `127.0.0.1:8787` by default, and changes nothing. Use it for
-data collected elsewhere or by another process. The list is at `/`, and one conversation at
+Serves the conversations at `ADDR`, `127.0.0.1:8787` by default. It collects nothing and changes no
+collected data. It writes a lease while it reads a pulled snapshot. When its root is a pulled
+snapshot that a stopped pull left half published, it deletes that unfinished snapshot and records
+its tag removed. When it answers pulls, it keeps the pull server's records under `_pull/`. Use it
+for data collected elsewhere or by another process. The list is at `/`, and one conversation at
 `/c/{id}`. The Evidence tab shows the collected record behind a step, and the Prompt tab a model
 call's request and response, when [provider bodies](claude-code-provider-bodies.md) were collected.
 The page withholds from every reader what [`view.hide`](configuration.md#view) names, the system
 prompt and the tool schemas a runtime sent, unless `view.hide_override` lets a request's `hide`
 parameter name another set. `server` does the same. `conversation` withholds nothing. See [Withholding](../formats/asz-view.md#withholding).
+The list also holds the conversations `asz pull` copied into the root, each named with
+`[remote, NAME]` before its title. Each request takes a lease on the pulled snapshot it reads, and
+lets it go when it is answered.
+
+With [`remote_server.tokens_file`](configuration.md#remote_server) set, `view` and `server` need a
+token on every request, and also answer `asz pull` from other machines, keeping the pull server's
+records under `_pull/`. A root that is itself a pulled snapshot answers no pulls. See
+[Pull from Another asz](remote-pull.md).
 
 ## push
 
@@ -124,6 +143,26 @@ Judges one conversation at its current head, or at round `-round N`: the targets
 whether each was achieved, how each sub-task went, and what each piece of work was, each stage given to
 an evaluator. `-from` and `-to`, or `-from-id` and `-to-id`, judge a window of whole main talks. `-list`
 lists a conversation's runs and `-show N` prints one. See [Judge a Conversation](judge.md).
+
+`-remote-conversation REMOTE/ID` judges a conversation `asz pull` copied here, in place of `ID`: the
+snapshot with `:TAG`, or the newest unexpired one without a tag or with `:latest`. `-pull` pulls its
+head first and judges it as a new run: it takes no fixed tag, and no `-list`, `-show` or `-regroup`.
+See [Pull from Another asz](remote-pull.md#judge-a-pulled-conversation).
+
+## pull
+
+Copies conversations from the asz servers named under [`remotes`](configuration.md#remotes), each as
+`REMOTE/ID`, into the storage root, and prints each copy's snapshot. `-list` lists what the remotes
+hold instead, newest activity first. It exits 0 when everything it was asked succeeded, 1 when a pull,
+a remote's listing or a copy here failed, and 2 when its arguments are wrong. When one conversation
+fails, the next goes on. When a remote itself fails, such as a refused token or certificate, its
+remaining pulls stop, and the other remotes go on. A conversation a remote's listing could not read
+is said, and does not fail the command. See [Pull from Another asz](remote-pull.md).
+
+## token create
+
+Makes a token for an asz that serves pulls, and prints it. With `-file`, adds its line to that tokens
+file. Without, prints the line to add.
 
 ## glossary
 

@@ -42,6 +42,8 @@ type Reader struct {
 	n    int
 	end  *End
 	done bool
+	// checked says the closing line passed its count and digest checks.
+	checked bool
 }
 
 // NewReader consumes the header and returns a Reader at the first record.
@@ -96,6 +98,7 @@ func (r *Reader) Next() (*Record, error) {
 			return nil, fmt.Errorf("sessiondata: %s holds %d records, the file claims %d",
 				r.hdr.Src, r.n, e.Records)
 		}
+		r.checked = true
 		return nil, io.EOF
 	}
 	r.h.Write(line)
@@ -141,6 +144,7 @@ func (r *Reader) NextRaw() ([]byte, error) {
 			return nil, fmt.Errorf("sessiondata: %s holds %d records, the file claims %d",
 				r.hdr.Src, r.n, e.Records)
 		}
+		r.checked = true
 		return nil, io.EOF
 	}
 	r.h.Write(line)
@@ -153,6 +157,33 @@ func (r *Reader) NextRaw() ([]byte, error) {
 
 // End returns the closing line, once the file has been read to its end.
 func (r *Reader) End() *End { return r.end }
+
+// Complete confirms that the file ends at a closing line that passed its
+// count and digest checks. Next stops at the closing line and never reads
+// past it, so a record or any other byte after it, an error the underlying
+// reader saved behind it, or a skeleton's damaged compression trailer would
+// go unseen. Complete reads on through the
+// reader's own buffer to the end of the underlying stream, which for a
+// skeleton also checks the gzip checksum and length. Draining the file
+// directly is not enough: the buffer may already hold bytes past the
+// closing line.
+//
+// Readers that accept a file as evidence call it after the closing line.
+// Ordinary readers need not.
+func (r *Reader) Complete() error {
+	if !r.checked {
+		return fmt.Errorf("sessiondata: %s: no closing line that passed its checks has been read", r.hdr.Src)
+	}
+	_, err := r.br.ReadByte()
+	switch {
+	case err == nil:
+		return fmt.Errorf("sessiondata: %s holds bytes after its closing line", r.hdr.Src)
+	case errors.Is(err, io.EOF):
+		return nil
+	default:
+		return fmt.Errorf("sessiondata: %s: after its closing line: %w", r.hdr.Src, err)
+	}
+}
 
 // LineTime returns a record's time from the bytes of its line, as unix
 // nanoseconds, without decoding the record. It reports false when the record

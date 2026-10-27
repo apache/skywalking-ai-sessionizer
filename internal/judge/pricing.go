@@ -19,12 +19,13 @@ package judge
 
 import (
 	"fmt"
-	"os"
+	"io"
 	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
@@ -55,14 +56,19 @@ type PricingEntry struct {
 }
 
 // LoadPricing reads a price file. An empty path is no price file: every call
-// is then unpriced, and its tokens still count.
-func LoadPricing(path string) (*Pricing, error) {
+// is then unpriced, and its tokens still count. The file is a path a person
+// gave, checked and opened as one; admitted is the pulled snapshot a held
+// lease lets it lie in, or empty.
+func LoadPricing(path, admitted string) (*Pricing, error) {
 	if path == "" {
 		return nil, nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := readSupplied(path, admitted, pricingBytes)
 	if err != nil {
 		return nil, fmt.Errorf("judge: price file: %w", err)
+	}
+	if len(b) > pricingBytes {
+		return nil, fmt.Errorf("judge: price file %s is larger than %d MiB", path, pricingBytes>>20)
 	}
 	var p Pricing
 	if err := yaml.Unmarshal(b, &p); err != nil {
@@ -157,4 +163,21 @@ func PricingOf(ledger *sessionjudge.File) (*Pricing, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// pricingBytes bounds a price file, which lists a few rates per model.
+const pricingBytes = 4 << 20
+
+// readSupplied reads a file a person named, up to limit bytes and one past
+// it, so the caller can tell a larger one apart and say so. It is checked as
+// a supplied path and read through its checked parent: a path in a tree pull
+// owns is refused before it is opened, except within admitted, the snapshot a
+// held lease covers.
+func readSupplied(path, admitted string, limit int) ([]byte, error) {
+	f, err := storage.OpenSuppliedRead(path, admitted)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, int64(limit)+1))
 }

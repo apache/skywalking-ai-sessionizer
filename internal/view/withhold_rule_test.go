@@ -95,14 +95,14 @@ func TestARecordIsWithheldAsItIsRead(t *testing.T) {
 
 	// The text a label is read from follows the same rule, and says which
 	// records are what the runtime sent the model, for any reader.
-	texts, sent := c.texts(refs, hide)
+	texts, sent, _ := c.texts(refs, hide)
 	if texts[[2]uint64{1, 1}] != "" || texts[[2]uint64{1, 2}] != "summarise what changed in the docs" {
 		t.Fatalf("texts: %v", texts)
 	}
 	if !sent[[2]uint64{1, 1}] || sent[[2]uint64{1, 2}] || !sent[[2]uint64{1, 3}] {
 		t.Fatalf("sent: %v", sent)
 	}
-	if whole, _ := c.texts(refs, nil); whole[[2]uint64{1, 1}] == "" {
+	if whole, _, _ := c.texts(refs, nil); whole[[2]uint64{1, 1}] == "" {
 		t.Fatal("a reader that withholds nothing was not shown the prompt")
 	}
 

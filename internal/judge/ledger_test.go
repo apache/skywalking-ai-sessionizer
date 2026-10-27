@@ -136,7 +136,7 @@ models:
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	p, err := LoadPricing(path)
+	p, err := LoadPricing(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestAnAmbiguousPriceFileIsRefused(t *testing.T) {
 	} {
 		path := filepath.Join(t.TempDir(), "p.yaml")
 		_ = os.WriteFile(path, []byte(body), 0o600)
-		if _, err := LoadPricing(path); err == nil {
+		if _, err := LoadPricing(path, ""); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
@@ -214,7 +214,7 @@ func TestAnUnfinishedCallCountsWhatItRead(t *testing.T) {
 	if err := os.WriteFile(path, []byte("currency: USD\nmodels:\n  - model: m\n    per_million: {in: 1, out: 10, cache_read: 0.1, cache_write: 2}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	prices, err := LoadPricing(path)
+	prices, err := LoadPricing(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}

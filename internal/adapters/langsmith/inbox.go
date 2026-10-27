@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -165,6 +166,23 @@ func (i *Inbox) List() ([]Waiting, error) {
 	for _, it := range items {
 		seq, ok := inboxSeq(it.Name())
 		if it.IsDir() || !ok {
+			continue
+		}
+		info, err := it.Info()
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		// An empty request is a reservation. On a file system with neither an
+		// exclusive rename nor hard links, Put's write makes the name first and
+		// renames the complete request over it a moment later
+		// (internal/storage/exclusive_fallback.go). It is passed over and left,
+		// as the round reader passes over one (pkg/sessionflow/chain.go): the
+		// request arrives whole on a later pass, and one a crash left is
+		// harmless. A non-empty request that cannot be read still fails.
+		if info.Size() == 0 {
 			continue
 		}
 		path := filepath.Join(i.dir, it.Name())

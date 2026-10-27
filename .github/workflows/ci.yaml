@@ -103,9 +103,12 @@ jobs:
       # detector needs a C toolchain, which the Windows runner does not put on
       # its path, so Windows runs without it. The tests of the command and of
       # the Claude Code plugin run here too. The plugin's tests run its hook
-      # from end to end, and this is their only run on Windows.
+      # from end to end, and this is their only run on Windows. The pull
+      # client's tests wait as a remote asks, up to two minutes in one test,
+      # and under -race they pass go test's default ten minutes, so the step
+      # names its own limit.
       - name: Unit tests
-        run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 ./cmd/... ./pkg/... ./internal/... ./plugins/...
+        run: go test ${{ runner.os != 'Windows' && '-race' || '' }} -count=1 -timeout 30m ./cmd/... ./pkg/... ./internal/... ./plugins/...
       # The LangChain shim is the other half of one agreement, written in
       # another language. Its tables are what the Go parity tests read, so
       # without this a change on the Python side could not fail anything.
@@ -185,6 +188,26 @@ jobs:
         run: make build
       - name: Push into a Collector and verify its output
         run: tools/test/e2e-collector.sh
+
+  # asz pull against asz servers in containers, started by Docker Compose:
+  # TLS with a trusted and an untrusted authority, a client certificate, a
+  # missing, unknown, changed and revoked token, and a shared cache in front
+  # of the page that must never answer for a token. Ubuntu only, because it
+  # needs docker.
+  pull:
+    name: Pull
+    if: github.event_name != 'release'
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+      - name: Build
+        run: make build
+      - name: Pull from servers in containers
+        run: tools/test/e2e-pull.sh
 
   # The conversation renderer asz view embeds is Horizon's, built from the
   # commit pinned in internal/view/conversation-view/HORIZON_COMMIT and

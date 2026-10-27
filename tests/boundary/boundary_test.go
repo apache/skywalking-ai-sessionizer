@@ -26,6 +26,7 @@
 package boundary_test
 
 import (
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -34,6 +35,72 @@ import (
 	"testing"
 )
 
+// The scanner must be usable by storage without bringing in a schema owner.
+func TestBoundedJSONUsesOnlyStandardLibrary(t *testing.T) {
+	root := filepath.Join("..", "..", "internal", "boundedjson")
+	for pkg, imports := range importsUnder(t, root) {
+		for _, imp := range imports {
+			dependency, err := build.Default.Import(imp, "", build.FindOnly)
+			if err != nil || !dependency.Goroot || imp == "C" {
+				t.Errorf("%s imports %s; the bounded scanner may use only the standard library", pkg, imp)
+			}
+		}
+	}
+}
+
+// Pull uses storage. The reverse direction would bind shared storage to one owner.
+func TestStorageImportsNoPullPackage(t *testing.T) {
+	root := filepath.Join("..", "..", "internal", "storage")
+	for pkg, imports := range importsUnder(t, root) {
+		for _, imp := range imports {
+			if imp == module+"internal/pull" || strings.HasPrefix(imp, module+"internal/pull/") {
+				t.Errorf("%s imports %s; storage may not import pull", pkg, imp)
+			}
+		}
+	}
+}
+
+// Pull is server side: it assembles nothing and collects nothing, and it
+// must not reach into a collector, a sender or retention.
+func TestPullImportsNoCollectorPackage(t *testing.T) {
+	root := filepath.Join("..", "..", "internal", "pull")
+	for pkg, imports := range importsUnder(t, root) {
+		for _, imp := range imports {
+			for _, banned := range collectorSide {
+				if strings.HasPrefix(imp+"/", module+banned) {
+					t.Errorf("%s imports %s; pull may not import the collector side", pkg, imp)
+				}
+			}
+		}
+	}
+}
+
+// The format is what both ends of a pull agree on. The source, the server
+// and the client import it, never the reverse.
+func TestPullFormatImportsNoOtherPullPackage(t *testing.T) {
+	root := filepath.Join("..", "..", "internal", "pull", "format")
+	for pkg, imports := range importsUnder(t, root) {
+		for _, imp := range imports {
+			if strings.HasPrefix(imp, module+"internal/pull/") && imp != module+"internal/pull/format" {
+				t.Errorf("%s imports %s; the pull format may import no other pull package", pkg, imp)
+			}
+		}
+	}
+}
+
+// sessionflow imports storage, so storage importing it would be a cycle the
+// compiler refuses; this names the rule before anyone tries.
+func TestStorageImportsNoSessionflow(t *testing.T) {
+	root := filepath.Join("..", "..", "internal", "storage")
+	for pkg, imports := range importsUnder(t, root) {
+		for _, imp := range imports {
+			if imp == module+"pkg/sessionflow" {
+				t.Errorf("%s imports %s; storage may not import sessionflow", pkg, imp)
+			}
+		}
+	}
+}
+
 const module = "github.com/apache/skywalking-ai-sessionizer/"
 
 var (
@@ -41,7 +108,7 @@ var (
 	// and sends, and must not know how anything is assembled or shown. A
 	// scenario's writers land input, so they are collector side too.
 	collectorSide = []string{"internal/adapters/", "internal/export/", "internal/metrics/", "internal/retention/", "internal/scenario/"}
-	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/", "internal/scenario/expect/", "internal/judge/"}
+	serverSide    = []string{"internal/assemble/", "internal/parse/", "internal/view/", "internal/verify/", "pkg/sessionflow/", "pkg/sessionview/", "internal/scenario/expect/", "internal/judge/", "internal/pull/"}
 	// The scenario runner wires both sides, as the command does. Only the
 	// command and the tests may import it.
 	wiring = []string{"internal/scenario/run/"}

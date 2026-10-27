@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -33,6 +32,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
@@ -45,6 +45,13 @@ type Config struct {
 	Export   Export    `yaml:"export"`
 	View     View      `yaml:"view"`
 	Judge    Judge     `yaml:"judge"`
+	// RemoteSnapshotTTL is how long a snapshot asz pull made, and the judge
+	// runs in it, stay after publication. The newest one expires too.
+	RemoteSnapshotTTL string `yaml:"remote_snapshot_ttl"`
+	// Remotes are the asz servers asz pull copies conversations from.
+	Remotes []Remote `yaml:"remotes"`
+	// RemoteServer is what this instance needs to answer pulls.
+	RemoteServer RemoteServer `yaml:"remote_server"`
 }
 
 // Judge configures asz judge and asz measure. A judge run happens only when a
@@ -669,7 +676,13 @@ func Default() *Config {
 			Logs:       boolPtr(true),
 			Metrics:    boolPtr(true),
 		}},
-		View: View{Hide: []string{}},
+		View:              View{Hide: []string{}},
+		RemoteSnapshotTTL: DefaultRemoteSnapshotTTL,
+		Remotes:           []Remote{},
+		RemoteServer: RemoteServer{
+			MaxConcurrentPerToken: DefaultMaxConcurrentPerToken,
+			SnapshotTTL:           DefaultServerSnapshotTTL,
+		},
 	}
 }
 
@@ -696,7 +709,17 @@ func Load(path string) (*Config, error) {
 	if path == "" {
 		return cfg, nil
 	}
-	data, err := os.ReadFile(path)
+	// The file is a supplied path like any other: it is refused inside a
+	// tree pull owns, before anything is read, and read through its checked
+	// parent so a link changed after the check leads nowhere else.
+	f, err := storage.OpenSuppliedRead(path, "")
+	if err != nil {
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	data, err := io.ReadAll(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
@@ -727,6 +750,12 @@ func Load(path string) (*Config, error) {
 				MaxBytes *int `yaml:"max_bytes"`
 			} `yaml:"references"`
 		} `yaml:"judge"`
+		RemoteSnapshotTTL *string `yaml:"remote_snapshot_ttl"`
+		RemoteServer      struct {
+			// A node, not an int: the decoder makes 64.9 into 64.
+			MaxConcurrentPerToken yaml.Node `yaml:"max_concurrent_per_token"`
+			SnapshotTTL           *string   `yaml:"snapshot_ttl"`
+		} `yaml:"remote_server"`
 	}
 	if err := yaml.Unmarshal(data, &set); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
@@ -837,7 +866,37 @@ func Load(path string) (*Config, error) {
 	if len(j.References.Fetch) > 0 {
 		cfg.Judge.References.Fetch = j.References.Fetch
 	}
-	return cfg, cfg.Validate()
+	// A time to live written as an empty value is a value, refused below
+	// with the rest; only one left out takes its default.
+	if set.RemoteSnapshotTTL != nil {
+		cfg.RemoteSnapshotTTL = *set.RemoteSnapshotTTL
+	}
+	if len(loaded.Remotes) > 0 {
+		cfg.Remotes = loaded.Remotes
+	}
+	rs := loaded.RemoteServer
+	cfg.RemoteServer.TokensFile = rs.TokensFile
+	cfg.RemoteServer.TLS = rs.TLS
+	if n := &set.RemoteServer.MaxConcurrentPerToken; n.Kind != 0 {
+		if n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int" {
+			return nil, fmt.Errorf("config: %s: remote_server.max_concurrent_per_token is %q; it is a whole number from 1 to %d", path, n.Value, MaxConcurrentPerTokenLimit)
+		}
+		if err := n.Decode(&cfg.RemoteServer.MaxConcurrentPerToken); err != nil {
+			return nil, fmt.Errorf("config: %s: remote_server.max_concurrent_per_token: %w", path, err)
+		}
+	}
+	if set.RemoteServer.SnapshotTTL != nil {
+		cfg.RemoteServer.SnapshotTTL = *set.RemoteServer.SnapshotTTL
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	// Credential paths are resolved now, from the working directory the
+	// configuration was loaded in, and read only when they are needed.
+	if err := cfg.resolveCredentialPaths(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // checkKeys refuses a configuration that would show a reader what it meant
@@ -994,7 +1053,7 @@ func (c *Config) Validate() error {
 	if err := sessiondata.CheckWithholdable(c.View.Hide); err != nil {
 		return fmt.Errorf("config: view.hide: %w", err)
 	}
-	return nil
+	return c.checkRemotes()
 }
 
 // ResolvedRoot returns storage.Root as an absolute path.

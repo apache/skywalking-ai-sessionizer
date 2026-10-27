@@ -197,7 +197,7 @@ func threeRuns(t *testing.T) *storage.Zone {
 func TestARunIsListedFromItsCloseFile(t *testing.T) {
 	z := threeRuns(t)
 	code := 0
-	out := stdoutOf(t, func() { code = judgeList(z, "s1", "s1") })
+	out := stdoutOf(t, func() { code = judgeList(z, "s1", "s1", false) })
 	want := "run 1  unfinished, 1 stage files\n" +
 		"run 2  round 3  2026-10-20T10:05:00Z  complete  targets 2: achieved 1, partly 0, not 1, cannot verify 0  score 50/100\n" +
 		"run 3  unfinished, 0 stage files\n"

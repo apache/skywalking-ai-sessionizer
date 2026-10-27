@@ -129,29 +129,64 @@ func Chain(z *storage.Zone, conversation string, digests map[uint64]string) (*Ch
 	if err != nil {
 		return nil, err
 	}
+	rounds := make([]ReadRound, 0, len(list))
+	for _, rf := range list {
+		r, err := chain.Open(rf.Path)
+		rd := ReadRound{Path: rf.Path, Round: rf.Round, Err: err}
+		if err == nil {
+			rd.Header, rd.Digest = r.Header, r.Commit.Digest
+		}
+		rounds = append(rounds, rd)
+	}
+	if digests == nil {
+		for _, rd := range rounds {
+			if rd.Err != nil {
+				continue
+			}
+			session := conversation
+			if rd.Header.Session != "" {
+				session = rd.Header.Session
+			}
+			if digests, err = LandedDigests(z, session); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
+	return Rounds(conversation, rounds, digests), nil
+}
+
+// ReadRound is one round as its reader read it: its file, its number by
+// that file's name, and its header and commit digest, or why it did not
+// read.
+type ReadRound struct {
+	Path   string
+	Round  uint64
+	Header sessionflow.Header
+	Digest string
+	Err    error
+}
+
+// Rounds makes Chain's checks over rounds a caller has read already, so
+// what is checked is exactly what the caller holds: a snapshot's reader
+// checks the rounds it folded, never a second read of them.
+func Rounds(conversation string, rounds []ReadRound, digests map[uint64]string) *ChainReport {
 	rep := &ChainReport{Conversation: conversation, Session: conversation}
 	var prevDigest, prevInput string
 	var prevThrough, prevRound uint64
-	for _, rf := range list {
-		rr := &RoundReport{Round: rf.Round, Path: rf.Path}
+	for _, rd := range rounds {
+		rr := &RoundReport{Round: rd.Round, Path: rd.Path}
 		rep.Rounds = append(rep.Rounds, rr)
-		r, err := chain.Open(rf.Path)
-		if err != nil {
-			rr.OpenError = err.Error()
-			rr.Problems = append(rr.Problems, fmt.Sprintf("round %d: %v", rf.Round, err))
+		if rd.Err != nil {
+			rr.OpenError = rd.Err.Error()
+			rr.Problems = append(rr.Problems, fmt.Sprintf("round %d: %v", rd.Round, rd.Err))
 			rep.Problems += len(rr.Problems)
 			continue
 		}
-		h := r.Header
-		rr.Header, rr.Digest = h, r.Commit.Digest
+		h := rd.Header
+		rr.Header, rr.Digest = h, rd.Digest
 		if h.Session != "" {
 			rep.Session = h.Session
-		}
-		if digests == nil {
-			digests, err = LandedDigests(z, rep.Session)
-			if err != nil {
-				return nil, err
-			}
 		}
 		if h.Round != prevRound+1 {
 			// A missing round: this one cannot link to what is not there,
@@ -181,9 +216,9 @@ func Chain(z *storage.Zone, conversation string, digests map[uint64]string) (*Ch
 			rr.Problems = append(rr.Problems, fmt.Sprintf("round %d: the input digest does not match the landed files", h.Round))
 		}
 		rep.Problems += len(rr.Problems)
-		prevDigest, prevInput, prevThrough, prevRound = r.Commit.Digest, h.InputDigest, h.ThroughSeq, h.Round
+		prevDigest, prevInput, prevThrough, prevRound = rd.Digest, h.InputDigest, h.ThroughSeq, h.Round
 	}
-	return rep, nil
+	return rep
 }
 
 func firstN(s string, n int) string {

@@ -210,62 +210,118 @@ func (s *Session) Manifest(id string) (*Manifest, bool) {
 // removal is cut as it would be with nothing removed, and the bytes of a
 // removed tip or piece come from the store.
 func (s *Session) Add(rec *sessiondata.Record) error {
+	repeat, _, err := s.add(rec, false, false)
+	if err == nil && repeat {
+		return ErrRepeat
+	}
+	return err
+}
+
+// AddChecked adds rec as Add does, for a reader that accepts a session's
+// files as evidence. skeleton says rec was read from a skeleton, the one
+// place a record holding no bytes may be: a landed file's record that says
+// it was removed is refused, so no record escapes being rebuilt by saying so.
+// The record's own size and digest prefix must be its manifest's, as the
+// verifier holds them. Every record that holds bytes is rebuilt from its own
+// parts and the records before it, and must match its digest, whether it is
+// new or a repeat: a repeat is checked as itself, and the body already held
+// under its id stands in for nothing. A skeleton is checked for its
+// structure only.
+//
+// err refuses the record: it is not added. repeat says rec repeated a record
+// already held, which a repeat does not replace. rebuild is the one failure
+// allowed, ErrTooLarge, for a body that holds or cites a piece too large to
+// land: such a body never could be rebuilt, and a new one is still added for
+// the records after it. A body that cannot be rebuilt because retention
+// removed something it is built from is refused, as any other failure is.
+func (s *Session) AddChecked(rec *sessiondata.Record, skeleton bool) (repeat bool, rebuild, err error) {
+	return s.add(rec, true, skeleton)
+}
+
+func (s *Session) add(rec *sessiondata.Record, strict, skeleton bool) (repeat bool, rebuild, err error) {
 	m, err := ManifestOf(rec)
 	if err != nil {
-		return err
+		return false, nil, err
 	}
 	if rec.ID == "" {
-		return errors.New("providerbody: a record without an id")
+		return false, nil, errors.New("providerbody: a record without an id")
 	}
 	if m.Bytes < 0 || m.Bytes > MaxBytes || m.Depth < 0 || m.Depth > MaxDepth {
-		return fmt.Errorf("providerbody: %s claims %d bytes at depth %d", rec.ID, m.Bytes, m.Depth)
+		return false, nil, fmt.Errorf("providerbody: %s claims %d bytes at depth %d", rec.ID, m.Bytes, m.Depth)
+	}
+	if strict && (rec.Bytes != m.Bytes || len(m.SHA256) < 12 || rec.Sha != m.SHA256[:12]) {
+		return false, nil, fmt.Errorf("providerbody: %s: the record's size or digest is not its body's", rec.ID)
 	}
 	// References are checked first, so a record landed again is held to the
 	// same rules as the first copy before it may count as a repeat.
 	own := len(rec.Parts) - 1
 	removed := rec.Parts[own].State == model.ContentRemoved
+	if strict && removed != skeleton {
+		if skeleton {
+			return false, nil, fmt.Errorf("providerbody: %s is in a skeleton and keeps its bytes", rec.ID)
+		}
+		return false, nil, fmt.Errorf("providerbody: %s is in a landed file and says it was removed", rec.ID)
+	}
 	copies := 0
 	for _, seg := range m.Segments {
 		switch {
 		case seg.Part != nil:
 			if *seg.Part < 0 || *seg.Part >= own {
-				return fmt.Errorf("providerbody: %s names part %d of %d", rec.ID, *seg.Part, own)
+				return false, nil, fmt.Errorf("providerbody: %s names part %d of %d", rec.ID, *seg.Part, own)
 			}
 		case seg.Piece != "":
 			if _, ok := s.pieces[seg.Piece]; !ok {
-				return fmt.Errorf("providerbody: %s names piece %s, which no earlier record holds", rec.ID, seg.Piece)
+				return false, nil, fmt.Errorf("providerbody: %s names piece %s, which no earlier record holds", rec.ID, seg.Piece)
 			}
 		case seg.Copy != nil:
 			copies++
 			base, ok := s.records[seg.Copy.From]
 			switch {
 			case !ok:
-				return fmt.Errorf("providerbody: %s copies from %s, which no earlier record holds", rec.ID, seg.Copy.From)
+				return false, nil, fmt.Errorf("providerbody: %s copies from %s, which no earlier record holds", rec.ID, seg.Copy.From)
 			case base.m.SHA256 != seg.Copy.SHA256 || seg.Copy.Len < 0 || seg.Copy.Len > base.m.Bytes:
-				return fmt.Errorf("providerbody: %s copies from %s with a digest or length it does not have", rec.ID, seg.Copy.From)
+				return false, nil, fmt.Errorf("providerbody: %s copies from %s with a digest or length it does not have", rec.ID, seg.Copy.From)
 			case m.Depth != base.m.Depth+1 || m.Depth > MaxDepth:
-				return fmt.Errorf("providerbody: %s claims depth %d over a base of depth %d", rec.ID, m.Depth, base.m.Depth)
+				return false, nil, fmt.Errorf("providerbody: %s claims depth %d over a base of depth %d", rec.ID, m.Depth, base.m.Depth)
 			}
 		}
 	}
 	if copies == 0 && m.Depth != 0 {
-		return fmt.Errorf("providerbody: %s claims depth %d and copies nothing", rec.ID, m.Depth)
+		return false, nil, fmt.Errorf("providerbody: %s claims depth %d and copies nothing", rec.ID, m.Depth)
 	}
 	if h, ok := s.records[rec.ID]; ok {
 		if h.m.SHA256 != m.SHA256 {
-			return fmt.Errorf("providerbody: %s is held with digest %s and landed again with %s", rec.ID, h.m.SHA256, m.SHA256)
+			return false, nil, fmt.Errorf("providerbody: %s is held with digest %s and landed again with %s", rec.ID, h.m.SHA256, m.SHA256)
 		}
 		// A repeat is a repeat only if it rebuilds to what it claims; a
 		// record that says so and does not is damage. One that cannot be
-		// rebuilt for a piece too large to land, or for one retention
-		// removed, is still a repeat, and so is a skeleton, which holds no
-		// bytes to rebuild from.
+		// rebuilt for a piece too large to land is still a repeat, and so
+		// is a skeleton, which holds no bytes to rebuild from. So is one
+		// that cannot be rebuilt for a piece retention removed, except for
+		// a strict reader, which needs every body it holds the bytes of.
 		if !removed {
-			if _, err := s.rebuild(rec, m, nil); err != nil && !errors.Is(err, ErrTooLarge) && !errors.Is(err, ErrRemoved) {
-				return err
+			_, err := s.rebuild(rec, m, nil)
+			switch {
+			case err == nil:
+			case errors.Is(err, ErrTooLarge):
+				return true, err, nil
+			case strict || !errors.Is(err, ErrRemoved):
+				return true, nil, err
 			}
 		}
-		return ErrRepeat
+		return true, nil, nil
+	}
+	var body []byte
+	if strict && !removed {
+		// Rebuilt before it is added, so a record that fails is never
+		// there for a later one to build on.
+		body, err = s.rebuild(rec, m, nil)
+		switch {
+		case errors.Is(err, ErrTooLarge):
+			rebuild = err
+		case err != nil:
+			return false, nil, err
+		}
 	}
 	s.records[rec.ID] = &held{rec: rec, m: m, removed: removed, at: s.added}
 	s.added++
@@ -294,7 +350,10 @@ func (s *Session) Add(rec *sessiondata.Record) error {
 	if m.Role == RoleRequest && m.Chain != "" {
 		s.setTip(m.Chain, rec.ID)
 	}
-	return nil
+	if body != nil {
+		s.remember(rec.ID, body)
+	}
+	return false, rebuild, nil
 }
 
 func hasPiece(m map[string]pieceAt, d string) bool { _, ok := m[d]; return ok }

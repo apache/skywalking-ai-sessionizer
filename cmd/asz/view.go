@@ -18,26 +18,37 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
+	"github.com/apache/skywalking-ai-sessionizer/internal/pull/server"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
-// cmdView serves the conversations in the storage root, and only reads.
+// cmdView serves the conversations in the storage root, and changes no
+// collected data.
 //
 // The chain, the landed records and the index are opened read-only, and
-// nothing in this process collects, parses or sends. It is the web host: a
+// nothing in this process collects, parses or sends. It writes a lease
+// while it reads a pulled snapshot. When its root is a pulled snapshot a
+// stopped pull left half published, it deletes that unfinished snapshot and
+// records its tag removed. When it answers pulls, it keeps the pull server's
+// records under _pull/. It is the web host: a
 // root filled by asz collect on this machine, or copied from another one,
 // or written by a receiver, is served the same way.
 //
@@ -52,11 +63,38 @@ func cmdView(cfg *config.Config, _ []config.Adapter, _ bool) error {
 	if err := srv.SetHide(cfg.View.Hide, cfg.View.HideOverride); err != nil {
 		return err
 	}
+	guard, err := protectionOf(cfg)
+	if err != nil {
+		return err
+	}
+	// A read of a pulled snapshot's evidence that fails stops the page:
+	// nothing more is served over evidence known damaged.
+	damaged := make(chan error, 1)
+	snap, err := snapshotView(func(err error) {
+		select {
+		case damaged <- err:
+		default:
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if snap != nil {
+		srv.SetSnapshot(snap)
+	}
 	ids, err := srv.List()
 	if err != nil {
 		return err
 	}
-	if len(ids) == 0 {
+	// A snapshot's page serves the snapshot alone. Any other root serves
+	// the conversations asz pull copied into it beside its own.
+	var pulled *pulledPage
+	if snap == nil {
+		if pulled, err = newPulledPage(cfg, zoneRoot); err != nil {
+			return err
+		}
+	}
+	if len(ids) == 0 && (pulled == nil || !pulled.any()) {
 		return fmt.Errorf("no conversations in %s; run asz collect first, or asz server to do both", zoneRoot)
 	}
 	ln, err := serveAddr()
@@ -65,30 +103,130 @@ func cmdView(cfg *config.Config, _ []config.Adapter, _ bool) error {
 	}
 	fmt.Printf("reading  : %s\nserving  : %d conversation(s)\n", zoneRoot, len(ids))
 	printWithholding(cfg)
-	fmt.Printf("\n   http://%s\n\n", ln.Addr())
+	fmt.Printf("\n   %s://%s\n\n", guard.scheme(), ln.Addr())
 	fmt.Fprintln(os.Stderr, "ctrl-c to stop")
-	// Nothing here writes, but something else may: an asz collect running
-	// beside this page fills the same root. Watching the chains costs a
-	// directory listing, and without it an open list page would never show
-	// a conversation that arrived after it was loaded.
-	go watchRoot(srv, pollInterval(cfg))
-	return http.Serve(ln, srv.Handler())
+	guard.warn(ln)
+	pulls, err := guard.pullServer(cfg, zoneRoot)
+	if err != nil {
+		return err
+	}
+	return servePage(ln, guard, srv, snap, damaged, pollInterval(cfg), pulls, pulled)
 }
+
+// servePage serves the page over a root, or over a pulled snapshot when snap
+// is set.
+//
+// Nothing here writes, but something else may: an asz collect running beside
+// this page fills the same root. Watching the chains costs a directory
+// listing, and without it an open list page would never show a conversation
+// that arrived after it was loaded. A pulled snapshot never changes, and is
+// not watched.
+//
+// A snapshot's page serves no pull routes: they answer 404, tokens or not.
+func servePage(ln net.Listener, p *protection, srv *view.Server, snap *view.Snapshot, damaged <-chan error, every time.Duration,
+	pulls *server.Server, pulled *pulledPage) error {
+	if snap != nil {
+		return serveSnapshot(ln, p, p.handler(srv.Handler(), nil), damaged)
+	}
+	go watchRoot(srv, every, pulled)
+	page := srv.Handler()
+	if pulled != nil {
+		page = pulled.handler(page)
+	}
+	if pulls != nil {
+		return p.serveWithPulls(ln, page, pulls)
+	}
+	return p.serve(p.server(p.handler(page, nil)), ln)
+}
+
+// serveSnapshot serves a pulled snapshot's page until a read of its evidence
+// fails or the command is interrupted. Either way it stops in one order: it
+// stops taking requests, cancels those running through their contexts, and
+// waits for every one to end. Only then does the command return, and its
+// lease is released, so no request reads the snapshot without one.
+func serveSnapshot(ln net.Listener, p *protection, h http.Handler, damaged <-chan error) error {
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	gate := &requestGate{h: h}
+	hs := p.server(gate)
+	hs.BaseContext = func(net.Listener) context.Context { return base }
+	served := make(chan error, 1)
+	go func() { served <- p.serve(hs, ln) }()
+	interrupted := make(chan os.Signal, 1)
+	signal.Notify(interrupted, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(interrupted)
+	var err error
+	select {
+	case err = <-damaged:
+	case <-interrupted:
+	case err = <-served:
+	}
+	gate.stop()
+	cancel()
+	err = errors.Join(err, hs.Shutdown(context.Background()))
+	gate.wait()
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
+}
+
+// requestGate admits requests until it is stopped, and counts those it
+// admitted, so a stop can wait for each of them.
+type requestGate struct {
+	h       http.Handler
+	mu      sync.Mutex
+	stopped bool
+	running sync.WaitGroup
+}
+
+func (g *requestGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.Lock()
+	if g.stopped {
+		g.mu.Unlock()
+		http.Error(w, "the snapshot is no longer served", http.StatusServiceUnavailable)
+		return
+	}
+	g.running.Add(1)
+	g.mu.Unlock()
+	defer g.running.Done()
+	g.h.ServeHTTP(w, r)
+}
+
+func (g *requestGate) stop() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.stopped = true
+}
+
+func (g *requestGate) wait() { g.running.Wait() }
 
 // watchRoot reports when the storage root last changed, so the page reloads
 // its list. It only lists directories: the folding is still done when a
 // reader asks for a conversation.
-func watchRoot(srv *view.Server, every time.Duration) {
+func watchRoot(srv *view.Server, every time.Duration, pulled *pulledPage) {
 	seen := ""
 	for {
-		now := chainsFingerprint(srv)
+		now := chainsFingerprint(srv) + pulled.fingerprint()
 		if now != seen {
 			seen = now
-			st := srv.Status()
-			st.LastRefresh = time.Now().UnixMilli()
-			srv.SetStatus(st)
+			srv.Touch(time.Now())
 		}
 		time.Sleep(every)
+	}
+}
+
+// watchPulled marks the list changed when the pulled conversations do: a
+// pull that adds a conversation or a snapshot, and a sweep that removes one.
+// asz server's own passes mark it for what they collect.
+func watchPulled(srv *view.Server, every time.Duration, pulled *pulledPage) {
+	seen := pulled.fingerprint()
+	for {
+		time.Sleep(every)
+		if now := pulled.fingerprint(); now != seen {
+			seen = now
+			srv.Touch(time.Now())
+		}
 	}
 }
 
@@ -152,6 +290,10 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	if err := srv.SetHide(cfg.View.Hide, cfg.View.HideOverride); err != nil {
 		return err
 	}
+	guard, err := protectionOf(cfg)
+	if err != nil {
+		return err
+	}
 
 	ref, err := newRefresher(srv, zone, ads, pipelineMetrics(cfg), cfg.Parse.MaxRoundBytes, once)
 	if err != nil {
@@ -192,8 +334,9 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	printPipeline(ref, cfg)
 	fmt.Printf("serving  : %d conversation(s)\n", len(ids))
 	printWithholding(cfg)
-	fmt.Printf("\n   http://%s\n\n", ln.Addr())
+	fmt.Printf("\n   %s://%s\n\n", guard.scheme(), ln.Addr())
 	fmt.Fprintln(os.Stderr, "ctrl-c to stop")
+	guard.warn(ln)
 
 	// The page is up before the first pass so a large backfill does not
 	// look like a hung command; the page shows the pass running.
@@ -205,7 +348,20 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 			ref.loop()
 		}
 	}()
-	return http.Serve(ln, srv.Handler())
+	pulls, err := guard.pullServer(cfg, zoneRoot)
+	if err != nil {
+		return err
+	}
+	pulled, err := newPulledPage(cfg, zoneRoot)
+	if err != nil {
+		return err
+	}
+	go watchPulled(srv, pollInterval(cfg), pulled)
+	page := pulled.handler(srv.Handler())
+	if pulls != nil {
+		return guard.serveWithPulls(ln, page, pulls)
+	}
+	return guard.serve(guard.server(guard.handler(page, nil)), ln)
 }
 
 // printWithholding says what the page withholds, and whether a request may

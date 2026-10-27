@@ -107,8 +107,9 @@ while landing. No configuration of Claude Code required, and it works on history
 immutable rounds — see the assembly doc.
 **Phase 3 (in progress):** read and export. `asz collect` is the pipeline: every period it lands
 what is new, parses what moved, and sends what `export.otlp` asks for, in that order. `asz view`
-serves the conversations as a page and only reads: a list at `/`, and one conversation at `/c/{id}`
-drawn by Horizon's conversation renderer, embedded from a pinned Horizon commit so asz and the
+serves the conversations as a page and changes no collected data: a list at `/`, and one
+conversation at `/c/{id}` drawn by Horizon's conversation renderer, embedded from a pinned Horizon
+commit so asz and the
 SkyWalking UI draw a conversation identically; the page adds the landed record behind a step, which
 only asz has. It reads the folded chain on demand. `asz server` is the pipeline and the page in one
 process, which is what a person runs locally, and the list page shows the last and the next refresh.
@@ -152,10 +153,11 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   resolved reference is superseded with that state rather than dropped.
 - **Landed files plus the round chain are the whole conversation.** Nothing else has to travel with
   them: the index rebuilds from the landed files, and the chain head is recovered by listing the
-  rounds directory. An archive or a bundle can be read, verified and re-parsed with no source files
-  and no collector. A skeleton stands in for a removed file's structure, never its text. After a
-  removal, the session's `provider/` store travels with them too: later provider bodies are built
-  from the bytes it keeps.
+  rounds directory. A complete export of a conversation's files, such as a bundle, can be read,
+  verified and re-parsed with no source files and no collector; a pull's archive is not one, since it
+  holds only the files the pulling machine lacks. A skeleton stands in for a removed file's
+  structure, never its text. After a removal, the session's `provider/` store travels with them
+  too: later provider bodies are built from the bytes it keeps.
 - **A skeleton keeps every field the index reads.** The index rebuilt from a `.sk` must equal the
   index rebuilt from its `.sd`, byte for byte, or a conversation continues differently after a
   removal. A new field the index reads goes into `skeleton.Of` too; `tests/chain` compares every
@@ -218,11 +220,39 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
 - **`next_seq` is monotonic across all streams in a session**, so a session is processed
   single-threaded and under a lock. The filesystem is the authority on the counter, and a
   skeleton's name counts: a sequence is never used twice, removed or not.
-- **Locks are taken in one order:** `_scenario`, `_root`, `_export`, `_metrics`, `_provider`, a
-  session's, a chain's. Every command that writes to a root holds `_root` for its pass, so two
-  commands never write the same root at once. The LangSmith receiver is the one writer outside a
-  pass: it only adds requests to `_langsmith/`, which a pass takes under that directory's own lock.
-  A new lock takes its place in this order, or two commands can wait on each other for ever.
+- **Each writable tree has one owner.** A production pass holds that root's `_root`. Production
+  passes leave `_remote/` and `_pull/` alone. A pull or sweep owns one
+  `_remote/<remote>/<conversation>/` under its `_pull`. Independent workers can own different
+  conversations. No worker holds two conversation locks. Creation of `_remote/` and its remote
+  directories belongs to pull. History, publication intent and removal records use the
+  conversation's outer `_root`. Lease-file creation, probing and removal use `_admit` only. That
+  gate also protects snapshot admission and detachment. A snapshot's evidence never changes. Its
+  judge reserves and publishes stages, regroups and work directories under the snapshot's `_root`.
+  The run alone writes prompts, evaluator output and logs in its work directory after releasing
+  `_root`. Inherited logs and navigation failure files stay within that chunk's work directory
+  within the run. A reader lease covers all snapshot handles and judge work. The same judge work
+  rule applies on a production root. One serving process holds `_pull/owner/.lock` for its
+  lifetime of pull work. It owns that root's `_pull/`. Its `.lock` protects state transitions.
+  Workers own private builds under their build locks and in-process slots. Requests hold
+  active-work locks. The server's conversation `_root` protects history and removal records. No
+  build or network write holds the global lock. The LangSmith receiver publishes each request to
+  `_langsmith/` through `WriteExclusive` under its in-process mutex. A production pass consumes
+  requests under `_langsmith`'s file lock. These are different locks. The consumer passes over an
+  empty `.request` file, as the round reader passes over an empty reservation, so the last-resort
+  install, which makes the name before renaming the request over it, cannot stop collection. A
+  leftover empty reservation is harmless and left. These owners never edit each other's evidence
+  in place.
+- **Locks are taken in one order:** the server lifetime owner, `_scenario`, a local
+  conversation's `_pull` or a server worker's in-process slot then build-owner lock, external
+  `_admit` or server `_pull/.lock`, `_root`, `_export`, `_metrics`, `_provider`, `_langsmith`, a
+  session's, then a chain's. This is the order for every acquisition that can wait. A probe of
+  capacity, another build owner, a lease or active work never waits. If a group of probes cannot
+  finish, release its new locks and try later outside the transition lock. Holding a worker or
+  lifetime lock does not forbid reentering the transition lock. Its holder is never waited for
+  there. No holder of `_root` waits for `_admit` or the server lock. Release a judge's `_root`
+  before releasing its lease. Capacity waits, expensive verification and network writes happen
+  outside transition locks. A new lock takes its place in this order, or two commands can wait on
+  each other for ever.
 - **A session is sent to one owner**, the endpoint, the configured service name and the instance it
   was first sent under. `push.state` records the owner, and saves it, before the first request
   carrying anything of the session goes out, because a receiver holds a session whole. Never the

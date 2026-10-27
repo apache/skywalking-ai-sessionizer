@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
@@ -85,5 +86,23 @@ func TestImagesServed(t *testing.T) {
 		if !strings.HasPrefix(rec.Body.String(), "<?xml") {
 			t.Fatalf("%s: does not start with the XML declaration", path)
 		}
+	}
+}
+
+// A touch marks the list changed, and a status written after it with an
+// older refresh time, as a pass that read its status before the touch
+// writes it, does not undo it.
+func TestATouchIsNeverUndone(t *testing.T) {
+	s := New(storage.NewZone(t.TempDir()), nil)
+	s.SetStatus(Status{Mode: "watch", LastRefresh: 1000})
+	stale := s.Status()
+	s.Touch(time.UnixMilli(5000))
+	s.SetStatus(stale)
+	if got := s.Status().LastRefresh; got != 5000 {
+		t.Fatalf("last refresh %d", got)
+	}
+	s.Touch(time.UnixMilli(5000))
+	if got := s.Status().LastRefresh; got <= 5000 {
+		t.Fatalf("a second touch in the same millisecond: %d", got)
 	}
 }

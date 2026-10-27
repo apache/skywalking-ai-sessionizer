@@ -85,8 +85,8 @@ func (s *BodyStore) Generations() ([]int, error) {
 	return out, nil
 }
 
-// tipName is the file a tip of the record id is kept in.
-func tipName(id string) string {
+// TipName is the file a tip of the record id is kept in.
+func TipName(id string) string {
 	sum := sha256.Sum256([]byte(id))
 	return hex.EncodeToString(sum[:]) + ".gz"
 }
@@ -101,7 +101,7 @@ func (s *BodyStore) Tip(id, sha string) ([]byte, error) {
 	}
 	var damaged error
 	for _, g := range generations {
-		b, err := readNamed(filepath.Join(s.TipsDir(g), tipName(id)), sha)
+		b, err := readNamed(filepath.Join(s.TipsDir(g), TipName(id)), sha)
 		switch {
 		case err == nil:
 			return b, nil
@@ -124,7 +124,7 @@ func (s *BodyStore) HasTip(id string) (bool, error) {
 		return false, err
 	}
 	for _, g := range generations {
-		if ok, err := exists(filepath.Join(s.TipsDir(g), tipName(id))); ok || err != nil {
+		if ok, err := exists(filepath.Join(s.TipsDir(g), TipName(id))); ok || err != nil {
 			return ok, err
 		}
 	}
@@ -170,7 +170,7 @@ func digest(b []byte) string {
 // PutTip keeps the body of record id as a tip of generation, made durable
 // with sync.
 func (s *BodyStore) PutTip(generation int, id string, b []byte, sync func(string) error) error {
-	return s.put(filepath.Join(s.TipsDir(generation), tipName(id)), b, sync)
+	return s.put(filepath.Join(s.TipsDir(generation), TipName(id)), b, sync)
 }
 
 // PutPiece keeps a removed piece, made durable with sync, before the body

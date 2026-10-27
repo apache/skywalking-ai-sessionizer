@@ -26,7 +26,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -56,7 +55,7 @@ type savedSource struct {
 // read, a source a configured command's prefix names goes through that
 // command, which never sees the conversation, and a plain http or https URL
 // is fetched; anything else is no source asz can read.
-func fetchSources(ctx context.Context, sources []string, cfg config.References, now func() time.Time) []savedSource {
+func fetchSources(ctx context.Context, sources []string, cfg config.References, now func() time.Time, admitted string) []savedSource {
 	timeout := time.Minute
 	if d, err := time.ParseDuration(cfg.Timeout); err == nil && d > 0 {
 		timeout = d
@@ -65,7 +64,7 @@ func fetchSources(ctx context.Context, sources []string, cfg config.References, 
 	for i, src := range sources {
 		m := sessionjudge.Source{ID: fmt.Sprintf("R%d", i+1), Source: src, Captured: now().UTC().Format(time.RFC3339), Outcome: sessionjudge.SourceSaved}
 		fctx, cancel := context.WithTimeout(ctx, timeout)
-		data, err := fetchOne(fctx, src, cfg, &m)
+		data, err := fetchOne(fctx, src, cfg, &m, admitted)
 		cancel()
 		s := savedSource{manifest: m}
 		if err == nil {
@@ -82,7 +81,7 @@ func fetchSources(ctx context.Context, sources []string, cfg config.References, 
 
 // fetchOne reads a source's bytes, setting how it was fetched and what the
 // source says of itself.
-func fetchOne(ctx context.Context, src string, cfg config.References, m *sessionjudge.Source) ([]byte, error) {
+func fetchOne(ctx context.Context, src string, cfg config.References, m *sessionjudge.Source, admitted string) ([]byte, error) {
 	// One byte past the bound is read, so saved can tell a source was cut.
 	limit := cfg.MaxBytes
 	if limit <= 0 {
@@ -127,21 +126,11 @@ func fetchOne(ctx context.Context, src string, cfg config.References, m *session
 		return nil, fmt.Errorf("no fetch command is configured for %s, and asz fetches only http and https itself", src)
 	}
 	m.Method = sessionjudge.MethodFile
-	// Opening a named pipe waits for a writer, and a device never ends, so
-	// only a regular file is read.
-	info, err := os.Stat(src)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", src)
-	}
-	f, err := os.Open(src)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	// A file is a path a person gave, checked and read as one: only a
+	// regular file, never one in a tree pull owns but the snapshot the run
+	// reads. Opening a named pipe would wait for a writer, and a device
+	// never ends; the supplied open refuses both.
+	data, err := readSupplied(src, admitted, limit)
 	if err != nil {
 		return nil, err
 	}

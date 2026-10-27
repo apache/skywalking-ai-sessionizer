@@ -23,6 +23,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"os"
@@ -65,6 +66,12 @@ const judgeUsage = `Usage:
   asz judge [-config FILE] -show RUN [-json] CONVERSATION
       print one run: its stages, then goal by goal each target's score out
       of 100, why, what was done, its rework and what it cost
+  asz judge [-config FILE] [-pull] -remote-conversation REMOTE/CONVERSATION[:TAG] ...
+      any of the above on a conversation asz pull copied here, in place of
+      CONVERSATION: the snapshot with that tag, or the newest unexpired one
+      without a tag or with :latest. -pull pulls the head first and judges
+      what it pulled; it starts a new run, so it takes no tag, -list, -show
+      or -regroup. -list without a tag lists the runs of every snapshot
   asz judge mcp -root DIR -conversation ID -round N -digest D [-hide FLAGS] [-ledger FILE] [-log FILE]
       the read-only navigation server an agent CLI evaluator is given
 
@@ -93,13 +100,46 @@ func cmdJudge(args []string) int {
 	fs.Var(&references, "reference", "a source to compare the run with: a file, a URL, or one a configured command fetches; repeat for several")
 	labelsPath := fs.String("labels", "", "a file listing the person's goals in their own words: regroup the run by them")
 	regroup := fs.Int("regroup", 0, "with -labels, regroup this closed run instead of making a new one")
+	remoteConversation := fs.String("remote-conversation", "", "judge a pulled conversation: REMOTE/CONVERSATION, with :TAG or :latest after it")
+	pullFirst := fs.Bool("pull", false, "with -remote-conversation, pull the conversation's head first and judge what was pulled")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, judgeUsage) }
 	_ = fs.Parse(args)
-	if fs.NArg() != 1 {
-		fs.Usage()
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	usage := func(why string) int {
+		fmt.Fprintln(os.Stderr, "asz judge:", why)
 		return 2
 	}
-	id := fs.Arg(0)
+	var selection *remoteSelection
+	var id string
+	switch {
+	case *remoteConversation != "" && fs.NArg() != 0:
+		return usage("give CONVERSATION or -remote-conversation, not both")
+	case *remoteConversation != "":
+		s, err := parseRemoteSelection(*remoteConversation)
+		if err != nil {
+			return usage(err.Error())
+		}
+		selection, id = s, s.conversation
+	case fs.NArg() != 1:
+		fs.Usage()
+		return 2
+	default:
+		id = fs.Arg(0)
+	}
+	if *pullFirst {
+		switch {
+		case selection == nil:
+			return usage("-pull needs -remote-conversation")
+		case selection.tag != "":
+			return usage("-pull takes the head: give no tag, or :latest")
+		case *list || given["show"] || given["regroup"]:
+			return usage("-pull starts a new run; -list, -show and -regroup select runs already made")
+		}
+	}
+	if err := checkIdentity("conversation", id, false); err != nil {
+		return fail(err)
+	}
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return fail(err)
@@ -108,17 +148,70 @@ func cmdJudge(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	// What a person reads names the conversation; a pulled one by its
+	// remote and its snapshot's tag.
+	display := id
+	if selection != nil {
+		// A pulled conversation is selected under the configured root,
+		// which must be one, never a snapshot or a copy itself.
+		if err := refuseCopyRoot("judge", root); err != nil {
+			return fail(err)
+		}
+		local, err := pulledLocal(cfg, root)
+		if err != nil {
+			return fail(err)
+		}
+		// The copies here are swept first, as a pull sweeps them, and what
+		// the sweep could not settle is said. One stop covers the sweep, a
+		// pull and the admission: an interrupt in any of them starts
+		// nothing after it.
+		ctx, stop := stopping()
+		if err := sweepPulled(ctx, local, selection); err != nil {
+			stop()
+			return fail(err)
+		}
+		if *list && !selection.suffixed {
+			defer stop()
+			return judgeListPulled(ctx, local, selection)
+		}
+		a, err := selection.admit(ctx, local, cfg, *pullFirst)
+		stop()
+		if err != nil {
+			return fail(err)
+		}
+		admittedMu.Lock()
+		admitted = a
+		admittedMu.Unlock()
+		root = a.Root.Path
+		display = fmt.Sprintf("%s:%s", selection, a.Root.Tag)
+	} else if _, err := admitRoot("judge", cfg, root); err != nil {
+		return fail(err)
+	}
+	defer releaseAdmission()
+	session := sessionOfChain(root, id)
+	if admitted != nil {
+		// A snapshot's marker names its session, as admission checked it.
+		session = admitted.Marker.Session
+	}
+	if err := checkIdentity("session", session, true); err != nil {
+		return fail(err)
+	}
 	switch {
 	case *list:
-		return judgeList(storage.NewZone(root), sessionOfChain(root, id), id)
+		return judgeList(storage.NewZone(root), session, display, selection != nil)
 	case *show > 0:
-		return judgeShow(storage.NewZone(root), sessionOfChain(root, id), id, *show, *asJSON)
+		// The stage files are printed as they are stored, with the source's
+		// own conversation identifier; the snapshot is named before them.
+		if selection != nil && !*asJSON {
+			fmt.Println(display)
+		}
+		return judgeShow(storage.NewZone(root), session, display, *show, *asJSON)
 	}
 	// A label file is read before a run, so a run is not made for labels
 	// that cannot be read.
 	var labels *judge.Labels
 	if *labelsPath != "" {
-		if labels, err = judge.ReadLabels(*labelsPath); err != nil {
+		if labels, err = judge.ReadLabels(*labelsPath, admittedRoot()); err != nil {
 			return fail(err)
 		}
 	}
@@ -142,7 +235,7 @@ func cmdJudge(args []string) int {
 	default:
 		return fail(fmt.Errorf("-mode %q: give auto, single or stream", *mode))
 	}
-	pricing, err := judge.LoadPricing(cfg.Judge.Pricing)
+	pricing, err := judge.LoadPricing(cfg.Judge.Pricing, admittedRoot())
 	if err != nil {
 		return fail(err)
 	}
@@ -171,26 +264,48 @@ func cmdJudge(args []string) int {
 			if a.Task != "" {
 				cmd = append(cmd, "-task", a.Task)
 			}
+			if admitted != nil {
+				// The child is admitted by the run's lease, which binds it
+				// to this run alone. Its log is made here, before it starts,
+				// and it may only append to it; its failure report sits
+				// beside the log, named for the lease.
+				log, err := storage.CreateSupplied(a.Log, admittedRoot())
+				if err == nil {
+					err = log.Close()
+				}
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "asz: the navigation log %s: %v\n", a.Log, err)
+				}
+				cmd = append(cmd, "-parent-lease", admitted.Lease(), "-failure-report", a.Failure)
+			}
 			return append(cmd, windowArgs(a.Window)...)
 		},
-		Log: func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
+		Admitted: admittedRoot(),
+		Log:      func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if admitted != nil {
+		r.Reserved = func(number int) error { return admitted.BindRun(ctx, fmt.Sprintf("j%06d", number)) }
+		r.Failures = func() string { return leaseRandom(admitted.Lease()) }
+		if r.Snapshot, err = snapshotView(nil); err != nil {
+			return fail(err)
+		}
+	}
 	if *regroup > 0 {
-		return judgeRegroup(ctx, r, sessionOfChain(root, id), id, *regroup, labels, regrouper)
+		return judgeRegroup(ctx, r, session, id, *regroup, labels, regrouper)
 	}
 	run, err := r.Run(ctx, id, *round, plan)
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Printf("run %d of %s at round %d: %s\n", run.Number, id, run.Head.Round, run.Status)
+	fmt.Printf("run %d of %s at round %d: %s\n", run.Number, display, run.Head.Round, run.Status)
 	if labels != nil {
-		if code := judgeRegroup(ctx, r, sessionOfChain(root, id), id, run.Number, labels, regrouper); code != 0 {
+		if code := judgeRegroup(ctx, r, session, id, run.Number, labels, regrouper); code != 0 {
 			return code
 		}
 	}
-	return judgeShow(zone, sessionOfChain(root, id), id, run.Number, false)
+	return judgeShow(zone, session, display, run.Number, false)
 }
 
 // judgeRegroup regroups a closed run by a person's goals and says how the
@@ -203,6 +318,13 @@ func judgeRegroup(ctx context.Context, r *judge.Runner, session, id string, numb
 	for _, run := range runs {
 		if run.Run != number {
 			continue
+		}
+		// On a pulled snapshot the lease is bound to the selected run before
+		// any evaluator works on it; a run that has its lease already keeps it.
+		if admitted != nil && admitted.Run() != fmt.Sprintf("j%06d", number) {
+			if err := admitted.BindRun(ctx, fmt.Sprintf("j%06d", number)); err != nil {
+				return fail(err)
+			}
 		}
 		path, a, err := r.Regroup(ctx, id, run, labels, evaluator)
 		if err != nil {
@@ -294,7 +416,7 @@ func sessionOfChain(root, id string) string {
 	return r.Header.Session
 }
 
-func judgeList(zone *storage.Zone, session, id string) int {
+func judgeList(zone *storage.Zone, session, id string, named bool) int {
 	runs, err := storage.JudgmentRuns(zone, session)
 	if err != nil {
 		return fail(err)
@@ -303,22 +425,32 @@ func judgeList(zone *storage.Zone, session, id string) int {
 		fmt.Printf("%s has no judge runs\n", id)
 		return 0
 	}
+	// A pulled conversation's runs are named by their snapshot, as a
+	// person reads them.
+	prefix := ""
+	if named {
+		prefix = id + " "
+	}
 	for _, run := range runs {
-		closeFile, ok := readClose(run)
-		if !ok {
-			fmt.Printf("run %d  unfinished, %d stage files\n", run.Run, len(run.Files))
-			continue
-		}
-		h := closeFile.Header
-		s := h.Summary
-		line := fmt.Sprintf("run %d  round %d  %s  %s  targets %d: achieved %d, partly %d, not %d, cannot verify %d",
-			run.Run, h.Head.Round, h.Finished, h.Status, s.Targets, s.Achieved, s.Partly, s.NotAchieved, s.CannotVerify)
-		if s.Score != nil && s.Score.Final != nil {
-			line += "  score " + scoreOf(s.Score.Final)
-		}
-		fmt.Println(line)
+		fmt.Printf("%srun %d  %s\n", prefix, run.Run, runLine(run))
 	}
 	return 0
+}
+
+// runLine is what a listing says of a run after its name.
+func runLine(run storage.JudgmentRun) string {
+	closeFile, ok := readClose(run)
+	if !ok {
+		return fmt.Sprintf("unfinished, %d stage files", len(run.Files))
+	}
+	h := closeFile.Header
+	s := h.Summary
+	line := fmt.Sprintf("round %d  %s  %s  targets %d: achieved %d, partly %d, not %d, cannot verify %d",
+		h.Head.Round, h.Finished, h.Status, s.Targets, s.Achieved, s.Partly, s.NotAchieved, s.CannotVerify)
+	if s.Score != nil && s.Score.Final != nil {
+		line += "  score " + scoreOf(s.Score.Final)
+	}
+	return line
 }
 
 func readClose(run storage.JudgmentRun) (*sessionjudge.File, bool) {
@@ -762,18 +894,39 @@ func cmdJudgeMCP(args []string) int {
 	toID := fs.String("to-id", "", "the window's last main talk")
 	readBytes := fs.Int("read-bytes", 0, "the reading budget of the call, in bytes of answers; 0 is no bound")
 	taskPath := fs.String("task", "", "the file that says what the call answers for")
+	cfgPath := fs.String("config", "", "configuration file, for a server admitted on its own to a pulled snapshot")
+	parentLease := fs.String("parent-lease", "", "the run lease of the judge run that started this server, on a pulled snapshot")
+	failureReport := fs.String("failure-report", "", "with -parent-lease, where to report a read of damaged evidence")
 	_ = fs.Parse(args)
 	if *root == "" || *conversation == "" || *round == 0 || *digest == "" {
 		fmt.Fprint(os.Stderr, judgeUsage)
 		return 2
 	}
+	if err := checkIdentity("conversation", *conversation, false); err != nil {
+		return fail(err)
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	switch {
+	case *parentLease != "" && set["config"]:
+		return fail(errors.New("-parent-lease takes its root and lease from the run that started it, and no -config"))
+	case *parentLease != "" && *failureReport == "":
+		return fail(errors.New("-parent-lease needs -failure-report, where the run reads a damaged read from"))
+	case *parentLease == "" && set["failure-report"]:
+		return fail(errors.New("-failure-report is for a server a judge run started, with -parent-lease"))
+	}
+	checkedLog, code := admitNavigation(*root, *cfgPath, *parentLease, *logPath, *failureReport)
+	if code != 0 {
+		return code
+	}
+	defer releaseAdmission()
 	var hidden []string
 	if *hide != "" {
 		hidden = strings.Split(*hide, ",")
 	}
 	var pricing *judge.Pricing
 	if *ledgerPath != "" {
-		f, err := os.Open(*ledgerPath)
+		f, err := storage.OpenSuppliedRead(*ledgerPath, admittedRoot())
 		if err != nil {
 			return fail(err)
 		}
@@ -786,35 +939,43 @@ func cmdJudgeMCP(args []string) int {
 			return fail(err)
 		}
 	}
-	zone := storage.NewZone(*root)
-	c, err := view.New(zone, nil).LoadAt(*conversation, *round)
-	if err != nil {
-		return fail(err)
-	}
-	doc, err := c.BuildWithheld(hidden)
-	if err != nil {
-		return fail(err)
-	}
-	// A chain parsed again can reach the same round number with other
-	// rounds; the digest says it is the head the run judges.
-	if doc.Head.Digest != *digest {
-		return fail(fmt.Errorf("round %d of %s is now %s, not the %s the run judges", *round, *conversation, doc.Head.Digest, *digest))
-	}
 	window, err := windowOf(*from, *to, *fromID, *toID)
 	if err != nil {
 		return fail(err)
 	}
-	doc, sel, err := judge.Narrow(doc, window, c.Records)
+	zone := storage.NewZone(*root)
+	var nav *judge.Nav
+	// Loading reads the snapshot's manifest first: under the attempt's
+	// marker too, for an inherited server.
+	load := func() error {
+		srv, snap, err := viewServer(zone, nil)
+		if err != nil {
+			return err
+		}
+		nav, err = navigationOf(srv, snap != nil, *failureReport, zone, *conversation, *round, *digest, hidden, window, pricing)
+		return err
+	}
+	switch {
+	case *failureReport != "":
+		// An inherited server loads under its chunk attempt's marker too:
+		// loading reads the evidence the run gave it to navigate.
+		err = judge.ReadUnder(*failureReport, load, func(err error) bool {
+			return errors.Is(err, view.ErrEvidence) || errors.Is(err, view.ErrNoRecord)
+		})
+	default:
+		err = load()
+	}
 	if err != nil {
 		return fail(err)
 	}
-	ledger := judge.Compute(doc, dialectOf(zone, c.Session), pricing, c.Records)
-	ledger.Select(sel)
-	nav := judge.NewNav(doc, ledger, func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, hidden) })
-	nav.Prepare(sel, c.Records, decoderOf(dialectOf(zone, c.Session)))
 	nav.ResetBudget(*readBytes)
 	if *taskPath != "" {
-		b, err := os.ReadFile(*taskPath)
+		f, err := storage.OpenSuppliedRead(*taskPath, admittedRoot())
+		if err != nil {
+			return fail(err)
+		}
+		b, err := io.ReadAll(f)
+		f.Close()
 		if err != nil {
 			return fail(err)
 		}
@@ -826,7 +987,7 @@ func cmdJudgeMCP(args []string) int {
 	}
 	var onCall func(string, json.RawMessage, int, error)
 	if *logPath != "" {
-		f, err := os.OpenFile(*logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		f, err := openNavigationLog(*logPath, checkedLog)
 		if err != nil {
 			return fail(err)
 		}
@@ -844,6 +1005,60 @@ func cmdJudgeMCP(args []string) int {
 		return fail(err)
 	}
 	return 0
+}
+
+// navigationOf loads a conversation at the round a navigation server serves
+// and prepares its navigation, as the run that started it prepared its own.
+// On a pulled snapshot every record is read checked, and a head that is not
+// the one the run judges is damage to the snapshot. Each read the navigation
+// makes there is held to marker, when its run gave it one.
+func navigationOf(srv *view.Server, strict bool, marker string, zone *storage.Zone, conversation string, round uint64, digest string, hidden []string,
+	window judge.Window, pricing *judge.Pricing) (*judge.Nav, error) {
+	c, err := srv.LoadAt(conversation, round)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := c.BuildWithheld(hidden)
+	if err != nil {
+		return nil, err
+	}
+	// A chain parsed again can reach the same round number with other
+	// rounds; the digest says it is the head the run judges.
+	if doc.Head.Digest != digest {
+		err := fmt.Errorf("round %d of %s is now %s, not the %s the run judges", round, conversation, doc.Head.Digest, digest)
+		if strict {
+			err = fmt.Errorf("%w: %w", view.ErrEvidence, err)
+		}
+		return nil, err
+	}
+	dialect := dialectOf(zone, c.Session)
+	read := func(seq, row uint64) (*sessiondata.Record, error) { return c.Record(seq, row, hidden) }
+	if !strict {
+		doc, sel, err := judge.Narrow(doc, window, c.Records)
+		if err != nil {
+			return nil, err
+		}
+		ledger := judge.Compute(doc, dialect, pricing, c.Records)
+		ledger.Select(sel)
+		nav := judge.NewNav(doc, ledger, read)
+		nav.Prepare(sel, c.Records, decoderOf(dialect))
+		return nav, nil
+	}
+	doc, sel, err := judge.NarrowChecked(doc, window, c.RecordsChecked)
+	if err != nil {
+		return nil, err
+	}
+	ledger, err := judge.ComputeChecked(doc, dialect, pricing, c.RecordsChecked)
+	if err != nil {
+		return nil, err
+	}
+	ledger.Select(sel)
+	nav := judge.NewNav(doc, ledger, read)
+	if err := nav.PrepareChecked(sel, c.RecordsChecked, decoderOf(dialect)); err != nil {
+		return nil, err
+	}
+	nav.Strictly(judge.NewStrict(doc, c.Holds), marker)
+	return nav, nil
 }
 
 // windowOf reads a window from the command line. A time is RFC 3339, or a

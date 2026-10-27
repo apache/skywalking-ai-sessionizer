@@ -51,7 +51,7 @@ func TestFetchCommandStandIn(_ *testing.T) {
 func fetched(t *testing.T, cfg config.References, sources ...string) []savedSource {
 	t.Helper()
 	at := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
-	return fetchSources(context.Background(), sources, cfg, func() time.Time { return at })
+	return fetchSources(context.Background(), sources, cfg, func() time.Time { return at }, "")
 }
 
 // A source is a file, a page fetched over http, or what a configured

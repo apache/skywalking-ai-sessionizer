@@ -85,18 +85,47 @@ func (c *Conversation) refsUnder(n *sessionflow.Node) []*sessionflow.Ref {
 
 // Records reads many landed positions with one pass per file, whole. A
 // reader that needs what several records of one call say, such as the usage
-// a call recorded on each of its fragments, reads them at once this way.
+// a call recorded on each of its fragments, reads them at once this way. A
+// record that cannot be read is left out; a snapshot's reader uses
+// RecordsChecked, and a failure here still stops the snapshot's command.
 func (c *Conversation) Records(refs []sessionflow.Ref) map[[2]uint64]*sessiondata.Record {
+	out, _ := c.RecordsChecked(refs)
+	return out
+}
+
+// RecordsChecked is Records for a reader that must know of every failure: on
+// a pulled snapshot every file read is read whole, and a record that cannot
+// be read is an error, never one left out.
+func (c *Conversation) RecordsChecked(refs []sessionflow.Ref) (map[[2]uint64]*sessiondata.Record, error) {
 	ptrs := make([]*sessionflow.Ref, len(refs))
 	for i := range refs {
 		ptrs[i] = &refs[i]
 	}
-	return c.records(ptrs, nil)
+	return c.recordsChecked(ptrs, nil)
 }
 
 // records reads many landed positions with one pass per file. A record
-// carrying any of the hide names is withheld as it is read.
+// carrying any of the hide names is withheld as it is read. What cannot be
+// read is left out.
 func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]uint64]*sessiondata.Record {
+	out, _ := c.recordsChecked(refs, hide)
+	return out
+}
+
+// recordsChecked is records with every failure returned. On an ordinary
+// root a file that cannot be read is passed over, as it always was, and the
+// first such failure returned. On a pulled snapshot each file is read whole,
+// and any failure stops the read.
+func (c *Conversation) recordsChecked(refs []*sessionflow.Ref, hide []string) (map[[2]uint64]*sessiondata.Record, error) {
+	if c.snap != nil {
+		return c.snapshotRecords(refs, hide)
+	}
+	var first error
+	keep := func(err error) {
+		if first == nil {
+			first = err
+		}
+	}
 	hidden := hiddenSet(hide)
 	want := map[uint64]map[uint64]bool{}
 	for _, r := range refs {
@@ -112,6 +141,7 @@ func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]ui
 	for seq, rows := range want {
 		path, err := c.landedPath(seq)
 		if err != nil {
+			keep(err)
 			continue
 		}
 		f, err := sessiondata.Open(path)
@@ -123,10 +153,12 @@ func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]ui
 			}
 		}
 		if err != nil {
+			keep(err)
 			continue
 		}
 		rd, err := sessiondata.NewReader(f)
 		if err != nil {
+			keep(err)
 			f.Close()
 			continue
 		}
@@ -134,6 +166,9 @@ func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]ui
 		for i := uint64(1); left > 0; i++ {
 			rec, rerr := rd.Next()
 			if rerr != nil {
+				if !errors.Is(rerr, io.EOF) {
+					keep(rerr)
+				}
 				break
 			}
 			if rows[i] {
@@ -144,7 +179,46 @@ func (c *Conversation) records(refs []*sessionflow.Ref, hide []string) map[[2]ui
 		}
 		f.Close()
 	}
-	return out
+	return out, first
+}
+
+// snapshotRecords reads a snapshot's records: each file named by the frozen
+// inventory, whole, and every row asked for must be there.
+func (c *Conversation) snapshotRecords(refs []*sessionflow.Ref, hide []string) (map[[2]uint64]*sessiondata.Record, error) {
+	hidden := hiddenSet(hide)
+	want := map[uint64]map[uint64]bool{}
+	for _, r := range refs {
+		if r == nil {
+			continue
+		}
+		if want[r.Seq] == nil {
+			want[r.Seq] = map[uint64]bool{}
+		}
+		want[r.Seq][r.Row] = true
+	}
+	out := map[[2]uint64]*sessiondata.Record{}
+	for seq, rows := range want {
+		// The frozen inventory is the only place a snapshot's files are
+		// looked for: nothing rescans its session.
+		path, ok := c.paths[seq]
+		if !ok {
+			return nil, c.snap.evidenceError("the chain names sequence %d, which the snapshot does not hold", seq)
+		}
+		w, err := c.readSnapshot(seq, path)
+		if err != nil {
+			return nil, err
+		}
+		recs := w.recs
+		for row := range rows {
+			if row == 0 || row > uint64(len(recs)) {
+				return nil, c.snap.evidenceError("%s holds no row %d, which the chain names", path, row)
+			}
+			rec := recs[row-1]
+			withholdRecord(rec, hidden)
+			out[[2]uint64{seq, row}] = rec
+		}
+	}
+	return out, nil
 }
 
 // withoutProviderBodies drops the attribute a call carries its bodies in.
@@ -483,7 +557,7 @@ func clip(t string) string {
 func (s *Server) apiRecord(w http.ResponseWriter, id string, seq, row uint64, hide []string) {
 	c, err := s.Load(id)
 	if err != nil {
-		fail(w, err, http.StatusNotFound)
+		fail(w, err, loadStatus(err))
 		return
 	}
 	rec, kind, err := c.record(seq, row)
@@ -542,7 +616,7 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 	// the document and the record endpoints answer, before any is refused.
 	c, err := s.Load(id)
 	if err != nil {
-		fail(w, err, http.StatusNotFound)
+		fail(w, err, loadStatus(err))
 		return
 	}
 	if len(hide) > 0 {
@@ -587,6 +661,47 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 		if lerr != nil {
 			continue
 		}
+		if c.snap != nil {
+			// A snapshot's file is read whole and checked, and a failure is
+			// damage the page is told of, never a file left out.
+			read, err := c.readSnapshot(seq, path)
+			if err != nil {
+				fail(w, err, http.StatusInternalServerError)
+				return
+			}
+			if read.hdr.Kind != sessiondata.KindProviderBody {
+				fail(w, fmt.Errorf("view: sequence %d is a %s file. Only provider body files are served whole", seq, read.hdr.Kind), http.StatusBadRequest)
+				return
+			}
+			// What the store keeps of a skeleton counts toward the budget,
+			// as on any other root, before any of it is read.
+			size := int64(len(read.data))
+			var want keptWant
+			if sessiondata.IsSkeleton(path) {
+				if want, err = keptWanted(read.data, c.store()); err != nil {
+					fail(w, c.snap.evidenceError("%s: %v", path, err), http.StatusInternalServerError)
+					return
+				}
+				size += want.bytes
+			}
+			if len(out) > 0 && held+size > budget {
+				break
+			}
+			held += size
+			file := map[string]any{"seq": seq, "file": filepath.Base(path), "bytes": base64.StdEncoding.EncodeToString(read.data)}
+			if len(want.bodies)+len(want.pieces) > 0 {
+				kept, err := c.keptOf(want)
+				if err != nil {
+					fail(w, c.snap.evidenceError("%s: the store: %v", path, err), http.StatusInternalServerError)
+					return
+				}
+				if len(kept) > 0 {
+					file["kept"] = kept
+				}
+			}
+			out = append(out, file)
+			continue
+		}
 		body, kind, rerr := readProviderBody(path)
 		if os.IsNotExist(rerr) {
 			// A removal deleted the landed file after its path was found:
@@ -628,7 +743,7 @@ func (s *Server) apiFiles(w http.ResponseWriter, id string, q url.Values, hide [
 		size := int64(len(body))
 		var want keptWant
 		if sessiondata.IsSkeleton(path) {
-			if want, rerr = keptWanted(body, c.zone.BodyStore(c.Session)); rerr != nil {
+			if want, rerr = keptWanted(body, c.store()); rerr != nil {
 				fail(w, rerr, http.StatusInternalServerError)
 				return
 			}
@@ -671,6 +786,22 @@ type keptWant struct {
 type keptHas interface {
 	HasTip(id string) (bool, error)
 	HasPiece(sha string) (bool, error)
+}
+
+// keptStore is a store keptOf reads from.
+type keptStore interface {
+	keptHas
+	Tip(id, sha string) ([]byte, error)
+	Piece(sha string) ([]byte, error)
+}
+
+// store is the session's provider store: on a snapshot, only what its
+// frozen manifest lists.
+func (c *Conversation) store() keptStore {
+	if c.snap != nil {
+		return snapshotStore{root: c.zone.Root(), session: c.Session, listed: c.snap.Store, tips: c.tips}
+	}
+	return c.zone.BodyStore(c.Session)
 }
 
 // keptWanted reads a skeleton for what the store keeps of it.
@@ -720,12 +851,13 @@ func keptWanted(skeleton []byte, store keptHas) (keptWant, error) {
 // body of each record kept as a chain tip, by its id, and each removed piece a
 // later body cites, by its digest, each base64 and checked by the store
 // against its digest. What the store does not keep is left out; a stored file
-// that does not read is this server's problem.
+// that does not read is this server's problem. A snapshot's store keeps what
+// its manifest lists, so a listed file that went is damage, never left out.
 func (c *Conversation) keptOf(want keptWant) (map[string]map[string]string, error) {
-	store := c.zone.BodyStore(c.Session)
+	store := c.store()
 	bodies, pieces := map[string]string{}, map[string]string{}
 	keep := func(into map[string]string, key string, b []byte, err error) error {
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) && c.snap == nil {
 			return nil
 		}
 		if err != nil {
@@ -814,6 +946,9 @@ func (c *Conversation) Record(seq, row uint64, hide []string) (*sessiondata.Reco
 // the only time its bytes are wanted. The landed file is found by its sequence,
 // which is unique across every stream in a session.
 func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, sessiondata.Kind, error) {
+	if c.snap != nil {
+		return c.snapshotRecord(seq, row)
+	}
 	path, err := c.landedPath(seq)
 	if err != nil {
 		return nil, "", err
@@ -849,42 +984,71 @@ func (c *Conversation) record(seq, row uint64) (*sessiondata.Record, sessiondata
 	}
 }
 
-// scanPaths walks the session once and maps every landed sequence to its file.
+// Holds says whether the conversation's files include one with sequence
+// seq. On a snapshot it is the frozen inventory, and nothing is read.
+func (c *Conversation) Holds(seq uint64) bool {
+	c.pathsMu.Lock()
+	defer c.pathsMu.Unlock()
+	_, ok := c.paths[seq]
+	return ok
+}
+
+// snapshotRecord reads one record of a snapshot, its file whole. A sequence
+// or a row the evidence does not hold is ErrNoRecord: the question named
+// something that is not there. A file that does not read whole is
+// ErrEvidence.
+func (c *Conversation) snapshotRecord(seq, row uint64) (*sessiondata.Record, sessiondata.Kind, error) {
+	path, ok := c.paths[seq]
+	if !ok {
+		return nil, "", fmt.Errorf("%w: no landed file with sequence %d", ErrNoRecord, seq)
+	}
+	w, err := c.readSnapshot(seq, path)
+	if err != nil {
+		return nil, "", err
+	}
+	if row == 0 || row > uint64(len(w.recs)) {
+		return nil, "", fmt.Errorf("%w: no row %d in sequence %d", ErrNoRecord, row, seq)
+	}
+	return w.recs[row-1], w.hdr.Kind, nil
+}
+
+// scanPaths maps every landed sequence of the session to its file.
 //
 // The sequence is monotonic across every stream and run in a session, so it
 // identifies a file on its own - which stream it belongs to does not have to be
 // known, and must not be assumed.
+//
+// Only the directories landed files are written to are listed, as
+// storage.LandedFiles lists them, one level each: a judge's work directory,
+// where an evaluator writes what it likes, could otherwise lend the page a
+// file with a landed name. A removed file is found by its skeleton, which
+// keeps its sequence; while a removal is in progress both are there, and the
+// landed file is read.
 func (c *Conversation) scanPaths() map[uint64]string {
 	out := map[uint64]string{}
-	_ = filepath.WalkDir(c.zone.SessionDir(c.Session), func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		// A landed file is written once and left read-only, so it is always a
-		// regular file. Anything else carrying a landed name is not one: a
+	files, err := storage.LandedFiles(c.zone, c.Session)
+	if err != nil {
+		return out
+	}
+	for _, lf := range files {
+		// A landed file is written once and left read-only, so it is always
+		// a regular file. Anything else carrying a landed name is not one: a
 		// symlink in a root from somewhere else would otherwise be read and
 		// served as though it were landed data, whatever it pointed at.
-		if !d.Type().IsRegular() {
-			return nil
+		if info, err := os.Lstat(lf.Path); err != nil || !info.Mode().IsRegular() {
+			continue
 		}
-		// A removed file is found by its skeleton, which keeps its sequence.
-		// While a removal is in progress both are there, and the landed file
-		// is read.
-		n, ok := storage.LandedFileSeq(d.Name())
-		if !ok {
-			return nil
-		}
-		if have, found := out[n]; !found || sessiondata.IsSkeleton(have) {
-			out[n] = p
-		}
-		return nil
-	})
+		out[lf.Seq] = lf.Path
+	}
 	return out
 }
 
 // rescan finds a sequence's file again at once, for a path that was found
 // and is gone: a removal replaced the landed file with its skeleton.
 func (c *Conversation) rescan(seq uint64) (string, error) {
+	if c.snap != nil {
+		return "", fmt.Errorf("%w: no landed file with sequence %d", ErrNoRecord, seq)
+	}
 	c.pathsMu.Lock()
 	defer c.pathsMu.Unlock()
 	c.pathsScan = time.Now()
@@ -909,7 +1073,7 @@ func (c *Conversation) landedPath(seq uint64) (string, error) {
 	// directory on every request asking for it, so a rescan is allowed at most
 	// once a second. Nothing is lost by waiting: a file that just landed is
 	// found on the next attempt.
-	if time.Since(c.pathsScan) > time.Second {
+	if c.snap == nil && time.Since(c.pathsScan) > time.Second {
 		c.pathsScan = time.Now()
 		c.paths = c.scanPaths()
 		if p, ok := c.paths[seq]; ok {

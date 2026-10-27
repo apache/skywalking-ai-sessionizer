@@ -129,7 +129,7 @@ var ErrRetiredSession = errors.New("storage: the session is retired")
 // evaluators can take minutes and collection must go on meanwhile. A retired
 // session gets no run.
 func ReserveRun(z *Zone, session string) (int, string, error) {
-	l, err := LockRootWait(z.Root(), 30*time.Second)
+	l, err := LockRootInCopyWait(z.Root(), 30*time.Second)
 	if err != nil {
 		return 0, "", err
 	}
@@ -163,7 +163,7 @@ func ReserveRun(z *Zone, session string) (int, string, error) {
 // PublishStage writes one stage file of a run, once and read-only, under the
 // root lock and only while the session is not retired.
 func PublishStage(z *Zone, session, runDir string, order int, stage, digest string, data []byte) (string, error) {
-	l, err := LockRootWait(z.Root(), 30*time.Second)
+	l, err := LockRootInCopyWait(z.Root(), 30*time.Second)
 	if err != nil {
 		return "", err
 	}
@@ -207,7 +207,7 @@ var regroupWorkRe = regexp.MustCompile(`^g(\d+)-regroup$`)
 // it makes, so two regroups made at once never share one.
 func ReserveRegroup(z *Zone, session, runDir string) (int, error) {
 	work := filepath.Join(runDir, WorkDir)
-	l, err := LockRootWait(z.Root(), 30*time.Second)
+	l, err := LockRootInCopyWait(z.Root(), 30*time.Second)
 	if err != nil {
 		return 0, err
 	}
@@ -251,7 +251,7 @@ func ReserveRegroup(z *Zone, session, runDir string) (int, error) {
 // is the next after the run's regroups, which the file's header names too;
 // a version already written is an error, never written over.
 func PublishRegroup(z *Zone, session, runDir string, version int, digest string, data []byte) (string, error) {
-	l, err := LockRootWait(z.Root(), 30*time.Second)
+	l, err := LockRootInCopyWait(z.Root(), 30*time.Second)
 	if err != nil {
 		return "", err
 	}
@@ -325,7 +325,7 @@ func WriteWorkFiles(z *Zone, session, runDir, name string, files []WorkFile) err
 // directories while the session is not retired and the run is there.
 // unlock releases the lock.
 func openWorkDir(z *Zone, session, runDir, name string) (string, func(), error) {
-	l, err := LockRootWait(z.Root(), 30*time.Second)
+	l, err := LockRootInCopyWait(z.Root(), 30*time.Second)
 	if err != nil {
 		return "", nil, err
 	}

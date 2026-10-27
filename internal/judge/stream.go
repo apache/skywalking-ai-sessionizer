@@ -651,6 +651,9 @@ func unjudged(stage string, ch chunk, targets []sessionjudge.Target) sessionjudg
 func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue) (*checked, error) {
 	targets := s.chunkTargets(ch)
 	var last error
+	// issued are the failure markers given to the chunk's attempts on a
+	// pulled snapshot, which are checked before any answer is accepted.
+	var issued []string
 	for attempt := 1; attempt <= 2; attempt++ {
 		work := s.work
 		if work == "" {
@@ -661,6 +664,15 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 			return nil, errStorage{err}
 		}
 		nav := s.nav.Fork()
+		var marker string
+		if s.nav.strict != nil {
+			if s.runner.Failures == nil {
+				return nil, errStorage{errors.New("judge: a run over a pulled snapshot needs its lease to name failure markers")}
+			}
+			marker = filepath.Join(dir, storage.FailurePrefix+s.runner.Failures())
+			issued = append(issued, marker)
+			nav.Strictly(s.nav.strict, marker)
+		}
 		// The call's task names the catalogue too, so the targets tool can
 		// give whole what the prompt gives compactly.
 		ch.assign.Catalogue, ch.assign.Goals = cat.targets, cat.goals
@@ -704,7 +716,7 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 		}
 		s.mu.Unlock()
 		args := s.mcp
-		args.Log, args.Task = filepath.Join(dir, "mcp-calls.jsonl"), taskPath
+		args.Log, args.Task, args.Failure = filepath.Join(dir, "mcp-calls.jsonl"), taskPath, marker
 		s.mu.Lock()
 		s.running[args.Log] = nav
 		s.mu.Unlock()
@@ -717,6 +729,20 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 		s.mu.Unlock()
 		writeRequests(filepath.Join(dir, "requests.jsonl"), res.Requests)
 		s.note(res, readingOf(nav, args.Log, s.runner.Config.ReadBytes))
+		if s.nav.strict != nil {
+			// On a pulled snapshot, a read of evidence that failed or did
+			// not finish, here or in a navigation server, fails the run
+			// rather than the attempt: another attempt reads the same
+			// evidence. The answer is checked only after this, by the
+			// run's own reads.
+			if ferr := s.nav.strict.Failed(); ferr != nil {
+				return nil, errStorage{ferr}
+			}
+			if ferr := CheckMarkers(issued); ferr != nil {
+				return nil, errStorage{ferr}
+			}
+			nav.Strictly(s.nav.strict, "")
+		}
 		if err == nil {
 			_ = os.WriteFile(filepath.Join(dir, "output.json"), res.Output, 0o600)
 			var c *checked
@@ -735,6 +761,12 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 				c, err = checkDivergence(nav, targets, s.inputs, s.achievements, s.misled, res.Output)
 			case sessionjudge.StageRegroup:
 				c, err = checkRegroup(nav, s.personGoals, targets, s.goals, res.Output)
+			}
+			if err == nil && s.nav.strict != nil {
+				// The answer's checks read evidence too.
+				if ferr := s.nav.strict.Failed(); ferr != nil {
+					return nil, errStorage{ferr}
+				}
 			}
 			if err == nil {
 				s.mu.Lock()
