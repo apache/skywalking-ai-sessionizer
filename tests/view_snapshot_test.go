@@ -401,6 +401,26 @@ func TestAChangedFileFailsASnapshotsLoad(t *testing.T) {
 	}
 }
 
+// replaceWith gives path a new file holding b. The new file is written
+// before the old one is removed: a file system may give a removed file's
+// identity to the next file made, and then nothing was replaced.
+func replaceWith(t *testing.T, path string, b []byte) {
+	t.Helper()
+	next := path + ".next"
+	if err := os.WriteFile(next, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(next, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A snapshot's file is read as the one its load read: a link in its place,
 // another copy of the same bytes, or a file of another sequence is damage.
 func TestASnapshotFileReplacedAfterItsLoadIsDamage(t *testing.T) {
@@ -408,22 +428,20 @@ func TestASnapshotFileReplacedAfterItsLoadIsDamage(t *testing.T) {
 	path := func(snap *view.Snapshot, seq uint64) string {
 		return filepath.Join(z.Root(), filepath.FromSlash(snap.Landed[seq]))
 	}
-	replace := map[string]func(*view.Snapshot){
-		"another copy": func(snap *view.Snapshot) {
+	replace := map[string]func(*testing.T, *view.Snapshot){
+		"another copy": func(t *testing.T, snap *view.Snapshot) {
 			p := path(snap, 1)
 			b, _ := os.ReadFile(p)
-			_ = os.Remove(p)
-			_ = os.WriteFile(p, b, 0o444)
+			replaceWith(t, p, b)
 		},
-		"another sequence": func(snap *view.Snapshot) {
+		"another sequence": func(t *testing.T, snap *view.Snapshot) {
 			p := path(snap, 1)
 			b, _ := os.ReadFile(path(snap, 2))
-			_ = os.Remove(p)
-			_ = os.WriteFile(p, b, 0o444)
+			replaceWith(t, p, b)
 		},
 	}
 	if runtime.GOOS != "windows" {
-		replace["a link"] = func(snap *view.Snapshot) {
+		replace["a link"] = func(t *testing.T, snap *view.Snapshot) {
 			p := path(snap, 1)
 			b, _ := os.ReadFile(p)
 			elsewhere := filepath.Join(t.TempDir(), filepath.Base(p))
@@ -443,7 +461,7 @@ func TestASnapshotFileReplacedAfterItsLoadIsDamage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fn(snap)
+			fn(t, snap)
 			if _, err := c.Record(1, 1, nil); !errors.Is(err, view.ErrEvidence) || told.count() == 0 {
 				t.Fatalf("%v, told %d", err, told.count())
 			}
@@ -671,10 +689,7 @@ func TestASnapshotsChangesAreReadAsLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = os.Remove(changes)
-	if err := os.WriteFile(changes, b, 0o444); err != nil {
-		t.Fatal(err)
-	}
+	replaceWith(t, changes, b)
 	if _, err := c.Build(); !errors.Is(err, view.ErrEvidence) || told.count() == 0 {
 		t.Fatalf("%v, told %d", err, told.count())
 	}
@@ -845,12 +860,7 @@ func TestASnapshotsDialectIsReadAsLoaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(p); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, b, 0o444); err != nil {
-		t.Fatal(err)
-	}
+	replaceWith(t, p, b)
 	if code := get(); code != http.StatusInternalServerError || told.count() == 0 {
 		t.Fatalf("a replaced file: %d, told %d", code, told.count())
 	}

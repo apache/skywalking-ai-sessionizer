@@ -280,6 +280,27 @@ func TestEachRegroupRuleStandsAlone(t *testing.T) {
 			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "unknown true", "1 targets were not placed and are unknown"},
+		// A target the answer could not place may serve a goal worked on.
+		{"a goal worked on, and a target not placed", all(placeAt("t3", "P9", "in/3")), []map[string]any{goals[0], goals[1], goals[2], workedOn("P4", true, "in/2")},
+			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+				return words(lg["P4"].Class, lg["P4"].Worked)
+			}, "unknown true", unshown},
+		// A target left out, or one the answer could not place, may serve a
+		// goal nothing else worked on: that nothing worked on it is not
+		// shown, so it is not absent.
+		{"a goal not worked on, and a target left out", all()[:3], goals,
+			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+				return words(lg["P4"].Class, lg["P4"].Asserted)
+			}, "unknown false", "1 targets were not placed and are unknown"},
+		{"a goal not worked on, and a target not placed", all(placeAt("t3", "P9", "in/3")), goals,
+			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+				return words(lg["P4"].Class, lg["P4"].Asserted)
+			}, "unknown false", unshown},
+		// Absent, with every target placed, is the evaluator's judgment.
+		{"a goal absent", all(), goals,
+			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+				return words(lg["P4"].Class, lg["P4"].Asserted)
+			}, "absent true", ""},
 		// A decision left out is none: a target with no goal, or a goal with
 		// no worked, is not answered.
 		{"a target with no goal given", all(map[string]any{"target": "t3", "note": "", "cite": []string{"in/3"}}), goals,

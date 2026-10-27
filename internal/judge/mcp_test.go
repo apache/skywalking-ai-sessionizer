@@ -40,7 +40,7 @@ func serve(t *testing.T, lines ...string) []map[string]any {
 	nav := NewNav(doc(), Compute(doc(), "claude-code/1", nil, nil), nil)
 	var out bytes.Buffer
 	var calls []string
-	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(tool string, _ json.RawMessage, _ int, _ error) {
+	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(tool string, _ json.RawMessage, _ int, _ error, _ Receipt) {
 		calls = append(calls, tool)
 	}); err != nil {
 		t.Fatal(err)
@@ -286,7 +286,7 @@ func TestTheServerEndsOnceTheBudgetIsSpent(t *testing.T) {
 	}
 	var out bytes.Buffer
 	answered := 0
-	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(string, json.RawMessage, int, error) { answered++ }); err != nil {
+	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(string, json.RawMessage, int, error, Receipt) { answered++ }); err != nil {
 		t.Fatal(err)
 	}
 	if answered != budgetRefusals || !strings.Contains(out.String(), "reading budget of this call is spent") {
@@ -676,3 +676,20 @@ func TestSearchKeepsOffsetsWhereCaseChangesSize(t *testing.T) {
 		t.Fatalf("the search over the document %+v", rows)
 	}
 }
+
+// An answer the server could not write never reached the evaluator, so it is
+// not logged: only an answer written whole counts as given.
+func TestAnAnswerNotWrittenIsNotLogged(t *testing.T) {
+	nav := NewNav(doc(), Compute(doc(), "claude-code/1", nil, nil), nil)
+	logged := 0
+	err := ServeMCP(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"card","arguments":{}}}`+"\n"),
+		failingWriter{}, nav, func(string, json.RawMessage, int, error, Receipt) { logged++ })
+	if err == nil || logged != 0 {
+		t.Fatalf("a failed write: %v, %d logged", err, logged)
+	}
+}
+
+// failingWriter refuses every write, as a closed pipe does.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("the pipe is closed") }

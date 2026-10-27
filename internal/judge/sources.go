@@ -21,18 +21,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
+	"github.com/apache/skywalking-ai-sessionizer/internal/mcpclient"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
@@ -52,24 +56,32 @@ type savedSource struct {
 
 // fetchSources copies or fetches each source, before any evaluator runs. A
 // source that cannot be fetched is kept as failed, with why. A file is
-// read, a source a configured command's prefix names goes through that
-// command, which never sees the conversation, and a plain http or https URL
-// is fetched; anything else is no source asz can read.
-func fetchSources(ctx context.Context, sources []string, cfg config.References, now func() time.Time, admitted string) []savedSource {
+// read, a source a configured entry's prefix names goes through its command
+// or its MCP server's tool, neither of which sees the conversation, and a
+// plain http or https URL is fetched; anything else is no source asz can
+// read. A URL is kept without its query and fragment, whatever fetched it.
+func fetchSources(ctx context.Context, sources []string, cfg config.References, now func() time.Time, admitted, version string) []savedSource {
 	timeout := time.Minute
 	if d, err := time.ParseDuration(cfg.Timeout); err == nil && d > 0 {
 		timeout = d
 	}
 	var out []savedSource
 	for i, src := range sources {
-		m := sessionjudge.Source{ID: fmt.Sprintf("R%d", i+1), Source: src, Captured: now().UTC().Format(time.RFC3339), Outcome: sessionjudge.SourceSaved}
+		ref := referenceOf(src)
+		m := sessionjudge.Source{ID: fmt.Sprintf("R%d", i+1), Source: ref.kept, QueryRemoved: ref.queryRemoved, Captured: now().UTC().Format(time.RFC3339),
+			Outcome: sessionjudge.SourceSaved}
 		fctx, cancel := context.WithTimeout(ctx, timeout)
-		data, err := fetchOne(fctx, src, cfg, &m, admitted)
-		cancel()
-		s := savedSource{manifest: m}
-		if err == nil {
-			s, err = saved(m, data, cfg.MaxBytes)
+		var s savedSource
+		var err error
+		if f := fetcherOf(src, cfg); f != nil && f.MCP != nil {
+			s, err = fetchMCP(fctx, ref, *f, cfg.MaxBytes, &m, version)
+		} else {
+			var data []byte
+			if data, err = fetchOne(fctx, ref, cfg, &m, admitted); err == nil {
+				s, err = saved(m, data, cfg.MaxBytes)
+			}
 		}
+		cancel()
 		if err != nil {
 			s = savedSource{manifest: m}
 			s.manifest.Outcome, s.manifest.Error = sessionjudge.SourceFailed, err.Error()
@@ -80,50 +92,81 @@ func fetchSources(ctx context.Context, sources []string, cfg config.References, 
 }
 
 // fetchOne reads a source's bytes, setting how it was fetched and what the
-// source says of itself.
-func fetchOne(ctx context.Context, src string, cfg config.References, m *sessionjudge.Source, admitted string) ([]byte, error) {
+// source says of itself. A fetch uses the source as it was given, and its
+// failure says only what is kept of it.
+func fetchOne(ctx context.Context, ref reference, cfg config.References, m *sessionjudge.Source, admitted string) ([]byte, error) {
+	src := ref.given
 	// One byte past the bound is read, so saved can tell a source was cut.
 	limit := cfg.MaxBytes
 	if limit <= 0 {
 		limit = 1 << 20
 	}
-	for _, f := range cfg.Fetch {
-		if strings.HasPrefix(src, f.Prefix) {
-			m.Method, m.ContentType = sessionjudge.MethodCommand, f.ContentType
-			if m.ContentType == "" {
-				m.ContentType = "text/plain"
-			}
-			cmd := exec.CommandContext(ctx, f.Command[0], append(f.Command[1:], src)...)
-			stdout, stderr := &boundedBuffer{max: limit + 1}, &boundedBuffer{max: 4 << 10}
-			cmd.Stdout, cmd.Stderr = stdout, stderr
-			if err := cmd.Run(); err != nil {
-				return nil, fmt.Errorf("%s: %w: %s", f.Command[0], err, strings.TrimSpace(clip(stderr.buf.String(), 300)))
-			}
-			return stdout.buf.Bytes(), nil
+	used := map[string]string{src: ref.kept}
+	none := newRedactor(nil)
+	if f := fetcherOf(src, cfg); f != nil {
+		m.Method, m.ContentType = sessionjudge.MethodCommand, f.ContentType
+		if m.ContentType == "" {
+			m.ContentType = "text/plain"
 		}
+		cmd := exec.CommandContext(ctx, f.Command[0], append(f.Command[1:], src)...)
+		// Standard error is kept whole up to 64 KiB, so nothing is cut
+		// before what it says is cleared of the source's query.
+		stdout, stderr := &boundedBuffer{max: limit + 1}, &boundedBuffer{max: 64 << 10}
+		cmd.Stdout, cmd.Stderr = stdout, stderr
+		if err := cmd.Run(); err != nil {
+			var exit *exec.ExitError
+			switch {
+			case ctx.Err() != nil:
+				return nil, failed(none, used, mcpclient.ClassTimeout, "the fetch did not end in time")
+			case errors.As(err, &exit):
+				return nil, failed(none, used, mcpclient.ClassToolError,
+					fmt.Sprintf("%s ended with status %d: %s", programName(f.Command[0]), exit.ExitCode(), strings.TrimSpace(stderr.buf.String())))
+			}
+			return nil, failed(none, used, mcpclient.ClassTransport, fmt.Sprintf("%s did not start", programName(f.Command[0])))
+		}
+		return stdout.buf.Bytes(), nil
 	}
 	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
 		m.Method = sessionjudge.MethodHTTP
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
 		if err != nil {
-			return nil, err
+			return nil, failed(none, used, mcpclient.ClassTransport, "the source is not a URL asz can request")
 		}
 		req.Header.Set("User-Agent", "asz-judge")
-		resp, err := http.DefaultClient.Do(req)
+		// A proxy's refusal can repeat its credential, so the user and
+		// password of every proxy the fetch went through, a redirect's
+		// too, are its secrets.
+		proxies := &proxiesUsed{}
+		req = req.WithContext(context.WithValue(ctx, proxiesKey{}, proxies))
+		resp, err := fetchClient.Do(req)
+		r := newRedactor(proxies.secrets())
 		if err != nil {
-			return nil, err
+			// The client's error names the URL it requested, so only the
+			// error under it is kept.
+			var ue *url.Error
+			switch {
+			case ctx.Err() != nil:
+				return nil, failed(r, used, mcpclient.ClassTimeout, "the fetch did not end in time")
+			case errors.As(err, &ue):
+				return nil, failed(r, used, mcpclient.ClassTransport, "the request did not reach the server: "+ue.Err.Error())
+			}
+			return nil, failed(r, used, mcpclient.ClassTransport, "the request did not reach the server")
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode/100 != 2 {
-			return nil, fmt.Errorf("the server answered %s", resp.Status)
+			return nil, failed(r, used, mcpclient.ClassServerError, fmt.Sprintf("the server answered HTTP %d %s", resp.StatusCode, http.StatusText(resp.StatusCode)))
 		}
 		m.ContentType = resp.Header.Get("Content-Type")
 		m.Revision = resp.Header.Get("ETag")
 		m.Published = resp.Header.Get("Last-Modified")
-		return io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+		data, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+		if err != nil {
+			return nil, failed(r, used, mcpclient.ClassTransport, "the answer did not arrive whole")
+		}
+		return data, nil
 	}
 	if strings.Contains(src, "://") {
-		return nil, fmt.Errorf("no fetch command is configured for %s, and asz fetches only http and https itself", src)
+		return nil, fmt.Errorf("no fetch is configured for %s, and asz fetches only http and https itself", ref.kept)
 	}
 	m.Method = sessionjudge.MethodFile
 	// A file is a path a person gave, checked and read as one: only a
@@ -139,6 +182,47 @@ func fetchOne(ctx context.Context, src string, cfg config.References, m *session
 		m.ContentType = "text/plain"
 	}
 	return data, nil
+}
+
+// fetchClient fetches a source over http, through the proxy proxyFor finds,
+// as an MCP server is reached. Each request, a redirect's included, notes
+// the proxy it goes through in the proxiesUsed its context carries.
+var fetchClient = func() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = func(r *http.Request) (*url.URL, error) {
+		proxy, err := proxyFor(r)
+		if used, ok := r.Context().Value(proxiesKey{}).(*proxiesUsed); ok && proxy != nil {
+			used.add(proxy)
+		}
+		return proxy, err
+	}
+	return &http.Client{Transport: t}
+}()
+
+// proxiesKey carries a fetch's proxiesUsed in its requests' context.
+type proxiesKey struct{}
+
+// proxiesUsed are the proxies one fetch's requests went through.
+type proxiesUsed struct {
+	mu      sync.Mutex
+	proxies []*url.URL
+}
+
+func (p *proxiesUsed) add(proxy *url.URL) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.proxies = append(p.proxies, proxy)
+}
+
+// secrets are the user and password of each proxy used.
+func (p *proxiesUsed) secrets() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for _, proxy := range p.proxies {
+		out = append(out, proxySecrets(proxy)...)
+	}
+	return out
 }
 
 // boundedBuffer keeps the first max bytes written to it and drops the rest,

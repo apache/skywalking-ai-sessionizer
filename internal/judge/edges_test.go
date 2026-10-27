@@ -188,11 +188,13 @@ func TestAPlanNamesOnlyStagesAnEvaluatorTakes(t *testing.T) {
 }
 
 // What an agent CLI read is counted from its navigation server's log, one
-// answer per line. The log ends with a newline, and a server stopped while
-// it wrote leaves part of a line: neither is an answer.
+// answer per line. The log ends with a newline, a server stopped while it
+// wrote leaves part of a line, and a server that ended writes a closing
+// line: none of them is an answer.
 func TestReadingCountsEachLoggedAnswer(t *testing.T) {
 	answers := `{"bytes":100}` + "\n" + `{"bytes":50,"refused":true}` + "\n"
-	for name, log := range map[string]string{"whole": answers, "stopped": answers + `{"bytes":7`} {
+	closed := answers + `{"attempt":"a1","closing":true,"answers":2,"write_failed":false}` + "\n"
+	for name, log := range map[string]string{"whole": answers, "stopped": answers + `{"bytes":7`, "closed": closed} {
 		path := filepath.Join(t.TempDir(), "nav.log")
 		if err := os.WriteFile(path, []byte(log), 0o600); err != nil {
 			t.Fatal(err)

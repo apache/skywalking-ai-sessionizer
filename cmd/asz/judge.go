@@ -53,7 +53,10 @@ const judgeUsage = `Usage:
   asz judge [-config FILE] -reference SRC ... CONVERSATION
       judge it as above, and compare it with what each source concludes: a
       file, an http or https URL, or a source judge.references.fetch names
-      a command for; repeat -reference for several
+      a command or an MCP server for; repeat -reference for several
+  asz judge [-config FILE] -reference-tools SRC
+      list the tools of the MCP server judge.references.fetch names for the
+      source, each with its input schema, to choose the entry's tool
   asz judge [-config FILE] -labels FILE ... CONVERSATION
       judge it as above, then regroup the run by the person's goals, a plain
       list in the file, and compare the judge's grouping with theirs
@@ -97,7 +100,8 @@ func cmdJudge(args []string) int {
 	toID := fs.String("to-id", "", "judge the main talks up to this talk id")
 	mode := fs.String("mode", "", "auto, single or stream: how each stage is given to its evaluator")
 	var references repeated
-	fs.Var(&references, "reference", "a source to compare the run with: a file, a URL, or one a configured command fetches; repeat for several")
+	fs.Var(&references, "reference", "a source to compare the run with: a file, a URL, or one a configured command or MCP server fetches; repeat for several")
+	referenceTools := fs.String("reference-tools", "", "list the tools of the MCP server configured for this source")
 	labelsPath := fs.String("labels", "", "a file listing the person's goals in their own words: regroup the run by them")
 	regroup := fs.Int("regroup", 0, "with -labels, regroup this closed run instead of making a new one")
 	remoteConversation := fs.String("remote-conversation", "", "judge a pulled conversation: REMOTE/CONVERSATION, with :TAG or :latest after it")
@@ -109,6 +113,26 @@ func cmdJudge(args []string) int {
 	usage := func(why string) int {
 		fmt.Fprintln(os.Stderr, "asz judge:", why)
 		return 2
+	}
+	if given["reference-tools"] {
+		if fs.NArg() != 0 || len(given) != 1 && (len(given) != 2 || !given["config"]) {
+			return usage("-reference-tools takes a source and -config, nothing else")
+		}
+		cfg, err := loadConfig(*cfgPath)
+		if err != nil {
+			return fail(err)
+		}
+		ctx, stop := stopping()
+		defer stop()
+		if err := judge.ReferenceTools(ctx, cfg.Judge.References, *referenceTools, version, os.Stdout); err != nil {
+			return fail(err)
+		}
+		return 0
+	}
+	// A reference with a user or a password stops the command before
+	// anything is pulled, read or written.
+	if err := judge.CheckReferences(references); err != nil {
+		return fail(err)
 	}
 	var selection *remoteSelection
 	var id string
@@ -985,7 +1009,12 @@ func cmdJudgeMCP(args []string) int {
 		}
 		nav.Assign(a)
 	}
-	var onCall func(string, json.RawMessage, int, error)
+	var onCall func(string, json.RawMessage, int, error, judge.Receipt)
+	// closing ends the log with the number of answers it holds, so the run
+	// can tell a log its server finished from one cut short. A write that
+	// failed stops the log, and the closing line says so when it can be
+	// written: the run then takes no receipts from it.
+	closing := func() {}
 	if *logPath != "" {
 		f, err := openNavigationLog(*logPath, checkedLog)
 		if err != nil {
@@ -993,15 +1022,32 @@ func cmdJudgeMCP(args []string) int {
 		}
 		defer f.Close()
 		var mu sync.Mutex
-		onCall = func(tool string, args json.RawMessage, size int, err error) {
+		attempt := nav.Assigned().Attempt
+		answers, failed := 0, false
+		onCall = func(tool string, args json.RawMessage, size int, err error, given judge.Receipt) {
 			mu.Lock()
 			defer mu.Unlock()
-			line, _ := json.Marshal(map[string]any{"tool": tool, "args": args, "bytes": size, "error": err != nil,
-				"refused": errors.Is(err, judge.ErrBudgetSpent)})
+			if failed {
+				return
+			}
+			line, _ := json.Marshal(map[string]any{"attempt": attempt, "tool": tool, "args": args, "bytes": size, "error": err != nil,
+				"refused": errors.Is(err, judge.ErrBudgetSpent), "opened": given.Opened, "listed": given.Listed})
+			if _, werr := f.Write(append(line, '\n')); werr != nil {
+				failed = true
+				return
+			}
+			answers++
+		}
+		closing = func() {
+			mu.Lock()
+			defer mu.Unlock()
+			line, _ := json.Marshal(map[string]any{"attempt": attempt, "closing": true, "answers": answers, "write_failed": failed})
 			_, _ = f.Write(append(line, '\n'))
 		}
 	}
-	if err := judge.ServeMCP(os.Stdin, os.Stdout, nav, onCall); err != nil {
+	err = judge.ServeMCP(os.Stdin, os.Stdout, nav, onCall)
+	closing()
+	if err != nil {
 		return fail(err)
 	}
 	return 0

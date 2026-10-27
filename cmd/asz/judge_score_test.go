@@ -18,6 +18,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,12 +28,14 @@ import (
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
+	"github.com/apache/skywalking-ai-sessionizer/internal/judge"
 	"github.com/apache/skywalking-ai-sessionizer/internal/parse"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 // Judging is set against the conversation's cost only when both totals are
@@ -268,8 +271,11 @@ func TestShowPrintsTheRunAskedFor(t *testing.T) {
 // named by a round and that round's digest. A chain parsed again can reach
 // the same round number with other content, so a digest that no longer
 // matches stops the server before it answers anything.
-func TestTheNavigationServesOnlyTheHeadItsRunJudges(t *testing.T) {
-	root := t.TempDir()
+// servedFixture is the fixture scenario built and parsed in a root, and its
+// conversation's document at round 1, which a navigation server serves.
+func servedFixture(t *testing.T) (root, session string, doc *sessionview.Conversation) {
+	t.Helper()
+	root = t.TempDir()
 	sc, err := scenario.Load(filepath.Join("..", "..", "tests", "scenarios", "fixture.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -292,36 +298,85 @@ func TestTheNavigationServesOnlyTheHeadItsRunJudges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, err := c.BuildWithheld(nil)
+	doc, err = c.BuildWithheld(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return root, b.Session, doc
+}
+
+// serveMCP runs the navigation server with some requests waiting on its
+// input, which then ends.
+func serveMCP(t *testing.T, args []string, requests ...string) (code int, out, said string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range requests {
+		_, _ = w.WriteString(req + "\n")
+	}
+	_ = w.Close()
+	old := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = old; _ = r.Close() }()
+	said = stderrOf(t, func() {
+		out = stdoutOf(t, func() { code = cmdJudgeMCP(args) })
+	})
+	return code, out, said
+}
+
+func TestTheNavigationServesOnlyTheHeadItsRunJudges(t *testing.T) {
+	root, session, doc := servedFixture(t)
 	head := doc.Head.Digest
-	// serve runs the server with one request waiting on its input.
-	serve := func(digest string) (code int, out, said string) {
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.WriteString(`{"jsonrpc":"2.0","id":7,"method":"ping"}` + "\n")
-		_ = w.Close()
-		old := os.Stdin
-		os.Stdin = r
-		defer func() { os.Stdin = old; _ = r.Close() }()
-		said = stderrOf(t, func() {
-			out = stdoutOf(t, func() {
-				code = cmdJudgeMCP([]string{"-root", root, "-conversation", b.Session, "-round", "1", "-digest", digest})
-			})
-		})
-		return code, out, said
+	serve := func(digest string) (int, string, string) {
+		return serveMCP(t, []string{"-root", root, "-conversation", session, "-round", "1", "-digest", digest},
+			`{"jsonrpc":"2.0","id":7,"method":"ping"}`)
 	}
 	if code, out, said := serve(head); code != 0 || !strings.Contains(out, `"id":7`) {
 		t.Fatalf("at its head: exit %d, answered %q, said %q", code, out, said)
 	}
 	stale := strings.Repeat("0", 64)
 	code, out, said := serve(stale)
-	if code != 1 || out != "" || !strings.Contains(said, "round 1 of "+b.Session+" is now "+head+", not the "+stale+" the run judges") {
+	if code != 1 || out != "" || !strings.Contains(said, "round 1 of "+session+" is now "+head+", not the "+stale+" the run judges") {
 		t.Fatalf("at a digest the round no longer has: exit %d, answered %q, said %q", code, out, said)
+	}
+}
+
+// The navigation server logs each answer it gave with its attempt's name and
+// its receipt, and closes the log with how many it gave. The run reads that
+// log back strictly: its own attempt's receipts count, and another
+// attempt's log gives none.
+func TestTheServersLogHoldsItsAttemptsReceipts(t *testing.T) {
+	root, session, doc := servedFixture(t)
+	dir := t.TempDir()
+	task, log := filepath.Join(dir, "task.json"), filepath.Join(dir, "mcp-calls.jsonl")
+	attempt := "j000001/5-divergence/c001/a1/test"
+	b, _ := json.Marshal(judge.Assignment{Attempt: attempt})
+	if err := os.WriteFile(task, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, said := serveMCP(t, []string{"-root", root, "-conversation", session, "-round", "1", "-digest", doc.Head.Digest,
+		"-task", task, "-log", log},
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"talks","arguments":{}}}`)
+	if code != 0 || !strings.Contains(out, `"id":1`) {
+		t.Fatalf("exit %d, answered %q, said %q", code, out, said)
+	}
+	written, _ := os.ReadFile(log)
+	lines := strings.Split(strings.TrimSpace(string(written)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[1], `"closing":true`) || !strings.Contains(lines[1], `"answers":1`) {
+		t.Fatalf("log:\n%s", written)
+	}
+	given := func(attempt string) *sessionjudge.Given {
+		nav := judge.NewNav(doc, judge.Compute(doc, "claude-code/1", nil, nil), nil)
+		nav.TakeLog(log, attempt)
+		return nav.GivenWindow()
+	}
+	if g := given(attempt); g.Counts == nil || g.Counts.Listed == 0 {
+		t.Fatalf("the attempt's own log: %+v %+v", g, g.Counts)
+	}
+	if g := given("another"); g.Counts != nil || !strings.Contains(g.Reason, "not this attempt's") {
+		t.Fatalf("another attempt's log: %+v", g)
 	}
 }
 

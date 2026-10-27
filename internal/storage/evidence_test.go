@@ -44,10 +44,16 @@ func TestOpenEvidenceOpensOnlyTheListedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = f.Close()
+	// The replacement is made before the file is removed: a file system may
+	// give a removed file's identity to the next file made.
+	next := filepath.Join(dir, "next.sd")
+	if err := os.WriteFile(next, []byte("bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("bytes"), 0o444); err != nil {
+	if err := os.Rename(next, path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := storage.OpenEvidence(path, listed); !errors.Is(err, storage.ErrProtected) {

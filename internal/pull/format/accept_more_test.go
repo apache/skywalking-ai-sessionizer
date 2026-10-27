@@ -41,12 +41,20 @@ import (
 )
 
 // replaceSame gives path a new file holding the same bytes: what an
-// inventory listed is no longer what the name holds.
+// inventory listed is no longer what the name holds. The new file is
+// written before the old one is removed: a file system may give a removed
+// file's identity to the next file made, and then nothing was replaced.
 func replaceSame(t *testing.T, path string) {
 	t.Helper()
-	data := read(t, path)
+	next := path + ".next"
+	if err := os.WriteFile(next, read(t, path), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	mustRemove(t, path)
-	if err := os.WriteFile(path, data, 0o444); err != nil {
+	if err := os.Rename(next, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o444); err != nil {
 		t.Fatal(err)
 	}
 }

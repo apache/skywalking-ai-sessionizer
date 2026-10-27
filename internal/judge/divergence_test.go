@@ -29,8 +29,14 @@ import (
 // which corrected t1 and which t2 cites.
 func diverged(t *testing.T, misled bool, answer string) *checked {
 	t.Helper()
-	w := workedDecisions()
 	nav, _ := worked()
+	return divergedOn(t, nav, misled, answer)
+}
+
+// divergedOn is diverged over a navigation the test prepared.
+func divergedOn(t *testing.T, nav *Nav, misled bool, answer string) *checked {
+	t.Helper()
+	w := workedDecisions()
 	nav.Assign(Assignment{Conclusions: []sessionjudge.Conclusion{
 		{ID: "r1", Kind: "final", Statement: "the clock drifts", Scope: []string{"in/1"}},
 		{ID: "r2", Kind: "final", Statement: "the disk is slow", Scope: []string{"in/3"}},
@@ -181,8 +187,8 @@ func TestADivergenceFindingNamesACauseItCanShow(t *testing.T) {
 		{"missing context shown", false, f("t1", "r1", "missing_context", "s2"), "missing_context"},
 		{"a sub-task no stage found misleading", false, f("t1", "r1", "misled_by_subtask"), "unavailable"},
 		{"a sub-task that misled other work", true, f("t1", "r1", "misled_by_subtask", "s1"), "unavailable"},
-		{"a question never asked", false, f("t1", "in/2", "clarification_not_sought"), "clarification_not_sought asserted"},
-		{"a premise never checked", false, f("t1", "s1", "unsupported_assumption"), "unsupported_assumption asserted"},
+		{"a question never asked", false, f("t1", "in/2", "question_not_asked"), "question_not_asked asserted"},
+		{"a premise never checked", false, f("t1", "s1", "assumption_not_checked"), "assumption_not_checked asserted"},
 		{"other work", false, f("t1", "r3", "wrong_interpretation"), "left out"},
 		{"no such target", false, f("t9", "r1", "wrong_interpretation"), "left out"},
 	} {
@@ -255,5 +261,61 @@ func TestAMisleadingSubtaskIsTheTargetsAndCited(t *testing.T) {
 				t.Errorf("cause %q, want %q; %q", got, tc.want, c.note())
 			}
 		})
+	}
+}
+
+// A claim of absence stands with how much of its scope the evaluator was
+// given: a verdict of not observed over the judged work, and a cause of
+// absence over the span from where the question or the assumption arose, a
+// start asz checks. A cause with no start, or one that does not hold, is
+// kept, its reading unavailable with why.
+func TestAnAbsenceClaimStandsWithWhatItWasGiven(t *testing.T) {
+	all := []map[string]any{verdict("r1", "not_observed", "", "", nil, false), verdict("r2", "not_applicable", "", "", nil, false),
+		verdict("r3", "not_applicable", "", "", nil, false), verdict("r4", "not_applicable", "", "", nil, false)}
+	f := func(at, cause, from string) map[string]any {
+		return map[string]any{"target": "t1", "at": at, "conclusion": "r1", "cause": cause, "from": from, "problem": "it went another way",
+			"explanation": "", "improvement": "", "cite": []string{}}
+	}
+	c := diverged(t, false, divergenceAnswer(all, nil, []map[string]any{
+		f("in/2", "question_not_asked", "in/1"), f("s1", "assumption_not_checked", ""), f("in/2", "question_not_asked", "s3"),
+		f("s1", "wrong_interpretation", "in/1")}))
+	if d := divergencesOf(c)["r1"]; d.Given == nil || d.Given.Scope != sessionjudge.GivenWindow || d.Given.Counts == nil || d.Given.Counts.Steps != 14 {
+		t.Fatalf("not observed: %+v", d.Given)
+	}
+	var got []string
+	for _, fr := range c.frames {
+		x, ok := fr.(*sessionjudge.Finding)
+		if !ok {
+			continue
+		}
+		line := fmt.Sprintf("%s from %q", x.Cause, x.From)
+		switch {
+		case x.Given == nil:
+			line += " no reading"
+		case x.Given.Counts != nil:
+			line += fmt.Sprintf(" %s of %d steps", x.Given.Scope, x.Given.Counts.Steps)
+		default:
+			line += " " + x.Given.Scope + ": " + x.Given.Reason
+		}
+		got = append(got, line)
+	}
+	want := []string{
+		`question_not_asked from "in/1" span of 5 steps`,
+		`assumption_not_checked from "" span: no step where the question or the assumption arose was given`,
+		`question_not_asked from "" span: s3 does not come before in/2 in its stream`,
+		`wrong_interpretation from "" no reading`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("findings\n%s", strings.Join(got, "\n"))
+	}
+
+	// A start that holds is kept when the receipts over it are lost.
+	nav, _ := worked()
+	nav.LoseReceipts("lost")
+	c = divergedOn(t, nav, false, divergenceAnswer(all, nil, []map[string]any{f("in/2", "question_not_asked", "in/1")}))
+	for _, fr := range c.frames {
+		if x, ok := fr.(*sessionjudge.Finding); ok && (x.From != "in/1" || x.Given == nil || x.Given.Reason != "lost") {
+			t.Fatalf("a start with its receipts lost: %q %+v", x.From, x.Given)
+		}
 	}
 }

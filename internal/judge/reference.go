@@ -24,11 +24,42 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
-// SourceDoc is a saved source a call reads through the source tool.
+// SourceDoc is a saved source a call reads through the source tool. Left
+// says what the copy leaves out of what the server sent, when it is not all
+// of it.
 type SourceDoc struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
 	Text   string `json:"text"`
+	Left   string `json:"left,omitempty"`
+}
+
+// LeftOut says what a saved copy leaves out of what an MCP server sent:
+// content blocks that are not text, the structured content beside the text,
+// and the secrets redacted. It is empty for a copy that is all of it, so an
+// evaluator and a reader know when it is not.
+func LeftOut(m sessionjudge.Source) string {
+	x := m.MCP
+	if x == nil {
+		return ""
+	}
+	var parts []string
+	switch {
+	case x.BlocksOmitted == 1:
+		parts = append(parts, "1 content block that is not text left out")
+	case x.BlocksOmitted > 1:
+		parts = append(parts, fmt.Sprintf("%d content blocks that are not text left out", x.BlocksOmitted))
+	}
+	if x.StructuredOmitted {
+		parts = append(parts, "the structured content beside the text left out")
+	}
+	switch {
+	case x.Redactions == 1:
+		parts = append(parts, "1 secret redacted")
+	case x.Redactions > 1:
+		parts = append(parts, fmt.Sprintf("%d secrets redacted", x.Redactions))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // sourceLineBytes bounds the text of one row of the source tool.
@@ -69,7 +100,11 @@ func (n *Nav) sourceRows(id string, from int) ([]any, error) {
 func (n *Nav) sourceList() []any {
 	var rows []any
 	for _, d := range n.assigned.Sources {
-		rows = append(rows, map[string]any{"id": d.ID, "source": d.Source, "lines": strings.Count(strings.TrimSuffix(d.Text, "\n"), "\n") + 1})
+		row := map[string]any{"id": d.ID, "source": d.Source, "lines": strings.Count(strings.TrimSuffix(d.Text, "\n"), "\n") + 1}
+		if d.Left != "" {
+			row["left"] = d.Left
+		}
+		rows = append(rows, row)
 	}
 	return rows
 }
@@ -94,6 +129,9 @@ func sourceItems(docs []SourceDoc, manifests []sessionjudge.Source) []item {
 		}
 		row := map[string]any{"id": m.ID, "source": m.Source, "content_type": m.ContentType, "lines": m.Lines, "cut": m.Cut,
 			"revision": m.Revision, "published": m.Published, "author": m.Author}
+		if left := LeftOut(m); left != "" {
+			row["left"] = left
+		}
 		b, _ := json.Marshal(row)
 		out = append(out, item{id: m.ID, source: &docs[i], rows: []any{row}, bytes: len(b) + 1})
 	}

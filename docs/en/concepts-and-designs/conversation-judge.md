@@ -147,7 +147,7 @@ asz then compares the two groupings, goal by goal:
 | `split` | its targets are in several goals of the judge |
 | `merged` | its targets are in one goal of the judge that also holds another of the person's goals |
 | `missed` | no target serves it, though the conversation worked on it, and every target was placed |
-| `absent` | no target serves it, and nothing in the conversation worked on it |
+| `absent` | no target serves it, nothing in the conversation worked on it, and every target was placed: the evaluator's judgment, with how much of the judged work it was given (see [A claim of absence](#a-claim-of-absence)) |
 | `unknown` | no target serves it, and the regroup cannot tell why: the answer left it out, a target put in it has nothing that shows it, a target was left out, or nothing shows it was worked on |
 
 A target the judge put in no goal stands alone. The targets that serve none of the person's goals are
@@ -432,6 +432,30 @@ its comparison is unavailable, which is not the same as no contradiction found. 
 judge by, never instructions. The time of the copy says when asz took it, never when what it says was
 knowable.
 
+A source can also be fetched by one tool of an MCP server, remote or local, which asz calls once and
+offers nothing: no sampling, roots or elicitation, and the server's tools are never given to an
+evaluator. asz speaks the protocol's revision `2026-07-28`, where each request carries its version, and
+the revisions before it that begin with a handshake, `2025-11-25`, `2025-06-18`, `2025-03-26` and
+`2024-11-05`; the first exchange finds which one a server speaks. The text the evaluators read is the
+tool's text blocks joined by a blank line, or with none, its structured content as JSON. Blocks that are
+not text, such as images, are left out, and so is structured content beside text; the manifest counts
+both, so an evaluator and a reader know the copy is not all the server sent. A tool that reports a
+failure leaves the source failed.
+
+What is kept of a source is its provenance, never a credential. A URL is kept without its query and
+fragment, and the manifest says one was there; a URL with a user or a password stops the run before it
+writes anything. An MCP server is kept as its URL's scheme and host, or its program's name, and the
+arguments as sent, a secret one by the name of the variable that held it. A fetch over http, through a
+command or through an MCP server that fails is kept as a class, `timeout`, `transport`, `protocol`,
+`server error`, `tool error` or `too large`, and a detail asz builds, with no URL the request used
+beyond what is kept. Before anything of an MCP fetch is kept, asz
+removes the secrets of the fetch from the result, every failure and the server's standard error: as
+written, inside every JSON string literal however it is escaped, and in text escaped as JSON with no
+quotes around it, to four levels of string inside string, a literal that holds one replaced whole. A
+failure also clears the URLs the request used however they are spelled, and an http fetch the
+credential of its proxy. Which blocks are text is read before anything is
+removed, so a secret that matches a word of the protocol changes no decision.
+
 The `reference` stage finds the conclusions each source holds, and how far each can be trusted. Each
 conclusion is `final` or `intermediate`, `required` or `explanatory`, and names the inputs of the
 conversation it is about. Its support is `saved` when the source holds the evidence, `linked` when it
@@ -459,7 +483,8 @@ delivered conclusion, which it cites. A source that says a delivered result was 
 conversation, such as a release rolled back, gives a rollback of the same shape. The stage is told
 which deliveries stand at the end, and asked to name one of those. What does not hold is
 unknown. A verdict of absence, `not_observed`, rests on reading all of where the conclusion would show,
-which the record cannot show, so it is marked as the evaluator's judgment.
+which the record cannot show, so it is marked as the evaluator's judgment, with how much of the judged
+work the evaluator was given (see [A claim of absence](#a-claim-of-absence)).
 
 A contradiction or a rollback of a delivery standing at the end applies to the final score as one the
 conversation shows does: the delivered conclusion leaves 0, and criteria count as not met. A rollback
@@ -471,11 +496,14 @@ target disagrees.
 
 The stage also records why the work went another way, at the step where it did, with a cause the
 evidence supports: a misleading tool result, a result read wrong, a sub-task's untrue report, context
-that never arrived, context that was there and not used, a question never asked, or a premise never
-checked. Missing context needs evidence of what failed to arrive. A misleading sub-task needs one the
-sub-task stage found misled the agent, started in the target's work before the step the finding is
-at, which the finding cites: a step of it, or the step that started it. A question never asked and a premise never checked rest on absence, so they are
-the evaluator's judgment. Where the record supports none, the cause is unavailable.
+that never arrived, context that was there and not used, a question never asked
+(`question_not_asked`), or an assumption never checked (`assumption_not_checked`). Missing context
+needs evidence of what failed to arrive. A misleading sub-task needs one the sub-task stage found misled
+the agent, started in the target's work before the step the finding is at, which the finding cites: a
+step of it, or the step that started it. A question never asked and an assumption never checked rest on
+absence, so they are the evaluator's judgment. For these two the answer gives `from`, the step where
+the ambiguity or the assumption arose, and asz reports how much of the steps from it to the finding
+the evaluator was given. Where the record supports none, the cause is unavailable.
 
 ## Cost
 
@@ -496,6 +524,33 @@ and the close file says so with each share. In 772204d1 one talk held a question
 person typed while the agent worked: 4 calls, 245k tokens, came before the change and 14 calls, 1.12M
 tokens, after it. An equal split had charged the question 682k. Talks no target claims are
 unassigned.
+
+## A claim of absence
+
+Four claims say that something did not happen: a verdict of `not_observed`, the causes
+`question_not_asked` and `assumption_not_checked`, and a person's goal found `absent`. Each rests on
+reading all of where it would have shown, which the record cannot prove, so each stays the evaluator's
+judgment. Beside it asz reports how much of that place the evaluator was given, counted in steps:
+
+| Count | The steps |
+| --- | --- |
+| opened | the evaluator asked for the step itself, and the answer was not empty: `step` with its id and a text or a result, `record` with a part the step owns and a slice that is not empty, or `search` in it with a match |
+| listed | a row the evaluator was given named the step: an outline line, a search match, an input row, a talk row's input or reply, a sub-task row's start or report, or the same rows in the prompt. A row read whole by its number, in slices, names the steps whose ids the slice holds |
+| none | neither |
+| unavailable | among them all, the steps some of whose evidence no one can be given: a part too large to land, cut, withheld, removed or dropped, or an image, in an input or in a tool's result |
+
+The place is the judged work for `not_observed` and `absent`: the main talks a window judges with
+every sub-task they started, or every talk and loose work for a run over the whole conversation. For
+the two causes it is the span of one stream from `from` to the finding's step, in stream order, with
+the sub-tasks a step of it started. A `from` in another stream, or after the finding's step, gives no
+count, and the report says why.
+
+The counts are facts about what the evaluator asked for and what it was answered, never about what it
+understood. An answer counts once it was given: an API evaluator's when a later request carries it to
+the model whole, and an agent CLI's when its navigation server wrote it. That server writes each
+answer on its log with the name of the attempt, and a closing line with how many it wrote; a log of
+another attempt, a line that is not one whole entry, or a closing line that is missing or gives no
+count, makes the counts unavailable, never smaller.
 
 ## What an evaluator reads
 
@@ -629,8 +684,15 @@ began there. A target cancelled or replaced keeps only the findings of its rewor
 since what its result missed was no longer wanted.
 
 Each goal has an outcome too: its main target, left undetermined when that target was cancelled or
-replaced by the end; the most severe class of its targets; the finding that happened first in it, in
-recorded order; the main target's final score; and the mean of its targets' final scores. Grouping
+replaced by the end; the most severe class of its targets; its first recorded finding, the one whose
+step was recorded first, by the record's address, which says nothing of work before it that no stage
+read; the main target's final score; and the mean of its targets' final scores. Two findings at one
+address are ordered by the stage that wrote them, in the order the stages run, asz's last. A finding
+with no address is not ordered against the others: when some have none, the first recorded is the
+first among those with one, and when none has one, the order is not established, and the report says
+so. When the first recorded finding has a cause that rests on something not happening, the report
+shows how much of its span the evaluator was given beside it. The report's view by the person's goals
+chooses the same way. Grouping
 targets into goals never changes a target's score or the run's.
 
 A run has two scores, which are never combined into one:

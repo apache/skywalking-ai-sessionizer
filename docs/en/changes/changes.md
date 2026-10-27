@@ -31,7 +31,7 @@
   achieved, cannot be verified, or cancelled or replaced. It has a record's score and a final score
   that applies the contradictions and undoing of the deliveries standing at the end; what its rework
   cost, priced by how its calls were labeled; the person's corrections; and its file operations. asz records a finding where each
-  problem happened, and each goal says its main target, its worst class, the problem that came first
+  problem happened, and each goal says its main target, its worst class, its first recorded finding,
   and its scores.
 - The targets stage groups targets into goals, the targets that serve one result the person asked for,
   since a person often works on unrelated things in one session. It says how each input relates to the
@@ -61,11 +61,22 @@
   each can be trusted, and a `divergence` stage says how the conversation compares with each: reached,
   contradicted, not observed, unknown or not applicable, with rollbacks the source reports and why the
   work went another way. What contradicts or rolls back a standing delivery applies to the final score.
+- A source can be fetched by one tool of an MCP server, remote over Streamable HTTP or local over its
+  standard input and output, such as a Jira server. asz speaks the protocol's revision `2026-07-28` and
+  the four revisions before it. `asz judge -reference-tools SRC` lists the server's tools. A URL is kept
+  without its query, a server without its path, and a failure as a class and a detail asz builds. The
+  fetch's secrets are removed from everything kept, inside JSON strings however escaped.
 - `asz judge -labels FILE` regroups a run by a person's goals, a plain list in their own words, and
   `-regroup N` regroups a closed run. One evaluator call places each target in the goal it serves, and
   asz compares the two groupings goal by goal: agree, split, merged, missed, absent or unknown. The
   regroup is a versioned file beside the run, which is never changed. `-show` follows the person's
-  goals.
+  goals. A goal is absent only when every target was placed: a target left out may serve it.
+- A claim that something did not happen stays the evaluator's judgment: a verdict of not observed, a
+  question never asked, an assumption never checked, and a person's goal nothing worked on. Beside it
+  asz reports how much of where it would show the evaluator was given, in steps: those it opened, those
+  only named in a list, those not given, and those whose evidence no one can be given. For the two
+  causes the evaluator names the step where the question or the assumption arose. See
+  [A claim of absence](../concepts-and-designs/conversation-judge.md#a-claim-of-absence).
 - asz derives a target's level from its criteria, which carry ids. Evidence that does not hold weakens
   the decision: a criterion with no valid citation, or resting only on the agent's own words, is
   unknown, and an avoidable label with no citation is left out.
@@ -98,6 +109,13 @@
   agent's transcript the final fragment is often missing; in one conversation, 698 of 1,309 child-agent
   calls, whose cache reads alone added 36% to the conversation's.
 - The asz.view document carries each model call's `model`, read from the same record as its usage.
+
+## Conversation view
+
+- A tool call that shares a record with the agent's text reads as its arguments in asz.view, on the
+  page and to the judge's evaluators, never as that text. Measured on a local root, 10 of 25 LangChain
+  tool calls shared a record with text, and 3 of 109,397 Claude Code ones. A queued command still reads
+  as its prompt. See [asz.view](../formats/asz-view.md).
 
 ## Release
 

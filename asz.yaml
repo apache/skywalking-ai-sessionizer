@@ -417,12 +417,39 @@ judge:
   # The sources asz judge -reference compares a run with: a ticket, an
   # incident report, a person's conclusions. A file and a plain http or https
   # URL need nothing here. A source that needs a login goes through a command
-  # given the source as its last argument, which writes the content on its
-  # standard output and never sees the conversation, for example:
+  # or a tool of an MCP server, the first entry whose prefix it starts with.
+  # Neither sees the conversation. A command is given the source as its last
+  # argument and writes the content on its standard output. An MCP server's
+  # tool is called once, with arguments in which {source} is the source and
+  # {rest} what follows the prefix; asz judge -reference-tools SOURCE lists
+  # the tools. Each header is read from the variable it names, and a secret
+  # argument from arguments_env; arguments are kept as written. For example:
   #   fetch:
-  #     - prefix: https://example.atlassian.net/browse/
-  #       command: [jira-export, --markdown]
+  #     - prefix: https://tickets.example.com/
+  #       command: [ticket-export, --markdown]
   #       content_type: text/markdown
+  #     # Atlassian's remote server. The variable holds the whole header:
+  #     # "Basic " and the base64 of email:token, or "Bearer " and a key.
+  #     - prefix: https://example.atlassian.net/browse/
+  #       mcp:
+  #         url: https://mcp.atlassian.com/v2/mcp
+  #         headers:
+  #           Authorization: ASZ_JIRA_AUTHORIZATION
+  #         tool: getJiraIssue
+  #         arguments:
+  #           cloudId: https://example.atlassian.net
+  #           issueIdOrKey: "{rest}"
+  #     # A local server asz starts. secret_env lists every variable it
+  #     # reads a credential from.
+  #     - prefix: https://jira.example.com/browse/
+  #       mcp:
+  #         command: [uvx, mcp-atlassian]
+  #         secret_env: [JIRA_PERSONAL_TOKEN]
+  #         tool: jira_get_issue
+  #         arguments:
+  #           issue_key: "{rest}"
+  #           comment_limit: 100
+  #           update_history: false
   references:
     # A saved copy is cut at this many bytes, and says so.
     max_bytes: 1048576

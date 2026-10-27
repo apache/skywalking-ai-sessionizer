@@ -109,6 +109,22 @@ func reportFiles() []*sessionjudge.File {
 	return []*sessionjudge.File{targets, achievement, efficiency, closeFile}
 }
 
+// A goal's first recorded finding whose cause rests on something not
+// happening shows, with it, how much of its span the evaluator was given.
+func TestAGoalsFirstFindingShowsItsReading(t *testing.T) {
+	files := reportFiles()
+	files[3].Header.Summary.Goals[0].First = &sessionjudge.Finding{Target: "t1", Source: sessionjudge.StageDivergence, At: "s1",
+		Cause: sessionjudge.CauseQuestionNotAsked, Asserted: true, From: "in/1", Problem: "it chose a cache without asking",
+		Given: &sessionjudge.Given{Scope: sessionjudge.GivenSpan, Counts: &sessionjudge.GivenCounts{Steps: 5, Opened: 2, Listed: 1, None: 2}}}
+	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, files) })
+	want := "    first recorded  divergence at s1: it chose a cache without asking\n" +
+		"      cause: question not asked; the evaluator's judgment, since the record cannot show it was looked for everywhere; " +
+		"of the 5 steps from in/1 to s1 it opened 2, saw 1 only in lists and was not given 2\n"
+	if !strings.Contains(out, want) {
+		t.Fatalf("the goal's first finding:\n%s", out)
+	}
+}
+
 // The report reads goal by goal, the most severe first: each goal's worst
 // class, first finding and main target; each target's scores, reasons and
 // what its steps show, what was done by what it was for, the person's
@@ -120,7 +136,7 @@ func TestTheReportReadsGoalByGoal(t *testing.T) {
 		"goal g1  Find why checkout times out, and fix it",
 		`evolved   "find why checkout is slow" (in/1) → "find why it times out" (in/2)`,
 		"worst     contradicted",
-		"first     asz at s1: criterion t1.c2 was not met: fixed",
+		"first recorded  asz at s1: criterion t1.c2 was not met: fixed",
 		"main      t1: the person asked for the cause first",
 		"t1  Find why checkout times out",
 		"0/100 (50 by the record)",
@@ -220,7 +236,7 @@ func TestTheReportFollowsThePersonsGoals(t *testing.T) {
 		"regroup      partial",
 		"goal P1  Fix checkout, release and tidy",
 		"worst     contradicted",
-		"first     asz at s1: criterion t1.c2 was not met: fixed",
+		"first recorded  asz at s1: criterion t1.c2 was not met: fixed",
 		"main      t2",
 		"scores    main t2 100/100; all 3 targets 33/100",
 		"goal P2  Design a logo",
@@ -261,7 +277,10 @@ func TestTheReportSaysWhatTheSourcesShowed(t *testing.T) {
 	files[3].Outcomes[0].References = []string{"r2"}
 	ref := &sessionjudge.File{Header: sessionjudge.Header{Stage: sessionjudge.StageReference, Status: sessionjudge.StatusPartial},
 		Sources: []sessionjudge.Source{{ID: "R1", Source: "OPS-1.md", Method: "file", Outcome: "saved", Captured: "2026-10-23T09:00:00Z", Lines: 40,
-			SHA256: "7a1c2b3d4e5f60718293", Cut: true}, {ID: "R2", Source: "https://jira.example/OPS-2", Outcome: "failed", Error: "the server answered 401"}},
+			SHA256: "7a1c2b3d4e5f60718293", Cut: true}, {ID: "R2", Source: "https://jira.example/OPS-2", Outcome: "failed", Error: "the server answered 401"},
+			{ID: "R3", Source: "https://jira.example/OPS-3", QueryRemoved: true, Method: "mcp", Outcome: "saved", Captured: "2026-10-23T09:00:00Z", Lines: 12,
+				SHA256: "0123456789abcdef", MCP: &sessionjudge.SourceMCP{Server: "https://mcp.example.com", Tool: "getJiraIssue", BlocksOmitted: 1,
+					StructuredOmitted: true, Redactions: 2}}},
 		Conclusions: []sessionjudge.Conclusion{{ID: "r1", Kind: "intermediate", Statement: "the queue was full", Support: "saved", Scope: []string{"in/1"}},
 			{ID: "r2", Kind: "final", Statement: "max_attempts is never checked", Support: "asserted", Scope: []string{"in/1"}, Conflicts: []string{"r3"}},
 			{ID: "r3", Kind: "final", Statement: "an aside", Support: "linked"},
@@ -270,22 +289,27 @@ func TestTheReportSaysWhatTheSourcesShowed(t *testing.T) {
 			{ID: "r6", Kind: "intermediate", Statement: "the database failed", Support: "linked", Scope: []string{"in/1"}, SupersededBy: "r2"}}}
 	div := &sessionjudge.File{Header: sessionjudge.Header{Stage: sessionjudge.StageDivergence, Status: sessionjudge.StatusComplete},
 		Divergences: []sessionjudge.Divergence{{Conclusion: "r1", Verdict: "reached", Cite: cited("s3")},
-			{Conclusion: "r2", Verdict: "contradicted", Target: "t1", Event: "t1.e3", Whole: true}, {Conclusion: "r3", Verdict: "not_observed", Asserted: true},
+			{Conclusion: "r2", Verdict: "contradicted", Target: "t1", Event: "t1.e3", Whole: true}, {Conclusion: "r3", Verdict: "not_observed", Asserted: true,
+				Given: &sessionjudge.Given{Scope: sessionjudge.GivenWindow, Counts: &sessionjudge.GivenCounts{Steps: 40, Opened: 12, Listed: 21, None: 7, Unavailable: 2}}},
 			{Conclusion: "r4", Verdict: "contradicted", Target: "t1", Event: "t1.e1", Criteria: []string{"t1.c1"}},
 			{Conclusion: "r5", Verdict: "contradicted", Target: "t1", Event: "t1.e3", Whole: true},
 			{Conclusion: "r6", Verdict: "contradicted", Target: "t1", Event: "t1.e3", Whole: true}},
 		Rollbacks: []sessionjudge.Rollback{{Conclusion: "r2", Target: "t1", Event: "t1.e3", Criteria: []string{"t1.c2"}}},
 		Findings: []sessionjudge.Finding{{Target: "t1", At: "s2", Ref: &sessionjudge.Ref{Seq: 1, Row: 2}, Problem: "it trusted the ping", Conclusion: "r2",
-			Cause: "unsupported_assumption", Asserted: true}}}
+			Cause: "assumption_not_checked", Asserted: true, From: "s1",
+			Given: &sessionjudge.Given{Scope: sessionjudge.GivenSpan, Counts: &sessionjudge.GivenCounts{Steps: 3, Opened: 3}}}}}
 	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, append(files, ref, div)) })
 	want := []string{
 		"reference r2 contradicts the delivered conclusion of t1.e3: max_attempts is never checked",
 		"reference r2 rolled back t1.c2 of t1.e3, outside the conversation: max_attempts is never checked",
 		"t1 at s2, divergence: it trusted the ping",
-		"cause: unsupported assumption, against r2; the evaluator's judgment, since the record cannot show it was looked for everywhere",
+		"cause: assumption not checked, against r2; the evaluator's judgment, since the record cannot show it was looked for everywhere; " +
+			"of the 3 steps from s1 to s2 it opened 3, saw 0 only in lists and was not given 0",
 		"references",
 		"R1  OPS-1.md: file, saved 2026-10-23T09:00:00Z, 40 lines, sha256 7a1c2b3d4e5f, cut to its start",
 		"R2  https://jira.example/OPS-2: not saved, the server answered 401; its comparison is unavailable",
+		"R3  https://jira.example/OPS-3: mcp getJiraIssue at https://mcp.example.com, saved 2026-10-23T09:00:00Z, 12 lines, sha256 0123456789ab, " +
+			"kept without its query; 1 content block that is not text left out, the structured content beside the text left out, 2 secrets redacted",
 		"r1  intermediate the queue was full",
 		"reached [s3]",
 		"saved support; about in/1",
@@ -294,7 +318,8 @@ func TestTheReportSaysWhatTheSourcesShowed(t *testing.T) {
 		"rolled back t1.c2 of t1, t1.e3, outside the conversation\n",
 		"asserted support; about in/1; disagrees with r3",
 		"r3  final        an aside",
-		"not observed, the evaluator's judgment",
+		"not observed, the evaluator's judgment; of the 40 steps of the judged work it opened 12, saw 21 only in lists and was not given 7; " +
+			"2 hold evidence no one can be given",
 		"linked support; about no input, so it changes no score",
 		// What a source shows of a delivery a later one replaced, or that
 		// another conclusion disagrees with, changes no score, and says why.
@@ -331,5 +356,25 @@ func TestARegroupTakesTheTargetsStagesEvaluator(t *testing.T) {
 	}
 	if got := regrouperOf("codex", plan); got != "codex" {
 		t.Errorf("named: %q", got)
+	}
+}
+
+// A claim of absence says how much of its steps the evaluator was given, or
+// why that cannot be said; a run made before readings were kept says it has
+// none. It never says the claim holds.
+func TestAReadingStandsBesideItsClaim(t *testing.T) {
+	for _, c := range []struct {
+		given *sessionjudge.Given
+		want  string
+	}{
+		{nil, "; what it was given was not recorded"},
+		{&sessionjudge.Given{Scope: sessionjudge.GivenWindow, Reason: "the navigation log has no closing line"},
+			"; what it was given is unavailable: the navigation log has no closing line"},
+		{&sessionjudge.Given{Scope: sessionjudge.GivenWindow, Counts: &sessionjudge.GivenCounts{Steps: 1, Listed: 1}},
+			"; of the 1 step of the judged work it opened 0, saw 1 only in lists and was not given 0"},
+	} {
+		if got := givenText(c.given, "of the judged work"); got != c.want {
+			t.Errorf("%q, want %q", got, c.want)
+		}
 	}
 }

@@ -360,9 +360,16 @@ func TestAnInheritedServersReadIsHeldToItsMarker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldIn, oldOut := os.Stdin, os.Stdout
-	os.Stdin, os.Stdout = inR, outW
-	defer func() { os.Stdin, os.Stdout = oldIn, oldOut }()
+	// Standard error is the server's from its start to its end, drained:
+	// swapped while it runs, its failure would race the swap.
+	errR, errW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = io.Copy(io.Discard, errR) }()
+	oldIn, oldOut, oldErr := os.Stdin, os.Stdout, os.Stderr
+	os.Stdin, os.Stdout, os.Stderr = inR, outW, errW
+	defer func() { os.Stdin, os.Stdout, os.Stderr = oldIn, oldOut, oldErr; _ = errW.Close() }()
 	code := make(chan int, 1)
 	go func() {
 		code <- cmdJudgeMCP([]string{"-root", p.snapshot, "-conversation", p.conversation, "-round", fmt.Sprint(v.Round),
@@ -389,8 +396,7 @@ func TestAnInheritedServersReadIsHeldToItsMarker(t *testing.T) {
 	if err := replies.Decode(&reply); err != nil {
 		t.Fatal(err)
 	}
-	var exit int
-	stderrOf(t, func() { exit = <-code })
+	exit := <-code
 	_ = inW.Close()
 	b, err := os.ReadFile(report)
 	if exit == 0 || err != nil || !strings.HasPrefix(string(b), "fatal: ") {

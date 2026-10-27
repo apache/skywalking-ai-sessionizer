@@ -490,7 +490,7 @@ func TestTheReferenceStagesReadBack(t *testing.T) {
 	d := Divergence{T: FrameDivergence, Conclusion: "r1", Verdict: VerdictContradicted, Target: "t1", Event: "t1.e2", Criteria: []string{"t1.c1"},
 		Note: "n", Cite: []Cite{{Node: "msg/2"}}}
 	rb := Rollback{T: FrameRollback, Conclusion: "r1", Target: "t1", Event: "t1.e2", Criteria: []string{"t1.c2"}, Note: "rolled back", Cite: []Cite{{Node: "tool/1"}}}
-	fd := Finding{T: FrameFinding, Target: "t1", Source: StageDivergence, Conclusion: "r1", Cause: CauseNoClarification, Asserted: true, At: "msg/1",
+	fd := Finding{T: FrameFinding, Target: "t1", Source: StageDivergence, Conclusion: "r1", Cause: CauseQuestionNotAsked, Asserted: true, At: "msg/1",
 		Problem: "it never asked", Cite: []Cite{}}
 	for _, f := range []any{&d, &rb, &fd} {
 		if err := w.Write(f); err != nil {

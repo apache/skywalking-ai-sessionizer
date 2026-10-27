@@ -359,8 +359,13 @@ func fill(s *step, rec *sessiondata.Record, block *int) {
 	case p.Text != "":
 		s.Text = clip(p.Text)
 	case len(p.Data) > 0:
-		// A wrapped human message reads as the message, not as its wrapper.
-		if t := readable(rec); t != "" && t != strings.TrimSpace(string(p.Data)) {
+		// A wrapped human message reads as the message, not as its wrapper,
+		// from this part's own data alone. Any other data reads as itself:
+		// a tool call that shares a record with the agent's prose is its
+		// arguments, never that prose. Measured on a local root, 10 of 25
+		// LangChain tool calls shared a record with text, and 3 of 109,397
+		// Claude Code ones.
+		if t := queuedPrompt(p.Data); t != "" {
 			s.Text = clip(t)
 		} else {
 			s.Text = clip(string(p.Data))
@@ -488,26 +493,32 @@ func readable(rec *sessiondata.Record) string {
 		return t
 	}
 	for _, raw := range candidates(rec) {
-		var env struct {
-			Type   string `json:"type"`
-			Prompt []struct {
-				Text string `json:"text"`
-			} `json:"prompt"`
-		}
-		if json.Unmarshal(raw, &env) != nil || env.Type != "queued_command" {
-			continue
-		}
-		var out []string
-		for _, p := range env.Prompt {
-			if p.Text != "" {
-				out = append(out, p.Text)
-			}
-		}
-		if len(out) > 0 {
-			return strings.TrimSpace(strings.Join(out, "\n"))
+		if t := queuedPrompt(raw); t != "" {
+			return t
 		}
 	}
 	return ""
+}
+
+// queuedPrompt is the sentence inside one queued_command envelope, or empty
+// when raw is not one.
+func queuedPrompt(raw []byte) string {
+	var env struct {
+		Type   string `json:"type"`
+		Prompt []struct {
+			Text string `json:"text"`
+		} `json:"prompt"`
+	}
+	if json.Unmarshal(raw, &env) != nil || env.Type != "queued_command" {
+		return ""
+	}
+	var out []string
+	for _, p := range env.Prompt {
+		if p.Text != "" {
+			out = append(out, p.Text)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // candidates returns every place a record's own JSON may be found.

@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -96,26 +98,133 @@ type Judge struct {
 
 // References are how asz fetches a source a run is judged against. A file
 // and a plain http or https URL need no setting. A source that needs a
-// login, such as a ticket system, goes through a command.
+// login, such as a ticket system, goes through a command or a tool of an
+// MCP server.
 type References struct {
 	// MaxBytes bounds a saved copy. A larger source is saved cut, and its
 	// manifest says so.
 	MaxBytes int `yaml:"max_bytes"`
 	// Timeout bounds one fetch, as a duration such as 1m.
 	Timeout string `yaml:"timeout"`
-	// Fetch are the commands that fetch sources, the first whose prefix a
+	// Fetch are the ways sources are fetched, the first whose prefix a
 	// source starts with taking it.
 	Fetch []Fetcher `yaml:"fetch"`
 }
 
-// Fetcher is a command that fetches the sources that start with a prefix.
-// It is given the source as its last argument and writes the content on
-// its standard output. It never sees the conversation.
+// Fetcher fetches the sources that start with a prefix, through a command
+// or one tool of an MCP server. A command is given the source as its last
+// argument and writes the content on its standard output. Neither sees the
+// conversation.
 type Fetcher struct {
 	Prefix  string   `yaml:"prefix"`
 	Command []string `yaml:"command"`
 	// ContentType is what the command writes, text/plain when empty.
 	ContentType string `yaml:"content_type"`
+	// MCP calls one tool of an MCP server for each source.
+	MCP *MCPFetch `yaml:"mcp"`
+}
+
+// MCPFetch is one tool of an MCP server a source is fetched with: a remote
+// server at URL, or a local one asz starts with Command.
+type MCPFetch struct {
+	// URL is https, or http on a loopback address, with no user, query or
+	// fragment: a credential goes in Headers or ArgumentsEnv.
+	URL     string   `yaml:"url"`
+	Command []string `yaml:"command"`
+	// Headers maps a header every request to a remote server carries to
+	// the environment variable that holds its value.
+	Headers map[string]string `yaml:"headers"`
+	// SecretEnv names the environment variables a local server reads a
+	// credential from, so what it answers is cleared of their values.
+	SecretEnv []string `yaml:"secret_env"`
+	// Tool is the tool called. It may be left empty while setting up: asz
+	// judge -reference-tools then lists the server's tools.
+	Tool string `yaml:"tool"`
+	// Arguments are the tool's arguments, kept and sent as configured, so
+	// they hold no secret. In a string, {source} is the whole source and
+	// {rest} what follows the prefix, both without a URL's query and
+	// fragment.
+	Arguments map[string]any `yaml:"arguments"`
+	// ArgumentsEnv maps an argument to the environment variable that holds
+	// its value, for a secret one.
+	ArgumentsEnv map[string]string `yaml:"arguments_env"`
+}
+
+// reservedHeaders are the headers asz sets on a request to an MCP server
+// itself, which a configured header may not replace; a name that starts
+// with Mcp-Param- is asz's too.
+var reservedHeaders = []string{"accept", "content-type", "content-length", "host", "mcp-protocol-version", "mcp-method", "mcp-name",
+	"mcp-session-id", "last-event-id"}
+
+// check refuses an MCP fetch a run could not use, or one that would keep a
+// secret where provenance is kept.
+func (m *MCPFetch) check(where string) error {
+	switch {
+	case (m.URL == "") == (len(m.Command) == 0):
+		return fmt.Errorf("config: %s.mcp needs exactly one of url and command", where)
+	case len(m.Command) > 0 && m.Command[0] == "":
+		return fmt.Errorf("config: %s.mcp.command names no program", where)
+	case m.URL != "" && len(m.SecretEnv) > 0:
+		return fmt.Errorf("config: %s.mcp.secret_env is for a local server: a remote one is sent headers", where)
+	case len(m.Command) > 0 && len(m.Headers) > 0:
+		return fmt.Errorf("config: %s.mcp.headers are for a remote server: a local one reads its environment", where)
+	}
+	if m.URL != "" {
+		u, err := url.Parse(m.URL)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("config: %s.mcp.url is not a URL", where)
+		}
+		switch {
+		case u.Scheme != "https" && (u.Scheme != "http" || !loopback(u.Hostname())):
+			return fmt.Errorf("config: %s.mcp.url must be https, or http on a loopback address", where)
+		case u.User != nil, u.RawQuery != "", u.ForceQuery, u.Fragment != "":
+			return fmt.Errorf("config: %s.mcp.url must have no user, query or fragment: a credential goes in headers or arguments_env", where)
+		}
+	}
+	seen := map[string]bool{}
+	for name, env := range m.Headers {
+		lower := strings.ToLower(name)
+		switch {
+		case !headerToken(name):
+			return fmt.Errorf("config: %s.mcp.headers: %q is not a header name", where, name)
+		case slices.Contains(reservedHeaders, lower) || strings.HasPrefix(lower, "mcp-param-"):
+			return fmt.Errorf("config: %s.mcp.headers: asz sets %s itself", where, name)
+		case seen[lower]:
+			return fmt.Errorf("config: %s.mcp.headers names %s twice", where, name)
+		case env == "":
+			return fmt.Errorf("config: %s.mcp.headers: %s names no environment variable", where, name)
+		}
+		seen[lower] = true
+	}
+	for name, env := range m.ArgumentsEnv {
+		if _, both := m.Arguments[name]; both {
+			return fmt.Errorf("config: %s.mcp: argument %s is in both arguments and arguments_env", where, name)
+		}
+		if env == "" {
+			return fmt.Errorf("config: %s.mcp.arguments_env: %s names no environment variable", where, name)
+		}
+	}
+	if slices.Contains(m.SecretEnv, "") {
+		return fmt.Errorf("config: %s.mcp.secret_env names an empty variable", where)
+	}
+	return nil
+}
+
+// loopback says whether a host is this machine's own.
+func loopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// headerToken says whether a name is an HTTP field-name token.
+func headerToken(name string) bool {
+	tokenChar := func(c rune) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", c)
+	}
+	return name != "" && !strings.ContainsFunc(name, func(c rune) bool { return !tokenChar(c) })
 }
 
 // Evaluator is one model or agent CLI a stage is given to.
@@ -188,8 +297,18 @@ func (j Judge) check() error {
 		}
 	}
 	for i, f := range r.Fetch {
-		if f.Prefix == "" || len(f.Command) == 0 || f.Command[0] == "" {
-			return fmt.Errorf("config: judge.references.fetch[%d] needs a prefix and a command", i)
+		where := fmt.Sprintf("judge.references.fetch[%d]", i)
+		switch {
+		case f.Prefix == "" || (len(f.Command) == 0) == (f.MCP == nil):
+			return fmt.Errorf("config: %s needs a prefix and exactly one of command and mcp", where)
+		case f.MCP != nil && f.ContentType != "":
+			return fmt.Errorf("config: %s.content_type is for a command: an MCP tool's answer is read as one", where)
+		case f.MCP != nil:
+			if err := f.MCP.check(where); err != nil {
+				return err
+			}
+		case f.Command[0] == "":
+			return fmt.Errorf("config: %s.command names no program", where)
 		}
 	}
 	return nil

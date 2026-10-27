@@ -680,16 +680,20 @@ const OperationUnlisted = "unlisted"
 // copy, never when what it says was knowable. A source that could not be
 // fetched is kept as failed, which leaves its comparison unavailable.
 type Source struct {
-	T           FrameType `json:"t,omitempty"`
-	ID          string    `json:"id"`
-	Source      string    `json:"source"`
-	Captured    string    `json:"captured"`
-	Method      string    `json:"method"`
-	Outcome     string    `json:"outcome"`
-	Error       string    `json:"error,omitempty"`
-	ContentType string    `json:"content_type,omitempty"`
-	Bytes       int       `json:"bytes"`
-	SHA256      string    `json:"sha256,omitempty"`
+	T  FrameType `json:"t,omitempty"`
+	ID string    `json:"id"`
+	// Source is the source as it is kept: a URL without its query and
+	// fragment, which QueryRemoved says were there. A query is never a
+	// place for a credential, and asz keeps none.
+	Source       string `json:"source"`
+	QueryRemoved bool   `json:"query_removed,omitempty"`
+	Captured     string `json:"captured"`
+	Method       string `json:"method"`
+	Outcome      string `json:"outcome"`
+	Error        string `json:"error,omitempty"`
+	ContentType  string `json:"content_type,omitempty"`
+	Bytes        int    `json:"bytes"`
+	SHA256       string `json:"sha256,omitempty"`
 	// Cut says the source was larger than a saved copy may be, and only
 	// its start was saved.
 	Cut bool `json:"cut,omitempty"`
@@ -702,6 +706,26 @@ type Source struct {
 	// form such as HTML, beside the fetched bytes. Lines counts its lines.
 	Text  *Extracted `json:"text,omitempty"`
 	Lines int        `json:"lines"`
+	// MCP is the tool call that fetched a source through an MCP server.
+	MCP *SourceMCP `json:"mcp,omitempty"`
+}
+
+// SourceMCP is the tool call that fetched a source: the server, kept as
+// its URL's scheme and host or its program's name; the era and protocol
+// version it spoke, when it got that far; the tool and its arguments as
+// sent, a secret one shown as [env NAME]; how many content blocks that are
+// not text, such as images, were left out; whether structured content was
+// left out beside the text; and how many secrets were redacted. The copy is
+// then not all the server sent.
+type SourceMCP struct {
+	Server            string         `json:"server"`
+	Era               string         `json:"era,omitempty"`
+	Version           string         `json:"version,omitempty"`
+	Tool              string         `json:"tool"`
+	Arguments         map[string]any `json:"arguments"`
+	BlocksOmitted     int            `json:"blocks_omitted,omitempty"`
+	StructuredOmitted bool           `json:"structured_omitted,omitempty"`
+	Redactions        int            `json:"redactions,omitempty"`
 }
 
 // Extracted is the size and SHA-256 of a text taken out of a source.
@@ -715,6 +739,7 @@ const (
 	MethodFile    = "file"
 	MethodHTTP    = "http"
 	MethodCommand = "command"
+	MethodMCP     = "mcp"
 	SourceSaved   = "saved"
 	SourceFailed  = "failed"
 )
@@ -782,7 +807,8 @@ const (
 // target, the delivery it disproves, and the criteria it shows not met, or
 // Whole for the delivered conclusion itself. Asserted marks a verdict of
 // absence, such as not observed, that the record cannot show was read in
-// full: it is the evaluator's judgment.
+// full: it is the evaluator's judgment, and Given says how much of the
+// judged work the evaluator was given.
 type Divergence struct {
 	T          FrameType `json:"t,omitempty"`
 	Conclusion string    `json:"conclusion"`
@@ -792,9 +818,41 @@ type Divergence struct {
 	Criteria   []string  `json:"criteria,omitempty"`
 	Whole      bool      `json:"whole,omitempty"`
 	Asserted   bool      `json:"asserted,omitempty"`
+	Given      *Given    `json:"given,omitempty"`
 	Note       string    `json:"note,omitempty"`
 	Cite       []Cite    `json:"cite"`
 }
+
+// Given is how much of an absence claim's scope the evaluator was given: the
+// judged work for a verdict of not observed or a goal nothing worked on, and
+// the span of one stream from where a question or an assumption arose to
+// the step the finding is at. Counts is absent when it could not be said,
+// and Reason then says why. It reports what the evaluator was given, never
+// that the claim holds.
+type Given struct {
+	Scope  string       `json:"scope"`
+	Counts *GivenCounts `json:"counts,omitempty"`
+	Reason string       `json:"reason,omitempty"`
+}
+
+// GivenCounts counts the steps of a scope three ways that add up to Steps:
+// those the evaluator asked for itself and was answered, those an answer or
+// the prompt only named in a row, and those it was given neither way.
+// Unavailable counts, among all of them, the steps some of whose evidence no
+// one can be given, as a part too large to land or withheld.
+type GivenCounts struct {
+	Steps       int `json:"steps"`
+	Opened      int `json:"opened"`
+	Listed      int `json:"listed"`
+	None        int `json:"none"`
+	Unavailable int `json:"unavailable"`
+}
+
+// The scopes a Given is over.
+const (
+	GivenWindow = "window"
+	GivenSpan   = "span"
+)
 
 // The verdicts of a divergence.
 const (
@@ -828,19 +886,19 @@ type Rollback struct {
 // did not use, an ambiguity it acted on without asking, a premise it never
 // checked; or none the record supports.
 const (
-	CauseMisleadingResult = "misleading_tool_result"
-	CauseMisread          = "wrong_interpretation"
-	CauseMisledBySubtask  = "misled_by_subtask"
-	CauseMissingContext   = "missing_context"
-	CauseContextNotUsed   = "context_not_used"
-	CauseNoClarification  = "clarification_not_sought"
-	CauseUnsupported      = "unsupported_assumption"
-	CauseUnavailable      = "unavailable"
+	CauseMisleadingResult     = "misleading_tool_result"
+	CauseMisread              = "wrong_interpretation"
+	CauseMisledBySubtask      = "misled_by_subtask"
+	CauseMissingContext       = "missing_context"
+	CauseContextNotUsed       = "context_not_used"
+	CauseQuestionNotAsked     = "question_not_asked"
+	CauseAssumptionNotChecked = "assumption_not_checked"
+	CauseUnavailable          = "unavailable"
 )
 
 // FindingCauses lists every cause a divergence finding can name.
 var FindingCauses = []string{CauseMisleadingResult, CauseMisread, CauseMisledBySubtask, CauseMissingContext, CauseContextNotUsed,
-	CauseNoClarification, CauseUnsupported, CauseUnavailable}
+	CauseQuestionNotAsked, CauseAssumptionNotChecked, CauseUnavailable}
 
 // LabelFile names the label file a regroup read: the person's goals, in
 // their own words.
@@ -865,8 +923,13 @@ type LabelGoal struct {
 	Judge     []string  `json:"judge"`
 	Class     string    `json:"class"`
 	Worked    bool      `json:"worked,omitempty"`
-	Note      string    `json:"note,omitempty"`
-	Cite      []Cite    `json:"cite"`
+	// Asserted marks a goal classed absent: that nothing worked on it rests
+	// on reading all of where it would show, so it is the evaluator's
+	// judgment, and Given says how much of the judged work it was given.
+	Asserted bool   `json:"asserted,omitempty"`
+	Given    *Given `json:"given,omitempty"`
+	Note     string `json:"note,omitempty"`
+	Cite     []Cite `json:"cite"`
 }
 
 // Placement is where a regroup put one of the judge's targets: the person's
@@ -937,8 +1000,12 @@ type Finding struct {
 	Cause      string `json:"cause,omitempty"`
 	// Asserted marks a cause that rests on something not happening, which
 	// the record cannot show was looked for everywhere: the evaluator's
-	// judgment.
+	// judgment. From is the step where the question or the assumption
+	// arose, and Given how much of the span from it to At the evaluator was
+	// given.
 	Asserted    bool   `json:"asserted,omitempty"`
+	From        string `json:"from,omitempty"`
+	Given       *Given `json:"given,omitempty"`
 	At          string `json:"at"`
 	Ref         *Ref   `json:"ref,omitempty"`
 	Problem     string `json:"problem"`
@@ -1413,17 +1480,28 @@ type OperationShare struct {
 }
 
 // GoalOutcome is how one goal did: its main target at the end, empty when
-// undetermined, the most severe class of its targets, the finding that
-// happened first in it, the main target's final score, and the mean of its
-// targets' final scores.
+// undetermined, the most severe class of its targets, the finding recorded
+// first in it, the main target's final score, and the mean of its targets'
+// final scores. First says nothing of work before it that no stage read.
+// FirstOrder says how far the choice of First rests on recorded places:
+// empty when every finding had one.
 type GoalOutcome struct {
-	Goal      string   `json:"goal"`
-	Main      string   `json:"main,omitempty"`
-	Worst     string   `json:"worst,omitempty"`
-	First     *Finding `json:"first,omitempty"`
-	ScoreMain *float64 `json:"score_main,omitempty"`
-	ScoreMean *float64 `json:"score_mean,omitempty"`
+	Goal       string   `json:"goal"`
+	Main       string   `json:"main,omitempty"`
+	Worst      string   `json:"worst,omitempty"`
+	First      *Finding `json:"first,omitempty"`
+	FirstOrder string   `json:"first_order,omitempty"`
+	ScoreMain  *float64 `json:"score_main,omitempty"`
+	ScoreMean  *float64 `json:"score_mean,omitempty"`
 }
+
+// How far a goal's first finding rests on recorded places: some findings
+// had no place, so First is the first among those with one; or none had
+// one, so First is the first written.
+const (
+	FirstOrderPartial = "partial"
+	FirstOrderNone    = "none"
+)
 
 // Amount is an amount of tokens and, where every call in it was priced,
 // money. A share of a call is counted in it, so tokens are rounded.
