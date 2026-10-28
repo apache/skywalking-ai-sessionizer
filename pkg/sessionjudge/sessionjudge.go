@@ -57,10 +57,9 @@ const (
 	FrameGoal        FrameType = "goal"
 	FrameFinding     FrameType = "finding"
 	FrameOperation   FrameType = "operation"
-	FrameLabelGoal   FrameType = "label_goal"
 	FramePlacement   FrameType = "placement"
 	FrameAgreement   FrameType = "agreement"
-	FrameLabelText   FrameType = "label_text"
+	FrameGoalsText   FrameType = "goals_text"
 	FrameSource      FrameType = "source"
 	FrameSourceText  FrameType = "source_text"
 	FrameConclusion  FrameType = "conclusion"
@@ -158,9 +157,9 @@ type Header struct {
 	// BuildsOn names the earlier stages of the run this one read, by
 	// digest.
 	BuildsOn []Dependency `json:"builds_on,omitempty"`
-	// Labels is the label file a regroup read: its name, its SHA-256 and
+	// Goals is the goals file a regroup read: its name, its SHA-256 and
 	// the regroup's version, counted from 1 over the regroups of a run.
-	Labels *LabelFile `json:"labels,omitempty"`
+	Goals *GoalsFile `json:"goals,omitempty"`
 
 	Evaluator Evaluator `json:"evaluator"`
 	// Kit is the prompts and schemas the evaluator was driven by. Absent
@@ -330,8 +329,6 @@ type Summary struct {
 	// Score is the run's two scores, and Judging what the run's evaluators
 	// consumed.
 	Score *Score `json:"score,omitempty"`
-	// Goals is how each goal did, in the order of their ids.
-	Goals []GoalOutcome `json:"goals,omitempty"`
 	// UnassignedOperations are the file operations no target's calls made.
 	UnassignedOperations []string `json:"unassigned_operations,omitempty"`
 	Judging              *Amount  `json:"judging,omitempty"`
@@ -549,8 +546,11 @@ const (
 var Relations = []string{RelationNew, RelationContinue, RelationAdjust, RelationReturn, RelationUnclear, RelationNotPerson}
 
 // Goal is the targets that serve one result the person asked for: a group
-// for the report, with no criteria or score of its own. Its id, such as
-// g2, is given by asz and never reused.
+// for the report, with no criteria or score of its own. The targets stage
+// finds the judge's goals, with ids such as g2 that asz gives and never
+// reuses. A regroup holds the person's goals, with ids such as P2 in the
+// order their file gives them, each with the judge's targets that serve it
+// and how the judge's grouping compares with it.
 type Goal struct {
 	T         FrameType `json:"t,omitempty"`
 	ID        string    `json:"id"`
@@ -558,14 +558,28 @@ type Goal struct {
 	// Members are the targets in the goal, by id.
 	Members []string `json:"members"`
 	// Main is the member whose result the goal is for, or empty when it is
-	// undetermined; MainReason says why either way, and MainCite holds the
-	// person's words that make it the main one.
+	// undetermined. For the judge's goals, MainReason says why either way,
+	// and MainCite holds the person's words that make it the main one.
 	Main       string `json:"main,omitempty"`
 	MainReason string `json:"main_reason,omitempty"`
 	MainCite   []Cite `json:"main_cite,omitempty"`
-	// Evolution is the goal's result after each input that set or
+	// Evolution is a judge's goal's result after each input that set or
 	// adjusted it, in order.
-	Evolution []Evolution `json:"evolution"`
+	Evolution []Evolution `json:"evolution,omitempty"`
+	// For one of the person's goals: Judge is the judge's goals its targets
+	// are in, Class how the judge's grouping compares with it, and Worked
+	// that the conversation worked on it, shown by the person's input it
+	// cites. A goal with no target is not scored.
+	Judge  []string `json:"judge,omitempty"`
+	Class  string   `json:"class,omitempty"`
+	Worked bool     `json:"worked,omitempty"`
+	// Asserted marks one of the person's goals classed absent: that nothing
+	// worked on it rests on reading all of where it would show, so it is the
+	// evaluator's judgment, and Given says how much of the judged work it
+	// was given.
+	Asserted bool   `json:"asserted,omitempty"`
+	Given    *Given `json:"given,omitempty"`
+	Note     string `json:"note,omitempty"`
 	// Cite holds the inputs that show these targets serve one result.
 	Cite []Cite `json:"cite"`
 }
@@ -900,36 +914,12 @@ const (
 var FindingCauses = []string{CauseMisleadingResult, CauseMisread, CauseMisledBySubtask, CauseMissingContext, CauseContextNotUsed,
 	CauseQuestionNotAsked, CauseAssumptionNotChecked, CauseUnavailable}
 
-// LabelFile names the label file a regroup read: the person's goals, in
+// GoalsFile names the goals file a regroup read: the person's goals, in
 // their own words.
-type LabelFile struct {
+type GoalsFile struct {
 	File    string `json:"file"`
 	SHA256  string `json:"sha256"`
 	Version int    `json:"version"`
-}
-
-// LabelGoal is one of the person's goals, by an id such as P2 in the order
-// the file gives them: its words, the judge's targets that serve it, its
-// main target, the judge's goals those targets are in, and how the judge's
-// grouping compares with it. Worked says the conversation worked on it,
-// shown by the person's input it cites. A goal with no target is not
-// scored.
-type LabelGoal struct {
-	T         FrameType `json:"t,omitempty"`
-	ID        string    `json:"id"`
-	Statement string    `json:"statement"`
-	Members   []string  `json:"members"`
-	Main      string    `json:"main,omitempty"`
-	Judge     []string  `json:"judge"`
-	Class     string    `json:"class"`
-	Worked    bool      `json:"worked,omitempty"`
-	// Asserted marks a goal classed absent: that nothing worked on it rests
-	// on reading all of where it would show, so it is the evaluator's
-	// judgment, and Given says how much of the judged work it was given.
-	Asserted bool   `json:"asserted,omitempty"`
-	Given    *Given `json:"given,omitempty"`
-	Note     string `json:"note,omitempty"`
-	Cite     []Cite `json:"cite"`
 }
 
 // Placement is where a regroup put one of the judge's targets: the person's
@@ -973,11 +963,11 @@ type Agreement struct {
 	Unknown []string       `json:"unknown,omitempty"`
 }
 
-// LabelText is a run of the label file a regroup was made from, as the
+// GoalsText is a run of the goals file a regroup was made from, as the
 // person gave it, cut as a source's text is: the frames in order are the
 // file, so the comparison can be made again after the file changed or was
 // removed.
-type LabelText struct {
+type GoalsText struct {
 	T    FrameType `json:"t,omitempty"`
 	From int       `json:"from"`
 	Text string    `json:"text"`
@@ -1479,30 +1469,6 @@ type OperationShare struct {
 	Share *float64 `json:"share,omitempty"`
 }
 
-// GoalOutcome is how one goal did: its main target at the end, empty when
-// undetermined, the most severe class of its targets, the finding recorded
-// first in it, the main target's final score, and the mean of its targets'
-// final scores. First says nothing of work before it that no stage read.
-// FirstOrder says how far the choice of First rests on recorded places:
-// empty when every finding had one.
-type GoalOutcome struct {
-	Goal       string   `json:"goal"`
-	Main       string   `json:"main,omitempty"`
-	Worst      string   `json:"worst,omitempty"`
-	First      *Finding `json:"first,omitempty"`
-	FirstOrder string   `json:"first_order,omitempty"`
-	ScoreMain  *float64 `json:"score_main,omitempty"`
-	ScoreMean  *float64 `json:"score_mean,omitempty"`
-}
-
-// How far a goal's first finding rests on recorded places: some findings
-// had no place, so First is the first among those with one; or none had
-// one, so First is the first written.
-const (
-	FirstOrderPartial = "partial"
-	FirstOrderNone    = "none"
-)
-
 // Amount is an amount of tokens and, where every call in it was priced,
 // money. A share of a call is counted in it, so tokens are rounded.
 type Amount struct {
@@ -1595,14 +1561,12 @@ func frameType(frame any) (FrameType, error) {
 		f.T = FrameFinding
 	case *Operation:
 		f.T = FrameOperation
-	case *LabelGoal:
-		f.T = FrameLabelGoal
 	case *Placement:
 		f.T = FramePlacement
 	case *Agreement:
 		f.T = FrameAgreement
-	case *LabelText:
-		f.T = FrameLabelText
+	case *GoalsText:
+		f.T = FrameGoalsText
 	case *Source:
 		f.T = FrameSource
 	case *SourceText:
@@ -1646,13 +1610,11 @@ func frameOf(frame any) FrameType {
 		return f.T
 	case *Operation:
 		return f.T
-	case *LabelGoal:
-		return f.T
 	case *Placement:
 		return f.T
 	case *Agreement:
 		return f.T
-	case *LabelText:
+	case *GoalsText:
 		return f.T
 	case *Source:
 		return f.T
@@ -1734,10 +1696,9 @@ type File struct {
 	Goals        []Goal
 	Findings     []Finding
 	Operations   []Operation
-	LabelGoals   []LabelGoal
 	Placements   []Placement
 	Agreements   []Agreement
-	LabelTexts   []LabelText
+	GoalsTexts   []GoalsText
 	Sources      []Source
 	SourceTexts  []SourceText
 	Conclusions  []Conclusion
@@ -1816,18 +1777,15 @@ func Read(r io.Reader) (*File, error) {
 		case FrameOperation:
 			out.Operations = append(out.Operations, Operation{})
 			derr = decode(raw, &out.Operations[len(out.Operations)-1])
-		case FrameLabelGoal:
-			out.LabelGoals = append(out.LabelGoals, LabelGoal{})
-			derr = decode(raw, &out.LabelGoals[len(out.LabelGoals)-1])
 		case FramePlacement:
 			out.Placements = append(out.Placements, Placement{})
 			derr = decode(raw, &out.Placements[len(out.Placements)-1])
 		case FrameAgreement:
 			out.Agreements = append(out.Agreements, Agreement{})
 			derr = decode(raw, &out.Agreements[len(out.Agreements)-1])
-		case FrameLabelText:
-			out.LabelTexts = append(out.LabelTexts, LabelText{})
-			derr = decode(raw, &out.LabelTexts[len(out.LabelTexts)-1])
+		case FrameGoalsText:
+			out.GoalsTexts = append(out.GoalsTexts, GoalsText{})
+			derr = decode(raw, &out.GoalsTexts[len(out.GoalsTexts)-1])
 		case FrameSource:
 			out.Sources = append(out.Sources, Source{})
 			derr = decode(raw, &out.Sources[len(out.Sources)-1])

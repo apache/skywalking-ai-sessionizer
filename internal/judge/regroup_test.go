@@ -26,17 +26,17 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
-// A label file lists the person's goals in their own words, each trimmed,
+// A goals file lists the person's goals in their own words, each trimmed,
 // with the file's digest and text kept. A file that lists none, or a goal
 // that is empty, too long or given twice, is not read.
-func TestALabelFileListsThePersonsGoals(t *testing.T) {
+func TestAGoalsFileListsThePersonsGoals(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "goals.yaml")
 	text := "goals:\n  - \" Finish the 0.4.0 release \"\n  - Remove the website step\n"
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := ReadLabels(path, "")
+	l, err := ReadGoals(path, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,14 +50,14 @@ func TestALabelFileListsThePersonsGoals(t *testing.T) {
 		"a goal too long":      {"goals:\n  - " + strings.Repeat("x", goalBytes+1) + "\n", "goal 1 is longer than"},
 		"a goal given twice":   {"goals:\n  - ship it\n  - test it\n  - \" ship it\"\n", "goal 3 is goal 1 again"},
 		"not text":             {"goals:\n  - ship it\n# \xff\n", "is not UTF-8 text"},
-		"too large":            {"goals:\n  - ship it\n#" + strings.Repeat("x", labelBytes) + "\n", "is larger than 64 KiB"},
+		"too large":            {"goals:\n  - ship it\n#" + strings.Repeat("x", goalsFileBytes) + "\n", "is larger than 64 KiB"},
 		"not YAML":             {"goals: [\n", "goals.yaml"},
 		"goals that are lists": {"goals:\n  - [a, b]\n", "goals.yaml"},
 	} {
 		if err := os.WriteFile(path, []byte(tc.text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ReadLabels(path, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, err := ReadGoals(path, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v, want %q", name, err, tc.want)
 		}
 	}
@@ -88,7 +88,7 @@ func workedOn(goal string, yes bool, cites ...string) map[string]any {
 
 // regrouped checks a regroup answer over four targets and four of the
 // person's goals, and gives what it found.
-func regrouped(t *testing.T, targets []map[string]any, goals []map[string]any) (map[string]*sessionjudge.LabelGoal, map[string]*sessionjudge.Placement,
+func regrouped(t *testing.T, targets []map[string]any, goals []map[string]any) (map[string]*sessionjudge.Goal, map[string]*sessionjudge.Placement,
 	*sessionjudge.Agreement, *checked) {
 	t.Helper()
 	ts, gs := fourTargets()
@@ -97,11 +97,11 @@ func regrouped(t *testing.T, targets []map[string]any, goals []map[string]any) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	lg, pl := map[string]*sessionjudge.LabelGoal{}, map[string]*sessionjudge.Placement{}
+	lg, pl := map[string]*sessionjudge.Goal{}, map[string]*sessionjudge.Placement{}
 	var agreement *sessionjudge.Agreement
 	for _, f := range c.frames {
 		switch x := f.(type) {
-		case *sessionjudge.LabelGoal:
+		case *sessionjudge.Goal:
 			lg[x.ID] = x
 		case *sessionjudge.Placement:
 			pl[x.Target] = x
@@ -115,7 +115,7 @@ func regrouped(t *testing.T, targets []map[string]any, goals []map[string]any) (
 // words prints its arguments with a space between each.
 func words(args ...any) string { return strings.TrimSuffix(fmt.Sprintln(args...), "\n") }
 
-func classes(lg map[string]*sessionjudge.LabelGoal) string {
+func classes(lg map[string]*sessionjudge.Goal) string {
 	return fmt.Sprintf("%s %s %s %s", lg["P1"].Class, lg["P2"].Class, lg["P3"].Class, lg["P4"].Class)
 }
 
@@ -175,7 +175,7 @@ func TestTargetsInNoGoalOfTheJudgeStandAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p1, p2 := c.frames[0].(*sessionjudge.LabelGoal), c.frames[1].(*sessionjudge.LabelGoal)
+	p1, p2 := c.frames[0].(*sessionjudge.Goal), c.frames[1].(*sessionjudge.Goal)
 	if p1.Class != sessionjudge.CompareAgree || p2.Class != sessionjudge.CompareAgree || len(p1.Judge) != 0 {
 		t.Fatalf("P1 %+v P2 %+v", p1, p2)
 	}
@@ -221,94 +221,94 @@ func TestEachRegroupRuleStandsAlone(t *testing.T) {
 		name    string
 		targets []map[string]any
 		goals   []map[string]any
-		check   func(lg map[string]*sessionjudge.LabelGoal, pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string
+		check   func(lg map[string]*sessionjudge.Goal, pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string
 		want    string
 		note    string
 	}{
-		{"a goal the person did not give", all(placeAt("t3", "P9", "in/3")), goals, func(_ map[string]*sessionjudge.LabelGoal,
+		{"a goal the person did not give", all(placeAt("t3", "P9", "in/3")), goals, func(_ map[string]*sessionjudge.Goal,
 			pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string {
 			return words(pl["t3"].Unknown, pl["t3"].Goal, a.Unknown)
 		}, "true  [t3]", unshown},
-		{"a placement that cites a step, not the person", all(placeAt("t3", "P2", "s3")), goals, func(_ map[string]*sessionjudge.LabelGoal,
+		{"a placement that cites a step, not the person", all(placeAt("t3", "P2", "s3")), goals, func(_ map[string]*sessionjudge.Goal,
 			pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string {
 			return words(pl["t3"].Unknown, pl["t3"].Goal, a.Unknown)
 		}, "true  [t3]", unshown},
-		{"a placement that cites nothing", all(placeAt("t3", "P2")), goals, func(_ map[string]*sessionjudge.LabelGoal,
+		{"a placement that cites nothing", all(placeAt("t3", "P2")), goals, func(_ map[string]*sessionjudge.Goal,
 			pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string {
 			return words(pl["t3"].Unknown, pl["t3"].Goal, a.Unknown)
 		}, "true  [t3]", unshown},
-		{"a target in none of the goals", all(), goals, func(_ map[string]*sessionjudge.LabelGoal, pl map[string]*sessionjudge.Placement,
+		{"a target in none of the goals", all(), goals, func(_ map[string]*sessionjudge.Goal, pl map[string]*sessionjudge.Placement,
 			a *sessionjudge.Agreement) string {
 			return words(pl["t4"].Unknown, pl["t4"].Goal, a.Extra)
 		}, "false  [t4]", ""},
-		{"a target left out", all()[:3], goals, func(_ map[string]*sessionjudge.LabelGoal, pl map[string]*sessionjudge.Placement,
+		{"a target left out", all()[:3], goals, func(_ map[string]*sessionjudge.Goal, pl map[string]*sessionjudge.Placement,
 			a *sessionjudge.Agreement) string {
 			return words(pl["t4"].Unknown, pl["t4"].Goal, a.Unknown)
 		}, "true  [t4]", "1 targets were not placed and are unknown"},
-		{"a target twice", append(all(), placeAt("t1", "P2", "in/3")), goals, func(_ map[string]*sessionjudge.LabelGoal,
+		{"a target twice", append(all(), placeAt("t1", "P2", "in/3")), goals, func(_ map[string]*sessionjudge.Goal,
 			pl map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 			return words(pl["t1"].Unknown, pl["t1"].Goal)
 		}, "false P1", twice},
-		{"a target this run does not have", append(all(), placeAt("t9", "P1", "in/1")), goals, func(_ map[string]*sessionjudge.LabelGoal,
+		{"a target this run does not have", append(all(), placeAt("t9", "P1", "in/1")), goals, func(_ map[string]*sessionjudge.Goal,
 			pl map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 			return words(pl["t9"] == nil)
 		}, "true", twice},
-		{"a goal left out", all(), goals[:3], func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement,
+		{"a goal left out", all(), goals[:3], func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement,
 			_ *sessionjudge.Agreement) string {
 			return words(lg["P4"].Class, lg["P4"].Worked)
 		}, "unknown false", "1 of the person's goals were not answered and are unknown"},
-		{"a goal twice", all(), append(goals, workedOn("P4", true, "in/2")), func(lg map[string]*sessionjudge.LabelGoal,
+		{"a goal twice", all(), append(goals, workedOn("P4", true, "in/2")), func(lg map[string]*sessionjudge.Goal,
 			_ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 			return words(lg["P4"].Class, lg["P4"].Worked)
 		}, "absent false", twice},
 		{"a goal worked on, shown by no input of the person", all(), []map[string]any{goals[0], goals[1], goals[2], workedOn("P4", true, "r1")},
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "unknown false", unshown},
 		{"a goal worked on, shown", all(), []map[string]any{goals[0], goals[1], goals[2], workedOn("P4", true, "in/2")},
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "missed true", ""},
 		// A goal a target was put in, with nothing that shows it, may have
 		// that target: it is not missed.
 		{"a goal a placement could not show", all(placeAt("t4", "P4", "s3")), []map[string]any{goals[0], goals[1], goals[2], workedOn("P4", true, "in/2")},
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "unknown true", unshown},
 		// A target left out may serve a goal worked on: it is not missed.
 		{"a goal worked on, and a target left out", all()[:3], []map[string]any{goals[0], goals[1], goals[2], workedOn("P4", true, "in/2")},
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "unknown true", "1 targets were not placed and are unknown"},
 		// A target the answer could not place may serve a goal worked on.
 		{"a goal worked on, and a target not placed", all(placeAt("t3", "P9", "in/3")), []map[string]any{goals[0], goals[1], goals[2], workedOn("P4", true, "in/2")},
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "unknown true", unshown},
 		// A target left out, or one the answer could not place, may serve a
 		// goal nothing else worked on: that nothing worked on it is not
 		// shown, so it is not absent.
 		{"a goal not worked on, and a target left out", all()[:3], goals,
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Asserted)
 			}, "unknown false", "1 targets were not placed and are unknown"},
 		{"a goal not worked on, and a target not placed", all(placeAt("t3", "P9", "in/3")), goals,
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Asserted)
 			}, "unknown false", unshown},
 		// Absent, with every target placed, is the evaluator's judgment.
 		{"a goal absent", all(), goals,
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Asserted)
 			}, "absent true", ""},
 		// A decision left out is none: a target with no goal, or a goal with
 		// no worked, is not answered.
 		{"a target with no goal given", all(map[string]any{"target": "t3", "note": "", "cite": []string{"in/3"}}), goals,
-			func(_ map[string]*sessionjudge.LabelGoal, pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string {
+			func(_ map[string]*sessionjudge.Goal, pl map[string]*sessionjudge.Placement, a *sessionjudge.Agreement) string {
 				return words(pl["t3"].Unknown, pl["t3"].Goal, a.Unknown)
 			}, "true  [t3]", twice},
 		{"a goal with no worked given", all(), []map[string]any{goals[0], goals[1], goals[2], {"goal": "P4", "note": "", "cite": []string{}}},
-			func(lg map[string]*sessionjudge.LabelGoal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
+			func(lg map[string]*sessionjudge.Goal, _ map[string]*sessionjudge.Placement, _ *sessionjudge.Agreement) string {
 				return words(lg["P4"].Class, lg["P4"].Worked)
 			}, "unknown false", twice},
 	} {
@@ -356,7 +356,7 @@ func TestThePersonsGoalTakesAMainOnlyItsTargetsShow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g := c.frames[0].(*sessionjudge.LabelGoal); g.Main != "t1" {
+	if g := c.frames[0].(*sessionjudge.Goal); g.Main != "t1" {
 		t.Fatalf("main %q", g.Main)
 	}
 }
@@ -369,7 +369,7 @@ func TestARegroupWritesGoalsThenPlacements(t *testing.T) {
 	var kinds []string
 	for _, f := range c.frames {
 		switch x := f.(type) {
-		case *sessionjudge.LabelGoal:
+		case *sessionjudge.Goal:
 			kinds = append(kinds, x.ID)
 		case *sessionjudge.Placement:
 			kinds = append(kinds, x.Target)

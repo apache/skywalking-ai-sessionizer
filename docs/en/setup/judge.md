@@ -34,7 +34,7 @@ asz judge -from-id talk/main/3f1c2a9e-5b7d-4c11-9e2a-6d0b8f4a1c3e -to-id talk/ma
 
 `-from` takes the talks that start at that time or later, and `-to` those that start before it. A time
 is RFC 3339, or a date with or without a time of day, in the local time zone. `-from-id` and `-to-id`
-name the first and the last talk, both included, by their whole identifiers, as `asz judge -show`
+name the first and the last talk, both included, by their whole identifiers, as `asz judge -show -json`
 and the page name them.
 
 `-mode single` gives each stage to one call, and `-mode stream` cuts each into calls; the default,
@@ -46,9 +46,12 @@ another evaluator. Each run is kept.
 ## Read the results
 
 ```sh
-asz judge -list 0438c73b-2367-4ed5-9de3-13ef9a17ed01          # every run
-asz judge -show 2 0438c73b-2367-4ed5-9de3-13ef9a17ed01        # one run
-asz judge -show 2 -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01  # its stage files
+asz judge -list 0438c73b-2367-4ed5-9de3-13ef9a17ed01                               # every run
+asz judge -show 0438c73b-2367-4ed5-9de3-13ef9a17ed01                               # the latest closed run
+asz judge -show -run 2 0438c73b-2367-4ed5-9de3-13ef9a17ed01                        # run 2, as -list numbers it
+asz judge -show -format markdown 0438c73b-2367-4ed5-9de3-13ef9a17ed01 > run.md     # its conclusions
+asz judge -show -format html 0438c73b-2367-4ed5-9de3-13ef9a17ed01 > run.html       # its details, as one page
+asz judge -show -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01                         # its stage files
 ```
 
 To compare the run with what a person concluded, such as a ticket or an incident report, give each
@@ -160,8 +163,8 @@ goals:
 ```
 
 ```sh
-asz judge -labels goals.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01              # a new run, regrouped
-asz judge -regroup 2 -labels goals.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01   # a closed run
+asz judge -goals goals.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01              # a new run, regrouped
+asz judge -regroup 2 -goals goals.yaml 0438c73b-2367-4ed5-9de3-13ef9a17ed01   # a closed run
 ```
 
 One call of an evaluator places each target of the run in the goal it serves: the one `-evaluator`
@@ -169,10 +172,21 @@ names, or the plan's targets stage's.
 
 `-show` then follows your goals and says where the judge's grouping differed.
 
-`-show` prints a run goal by goal, the most severe outcome first. Each target has its final score out
-of 100, with the record's score beside it when they differ. Then come why it holds, what was done for
-it, the person's corrections, its rework, what it still misses, and what it cost. A text the evaluator
-wrote is marked `read:`, apart from what asz checked.
+`-show` prints a run goal by goal. Each goal lists its targets, the most severe outcome first. Each
+target says its status and why, and its score out of 100. When the achievement record gives another
+score, that score is beside it. Then come the target's criteria, what was done and what it is missing.
+The overall assessment follows, with the two scores and the efficiency, then the overall result.
+Nothing is named by an id or a step's address; `-json` prints the stage files, ids and all.
+
+`-format markdown` prints the conclusions alone, to share: a table of every goal's targets with how each
+ended, what each target is missing, and the overall assessment and result.
+
+`-format html` prints the details as one page, a single file that holds its styles and opens with
+nothing to serve it, drawn with Horizon's design. A table of the targets comes first, each with a
+button to its details. Then a card per goal lists its targets. Each target shows its score and
+status, and opens on its own to its criteria with the evidence of each, what was done and what is
+missing. A step the evidence rests on opens in a dialog from where it is cited, as the run read it
+and withheld as `view.hide` says. The steps of a conversation pulled from another asz are not shown.
 
 A run is kept in the session's directory, under `judgments/`. Its `work/` directory holds what each
 evaluator was given, every navigation call it made, and what it answered. For an agent CLI it also

@@ -104,14 +104,15 @@ A target belongs to the goal of the input that created it, and to one goal only.
 is the member whose result the goal is for. It is the only member, or the member the person's words
 point to, which the evaluator must cite. Otherwise the main target is undetermined, as it becomes
 when a goal whose only member was its main gains members and nothing cited says which is main. It is
-never chosen by cost, recency or size. The header of the targets stage counts the goals and the targets
-that no goal holds.
+never chosen by cost, recency or size. A main target cancelled or replaced by the end leaves the goal's
+main undetermined in the report. The header of the targets stage counts the goals and the targets that
+no goal holds.
 
 ### The person's goals
 
 Grouping is the judge's unless a person gives their own. A person knows what they wanted from a
 conversation, but not which of its inputs or steps each part took: an agent conversation is too long
-to group by hand. So a label file is a plain list of the person's goals, in their own words:
+to group by hand. So a goals file is a plain list of the person's goals, in their own words:
 
 ```yaml
 goals:
@@ -125,8 +126,8 @@ longer than 2,000 bytes or given twice, is not read.
 A regroup is made over a closed run, as a file of its own beside it, and the run is never changed.
 Goals given with a new run are applied once it closes, never shown to the stages of the run: a
 grouping made with the person's goals in view would measure nothing against them. Each regroup has a
-version, names the label file and its SHA-256, and keeps the file's text, so each change of the prompts
-or the model can be measured against the same goals, even after the file changed.
+version, names the goals file and its SHA-256, and keeps the file's text, so each change of the
+prompts or the model can be measured against the same goals, even after the file changed.
 
 Placing a target in a goal is a judgment of meaning, so one evaluator call makes it: the one
 `-evaluator` names, or the plan's targets stage's. It reads the conversation as the run did, at its
@@ -153,13 +154,13 @@ asz then compares the two groupings, goal by goal:
 A target the judge put in no goal stands alone. The targets that serve none of the person's goals are
 listed apart. A goal's main target is its only member still wanted, or the main target of a goal of
 the judge that holds the same targets: the person's words that made it main were about those targets
-alone. The goals change only how the report groups targets and the goals' scores. A target's scores,
-and the run's, are the same in both views. A run whose targets stage found no target is regrouped too,
-and a goal the conversation worked on is then missed. A decision the answer leaves out is none it
-made: a target with no goal given, or a goal with no answer to whether it was worked on, is not
-answered. Each regroup reserves its version with its work directory, so two made at once never share
-one. A regroup whose call failed is kept, failed, with what the call consumed, and the report follows
-the latest regroup that compared anything.
+alone. The goals change only how the report groups targets. A target's scores, and the run's, are the
+same in both views. A run whose targets stage found no target is regrouped too, and a goal the
+conversation worked on is then missed. A decision the answer leaves out is none it made: a target with
+no goal given, or a goal with no answer to whether it was worked on, is not answered. Each regroup
+reserves its version with its work directory, so two made at once never share one. A regroup whose
+call failed is kept, failed, with what the call consumed, and the report follows the latest regroup
+that compared anything.
 
 ## Achievement
 
@@ -548,9 +549,11 @@ count, and the report says why.
 The counts are facts about what the evaluator asked for and what it was answered, never about what it
 understood. An answer counts once it was given: an API evaluator's when a later request carries it to
 the model whole, and an agent CLI's when its navigation server wrote it. That server writes each
-answer on its log with the name of the attempt, and a closing line with how many it wrote; a log of
-another attempt, a line that is not one whole entry, or a closing line that is missing or gives no
-count, makes the counts unavailable, never smaller.
+answer on its log with the name of the attempt, and a closing line with how many it wrote. It writes
+the closing line when its input ends, or when the CLI ends it with an interrupt or a termination
+signal, as Claude Code 2.1.312 does with SIGINT, after the answer being given is written and logged. A
+log of another attempt, a line that is not one whole entry, or a closing line that is missing or gives
+no count, as when the server was killed outright, makes the counts unavailable, never smaller.
 
 ## What an evaluator reads
 
@@ -683,17 +686,8 @@ round of rework at its trigger; and each correction at the person's input, unles
 began there. A target cancelled or replaced keeps only the findings of its rework and corrections,
 since what its result missed was no longer wanted.
 
-Each goal has an outcome too: its main target, left undetermined when that target was cancelled or
-replaced by the end; the most severe class of its targets; its first recorded finding, the one whose
-step was recorded first, by the record's address, which says nothing of work before it that no stage
-read; the main target's final score; and the mean of its targets' final scores. Two findings at one
-address are ordered by the stage that wrote them, in the order the stages run, asz's last. A finding
-with no address is not ordered against the others: when some have none, the first recorded is the
-first among those with one, and when none has one, the order is not established, and the report says
-so. When the first recorded finding has a cause that rests on something not happening, the report
-shows how much of its span the evaluator was given beside it. The report's view by the person's goals
-chooses the same way. Grouping
-targets into goals never changes a target's score or the run's.
+A goal only groups targets. It has no outcome or score of its own: how each of its targets ended is
+shown with the target, and grouping targets into goals never changes a target's score or the run's.
 
 A run has two scores, which are never combined into one:
 

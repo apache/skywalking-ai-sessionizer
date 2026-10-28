@@ -375,7 +375,7 @@ func TestARegroupReadsUnderItsOwnLease(t *testing.T) {
 	if err := os.WriteFile(labels, []byte("goals:\n  - build the parser\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := judge.ReadLabels(labels, "")
+	l, err := judge.ReadGoals(labels, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,11 +39,17 @@ var mcpVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
 // Every call is logged through onCall, when it is set, so a run can say what
 // its evaluator read: after its answer was written whole, with the receipt
 // of what the answer gave, since an answer that never reached the evaluator
-// gave it nothing.
+// gave it nothing. Each request is answered and logged under serving, so a
+// caller that stops the server takes serving first and never stops it
+// between an answer and its line in the log.
 // Once the call's reading budget is spent, every tool says so; after
 // budgetRefusals such answers the server ends, so an evaluator that goes on
 // asking has nothing left to ask and answers with what it read.
-func ServeMCP(r io.Reader, w io.Writer, nav *Nav, onCall func(tool string, args json.RawMessage, bytes int, err error, given Receipt)) error {
+func ServeMCP(r io.Reader, w io.Writer, nav *Nav, onCall func(tool string, args json.RawMessage, bytes int, err error, given Receipt),
+	serving sync.Locker) error {
+	if serving == nil {
+		serving = new(sync.Mutex)
+	}
 	var mu sync.Mutex
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
@@ -56,7 +62,10 @@ func ServeMCP(r io.Reader, w io.Writer, nav *Nav, onCall func(tool string, args 
 	for {
 		line, err := br.ReadBytes('\n')
 		if len(line) > 0 {
-			if serr := answer(line, nav, send, onCall); serr != nil {
+			serving.Lock()
+			serr := answer(line, nav, send, onCall)
+			serving.Unlock()
+			if serr != nil {
 				return serr
 			}
 			// A read of a pulled snapshot's evidence that failed ends the

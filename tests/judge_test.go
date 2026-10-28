@@ -943,9 +943,8 @@ func TestTheCloseSaysHowEachTargetEnded(t *testing.T) {
 		t.Fatalf("operations %+v", ops)
 	}
 	s := closeFile.Header.Summary
-	if s.Score.Final == nil || *s.Score.Final != 1 || len(s.Goals) != 1 || s.Goals[0].Main != "t1" || s.Goals[0].Worst != sessionjudge.ClassAchieved ||
-		s.Goals[0].First == nil || s.Goals[0].First.Source != sessionjudge.StageEfficiency || len(s.UnassignedOperations) != 0 {
-		t.Fatalf("summary %+v goals %+v", s.Score, s.Goals)
+	if s.Score.Final == nil || *s.Score.Final != 1 || len(s.UnassignedOperations) != 0 {
+		t.Fatalf("summary %+v", s.Score)
 	}
 }
 
@@ -1070,7 +1069,7 @@ func TestARegroupReadsAsItsRunRead(t *testing.T) {
 	if err := os.WriteFile(labels, []byte("goals:\n  - add tests for the parser\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l, err := judge.ReadLabels(labels, "")
+	l, err := judge.ReadGoals(labels, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1156,12 +1155,12 @@ func TestARunIsRegroupedByThePersonsGoals(t *testing.T) {
 		}
 	}
 	path := filepath.Join(t.TempDir(), "goals.yaml")
-	write := func(text string) *judge.Labels {
+	write := func(text string) *judge.GoalsFile {
 		t.Helper()
 		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		labels, err := judge.ReadLabels(path, "")
+		labels, err := judge.ReadGoals(path, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1184,12 +1183,12 @@ func TestARunIsRegroupedByThePersonsGoals(t *testing.T) {
 	}
 	g := readStage(t, first)
 	h := g.Header
-	if h.Stage != sessionjudge.StageRegroup || h.Status != sessionjudge.StatusComplete || h.Labels == nil || h.Labels.Version != 1 ||
-		h.Labels.SHA256 != labels.SHA256 || len(h.BuildsOn) != 1 || h.BuildsOn[0].Digest != targets.Commit.Digest || h.Evaluator.Name != "stand-in" ||
-		h.Kit == nil || h.Attempts != 1 || len(g.LabelTexts) != 1 || !strings.HasPrefix(g.LabelTexts[0].Text, "goals:\n  - build the parser") ||
-		len(g.LabelGoals) != 2 || fmt.Sprint(g.LabelGoals[0].Members) != "[t1]" || fmt.Sprint(g.LabelGoals[0].Judge) != "[g1]" ||
-		g.LabelGoals[0].Main != "t1" || len(g.Placements) != 1 || g.Placements[0].Goal != "P1" {
-		t.Fatalf("regroup %+v goals %+v placements %+v", h, g.LabelGoals, g.Placements)
+	if h.Stage != sessionjudge.StageRegroup || h.Status != sessionjudge.StatusComplete || h.Goals == nil || h.Goals.Version != 1 ||
+		h.Goals.SHA256 != labels.SHA256 || len(h.BuildsOn) != 1 || h.BuildsOn[0].Digest != targets.Commit.Digest || h.Evaluator.Name != "stand-in" ||
+		h.Kit == nil || h.Attempts != 1 || len(g.GoalsTexts) != 1 || !strings.HasPrefix(g.GoalsTexts[0].Text, "goals:\n  - build the parser") ||
+		len(g.Goals) != 2 || fmt.Sprint(g.Goals[0].Members) != "[t1]" || fmt.Sprint(g.Goals[0].Judge) != "[g1]" ||
+		g.Goals[0].Main != "t1" || len(g.Placements) != 1 || g.Placements[0].Goal != "P1" {
+		t.Fatalf("regroup %+v goals %+v placements %+v", h, g.Goals, g.Placements)
 	}
 	// The call was given the targets and not the judge's goals.
 	var task judge.Assignment
@@ -1211,20 +1210,20 @@ func TestARunIsRegroupedByThePersonsGoals(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(runs[0].Dir, storage.WorkDir, "g2-regroup", "c001", "a1", "task.json")); err != nil {
 		t.Fatalf("the second regroup's work: %v", err)
 	}
-	if v := readStage(t, second).Header.Labels.Version; v != 2 {
+	if v := readStage(t, second).Header.Goals.Version; v != 2 {
 		t.Fatalf("version %d", v)
 	}
 	// A version is written once.
 	if _, err := storage.PublishRegroup(z, id, runs[0].Dir, 2, strings.Repeat("a", 64), []byte("x")); err == nil {
 		t.Fatal("a regroup was written over")
 	}
-	// A regroup whose call failed is kept, failed, with the label file.
+	// A regroup whose call failed is kept, failed, with the goals file.
 	failing := write("goals:\n  - fail the regroup\n")
 	third, _, err := r.Regroup(context.Background(), id, runs[0], failing, "stand-in")
 	if err == nil || !strings.Contains(err.Error(), "failed") {
 		t.Fatalf("a failed regroup: %v", err)
 	}
-	if f := readStage(t, third); f.Header.Status != sessionjudge.StatusFailed || f.Header.Labels.Version != 3 || len(f.LabelTexts) != 1 || len(f.LabelGoals) != 0 {
+	if f := readStage(t, third); f.Header.Status != sessionjudge.StatusFailed || f.Header.Goals.Version != 3 || len(f.GoalsTexts) != 1 || len(f.Goals) != 0 {
 		t.Fatalf("failed regroup %+v", f.Header)
 	}
 	// A run whose round now holds other content is not regrouped: its

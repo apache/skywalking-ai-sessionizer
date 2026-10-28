@@ -24,15 +24,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"maps"
-	"math"
 	"os"
 	"os/signal"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
@@ -42,6 +39,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 const judgeUsage = `Usage:
@@ -57,18 +55,21 @@ const judgeUsage = `Usage:
   asz judge [-config FILE] -reference-tools SRC
       list the tools of the MCP server judge.references.fetch names for the
       source, each with its input schema, to choose the entry's tool
-  asz judge [-config FILE] -labels FILE ... CONVERSATION
+  asz judge [-config FILE] -goals FILE ... CONVERSATION
       judge it as above, then regroup the run by the person's goals, a plain
       list in the file, and compare the judge's grouping with theirs
-  asz judge [-config FILE] -regroup RUN -labels FILE [-evaluator NAME] CONVERSATION
+  asz judge [-config FILE] -regroup RUN -goals FILE [-evaluator NAME] CONVERSATION
       regroup a closed run by the person's goals, in a new version beside
       it: one call of the evaluator, or of the plan's targets stage, places
       each target in the goal it serves
   asz judge [-config FILE] -list CONVERSATION
       list the conversation's runs
-  asz judge [-config FILE] -show RUN [-json] CONVERSATION
-      print one run: its stages, then goal by goal each target's score out
-      of 100, why, what was done, its rework and what it cost
+  asz judge [-config FILE] -show [-run N] [-json | -format text|markdown|html] CONVERSATION
+      print the latest closed run, or run N as -list numbers it: goal by goal, each target's status, score out of 100,
+      criteria, what was done and what is missing, then the overall
+      assessment and result. -format markdown prints the conclusions alone;
+      html prints a page of the details that opens as a file, with the steps
+      of the conversation its evidence rests on
   asz judge [-config FILE] [-pull] -remote-conversation REMOTE/CONVERSATION[:TAG] ...
       any of the above on a conversation asz pull copied here, in place of
       CONVERSATION: the snapshot with that tag, or the newest unexpired one
@@ -92,8 +93,10 @@ func cmdJudge(args []string) int {
 	round := fs.Uint64("round", 0, "judge the conversation as it was at this round of its chain")
 	planFlag := fs.String("plan", "", "stage=evaluator pairs, comma separated")
 	list := fs.Bool("list", false, "list the conversation's runs")
-	show := fs.Int("show", 0, "print this run")
+	show := fs.Bool("show", false, "print the latest closed run, or the one -run names")
+	runNumber := fs.Int("run", 0, "with -show, the run to print, as -list numbers it")
 	asJSON := fs.Bool("json", false, "with -show, print the stage files as JSON")
+	format := fs.String("format", formatText, "with -show: text, markdown or html")
 	from := fs.String("from", "", "judge the main talks that start at or after this time")
 	to := fs.String("to", "", "judge the main talks that start before this time")
 	fromID := fs.String("from-id", "", "judge the main talks from this talk id on")
@@ -102,8 +105,8 @@ func cmdJudge(args []string) int {
 	var references repeated
 	fs.Var(&references, "reference", "a source to compare the run with: a file, a URL, or one a configured command or MCP server fetches; repeat for several")
 	referenceTools := fs.String("reference-tools", "", "list the tools of the MCP server configured for this source")
-	labelsPath := fs.String("labels", "", "a file listing the person's goals in their own words: regroup the run by them")
-	regroup := fs.Int("regroup", 0, "with -labels, regroup this closed run instead of making a new one")
+	goalsPath := fs.String("goals", "", "a file listing the person's goals in their own words: regroup the run by them")
+	regroup := fs.Int("regroup", 0, "with -goals, regroup this closed run instead of making a new one")
 	remoteConversation := fs.String("remote-conversation", "", "judge a pulled conversation: REMOTE/CONVERSATION, with :TAG or :latest after it")
 	pullFirst := fs.Bool("pull", false, "with -remote-conversation, pull the conversation's head first and judge what was pulled")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, judgeUsage) }
@@ -150,6 +153,16 @@ func cmdJudge(args []string) int {
 		return 2
 	default:
 		id = fs.Arg(0)
+	}
+	switch {
+	case given["run"] && !*show:
+		return usage("-run names the run -show prints")
+	case given["run"] && *runNumber < 1:
+		return usage("-run takes a run number, as -list prints them")
+	case *format != formatText && *format != formatMarkdown && *format != formatHTML:
+		return usage(fmt.Sprintf("-format %q: give text, markdown or html", *format))
+	case *asJSON && given["format"]:
+		return usage("-json and -format each say how to print a run: give one")
 	}
 	if *pullFirst {
 		switch {
@@ -223,24 +236,29 @@ func cmdJudge(args []string) int {
 	switch {
 	case *list:
 		return judgeList(storage.NewZone(root), session, display, selection != nil)
-	case *show > 0:
-		// The stage files are printed as they are stored, with the source's
-		// own conversation identifier; the snapshot is named before them.
-		if selection != nil && !*asJSON {
-			fmt.Println(display)
+	case *show:
+		// -json prints the stage files as they are stored, with the source's
+		// own conversation identifier. The report names the snapshot inside
+		// the document, in every form, so nothing comes before a page.
+		opts := showOptions{json: *asJSON, format: *format}
+		if selection != nil {
+			opts.snapshot = display
 		}
-		return judgeShow(storage.NewZone(root), session, display, *show, *asJSON)
+		if *format == formatHTML {
+			opts.steps = pageSteps(root, cfg.View.Hide)
+		}
+		return judgeShow(storage.NewZone(root), session, display, *runNumber, opts)
 	}
-	// A label file is read before a run, so a run is not made for labels
+	// A goals file is read before a run, so a run is not made for goals
 	// that cannot be read.
-	var labels *judge.Labels
-	if *labelsPath != "" {
-		if labels, err = judge.ReadLabels(*labelsPath, admittedRoot()); err != nil {
+	var goalsFile *judge.GoalsFile
+	if *goalsPath != "" {
+		if goalsFile, err = judge.ReadGoals(*goalsPath, admittedRoot()); err != nil {
 			return fail(err)
 		}
 	}
-	if *regroup > 0 && labels == nil {
-		return fail(errors.New("-regroup needs -labels"))
+	if *regroup > 0 && goalsFile == nil {
+		return fail(errors.New("-regroup needs -goals"))
 	}
 	plan, err := judgePlan(cfg.Judge, *evaluator, *planFlag)
 	if err != nil {
@@ -317,24 +335,24 @@ func cmdJudge(args []string) int {
 		}
 	}
 	if *regroup > 0 {
-		return judgeRegroup(ctx, r, session, id, *regroup, labels, regrouper)
+		return judgeRegroup(ctx, r, session, id, *regroup, goalsFile, regrouper)
 	}
 	run, err := r.Run(ctx, id, *round, plan)
 	if err != nil {
 		return fail(err)
 	}
 	fmt.Printf("run %d of %s at round %d: %s\n", run.Number, display, run.Head.Round, run.Status)
-	if labels != nil {
-		if code := judgeRegroup(ctx, r, session, id, run.Number, labels, regrouper); code != 0 {
+	if goalsFile != nil {
+		if code := judgeRegroup(ctx, r, session, id, run.Number, goalsFile, regrouper); code != 0 {
 			return code
 		}
 	}
-	return judgeShow(zone, session, display, run.Number, false)
+	return judgeShow(zone, session, display, run.Number, showOptions{format: formatText})
 }
 
 // judgeRegroup regroups a closed run by a person's goals and says how the
 // judge's grouping compared.
-func judgeRegroup(ctx context.Context, r *judge.Runner, session, id string, number int, labels *judge.Labels, evaluator string) int {
+func judgeRegroup(ctx context.Context, r *judge.Runner, session, id string, number int, goalsFile *judge.GoalsFile, evaluator string) int {
 	runs, err := storage.JudgmentRuns(r.Zone, session)
 	if err != nil {
 		return fail(err)
@@ -350,7 +368,7 @@ func judgeRegroup(ctx context.Context, r *judge.Runner, session, id string, numb
 				return fail(err)
 			}
 		}
-		path, a, err := r.Regroup(ctx, id, run, labels, evaluator)
+		path, a, err := r.Regroup(ctx, id, run, goalsFile, evaluator)
 		if err != nil {
 			return fail(err)
 		}
@@ -360,7 +378,7 @@ func judgeRegroup(ctx context.Context, r *judge.Runner, session, id string, numb
 				classes = append(classes, fmt.Sprintf("%s %d", class, n))
 			}
 		}
-		line := fmt.Sprintf("run %d regrouped by %s: the judge agreed on %d of %s", number, labels.File, a.Classes[sessionjudge.CompareAgree], plural(a.Goals, "goal"))
+		line := fmt.Sprintf("run %d regrouped by %s: the judge agreed on %d of %s", number, goalsFile.File, a.Classes[sessionjudge.CompareAgree], plural(a.Goals, "goal"))
 		if len(classes) > 0 {
 			line += "; " + strings.Join(classes, ", ")
 		}
@@ -493,10 +511,32 @@ func readClose(run storage.JudgmentRun) (*sessionjudge.File, bool) {
 	return nil, false
 }
 
-func judgeShow(zone *storage.Zone, session, id string, number int, asJSON bool) int {
+// showOptions say how -show prints a run: as the stage files in JSON, or in
+// one of the forms. steps reads the conversation at the head the run judged,
+// for a page to show the steps its evidence rests on; nil shows none.
+type showOptions struct {
+	// snapshot names a conversation pulled from another asz, as asked for.
+	snapshot string
+	json     bool
+	format   string
+	steps    func(conversation string, head sessionjudge.Head) (map[string]sessionview.Node, error)
+}
+
+// judgeShow prints run number, or the latest closed run when number is 0.
+func judgeShow(zone *storage.Zone, session, id string, number int, opts showOptions) int {
 	runs, err := storage.JudgmentRuns(zone, session)
 	if err != nil {
 		return fail(err)
+	}
+	if number == 0 {
+		for _, run := range runs {
+			if run.Closed() && run.Run > number {
+				number = run.Run
+			}
+		}
+		if number == 0 {
+			return fail(fmt.Errorf("%s has no closed run", id))
+		}
 	}
 	for _, run := range runs {
 		if run.Run != number {
@@ -525,18 +565,75 @@ func judgeShow(zone *storage.Zone, session, id string, number int, asJSON bool) 
 			}
 		}
 		files = append(files, regroups...)
-		if asJSON {
+		if opts.json {
 			out, _ := json.MarshalIndent(files, "", "  ")
 			fmt.Println(string(out))
 			return 0
 		}
-		printRun(run, files)
+		doc := buildReport(run, files)
+		doc.snapshot = opts.snapshot
+		var assets pageAssets
+		var steps map[string]sessionview.Node
+		var stepsErr error
+		if opts.format == formatHTML {
+			assets.theme = view.HorizonTheme()
+			assets.logo, assets.logoBlue, assets.favicon = view.Brand()
+			if opts.steps != nil && len(files) > 0 {
+				steps, stepsErr = opts.steps(files[0].Header.Conversation, files[0].Header.Head)
+			}
+		}
+		if err := writeReport(os.Stdout, doc, opts.format, assets, steps, stepsErr); err != nil {
+			return fail(err)
+		}
 		return 0
 	}
 	return fail(fmt.Errorf("%s has no run %d", id, number))
 }
 
 // readJudgment reads one judgment file.
+// pageSteps reads, for a page, the steps of the conversation a run judged,
+// as the page reads them. A pulled snapshot's evidence is read only through
+// its checks, so a page over one shows none, whether the snapshot was
+// selected or given as the storage root.
+func pageSteps(root string, hide []string) func(string, sessionjudge.Head) (map[string]sessionview.Node, error) {
+	if admittedRoot() != "" {
+		return nil
+	}
+	zone := storage.NewZone(root)
+	return func(conversation string, head sessionjudge.Head) (map[string]sessionview.Node, error) {
+		return stepsAt(zone, conversation, head, hide)
+	}
+}
+
+// stepsAt reads a conversation at the head a run judged, withholding what
+// the page withholds, and indexes its steps by id. A chain parsed again may
+// hold other content at that round, and then none are given.
+func stepsAt(zone *storage.Zone, conversation string, head sessionjudge.Head, hide []string) (map[string]sessionview.Node, error) {
+	c, err := view.New(zone, nil).LoadAt(conversation, head.Round)
+	if err != nil {
+		return nil, err
+	}
+	doc, err := c.BuildWithheld(hide)
+	if err != nil {
+		return nil, err
+	}
+	if doc.Head.Digest != head.Digest {
+		return nil, fmt.Errorf("round %d of the conversation is now %s, not the %s the run judged", head.Round, doc.Head.Digest, head.Digest)
+	}
+	out := map[string]sessionview.Node{}
+	var walk func([]sessionview.Node)
+	walk = func(nodes []sessionview.Node) {
+		for _, n := range nodes {
+			walk(n.Children)
+			n.Children = nil
+			out[n.ID] = n
+		}
+	}
+	walk(doc.Talks)
+	walk(doc.Loose)
+	return out, nil
+}
+
 func readJudgment(path string) (*sessionjudge.File, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -548,357 +645,6 @@ func readJudgment(path string) (*sessionjudge.File, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return sj, nil
-}
-
-// stageUsage says what one stage consumed: computed by asz, no call when it
-// had nothing to answer, unknown when its evaluator did not say.
-func stageUsage(h sessionjudge.Header) string {
-	usage := "usage unknown"
-	switch {
-	case h.Evaluator.Kind == sessionjudge.EvaluatorComputed:
-		usage = "computed"
-	case h.Chunks == 0 && h.Attempts == 0:
-		usage = "no call, nothing to answer"
-	case h.Usage != nil:
-		usage = fmt.Sprintf("in %d, out %d, cache read %d, cache write %d", h.Usage.Input, h.Usage.Output, h.Usage.CacheRead, h.Usage.CacheWrite)
-	}
-	if h.Requests != nil && h.Requests.Unknown > 0 {
-		usage += fmt.Sprintf("; %d requests with usage unknown, not counted", h.Requests.Unknown)
-	}
-	if h.ReportedCostUSD != nil {
-		usage += fmt.Sprintf(", reported %.2f USD", *h.ReportedCostUSD)
-	}
-	return usage
-}
-
-func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
-	fmt.Printf("run %d  %s\n", run.Run, run.Dir)
-	var closeFile, subtaskFile, regroup *sessionjudge.File
-	statements := map[string]string{}
-	for _, f := range files {
-		h := f.Header
-		model := ""
-		if h.Evaluator.Model != "" {
-			model = " (" + h.Evaluator.Model + ")"
-		}
-		fmt.Printf("  %-12s %-9s by %s%s, %s%s\n", h.Stage, h.Status, h.Evaluator.Name, model, stageUsage(h), noteOf(h.Note))
-		for _, t := range f.Targets {
-			statements[t.ID] = t.Statement
-		}
-		switch h.Stage {
-		case sessionjudge.StageClose:
-			closeFile = f
-		case sessionjudge.StageSubtasks:
-			subtaskFile = f
-		case sessionjudge.StageRegroup:
-			if h.Status != sessionjudge.StatusFailed {
-				regroup = f
-			}
-		}
-	}
-	if closeFile == nil {
-		fmt.Println("  not closed")
-		return
-	}
-	// A target's lines are its outcome, which asz priced from the ledger:
-	// shares of a talk two targets used are fractions until the outcome
-	// rounds them once, so the targets add up to what they cost.
-	type alloc struct{ calls, unknown, partial, unpriced float64 }
-	cost := map[string]*alloc{}
-	work := map[string]map[string]float64{}
-	for _, c := range closeFile.Costs {
-		share := 1.0
-		if c.Share != nil {
-			share = *c.Share
-		}
-		switch c.Scope {
-		case sessionjudge.ScopeTarget, sessionjudge.ScopeShared:
-			a := cost[c.Target]
-			if a == nil {
-				a = &alloc{}
-				cost[c.Target] = a
-			}
-			a.calls += float64(c.Calls) * share
-			a.unknown += float64(c.Unknown) * share
-			a.partial += float64(c.OutputUnknown) * share
-			a.unpriced += float64(c.Unpriced) * share
-		case sessionjudge.ScopeWork:
-			if work[c.Target] == nil {
-				work[c.Target] = map[string]float64{}
-			}
-			work[c.Target][c.Work] += float64(c.Usage.Input+c.Usage.Output+c.Usage.CacheRead+c.Usage.CacheWrite) * share
-		}
-	}
-	s := closeFile.Header.Summary
-	if s == nil {
-		s = &sessionjudge.Summary{}
-	}
-	costLines := func(o *sessionjudge.Outcome) {
-		c := cost[o.Target]
-		if c == nil {
-			c = &alloc{}
-		}
-		fmt.Printf("        cost      %s calls, %s, observed %s\n", share(c.calls), amount(o.Cost, s.Currency), minutes(o.Span))
-		// The counts are shares, as the cost's calls are: a call two targets
-		// share is half of each, and a half is never shown as none.
-		var notes []string
-		if c.unknown > 0 {
-			notes = append(notes, share(c.unknown)+" calls with usage unknown")
-		}
-		if c.partial > 0 {
-			notes = append(notes, share(c.partial)+" calls that never finished, their output unknown")
-		}
-		if c.unpriced > 0 {
-			notes = append(notes, share(c.unpriced)+" calls unpriced")
-		}
-		if len(notes) > 0 {
-			fmt.Printf("                  %s\n", strings.Join(notes, "; "))
-		}
-		if o.Avoidable != nil {
-			line := fmt.Sprintf("                  avoidable %s and %.1f min", amount(*o.Avoidable, s.Currency), float64(*o.AvoidableSpan)/60000)
-			// The part sub-tasks caused by their own work going wrong; the
-			// rest is the main agent's.
-			if b := o.AvoidableBySubtasks; b != nil && b.Tokens() > 0 {
-				line += fmt.Sprintf(", of which sub-tasks caused %s", amount(*b, s.Currency))
-			}
-			if u := o.AvoidableCauseUnknown; u != nil && u.Tokens() > 0 {
-				line += fmt.Sprintf(", %s of a cause the record does not show", amount(*u, s.Currency))
-			}
-			fmt.Printf("%s; not reviewed %s\n", line, amount(*o.NotReviewed, s.Currency))
-		}
-		if w := work[o.Target]; len(w) > 0 {
-			var parts []string
-			for _, label := range sessionjudge.Works {
-				if n, ok := w[label]; ok {
-					parts = append(parts, fmt.Sprintf("%s %s", label, tokensOf(n)))
-				}
-			}
-			fmt.Printf("                  work: %s\n", strings.Join(parts, "; "))
-		}
-	}
-	printGoals(gather(files, closeFile, regroup), costLines)
-	printSubtasks(subtaskFile, closeFile)
-	printScore(s, closeFile.Outcomes)
-}
-
-// printSubtasks says in one line how the sub-tasks went.
-func printSubtasks(f, closeFile *sessionjudge.File) {
-	if f == nil || f.Header.Coverage == nil || f.Header.Coverage.Subtasks == nil {
-		return
-	}
-	count := func(get func(sessionjudge.Subtask) string, order []string) string {
-		n := map[string]int{}
-		for _, st := range f.Subtasks {
-			n[get(st)]++
-		}
-		var parts []string
-		for _, k := range order {
-			if n[k] > 0 {
-				parts = append(parts, fmt.Sprintf("%s %d", strings.ReplaceAll(k, "_", " "), n[k]))
-			}
-		}
-		return strings.Join(parts, ", ")
-	}
-	fmt.Printf("\n  sub-tasks      %d of %d judged", *f.Header.Coverage.SubtasksJudged, *f.Header.Coverage.Subtasks)
-	if len(f.Subtasks) > 0 {
-		fmt.Printf(": %s; reports %s; use %s; dispatch %s",
-			count(func(s sessionjudge.Subtask) string { return s.Outcome }, sessionjudge.Levels),
-			count(func(s sessionjudge.Subtask) string { return s.Report }, sessionjudge.Reports),
-			count(func(s sessionjudge.Subtask) string { return s.Use }, sessionjudge.Uses),
-			count(func(s sessionjudge.Subtask) string { return s.Dispatch }, sessionjudge.Dispatches))
-	}
-	fmt.Println()
-	// The sub-tasks whose own work going wrong cost avoidable work, their
-	// own and the asking agent's on their reports, costliest first.
-	caused := map[string]float64{}
-	for _, c := range closeFile.Costs {
-		if c.Scope != sessionjudge.ScopeWork || c.Cause == "" || c.Cause == sessionjudge.CauseMain || c.Cause == sessionjudge.CauseUnknown {
-			continue
-		}
-		share := 1.0
-		if c.Share != nil {
-			share = *c.Share
-		}
-		caused[c.Cause] += float64(c.Usage.Input+c.Usage.Output+c.Usage.CacheRead+c.Usage.CacheWrite) * share
-	}
-	ids := slices.Collect(maps.Keys(caused))
-	sort.Slice(ids, func(i, j int) bool {
-		return caused[ids[i]] > caused[ids[j]] || caused[ids[i]] == caused[ids[j]] && ids[i] < ids[j]
-	})
-	for i, id := range ids {
-		if i == 5 {
-			fmt.Printf("                 and %d more\n", len(ids)-5)
-			break
-		}
-		fmt.Printf("                 %s caused %s of avoidable work\n", id, tokensOf(caused[id]))
-	}
-}
-
-// verdict says in one line what a target came to and what it rests on.
-func verdict(o sessionjudge.Outcome) string {
-	if o.Level == "" {
-		return "not judged, " + o.Status
-	}
-	v := strings.ReplaceAll(o.Level, "_", " ")
-	if o.Criteria != nil {
-		v += fmt.Sprintf(": %d of %d criteria met", *o.Met, *o.Criteria)
-		if o.Unknown != nil && *o.Unknown > 0 {
-			v += fmt.Sprintf(", %d unknown", *o.Unknown)
-		}
-	}
-	if o.Basis != "" {
-		v += ", on " + strings.ReplaceAll(o.Basis, "_", " ")
-	}
-	return v + "; " + o.Status
-}
-
-// amount prints tokens, and money where any call in the amount was priced.
-func amount(a sessionjudge.Amount, currency string) string {
-	out := tokensOf(float64(a.Tokens())) + " tokens"
-	if a.Money != nil {
-		out += fmt.Sprintf(", %.2f %s", *a.Money, currency)
-	}
-	return out
-}
-
-// printScore prints the run's two scores, never combined, and what the
-// conversation and the judging cost.
-func printScore(s *sessionjudge.Summary, outcomes []sessionjudge.Outcome) {
-	sc := s.Score
-	if sc == nil {
-		return
-	}
-	pct := func(f *float64) string {
-		if f == nil {
-			return "unavailable"
-		}
-		return fmt.Sprintf("%.0f%%", *f*100)
-	}
-	// The levels counted are those of the targets the score is over: a
-	// cancelled or replaced target is not scored, and is named apart.
-	levels, unscored := map[string]int{}, 0
-	for _, o := range outcomes {
-		if o.Status == sessionjudge.TargetCancelled || o.Status == sessionjudge.TargetReplaced {
-			unscored++
-			continue
-		}
-		levels[o.Level]++
-	}
-	fmt.Println("\n  score")
-	if sc.Achievement != nil {
-		line := fmt.Sprintf("    achievement  %s over %d targets judged: achieved %d, partly %d, not achieved %d; %d cannot be verified",
-			scoreOf(sc.Achievement), sc.Judged, levels[sessionjudge.LevelAchieved], levels[sessionjudge.LevelPartly],
-			levels[sessionjudge.LevelNotAchieved], levels[sessionjudge.LevelCannotVerify])
-		if unscored > 0 {
-			line += fmt.Sprintf("; %d cancelled or replaced, not scored", unscored)
-		}
-		fmt.Println(line)
-	} else {
-		fmt.Printf("    achievement  unavailable: no target could be verified (%d cannot be verified)\n", levels[sessionjudge.LevelCannotVerify])
-	}
-	// The final score applies what contradicted or undid each delivered
-	// result; the record's mean is beside it when the two differ.
-	if sc.Final != nil {
-		line := fmt.Sprintf("    final        %s over the targets scored", scoreOf(sc.Final))
-		if sc.Achievement != nil && scoreOf(sc.Achievement) != scoreOf(sc.Final) {
-			line += fmt.Sprintf(", %s by the record", strings.TrimSuffix(scoreOf(sc.Achievement), "/100"))
-		}
-		fmt.Println(line)
-	}
-	if sc.Efficiency != nil {
-		fmt.Printf("    efficiency   %s: avoidable %s of the reviewed cost, by %s; %s of the targets' cost reviewed\n",
-			scoreOf(sc.Efficiency), pct(ptr(1-*sc.Efficiency)), sc.Unit, pct(sc.Reviewed))
-	} else {
-		fmt.Println("    efficiency   unavailable: no work was labeled")
-	}
-	fmt.Printf("    delivered    %s of the targets' cost went to targets achieved, by %s\n", pct(sc.Delivered), sc.Unit)
-	conv := sessionjudge.Amount{Usage: s.Usage, Money: s.Money, Unpriced: s.Unpriced}
-	line := amount(conv, s.Currency)
-	// A total that is not whole says so, beside the number.
-	if s.Unknown > 0 {
-		line += fmt.Sprintf("; %d calls with usage unknown, not counted", s.Unknown)
-	}
-	if s.OutputUnknown > 0 {
-		line += fmt.Sprintf("; %d calls that never finished, their output not counted", s.OutputUnknown)
-	}
-	if s.Money != nil && s.Unpriced > 0 {
-		line += fmt.Sprintf("; %d calls unpriced", s.Unpriced)
-	}
-	fmt.Printf("\n  conversation   %s\n", line)
-	if s.Judging == nil {
-		fmt.Println("  judging        unknown: an evaluator did not report what it used")
-		return
-	}
-	j := amount(*s.Judging, s.Currency)
-	if s.Judging.Unpriced > 0 {
-		j += fmt.Sprintf(" (%d stages unpriced)", s.Judging.Unpriced)
-	}
-	if s.Judging.Unknown > 0 {
-		j += fmt.Sprintf("; %d model requests with usage unknown, not counted", s.Judging.Unknown)
-	}
-	if share, ok := judgingShare(s); ok {
-		j += fmt.Sprintf(", %.0f%% of what the conversation cost", share*100)
-	}
-	if s.JudgingReportedUSD != nil {
-		j += fmt.Sprintf("; the evaluators reported %.2f USD", *s.JudgingReportedUSD)
-	}
-	if s.JudgingMs > 0 {
-		m := float64(s.JudgingMs) / 60000
-		u := s.Judging.Usage
-		j += fmt.Sprintf("\n                 over %.1f min: %s input and %s output tokens per minute", m,
-			tokensOf(float64(u.Input+u.CacheRead+u.CacheWrite)/m), tokensOf(float64(u.Output)/m))
-	}
-	fmt.Printf("  judging        %s\n", j)
-}
-
-// judgingShare is what judging cost against what the conversation cost. It
-// is given only when both are whole: never against a priced part of either,
-// nor a total missing calls with no usage or calls that never finished.
-func judgingShare(s *sessionjudge.Summary) (float64, bool) {
-	if s.Judging == nil || s.Judging.Money == nil || s.Money == nil || *s.Money <= 0 || s.Judging.Unpriced > 0 ||
-		s.Judging.Unknown > 0 || s.Unpriced > 0 || s.Unknown > 0 || s.OutputUnknown > 0 {
-		return 0, false
-	}
-	return *s.Judging.Money / *s.Money, true
-}
-
-func ptr(f float64) *float64 { return &f }
-
-func noteOf(note string) string {
-	if note == "" {
-		return ""
-	}
-	return " - " + trunc(note, 160)
-}
-
-func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
-
-// share prints a count a share may have made fractional: whole when it is
-// whole, and to two significant digits otherwise, so a call split among
-// many targets is never shown as none.
-func share(f float64) string {
-	if math.Abs(f-math.Round(f)) < 1e-9 {
-		return fmt.Sprintf("%.0f", f)
-	}
-	return strconv.FormatFloat(f, 'f', 1, 64)
-}
-
-func tokensOf(f float64) string {
-	n := int(math.Round(f))
-	switch {
-	case n >= 1_000_000:
-		return fmt.Sprintf("%.1fM", float64(n)/1e6)
-	case n >= 1000:
-		return fmt.Sprintf("%.1fk", float64(n)/1e3)
-	}
-	return fmt.Sprint(n)
-}
-
-func minutes(ms int64) string {
-	if ms == 0 {
-		return "no time"
-	}
-	return fmt.Sprintf("%.1f min", float64(ms)/60000)
 }
 
 // cmdJudgeMCP serves the navigation over one conversation at one round, on
@@ -1023,7 +769,7 @@ func cmdJudgeMCP(args []string) int {
 		defer f.Close()
 		var mu sync.Mutex
 		attempt := nav.Assigned().Attempt
-		answers, failed := 0, false
+		answers, failed, closed := 0, false, false
 		onCall = func(tool string, args json.RawMessage, size int, err error, given judge.Receipt) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -1041,12 +787,39 @@ func cmdJudgeMCP(args []string) int {
 		closing = func() {
 			mu.Lock()
 			defer mu.Unlock()
+			if closed {
+				return
+			}
+			closed = true
 			line, _ := json.Marshal(map[string]any{"attempt": attempt, "closing": true, "answers": answers, "write_failed": failed})
 			_, _ = f.Write(append(line, '\n'))
 		}
 	}
-	err = judge.ServeMCP(os.Stdin, os.Stdout, nav, onCall)
+	// The CLI that runs the evaluator may end this server with a signal
+	// instead of closing its input: Claude Code 2.1.312 sent SIGINT and never
+	// closed it, and no log was closed. A signal closes the log too, once the
+	// request being answered is answered and logged, and nothing is served
+	// after it. A server killed outright leaves its log open, and the run
+	// takes no receipts from it.
+	var serving sync.Mutex
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	served := make(chan struct{})
+	go func() {
+		select {
+		case <-stop:
+			serving.Lock()
+			closing()
+			os.Exit(0)
+		case <-served:
+		}
+	}()
+	err = judge.ServeMCP(os.Stdin, os.Stdout, nav, onCall, &serving)
+	// The log is closed before the signals are let go: a signal after that
+	// would end the server as it would end any program, with no closing line.
 	closing()
+	signal.Stop(stop)
+	close(served)
 	if err != nil {
 		return fail(err)
 	}

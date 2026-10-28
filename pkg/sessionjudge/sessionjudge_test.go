@@ -362,14 +362,12 @@ func TestAnAchievementReadsBackWithItsEvents(t *testing.T) {
 	}
 }
 
-// A close reads back with how each target ended and how each goal did.
+// A close reads back with how each target ended.
 func TestACloseReadsBackWithItsReport(t *testing.T) {
 	h := header()
 	h.Stage = StageClose
 	half, one, zero := 0.5, 1.0, 0.0
 	h.Summary = &Summary{Targets: 1, Score: &Score{Achievement: &half, Final: &zero, Judged: 1},
-		Goals: []GoalOutcome{{Goal: "g1", Main: "t1", Worst: ClassContradicted, ScoreMain: &zero, ScoreMean: &zero,
-			First: &Finding{Target: "t1", Source: SourceASZ, At: "tool/1", Problem: "criterion t1.c2 was not met"}}},
 		UnassignedOperations: []string{"o3"}}
 	w, err := NewWriter(h)
 	if err != nil {
@@ -409,25 +407,27 @@ func TestACloseReadsBackWithItsReport(t *testing.T) {
 	}
 }
 
-// A regroup reads back with its label file, the person's goals, where each
+// A regroup reads back with its goals file, the person's goals, where each
 // target went and how the two groupings compared; it is no stage of a run,
 // yet its stage is known.
 func TestARegroupReadsBack(t *testing.T) {
 	h := header()
 	h.Stage = StageRegroup
-	h.Labels = &LabelFile{File: "labels.yaml", SHA256: strings.Repeat("b", 64), Version: 3}
+	h.Goals = &GoalsFile{File: "goals.yaml", SHA256: strings.Repeat("b", 64), Version: 3}
 	w, err := NewWriter(h)
 	if err != nil {
 		t.Fatal(err)
 	}
-	goal := LabelGoal{T: FrameLabelGoal, ID: "P1", Statement: "build and test it", Members: []string{"t1", "t2"}, Main: "t1", Judge: []string{"g1", "g2"},
+	goal := Goal{T: FrameGoal, ID: "P1", Statement: "build and test it", Members: []string{"t1", "t2"}, Main: "t1", Judge: []string{"g1", "g2"},
 		Class: CompareSplit, Worked: true, Note: "both serve it", Cite: []Cite{{Node: "msg/2"}}}
-	missed := LabelGoal{T: FrameLabelGoal, ID: "P2", Statement: "ship it", Members: []string{}, Judge: []string{}, Class: CompareMissed, Worked: true,
+	// A goal no target serves is in none of the judge's goals, and leaves
+	// judge out.
+	missed := Goal{T: FrameGoal, ID: "P2", Statement: "ship it", Members: []string{}, Class: CompareMissed, Worked: true,
 		Cite: []Cite{{Node: "msg/3"}}}
 	placed := Placement{T: FramePlacement, Target: "t1", Goal: "P1", Note: "asked first", Cite: []Cite{{Node: "msg/1"}}}
 	unknown := Placement{T: FramePlacement, Target: "t3", Unknown: true, Cite: []Cite{}}
 	agree := Agreement{T: FrameAgreement, Goals: 2, Classes: map[string]int{CompareSplit: 1, CompareMissed: 1}, Extra: []string{"t4"}, Unknown: []string{"t3"}}
-	text := LabelText{T: FrameLabelText, From: 1, Text: "goals:\n  - build and test it\n  - ship it\n"}
+	text := GoalsText{T: FrameGoalsText, From: 1, Text: "goals:\n  - build and test it\n  - ship it\n"}
 	for _, f := range []any{&text, &goal, &missed, &placed, &unknown, &agree} {
 		if err := w.Write(f); err != nil {
 			t.Fatal(err)
@@ -441,10 +441,17 @@ func TestARegroupReadsBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(f.Header.Labels, h.Labels) || !reflect.DeepEqual(f.LabelGoals, []LabelGoal{goal, missed}) ||
+	if !reflect.DeepEqual(f.Header.Goals, h.Goals) || !reflect.DeepEqual(f.Goals, []Goal{goal, missed}) ||
 		!reflect.DeepEqual(f.Placements, []Placement{placed, unknown}) || !reflect.DeepEqual(f.Agreements, []Agreement{agree}) ||
-		!reflect.DeepEqual(f.LabelTexts, []LabelText{text}) {
-		t.Fatalf("read back %+v %+v %+v %+v %+v", f.Header.Labels, f.LabelGoals, f.Placements, f.Agreements, f.LabelTexts)
+		!reflect.DeepEqual(f.GoalsTexts, []GoalsText{text}) {
+		t.Fatalf("read back %+v %+v %+v %+v %+v", f.Header.Goals, f.Goals, f.Placements, f.Agreements, f.GoalsTexts)
+	}
+	// The names are the format's, as its page gives them: a writer and a
+	// reader that agreed on other names would read each other back too.
+	for _, name := range []string{`"goals":{"file":"goals.yaml"`, `{"t":"goal","id":"P1"`, `{"t":"goals_text","from":1`} {
+		if !bytes.Contains(data, []byte(name)) {
+			t.Fatalf("no %s in:\n%s", name, data)
+		}
 	}
 	// A stage no run takes and no regroup is is refused.
 	h.Stage = "relabel"

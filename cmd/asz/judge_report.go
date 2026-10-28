@@ -18,26 +18,28 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 	"slices"
 	"sort"
 	"strings"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/judge"
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
 // runReport is what a closed run's files say of its targets and goals,
 // gathered for printing.
 type runReport struct {
+	conversation string
 	targets      []sessionjudge.Target
 	goals        []sessionjudge.Goal
 	achievements map[string]*sessionjudge.Achievement
 	outcomes     map[string]*sessionjudge.Outcome
 	findings     map[string][]sessionjudge.Finding
 	ops          map[string]sessionjudge.Operation
-	goalOut      map[string]sessionjudge.GoalOutcome
-	// regroup is the run's latest regroup, whose label view the report
-	// follows, nil when the person gave no labels.
+	// regroup is the run's latest regroup, whose grouping by the person's
+	// goals the report follows, nil when the person gave no goals.
 	regroup *sessionjudge.File
 	// sources, conclusions, divergences and rollbacks are what the
 	// reference and divergence stages found.
@@ -45,15 +47,27 @@ type runReport struct {
 	conclusions []sessionjudge.Conclusion
 	divergences map[string]sessionjudge.Divergence
 	rollbacks   []sessionjudge.Rollback
+	// headers are the stage headers of the run and of the regroups shown with
+	// it, in the order given, and subtasks the sub-task stage's file.
+	headers  []sessionjudge.Header
+	subtasks *sessionjudge.File
+	summary  *sessionjudge.Summary
 	// unassigned are the file operations no target's calls made.
 	unassigned []string
 }
 
 func gather(files []*sessionjudge.File, closeFile, regroup *sessionjudge.File) *runReport {
 	r := &runReport{achievements: map[string]*sessionjudge.Achievement{}, outcomes: map[string]*sessionjudge.Outcome{},
-		findings: map[string][]sessionjudge.Finding{}, ops: map[string]sessionjudge.Operation{}, goalOut: map[string]sessionjudge.GoalOutcome{},
-		regroup: regroup, divergences: map[string]sessionjudge.Divergence{}}
+		findings: map[string][]sessionjudge.Finding{}, ops: map[string]sessionjudge.Operation{},
+		regroup: regroup, divergences: map[string]sessionjudge.Divergence{}, summary: closeFile.Header.Summary}
+	if r.summary == nil {
+		r.summary = &sessionjudge.Summary{}
+	}
 	for _, f := range files {
+		if r.conversation == "" {
+			r.conversation = f.Header.Conversation
+		}
+		r.headers = append(r.headers, f.Header)
 		switch f.Header.Stage {
 		case sessionjudge.StageTargets:
 			r.targets, r.goals = f.Targets, f.Goals
@@ -66,6 +80,8 @@ func gather(files []*sessionjudge.File, closeFile, regroup *sessionjudge.File) *
 					r.findings[a.Target] = append(r.findings[a.Target], x)
 				}
 			}
+		case sessionjudge.StageSubtasks:
+			r.subtasks = f
 		case sessionjudge.StageEfficiency, sessionjudge.StageDivergence:
 			for _, x := range f.Findings {
 				x.Source = f.Header.Stage
@@ -90,19 +106,957 @@ func gather(files []*sessionjudge.File, closeFile, regroup *sessionjudge.File) *
 			r.targets = append(r.targets, sessionjudge.Target{ID: o.Target, Statement: o.Statement, Status: o.Status})
 		}
 	}
-	for _, x := range closeFile.Findings {
-		r.findings[x.Target] = append(r.findings[x.Target], x)
-	}
 	for _, op := range closeFile.Operations {
 		r.ops[op.ID] = op
 	}
-	if s := closeFile.Header.Summary; s != nil {
-		for _, g := range s.Goals {
-			r.goalOut[g.Goal] = g
-		}
-		r.unassigned = s.UnassignedOperations
-	}
+	r.unassigned = r.summary.UnassignedOperations
 	return r
+}
+
+// reportDoc is a run as a person reads it, whatever it is written as: goal
+// by goal, each target's status, score, criteria, what was done and what is
+// missing; then the overall assessment and the overall result. It names
+// nothing by an id or a step's address: those, the steps each line rests on
+// and what each target cost are in -json.
+type reportDoc struct {
+	run          int
+	conversation string
+	// snapshot names a conversation pulled from another asz as it was asked
+	// for; the run's files name it by the source's own identifier.
+	snapshot string
+	// closed is false for a run with no close yet, which shows nothing else.
+	closed     bool
+	goals      []goalSection
+	assessment []string
+	result     []string
+	// tally counts the targets by how they ended, most severe first, and
+	// final is the run's final score, for the head of a page.
+	tally      []tallyItem
+	final      string
+	finalValue *float64
+}
+
+type tallyItem struct{ class, text string }
+
+// goalSection is one goal, or the targets in none: what it is called, and
+// for one of the person's goals no target serves, what is known of it.
+type goalSection struct {
+	label, statement string
+	// class is how the person's goal no target serves compares, and status
+	// and score what is known of it.
+	class, status, score string
+	targets              []targetView
+}
+
+// targetView is one target as the report says it: how it ended, in words
+// and why, its score, its criteria, what was done and what is missing.
+// final and record are its two scores, for a page to color.
+type targetView struct {
+	statement     string
+	main          bool
+	class         string
+	words, why    string
+	whySteps      []string
+	score         string
+	final, record *float64
+	criteria      []criterionView
+	done, missing []item
+}
+
+// item is one line of a list, with the steps of the conversation it rests
+// on, which a page links to.
+type item struct {
+	text  string
+	steps []string
+}
+
+// criterionView is one criterion: its state, what contradicted or undid it
+// since, the reason given for its state, and the steps that show it.
+type criterionView struct {
+	text, state string
+	against     []item
+	reason      string
+	evidence    []evidenceView
+}
+
+func (c criterionView) line() string {
+	line := c.text + ": " + c.state
+	for _, x := range c.against {
+		line += "; " + x.text
+	}
+	return line
+}
+
+// evidenceView is one step a criterion's state rests on: what the step
+// holds, as an excerpt, and what the evaluator read in it.
+type evidenceView struct {
+	step, excerpt, reading string
+}
+
+func nodesOf(cites []sessionjudge.Cite) []string {
+	var out []string
+	for _, c := range cites {
+		out = append(out, c.Node)
+	}
+	return out
+}
+
+func (t targetView) status() string {
+	if t.why == "" {
+		return t.words
+	}
+	return t.words + ": " + t.why
+}
+
+func buildReport(run storage.JudgmentRun, files []*sessionjudge.File) reportDoc {
+	doc := reportDoc{run: run.Run}
+	var closeFile, regroup *sessionjudge.File
+	for _, f := range files {
+		if doc.conversation == "" {
+			doc.conversation = f.Header.Conversation
+		}
+		switch f.Header.Stage {
+		case sessionjudge.StageClose:
+			closeFile = f
+		case sessionjudge.StageRegroup:
+			if f.Header.Status != sessionjudge.StatusFailed {
+				regroup = f
+			}
+		}
+	}
+	if closeFile == nil {
+		return doc
+	}
+	r := gather(files, closeFile, regroup)
+	doc.closed = true
+	doc.goals, doc.assessment, doc.result = r.sections(), r.assessment(), r.result()
+	counts := map[string]int{}
+	for _, o := range r.outcomes {
+		counts[o.Class]++
+	}
+	for _, c := range sessionjudge.Classes {
+		if n := counts[c]; n > 0 {
+			doc.tally = append(doc.tally, tallyItem{class: c, text: fmt.Sprintf("%d %s", n, classWords[c])})
+		}
+	}
+	if sc := r.summary.Score; sc != nil && sc.Final != nil {
+		doc.final, doc.finalValue = scoreWords100(sc.Final), sc.Final
+	}
+	return doc
+}
+
+// printRun prints a run as a tree, for a terminal.
+func printRun(run storage.JudgmentRun, files []*sessionjudge.File) {
+	writeText(os.Stdout, buildReport(run, files))
+}
+
+// goalView is one goal as the report prints it: the judge's, or the
+// person's from a regroup, with how it compares with the judge's grouping.
+// A goal only groups targets: how each target did is printed with it.
+type goalView struct {
+	statement, main, class string
+	members                []string
+	// given is how much of the judged work the regroup was given, for a
+	// person's goal it found nothing worked on.
+	given *sessionjudge.Given
+	// worked says the conversation worked on one of the person's goals.
+	worked bool
+}
+
+// goalViews are the goals the report prints, in the order of their ids: the
+// person's when a regroup was made, the judge's otherwise.
+func (r *runReport) goalViews() []goalView {
+	var out []goalView
+	if r.regroup == nil {
+		for _, g := range r.goals {
+			v := goalView{statement: g.Statement, main: g.Main, members: g.Members}
+			// A main target the person no longer wanted by the end leaves the
+			// goal's main undetermined, as a regroup's main target is only
+			// one still wanted.
+			if o := r.outcomes[g.Main]; o != nil && (o.Status == sessionjudge.TargetCancelled || o.Status == sessionjudge.TargetReplaced) {
+				v.main = ""
+			}
+			out = append(out, v)
+		}
+		return out
+	}
+	for _, g := range r.regroup.Goals {
+		out = append(out, goalView{statement: g.Statement, main: g.Main, members: g.Members, class: g.Class, worked: g.Worked, given: g.Given})
+	}
+	return out
+}
+
+// sections are the run's goals, each with its targets, the most severe
+// outcome first, and then the targets in no goal.
+func (r *runReport) sections() []goalSection {
+	placed := map[string]bool{}
+	goals := r.goalViews()
+	var out []goalSection
+	for i, g := range goals {
+		sec := goalSection{label: fmt.Sprintf("goal %d", i+1), statement: oneLine(g.statement)}
+		if len(g.members) == 0 {
+			sec.class, sec.status, sec.score = g.class, noTarget(g), "none"
+		}
+		members := slices.Clone(g.members)
+		sort.SliceStable(members, func(i, j int) bool {
+			return severity(classOf(r.outcomes[members[i]])) < severity(classOf(r.outcomes[members[j]]))
+		})
+		for _, m := range members {
+			placed[m] = true
+			if o := r.outcomes[m]; o != nil {
+				sec.targets = append(sec.targets, r.viewOf(o, m == g.main && len(members) > 1))
+			}
+		}
+		out = append(out, sec)
+	}
+	loose := goalSection{label: "not in a goal"}
+	if len(goals) == 0 {
+		loose.label = "targets"
+	}
+	for _, t := range r.targets {
+		if o := r.outcomes[t.ID]; o != nil && !placed[t.ID] {
+			loose.targets = append(loose.targets, r.viewOf(o, false))
+		}
+	}
+	if len(loose.targets) > 0 {
+		out = append(out, loose)
+	}
+	return out
+}
+
+// noTarget says what is known of one of the person's goals that no target
+// serves.
+func noTarget(g goalView) string {
+	switch {
+	case g.class == sessionjudge.CompareMissed:
+		return "worked on, but the judge found no target for it"
+	case g.class == sessionjudge.CompareAbsent:
+		return "not worked on, the evaluator's judgment" + givenWords(g.given)
+	case g.class == sessionjudge.CompareUnknown && g.worked:
+		return "worked on, and a target that may serve it could not be placed"
+	case g.class == sessionjudge.CompareUnknown:
+		return "the regroup could not tell whether it was worked on"
+	}
+	return "no target"
+}
+
+// viewOf is one target: its status, its score, its criteria, what was done
+// for it and what it is missing.
+func (r *runReport) viewOf(o *sessionjudge.Outcome, main bool) targetView {
+	a := r.achievements[o.Target]
+	t := targetView{statement: oneLine(o.Statement), main: main, class: o.Class, score: scoreWords(o), final: o.ScoreFinal, record: o.ScoreRecord,
+		done: r.done(o, a), missing: r.missing(o, a)}
+	if o.Class == sessionjudge.ClassCancelled || o.Class == sessionjudge.ClassReplaced {
+		t.final, t.record = nil, nil
+	}
+	t.words, t.why, t.whySteps = r.status(o, a)
+	if a != nil {
+		t.criteria = r.criteria(o, a)
+	}
+	return t
+}
+
+// classWords says each class in words.
+var classWords = map[string]string{sessionjudge.ClassAchieved: "achieved", sessionjudge.ClassPartly: "partly achieved",
+	sessionjudge.ClassNotAchieved: "not achieved", sessionjudge.ClassContradicted: "contradicted", sessionjudge.ClassReverted: "reverted",
+	sessionjudge.ClassCannotVerify: "cannot be verified", sessionjudge.ClassCancelled: "cancelled", sessionjudge.ClassReplaced: "replaced"}
+
+// status says how a target ended, in words, and why in one sentence, with
+// the steps that show why.
+func (r *runReport) status(o *sessionjudge.Outcome, a *sessionjudge.Achievement) (words, why string, steps []string) {
+	per, whole := r.against(o, a)
+	words = classWords[o.Class]
+	switch o.Class {
+	case sessionjudge.ClassAchieved:
+		return words, basisWords(o.Basis), nil
+	case sessionjudge.ClassPartly, sessionjudge.ClassNotAchieved:
+		return words, metWords(o), nil
+	case sessionjudge.ClassCannotVerify:
+		return words, "nothing shows the result either way", nil
+	case sessionjudge.ClassContradicted, sessionjudge.ClassReverted:
+		if len(whole) == 0 && len(per) == 1 {
+			return words, "1 criterion contradicted or undone", nil
+		}
+		if len(whole) == 0 && len(per) > 1 {
+			return words, fmt.Sprintf("%d criteria contradicted or undone", len(per)), nil
+		}
+		var texts []string
+		for _, x := range whole {
+			texts = append(texts, x.text)
+			steps = append(steps, x.steps...)
+		}
+		return words, strings.Join(texts, "; "), steps
+	case sessionjudge.ClassCancelled:
+		return words, "the person no longer wanted it, so it is not scored", nil
+	case sessionjudge.ClassReplaced:
+		return words, "another target took its place, so it is not scored", nil
+	}
+	return "not judged", "", nil
+}
+
+func basisWords(basis string) string {
+	switch basis {
+	case sessionjudge.BasisAccepted:
+		return "the person accepted the result"
+	case sessionjudge.BasisObserved:
+		return "the conversation shows the result"
+	case sessionjudge.BasisDelivered:
+		return "the agent delivered the answer"
+	case sessionjudge.BasisClaimOnly:
+		return "only the agent's own words show it"
+	}
+	return ""
+}
+
+func metWords(o *sessionjudge.Outcome) string {
+	if o.Met == nil || o.Criteria == nil {
+		return "its criteria are unknown"
+	}
+	return fmt.Sprintf("%d of %d criteria met", *o.Met, *o.Criteria)
+}
+
+// against is what contradicted or undid a target's result standing at the
+// end, each said once: per criterion, and for the whole result. Each comes
+// with the steps that show it: those the conversation's contradiction or
+// undoing cites, and for a source's, the delivery it is about.
+func (r *runReport) against(o *sessionjudge.Outcome, a *sessionjudge.Achievement) (map[string][]item, []item) {
+	per := map[string][]item{}
+	var whole []item
+	add := func(criteria []string, x item) {
+		if len(criteria) == 0 {
+			whole = append(whole, x)
+			return
+		}
+		for _, c := range criteria {
+			per[c] = append(per[c], x)
+		}
+	}
+	delivery := func(event string) []string {
+		if a == nil {
+			return nil
+		}
+		for _, e := range a.Events {
+			if e.ID == event {
+				return nodesOf(e.Cite)
+			}
+		}
+		return nil
+	}
+	if a != nil {
+		for _, x := range a.Contradictions {
+			if !slices.Contains(o.Standing, x.Event) {
+				continue
+			}
+			criteria := x.Criteria
+			if x.Conclusion {
+				criteria = nil
+			}
+			add(criteria, item{"later in the conversation, " + trunc(oneLine(x.Text), 200), nodesOf(x.Cite)})
+		}
+		for _, e := range a.Events {
+			if slices.Contains(o.Undone, e.ID) {
+				add(e.Criteria, item{"undone in the conversation, " + trunc(oneLine(e.Text), 200), nodesOf(e.Cite)})
+			}
+		}
+	}
+	for _, id := range o.References {
+		if d, ok := r.divergences[id]; ok && d.Verdict == sessionjudge.VerdictContradicted && d.Target == o.Target {
+			criteria := d.Criteria
+			if d.Whole {
+				criteria = nil
+			}
+			add(criteria, item{"the reference says " + trunc(oneLine(r.statementOf(id)), 200), delivery(d.Event)})
+		}
+		for _, rb := range r.rollbacks {
+			if rb.Conclusion == id && rb.Target == o.Target {
+				add(rb.Criteria, item{"undone outside the conversation: " + trunc(oneLine(r.statementOf(id)), 200), delivery(rb.Event)})
+			}
+		}
+	}
+	return per, whole
+}
+
+func (r *runReport) statementOf(id string) string {
+	for _, k := range r.conclusions {
+		if k.ID == id {
+			return k.Statement
+		}
+	}
+	return ""
+}
+
+// criteria lists a target's criteria, each with its state, what
+// contradicted or undid it since, and what shows it.
+func (r *runReport) criteria(o *sessionjudge.Outcome, a *sessionjudge.Achievement) []criterionView {
+	per, _ := r.against(o, a)
+	var out []criterionView
+	for _, k := range a.Criteria {
+		c := criterionView{text: trunc(oneLine(k.Text), 160), state: strings.ReplaceAll(k.State, "_", " "), against: per[k.ID], reason: oneLine(k.Reason)}
+		for _, ob := range k.Observations {
+			c.evidence = append(c.evidence, evidenceView{step: ob.Node, excerpt: oneLine(ob.Excerpt), reading: oneLine(ob.Interpretation)})
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// done lists what was done for a target, by what it was for: what an answer
+// checked, ruled out and answered, the files changed, and changes to other
+// systems.
+func (r *runReport) done(o *sessionjudge.Outcome, a *sessionjudge.Achievement) []item {
+	if a == nil {
+		return nil
+	}
+	var out []item
+	acc := a.Account
+	answer := acc != nil && acc.Answer != nil
+	// What was delivered, in order; an answer's delivery is said below with
+	// what the answer checked.
+	for _, e := range a.Events {
+		if e.Kind == sessionjudge.EventUndone || e.Text == "" || answer && e.Artifact == sessionjudge.ArtifactAnswer {
+			continue
+		}
+		what := "delivered"
+		if e.Kind == sessionjudge.EventDeliveredAgain {
+			what = "delivered again"
+		}
+		if e.Artifact != "" {
+			what += " " + strings.ReplaceAll(e.Artifact, "_", " ")
+		}
+		out = append(out, item{what + ": " + trunc(oneLine(e.Text), 200), nodesOf(e.Cite)})
+	}
+	if answer {
+		an := acc.Answer
+		for _, x := range an.Checked {
+			out = append(out, item{trunc(strings.TrimSuffix(oneLine(x.What), "."), 140) + ": " + trunc(oneLine(x.Found), 200), nodesOf(x.Cite)})
+		}
+		for _, x := range an.RuledOut {
+			out = append(out, item{"ruled out " + trunc(strings.TrimSuffix(oneLine(x.What), "."), 140) + ": " + trunc(oneLine(x.Found), 200), nodesOf(x.Cite)})
+		}
+		if an.Answered.Text != "" {
+			out = append(out, item{"answered: " + trunc(oneLine(an.Answered.Text), 200), nodesOf(an.Answered.Cite)})
+		}
+	}
+	grouped := map[string]bool{}
+	if acc != nil {
+		for _, g := range acc.Files {
+			out = append(out, item{text: fmt.Sprintf("%s, %s: %s\n%s", g.Area, g.Category, trunc(oneLine(g.Summary), 120), r.paths(g.Operations))})
+			for _, id := range g.Operations {
+				grouped[id] = true
+			}
+		}
+	}
+	var rest []string
+	for _, s := range o.Operations {
+		if !grouped[s.ID] {
+			rest = append(rest, s.ID)
+		}
+	}
+	if len(rest) > 0 {
+		out = append(out, item{text: "files: " + r.paths(rest)})
+	}
+	if len(o.Operations) == 0 && slices.ContainsFunc(a.Events, func(e sessionjudge.Event) bool {
+		return e.Artifact == sessionjudge.ArtifactFile || e.Artifact == sessionjudge.ArtifactRevision
+	}) {
+		out = append(out, item{text: "changed files that no change record or editing tool names"})
+	}
+	if acc != nil {
+		for _, x := range acc.Remote {
+			line := fmt.Sprintf("%s on %s through %s", trunc(oneLine(x.Operation), 100), x.System, x.Via)
+			if x.Confirmed != nil {
+				line += ", confirmed"
+			} else {
+				line += ", not confirmed"
+			}
+			out = append(out, item{line, nodesOf(x.Request.Cite)})
+		}
+	}
+	return out
+}
+
+// paths names some file operations, at most five, each with what happened:
+// a change a record captured says how much changed, and a request of an
+// editing tool says whether the tool returned, since a request is only an
+// attempt.
+func (r *runReport) paths(ids []string) string {
+	var names []string
+	for i, id := range ids {
+		if i == 5 {
+			names = append(names, fmt.Sprintf("and %d more", len(ids)-5))
+			break
+		}
+		op, ok := r.ops[id]
+		if !ok {
+			continue
+		}
+		path := op.Path
+		if path == "" {
+			path = "a file not named"
+		}
+		what := op.Operation
+		switch {
+		case op.Source == sessionjudge.SourceToolRequest:
+			what += ", requested, the tool " + toolWords(op.Status)
+		case op.Added != nil && op.Removed != nil:
+			what += fmt.Sprintf(" +%d -%d", *op.Added, *op.Removed)
+		}
+		names = append(names, path+" ("+what+")")
+	}
+	if len(names) == 0 {
+		return plural(len(ids), "file operation")
+	}
+	return strings.Join(names, ", ")
+}
+
+// toolWords says what became of a request to an editing tool.
+func toolWords(status string) string {
+	switch status {
+	case sessionjudge.ObservedReturned:
+		return "returned"
+	case sessionjudge.ObservedNoResult:
+		return "never returned"
+	case sessionjudge.ObservedFailed, sessionjudge.ObservedError:
+		return "failed"
+	}
+	return strings.ReplaceAll(status, "_", " ")
+}
+
+// missing lists what a target lacks: the criteria not met, the claims the
+// conversation contradicts, each round of rework, the person's
+// corrections, the problems the stages found and the avoidable work. asz's
+// own findings are left out, since each repeats one of these or the status.
+func (r *runReport) missing(o *sessionjudge.Outcome, a *sessionjudge.Achievement) []item {
+	var out []item
+	if a != nil {
+		per, whole := r.against(o, a)
+		// What contradicted or undid the whole result is missing first: it
+		// leaves nothing of the result, whatever its criteria say.
+		for _, x := range whole {
+			out = append(out, item{"the whole result: " + x.text, x.steps})
+		}
+		for _, k := range a.Criteria {
+			// A criterion met and then contradicted or undone counts as not met.
+			if k.State == sessionjudge.CheckMet && len(per[k.ID]) > 0 {
+				line := trunc(oneLine(k.Text), 160) + ": met, then"
+				var steps []string
+				for i, x := range per[k.ID] {
+					if i > 0 {
+						line += ";"
+					}
+					line += " " + x.text
+					steps = append(steps, x.steps...)
+				}
+				out = append(out, item{line, steps})
+				continue
+			}
+			if k.State == sessionjudge.CheckMet {
+				continue
+			}
+			line := trunc(oneLine(k.Text), 160) + ": " + strings.ReplaceAll(k.State, "_", " ")
+			if k.Reason != "" {
+				line += ", " + trunc(oneLine(k.Reason), 160)
+			}
+			var steps []string
+			for _, ob := range k.Observations {
+				steps = append(steps, ob.Node)
+			}
+			for _, x := range per[k.ID] {
+				line += "; " + x.text
+				steps = append(steps, x.steps...)
+			}
+			out = append(out, item{line, steps})
+		}
+		for _, k := range a.Claims {
+			if k.State == sessionjudge.CheckContradicted {
+				out = append(out, item{"said, and the conversation contradicts it: " + trunc(oneLine(k.Text), 160), nodesOf(k.Cite)})
+			}
+		}
+		for _, w := range a.Rework {
+			out = append(out, item{reworkWords(w), []string{w.From}})
+		}
+	}
+	if n := len(o.Corrections); n > 0 {
+		out = append(out, item{fmt.Sprintf("the person corrected it %s", times(n)), o.Corrections})
+	}
+	found := slices.Clone(r.findings[o.Target])
+	sort.SliceStable(found, func(i, j int) bool { return refLess(found[i].Ref, found[j].Ref) })
+	for _, f := range found {
+		if f.Source == sessionjudge.SourceASZ {
+			continue
+		}
+		line := trunc(oneLine(f.Problem), 200)
+		if f.Cause != "" {
+			line += "\n" + causeWords(f)
+		}
+		var steps []string
+		if f.At != "" {
+			steps = []string{f.At}
+		}
+		out = append(out, item{line, steps})
+	}
+	if o.Avoidable != nil && o.Avoidable.Tokens() > 0 {
+		line := "avoidable work: " + amountWords(*o.Avoidable, r.summary.Currency)
+		if o.AvoidableSpan != nil {
+			line += fmt.Sprintf(", %.1f minutes", float64(*o.AvoidableSpan)/60000)
+		}
+		out = append(out, item{text: line})
+	}
+	return out
+}
+
+func times(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d times", n)
+}
+
+// reworkWords says a round of rework: what started it, whose doing it was,
+// and what the evaluator said it redid.
+func reworkWords(w sessionjudge.Rework) string {
+	trigger := map[string]string{sessionjudge.TriggerPerson: "the person's correction", sessionjudge.TriggerTool: "a tool's failure",
+		sessionjudge.TriggerVerification: "a failed check"}[w.Trigger]
+	if trigger == "" {
+		trigger = strings.ReplaceAll(w.Trigger, "_", " ")
+	}
+	cause := map[string]string{sessionjudge.ReworkAgentError: "the agent's mistake", sessionjudge.ReworkRequirementChange: "a changed request",
+		sessionjudge.ReworkUnknown: "a cause the conversation does not show"}[w.Cause]
+	if cause == "" {
+		cause = strings.ReplaceAll(w.Cause, "_", " ")
+	}
+	line := fmt.Sprintf("redone after %s, from %s", trigger, cause)
+	if w.Note != "" {
+		line += ": " + trunc(oneLine(w.Note), 160)
+	}
+	if !w.Finished {
+		line += "; not finished"
+	}
+	return line
+}
+
+// causeWords says a finding's cause, whether it is against the reference,
+// and for a cause that rests on something not happening, that it is the
+// evaluator's judgment, with how much of its span the evaluator was given.
+func causeWords(f sessionjudge.Finding) string {
+	cause := map[string]string{sessionjudge.CauseMisleadingResult: "a misleading tool result", sessionjudge.CauseMisread: "a result read wrong",
+		sessionjudge.CauseMisledBySubtask: "a sub-task's untrue report", sessionjudge.CauseMissingContext: "context the agent could not have had",
+		sessionjudge.CauseContextNotUsed: "context the agent had and did not use", sessionjudge.CauseQuestionNotAsked: "a question not asked",
+		sessionjudge.CauseAssumptionNotChecked: "an assumption not checked", sessionjudge.CauseUnavailable: "none the conversation supports"}[f.Cause]
+	if cause == "" {
+		cause = strings.ReplaceAll(f.Cause, "_", " ")
+	}
+	line := "cause: " + cause
+	if f.Conclusion != "" {
+		line += ", against the reference"
+	}
+	if f.Asserted {
+		line += "; the evaluator's judgment" + givenWords(f.Given)
+	}
+	return line
+}
+
+// givenWords says how much of an absence claim's steps the evaluator was
+// given: what it opened, what it saw only named in a list, and what it was
+// not given. It never says the claim holds. A run made before readings were
+// kept has none.
+func givenWords(g *sessionjudge.Given) string {
+	switch {
+	case g == nil:
+		return "; what it was given was not recorded"
+	case g.Counts == nil:
+		return "; what it was given is unavailable: " + g.Reason
+	}
+	c := g.Counts
+	where := "where it would show"
+	if g.Scope == sessionjudge.GivenWindow {
+		where = "of the judged work"
+	}
+	text := fmt.Sprintf("; of the %s %s, it opened %d, saw %d only in lists and was not given %d", plural(c.Steps, "step"), where, c.Opened,
+		c.Listed, c.None)
+	if c.Unavailable > 0 {
+		text += fmt.Sprintf("; %d hold evidence no one can be given", c.Unavailable)
+	}
+	return text
+}
+
+// assessment is how the run judged the conversation as a whole: the two
+// scores, never combined, the efficiency, the sub-tasks, the grouping, the
+// references, and the stages.
+func (r *runReport) assessment() []string {
+	var out []string
+	s := r.summary
+	if sc := s.Score; sc != nil {
+		levels, unscored := map[string]int{}, 0
+		for _, o := range r.outcomes {
+			if o.Status == sessionjudge.TargetCancelled || o.Status == sessionjudge.TargetReplaced {
+				unscored++
+				continue
+			}
+			levels[o.Level]++
+		}
+		if sc.Achievement != nil {
+			line := fmt.Sprintf("by the achievement record: %s over %s: %d achieved, %d partly, %d not achieved, %d cannot be verified",
+				scoreWords100(sc.Achievement), plural(sc.Judged, "target"), levels[sessionjudge.LevelAchieved], levels[sessionjudge.LevelPartly],
+				levels[sessionjudge.LevelNotAchieved], levels[sessionjudge.LevelCannotVerify])
+			if unscored > 0 {
+				line += fmt.Sprintf("; %d cancelled or replaced, not scored", unscored)
+			}
+			out = append(out, line)
+		} else {
+			out = append(out, fmt.Sprintf("by the achievement record: unavailable, no target could be verified (%d cannot be verified)",
+				levels[sessionjudge.LevelCannotVerify]))
+		}
+		if sc.Final != nil {
+			out = append(out, "final, after what contradicted or undid a result: "+scoreWords100(sc.Final))
+		}
+		if sc.Efficiency != nil {
+			out = append(out, fmt.Sprintf("efficiency: %s; %s of the reviewed cost was avoidable, by %s; %s of the targets' cost was reviewed",
+				scoreWords100(sc.Efficiency), percent(ptr(1-*sc.Efficiency)), sc.Unit, percent(sc.Reviewed)))
+		} else {
+			out = append(out, "efficiency: unavailable, no work was labeled")
+		}
+		if sc.Delivered != nil {
+			out = append(out, fmt.Sprintf("delivered: %s of the targets' cost went to targets achieved, by %s", percent(sc.Delivered), sc.Unit))
+		} else {
+			out = append(out, "delivered: unavailable")
+		}
+	}
+	if line := r.subtaskWords(); line != "" {
+		out = append(out, line)
+	}
+	if line := r.groupingWords(); line != "" {
+		out = append(out, line)
+	}
+	out = append(out, r.referenceWords()...)
+	if len(r.unassigned) > 0 {
+		out = append(out, "file operations no target's calls made: "+r.paths(r.unassigned))
+	}
+	out = append(out, r.stageWords())
+	return out
+}
+
+// subtaskWords says in one line how the sub-tasks went, and how much
+// avoidable work their own work going wrong caused.
+func (r *runReport) subtaskWords() string {
+	f := r.subtasks
+	if f == nil || f.Header.Coverage == nil || f.Header.Coverage.Subtasks == nil || *f.Header.Coverage.Subtasks == 0 {
+		return ""
+	}
+	count := func(get func(sessionjudge.Subtask) string, order []string) string {
+		n := map[string]int{}
+		for _, st := range f.Subtasks {
+			n[get(st)]++
+		}
+		var parts []string
+		for _, k := range order {
+			if n[k] > 0 {
+				parts = append(parts, fmt.Sprintf("%d %s", n[k], strings.ReplaceAll(k, "_", " ")))
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	line := fmt.Sprintf("sub-tasks: %d of %d judged", *f.Header.Coverage.SubtasksJudged, *f.Header.Coverage.Subtasks)
+	if len(f.Subtasks) > 0 {
+		line += fmt.Sprintf("; results %s; reports %s; use %s; dispatch %s",
+			count(func(s sessionjudge.Subtask) string { return s.Outcome }, sessionjudge.Levels),
+			count(func(s sessionjudge.Subtask) string { return s.Report }, sessionjudge.Reports),
+			count(func(s sessionjudge.Subtask) string { return s.Use }, sessionjudge.Uses),
+			count(func(s sessionjudge.Subtask) string { return s.Dispatch }, sessionjudge.Dispatches))
+	}
+	if b := r.summary.AvoidableBySubtasks; b != nil {
+		if caused := (sessionjudge.Amount{Usage: *b}); caused.Tokens() > 0 {
+			line += "; their own work going wrong caused " + amountWords(caused, r.summary.Currency) + " of avoidable work"
+		}
+	}
+	return line
+}
+
+// groupingWords says how the judge's grouping compared with the person's
+// goals, when the person gave them.
+func (r *runReport) groupingWords() string {
+	if r.regroup == nil {
+		return ""
+	}
+	var agreement sessionjudge.Agreement
+	if len(r.regroup.Agreements) > 0 {
+		agreement = r.regroup.Agreements[0]
+	}
+	var parts []string
+	for _, c := range sessionjudge.Compares {
+		if n := agreement.Classes[c]; n > 0 && c != sessionjudge.CompareAgree {
+			parts = append(parts, fmt.Sprintf("%d %s", n, c))
+		}
+	}
+	line := fmt.Sprintf("grouping: the judge agreed with %d of your %s", agreement.Classes[sessionjudge.CompareAgree],
+		plural(agreement.Goals, "goal"))
+	if len(parts) > 0 {
+		line += "; " + strings.Join(parts, ", ")
+	}
+	if n := len(agreement.Extra); n > 0 {
+		line += fmt.Sprintf("; %s serving none of your goals", plural(n, "target"))
+	}
+	if n := len(agreement.Unknown); n > 0 {
+		line += fmt.Sprintf("; %s could not be placed", plural(n, "target"))
+	}
+	return line
+}
+
+// referenceWords says what the run was compared with: a source that could
+// not be saved, and how the conversation compared with the conclusions of
+// those saved.
+func (r *runReport) referenceWords() []string {
+	var out []string
+	for _, s := range r.sources {
+		if s.Outcome != sessionjudge.SourceSaved {
+			out = append(out, fmt.Sprintf("reference %s could not be saved: %s; nothing was compared with it", s.Source, trunc(oneLine(s.Error), 120)))
+			continue
+		}
+		// What the copy leaves out of what the source holds.
+		var notes []string
+		if s.QueryRemoved {
+			notes = append(notes, "kept without its query")
+		}
+		if s.Cut {
+			notes = append(notes, "cut to its start")
+		}
+		if left := judge.LeftOut(s); left != "" {
+			notes = append(notes, left)
+		}
+		if len(notes) > 0 {
+			out = append(out, fmt.Sprintf("reference %s: %s", s.Source, strings.Join(notes, "; ")))
+		}
+	}
+	if len(r.conclusions) == 0 {
+		return out
+	}
+	verdicts := map[string]int{}
+	for _, k := range r.conclusions {
+		if d, ok := r.divergences[k.ID]; ok {
+			verdicts[d.Verdict]++
+		} else {
+			verdicts["not compared"]++
+		}
+	}
+	var parts []string
+	for _, v := range []string{sessionjudge.VerdictReached, sessionjudge.VerdictContradicted, sessionjudge.VerdictNotObserved,
+		sessionjudge.VerdictUnknown, sessionjudge.VerdictNotApplicable, "not compared"} {
+		if n := verdicts[v]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, strings.ReplaceAll(v, "_", " ")))
+		}
+	}
+	line := fmt.Sprintf("reference: %s; %s", plural(len(r.conclusions), "conclusion"), strings.Join(parts, ", "))
+	if n := len(r.rollbacks); n > 0 {
+		line += fmt.Sprintf("; %s undone outside the conversation", plural(n, "result"))
+	}
+	return append(out, line)
+}
+
+// stageWords says which stages did not complete, and who judged.
+func (r *runReport) stageWords() string {
+	var notes, evaluators []string
+	for _, h := range r.headers {
+		if h.Status != sessionjudge.StatusComplete {
+			note := h.Stage + " " + h.Status
+			if h.Note != "" {
+				note += ": " + trunc(oneLine(h.Note), 160)
+			}
+			notes = append(notes, note)
+		}
+		// A stage computed by asz, or one with nothing to ask, judged nothing.
+		if h.Evaluator.Kind == sessionjudge.EvaluatorComputed || h.Attempts == 0 {
+			continue
+		}
+		name := h.Evaluator.Name
+		if h.Evaluator.Model != "" {
+			name += " with " + h.Evaluator.Model
+		}
+		if !slices.Contains(evaluators, name) {
+			evaluators = append(evaluators, name)
+		}
+	}
+	line := "every stage completed"
+	if len(notes) > 0 {
+		line = "stages not complete: " + strings.Join(notes, "; ")
+	}
+	if len(evaluators) > 0 {
+		line += "; judged by " + strings.Join(evaluators, ", ")
+	}
+	return line
+}
+
+// result is what the conversation came to: its targets by how they ended,
+// the person's goals nothing served, and what the conversation and its
+// judging used.
+func (r *runReport) result() []string {
+	var out []string
+	byClass := map[string][]string{}
+	for _, t := range r.targets {
+		if o := r.outcomes[t.ID]; o != nil {
+			byClass[o.Class] = append(byClass[o.Class], trunc(oneLine(o.Statement), 140))
+		}
+	}
+	words := map[string]string{sessionjudge.ClassAchieved: "achieved", sessionjudge.ClassPartly: "partly achieved",
+		sessionjudge.ClassNotAchieved: "not achieved", sessionjudge.ClassContradicted: "contradicted", sessionjudge.ClassReverted: "reverted",
+		sessionjudge.ClassCannotVerify: "cannot be verified", sessionjudge.ClassCancelled: "cancelled", sessionjudge.ClassReplaced: "replaced"}
+	for _, c := range []string{sessionjudge.ClassAchieved, sessionjudge.ClassPartly, sessionjudge.ClassNotAchieved, sessionjudge.ClassContradicted,
+		sessionjudge.ClassReverted, sessionjudge.ClassCannotVerify, sessionjudge.ClassCancelled, sessionjudge.ClassReplaced} {
+		if list := byClass[c]; len(list) > 0 {
+			out = append(out, fmt.Sprintf("%d of %s %s: %s", len(list), plural(len(r.targets), "target"), words[c], strings.Join(list, "; ")))
+		}
+	}
+	for i, g := range r.goalViews() {
+		if len(g.members) > 0 {
+			continue
+		}
+		switch g.class {
+		case sessionjudge.CompareAbsent:
+			out = append(out, fmt.Sprintf("your goal %d was not worked on, the evaluator's judgment", i+1))
+		case sessionjudge.CompareMissed:
+			out = append(out, fmt.Sprintf("your goal %d was worked on, but the judge found no target for it", i+1))
+		default:
+			out = append(out, fmt.Sprintf("for your goal %d, the regroup could not tell whether it was worked on or served", i+1))
+		}
+	}
+	return append(out, r.usageWords())
+}
+
+// usageWords says what the conversation used and what judging it used. A
+// total that leaves something out says what, so it is never read as whole.
+func (r *runReport) usageWords() string {
+	s := r.summary
+	line := "the conversation used " + amountWords(sessionjudge.Amount{Usage: s.Usage, Money: s.Money, Unpriced: s.Unpriced}, s.Currency)
+	if s.Unknown > 0 {
+		line += ", not counting " + plural(s.Unknown, "call") + " whose usage is unknown"
+	}
+	if s.OutputUnknown > 0 {
+		line += ", not counting the output of " + plural(s.OutputUnknown, "call") + " that never finished"
+	}
+	if s.Money != nil && s.Unpriced > 0 {
+		line += ", with " + plural(s.Unpriced, "call") + " not priced"
+	}
+	if s.Judging == nil {
+		return line + "; what judging used is unknown, as an evaluator did not report it"
+	}
+	line += "; judging used " + amountWords(*s.Judging, s.Currency)
+	if s.Judging.Unknown > 0 {
+		line += ", not counting " + plural(s.Judging.Unknown, "model request") + " whose usage is unknown"
+	}
+	if s.Judging.Money != nil && s.Judging.Unpriced > 0 {
+		line += ", with " + plural(s.Judging.Unpriced, "stage") + " not priced"
+	}
+	if share, ok := judgingShare(s); ok {
+		line += fmt.Sprintf(", %.0f%% of what the conversation cost", share*100)
+	}
+	if s.JudgingReportedUSD != nil {
+		line += fmt.Sprintf(", %.2f USD as the evaluators reported", *s.JudgingReportedUSD)
+	}
+	if s.JudgingMs > 0 {
+		m := float64(s.JudgingMs) / 60000
+		u := s.Judging.Usage
+		line += fmt.Sprintf(", over %.1f minutes: %s input and %s output tokens a minute", m, tokenWords(float64(u.Input+u.CacheRead+u.CacheWrite)/m),
+			tokenWords(float64(u.Output)/m))
+	}
+	return line
 }
 
 // severity orders classes most severe first; a target with none comes last.
@@ -111,6 +1065,13 @@ func severity(class string) int {
 		return i
 	}
 	return len(sessionjudge.Classes)
+}
+
+func classOf(o *sessionjudge.Outcome) string {
+	if o == nil {
+		return ""
+	}
+	return o.Class
 }
 
 // plural prints a count with its noun, one or many.
@@ -130,766 +1091,72 @@ func scoreOf(v *float64) string {
 	return fmt.Sprintf("%.0f/100", math.Round(*v*100))
 }
 
-// scores prints a target's final score, with the record's beside it when
-// they differ, or why it has none.
-func scores(o *sessionjudge.Outcome) string {
+func scoreWords100(v *float64) string {
+	if v == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.0f of 100", math.Round(*v*100))
+}
+
+// scoreWords says a target's final score, with what the achievement record
+// gives beside it when the two differ, or why it has none. The record counts
+// a contradicted claim as a criterion not met, so it is not the criteria's
+// score alone.
+func scoreWords(o *sessionjudge.Outcome) string {
 	switch {
 	case o.Class == sessionjudge.ClassCancelled || o.Class == sessionjudge.ClassReplaced:
-		return "not scored, " + o.Class
+		return "none, not scored"
 	case o.ScoreFinal == nil:
-		return "score unavailable"
+		return "unavailable"
 	case o.ScoreRecord != nil && scoreOf(o.ScoreRecord) != scoreOf(o.ScoreFinal):
-		return fmt.Sprintf("%s (%s by the record)", scoreOf(o.ScoreFinal), strings.TrimSuffix(scoreOf(o.ScoreRecord), "/100"))
+		return fmt.Sprintf("%s (%.0f by the achievement record)", scoreWords100(o.ScoreFinal), math.Round(*o.ScoreRecord*100))
 	}
-	return scoreOf(o.ScoreFinal)
+	return scoreWords100(o.ScoreFinal)
 }
 
-// goalView is one goal as the report prints it: the judge's, with how the
-// close found it did, or the person's from a regroup, how it did taken from
-// its targets' outcomes the same way, with how it compares with the judge's
-// grouping.
-type goalView struct {
-	id, statement, main, mainReason, worst, class string
-	members                                       []string
-	evolution                                     []sessionjudge.Evolution
-	first                                         *sessionjudge.Finding
-	firstOrder                                    string
-	// given is how much of the judged work the regroup was given, for a
-	// person's goal it found nothing worked on.
-	given                *sessionjudge.Given
-	scoreMain, scoreMean *float64
-	// worked says the conversation worked on one of the person's goals.
-	worked bool
+func percent(f *float64) string {
+	if f == nil {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.0f%%", *f*100)
 }
 
-// goalViews are the goals the report prints: the label view's when a
-// regroup was made, the judge's otherwise.
-func (r *runReport) goalViews() []goalView {
-	var out []goalView
-	if r.regroup == nil {
-		for _, g := range r.goals {
-			o := r.goalOut[g.ID]
-			out = append(out, goalView{id: g.ID, statement: g.Statement, main: o.Main, mainReason: g.MainReason, worst: o.Worst,
-				members: g.Members, evolution: g.Evolution, first: o.First, firstOrder: o.FirstOrder, scoreMain: o.ScoreMain,
-				scoreMean: o.ScoreMean})
-		}
-		return out
+// tokenWords prints a count of tokens in words: thousands and millions to
+// one decimal place, never an abbreviation.
+func tokenWords(f float64) string {
+	switch {
+	case f >= 1e6:
+		return fmt.Sprintf("%.1f million", f/1e6)
+	case f >= 1e3:
+		return fmt.Sprintf("%.1f thousand", f/1e3)
 	}
-	for _, g := range r.regroup.LabelGoals {
-		v := goalView{id: g.ID, statement: g.Statement, main: g.Main, members: g.Members, class: g.Class, worked: g.Worked, given: g.Given}
-		worst := len(sessionjudge.Classes)
-		total, n := 0.0, 0
-		var found []sessionjudge.Finding
-		for _, m := range g.Members {
-			o := r.outcomes[m]
-			if o == nil {
-				continue
-			}
-			worst = min(worst, severity(o.Class))
-			if o.ScoreFinal != nil {
-				total, n = total+*o.ScoreFinal, n+1
-			}
-			found = append(found, r.findings[m]...)
-		}
-		if worst < len(sessionjudge.Classes) {
-			v.worst = sessionjudge.Classes[worst]
-		}
-		if n > 0 {
-			mean := total / float64(n)
-			v.scoreMean = &mean
-		}
-		if o := r.outcomes[g.Main]; o != nil {
-			v.scoreMain = o.ScoreFinal
-		}
-		v.first, v.firstOrder = judge.FirstRecorded(found)
-		out = append(out, v)
+	return fmt.Sprintf("%.0f", f)
+}
+
+// amountWords prints tokens, and money where any call in the amount was
+// priced.
+func amountWords(a sessionjudge.Amount, currency string) string {
+	out := tokenWords(float64(a.Tokens())) + " tokens"
+	if a.Money != nil {
+		out += fmt.Sprintf(", %.2f %s", *a.Money, currency)
 	}
 	return out
 }
 
-// printGoals prints the run goal by goal, the most severe first, each with
-// its targets, and then the targets in no goal. cost prints a target's cost
-// lines.
-func printGoals(r *runReport, cost func(*sessionjudge.Outcome)) {
-	placed := map[string]bool{}
-	goals := r.goalViews()
-	sort.SliceStable(goals, func(i, j int) bool { return severity(goals[i].worst) < severity(goals[j].worst) })
-	for _, g := range goals {
-		fmt.Printf("\n  goal %s  %s\n", g.id, trunc(oneLine(g.statement), 100))
-		if len(g.evolution) > 1 {
-			var steps []string
-			for _, e := range g.evolution {
-				steps = append(steps, fmt.Sprintf("%q (%s)", trunc(oneLine(e.Statement), 60), e.Input))
-			}
-			fmt.Printf("    evolved   %s\n", strings.Join(steps, " → "))
-		}
-		switch g.class {
-		case sessionjudge.CompareMissed:
-			fmt.Println("    no target: the conversation worked on it, and the judge found no target for it")
-		case sessionjudge.CompareAbsent:
-			fmt.Printf("    no target: nothing in the conversation worked on it, the evaluator's judgment%s\n", givenText(g.given, "of the judged work"))
-		case sessionjudge.CompareUnknown:
-			if g.worked {
-				fmt.Println("    no target placed: the conversation worked on it, and a target that may serve it could not be placed")
-			} else {
-				fmt.Println("    no target: the regroup could not tell whether the conversation worked on it")
-			}
-		}
-		if g.worst != "" {
-			fmt.Printf("    worst     %s\n", strings.ReplaceAll(g.worst, "_", " "))
-		}
-		// The finding recorded first in the goal, which says nothing of work
-		// before it that no stage read. One whose cause rests on something
-		// not happening shows how much of its span the evaluator was given.
-		if f := g.first; f != nil {
-			note := ""
-			switch g.firstOrder {
-			case sessionjudge.FirstOrderPartial:
-				note = " (among the findings with a recorded place)"
-			case sessionjudge.FirstOrderNone:
-				note = " (no finding has a recorded place: the first given)"
-			}
-			fmt.Printf("    first recorded  %s at %s: %s%s\n", f.Source, f.At, trunc(oneLine(f.Problem), 120), note)
-			if f.Asserted {
-				fmt.Printf("      cause: %s\n", causeOf(*f))
-			}
-		}
-		switch {
-		case g.main != "":
-			fmt.Printf("    main      %s%s\n", g.main, reasonOf(g.mainReason))
-		case len(g.members) > 0:
-			fmt.Printf("    main      undetermined%s\n", reasonOf(g.mainReason))
-		}
-		members := slices.Clone(g.members)
-		sort.SliceStable(members, func(i, j int) bool {
-			return severity(classOf(r.outcomes[members[i]])) < severity(classOf(r.outcomes[members[j]]))
-		})
-		var records []float64
-		for _, m := range members {
-			placed[m] = true
-			if o := r.outcomes[m]; o != nil {
-				printTarget(r, o, cost)
-				if o.ScoreRecord != nil && o.ScoreFinal != nil {
-					records = append(records, *o.ScoreRecord)
-				}
-			}
-		}
-		printFindings(r, members)
-		// A goal with no target has no score.
-		if len(g.members) == 0 {
-			continue
-		}
-		line := "main undetermined"
-		if g.main != "" {
-			line = fmt.Sprintf("main %s %s", g.main, scoreOf(g.scoreMain))
-		}
-		if g.scoreMean != nil {
-			line += fmt.Sprintf("; all %s %s", plural(len(members), "target"), scoreOf(g.scoreMean))
-			if len(records) > 0 {
-				mean := 0.0
-				for _, v := range records {
-					mean += v
-				}
-				mean /= float64(len(records))
-				if rec := scoreOf(&mean); rec != scoreOf(g.scoreMean) {
-					line += fmt.Sprintf(" (%s by the record)", strings.TrimSuffix(rec, "/100"))
-				}
-			}
-		}
-		fmt.Printf("    scores    %s\n", line)
+// judgingShare is what judging cost against what the conversation cost. It
+// is given only when both are whole: never against a priced part of either,
+// nor a total missing calls with no usage or calls that never finished.
+func judgingShare(s *sessionjudge.Summary) (float64, bool) {
+	if s.Judging == nil || s.Judging.Money == nil || s.Money == nil || *s.Money <= 0 || s.Judging.Unpriced > 0 ||
+		s.Judging.Unknown > 0 || s.Unpriced > 0 || s.Unknown > 0 || s.OutputUnknown > 0 {
+		return 0, false
 	}
-	var loose []string
-	for _, t := range r.targets {
-		if !placed[t.ID] {
-			loose = append(loose, t.ID)
-		}
-	}
-	if len(loose) > 0 {
-		if len(goals) > 0 {
-			fmt.Println("\n  not in a goal")
-		} else {
-			fmt.Println()
-		}
-		for _, id := range loose {
-			if o := r.outcomes[id]; o != nil {
-				printTarget(r, o, cost)
-			}
-		}
-		printFindings(r, loose)
-	}
-	if len(r.unassigned) > 0 {
-		fmt.Printf("\n  operations no target's calls made\n    %s\n", r.opsLine(r.unassigned, nil))
-	}
-	printGrouping(r)
-	printReferences(r)
+	return *s.Judging.Money / *s.Money, true
 }
 
-// unapplied says why what a conclusion shows of a delivery changed no
-// score, or nothing when it did: its source corrected it later, the
-// delivery no longer stood at the end, or another conclusion about the
-// target disagrees with it.
-func (r *runReport) unapplied(conclusion, target, event string) string {
-	o := r.outcomes[target]
-	var by string
-	for _, k := range r.conclusions {
-		if k.ID == conclusion {
-			by = k.SupersededBy
-		}
-	}
-	switch {
-	case o == nil:
-		return ""
-	case by != "":
-		return fmt.Sprintf("; it changes no score, since %s corrects it", by)
-	case !slices.Contains(o.Standing, event):
-		return fmt.Sprintf("; it changes no score, since %s no longer stands", event)
-	case !slices.Contains(o.References, conclusion):
-		return fmt.Sprintf("; it changes no score, since another conclusion about %s disagrees", target)
-	}
-	return ""
-}
+func ptr(f float64) *float64 { return &f }
 
-func (r *runReport) statementOf(id string) string {
-	for _, k := range r.conclusions {
-		if k.ID == id {
-			return k.Statement
-		}
-	}
-	return ""
-}
-
-// printReferences says what the run was compared with: each source as asz
-// saved it, or why it could not be, which leaves its comparison
-// unavailable; then each conclusion with how the conversation compared, and
-// what it rests on.
-func printReferences(r *runReport) {
-	if len(r.sources) == 0 {
-		return
-	}
-	fmt.Println("\n  references")
-	for _, s := range r.sources {
-		if s.Outcome != sessionjudge.SourceSaved {
-			fmt.Printf("    %s  %s: not saved, %s; its comparison is unavailable\n", s.ID, s.Source, trunc(oneLine(s.Error), 120))
-			continue
-		}
-		method := s.Method
-		if s.MCP != nil {
-			method = fmt.Sprintf("mcp %s at %s", s.MCP.Tool, s.MCP.Server)
-		}
-		line := fmt.Sprintf("    %s  %s: %s, saved %s, %d lines, sha256 %s", s.ID, s.Source, method, s.Captured, s.Lines, s.SHA256[:min(12, len(s.SHA256))])
-		if s.QueryRemoved {
-			line += ", kept without its query"
-		}
-		if s.Cut {
-			line += ", cut to its start"
-		}
-		if left := judge.LeftOut(s); left != "" {
-			line += "; " + left
-		}
-		fmt.Println(line)
-	}
-	for _, k := range r.conclusions {
-		d, ok := r.divergences[k.ID]
-		verdict := "not compared"
-		if ok {
-			verdict = strings.ReplaceAll(d.Verdict, "_", " ")
-			switch {
-			case d.Verdict == sessionjudge.VerdictContradicted && d.Whole:
-				verdict += fmt.Sprintf(" %s's delivered conclusion, %s", d.Target, d.Event)
-			case d.Verdict == sessionjudge.VerdictContradicted:
-				verdict += fmt.Sprintf(" %s of %s, %s", strings.Join(d.Criteria, ", "), d.Target, d.Event)
-			case d.Verdict == sessionjudge.VerdictReached:
-				verdict += " " + citesOf(d.Cite)
-			case d.Asserted:
-				verdict += ", the evaluator's judgment" + givenText(d.Given, "of the judged work")
-			}
-			if d.Verdict == sessionjudge.VerdictContradicted {
-				verdict += r.unapplied(k.ID, d.Target, d.Event)
-			}
-		}
-		fmt.Printf("    %s  %-12s %s\n", k.ID, k.Kind, trunc(oneLine(k.Statement), 100))
-		fmt.Printf("        %s\n", verdict)
-		for _, rb := range r.rollbacks {
-			if rb.Conclusion != k.ID {
-				continue
-			}
-			what := "the whole result"
-			if len(rb.Criteria) > 0 {
-				what = strings.Join(rb.Criteria, ", ")
-			}
-			fmt.Printf("        rolled back %s of %s, %s, outside the conversation%s\n", what, rb.Target, rb.Event, r.unapplied(k.ID, rb.Target, rb.Event))
-		}
-		var rests []string
-		rests = append(rests, k.Support+" support")
-		if len(k.Scope) > 0 {
-			rests = append(rests, "about "+strings.Join(k.Scope, ", "))
-		} else {
-			rests = append(rests, "about no input, so it changes no score")
-		}
-		if k.SupersededBy != "" {
-			rests = append(rests, "superseded by "+k.SupersededBy)
-		}
-		if len(k.Conflicts) > 0 {
-			rests = append(rests, "disagrees with "+strings.Join(k.Conflicts, ", "))
-		}
-		fmt.Printf("        %s\n", strings.Join(rests, "; "))
-	}
-}
-
-// printGrouping says whose grouping the report followed, and with a
-// regroup, how the judge's compares with the person's goals: each goal's
-// class with its targets and the judge's goal each is in, then the targets
-// that serve none of the person's goals, and those the regroup could not
-// place.
-func printGrouping(r *runReport) {
-	g := r.regroup
-	if g == nil {
-		return
-	}
-	var agreement sessionjudge.Agreement
-	if len(g.Agreements) > 0 {
-		agreement = g.Agreements[0]
-	}
-	l := g.Header.Labels
-	fmt.Printf("\n  grouping  by the person's goals, %s (sha256 %s), regroup %d; the judge agreed on %d of %s\n",
-		l.File, l.SHA256[:min(12, len(l.SHA256))], l.Version, agreement.Classes[sessionjudge.CompareAgree], plural(agreement.Goals, "goal"))
-	judgeOf := map[string]string{}
-	for _, jg := range r.goals {
-		for _, m := range jg.Members {
-			judgeOf[m] = jg.ID
-		}
-	}
-	for _, lg := range g.LabelGoals {
-		var in []string
-		for _, m := range lg.Members {
-			where := "in no goal"
-			if j := judgeOf[m]; j != "" {
-				where = "in " + j
-			}
-			in = append(in, m+" "+where)
-		}
-		line := fmt.Sprintf("    %-3s %-8s %s", lg.ID, lg.Class, trunc(oneLine(lg.Statement), 80))
-		if len(in) > 0 {
-			line += ": " + strings.Join(in, ", ")
-		}
-		fmt.Println(line)
-	}
-	if len(agreement.Extra) > 0 {
-		fmt.Printf("    serve none of the person's goals: %s\n", strings.Join(agreement.Extra, ", "))
-	}
-	if len(agreement.Unknown) > 0 {
-		fmt.Printf("    not placed: %s\n", strings.Join(agreement.Unknown, ", "))
-	}
-}
-
-func classOf(o *sessionjudge.Outcome) string {
-	if o == nil {
-		return ""
-	}
-	return o.Class
-}
-
-func reasonOf(reason string) string {
-	if reason == "" {
-		return ""
-	}
-	return ": " + trunc(oneLine(reason), 120)
-}
-
-// printTarget prints one target: its scores, how it ended, why, what was
-// done, the person's corrections, its rework, what it still misses, and
-// what it cost. What the evaluator wrote, such as a reason, a summary or how
-// it read a step, is marked as read, apart from what asz checked.
-func printTarget(r *runReport, o *sessionjudge.Outcome, cost func(*sessionjudge.Outcome)) {
-	fmt.Printf("\n    %s  %-80s %s\n", o.Target, trunc(oneLine(o.Statement), 80), scores(o))
-	a := r.achievements[o.Target]
-	line := strings.ReplaceAll(o.Class, "_", " ")
-	if line == "" {
-		line = "not judged"
-	}
-	if len(o.Standing) > 0 {
-		line += "; standing " + strings.Join(o.Standing, ", ")
-	}
-	if a != nil && len(a.Rework) > 0 {
-		line += "; " + plural(len(a.Rework), "round") + " of rework"
-	}
-	fmt.Printf("        outcome   %s\n", line)
-	fmt.Printf("        record    %s\n", verdict(*o))
-	if a == nil {
-		cost(o)
-		return
-	}
-	var met, missing []sessionjudge.Check
-	for _, k := range a.Criteria {
-		if k.State == sessionjudge.CheckMet {
-			met = append(met, k)
-		} else {
-			missing = append(missing, k)
-		}
-	}
-	for i, k := range met {
-		label := "why"
-		if i > 0 {
-			label = ""
-		}
-		printCheck(label, k)
-	}
-	for i, k := range a.Claims {
-		label := "claims"
-		if i > 0 {
-			label = ""
-		}
-		fmt.Printf("        %-9s %s: %s %s\n", label, strings.ReplaceAll(k.State, "_", " "), trunc(oneLine(k.Text), 100), citesOf(k.Cite))
-	}
-	printHistory(a, o)
-	for _, x := range a.Contradictions {
-		if slices.Contains(o.Standing, x.Event) {
-			fmt.Printf("        contradicted  %s, by %s: %s\n", disproved(x), citesOf(x.Cite), trunc(oneLine(x.Text), 120))
-		}
-	}
-	// What a source shows of a standing delivery, which applies to the
-	// final score as what the conversation shows does.
-	for _, id := range o.References {
-		if d, ok := r.divergences[id]; ok && d.Verdict == sessionjudge.VerdictContradicted && d.Target == o.Target {
-			what := "the delivered conclusion"
-			if !d.Whole {
-				what = strings.Join(d.Criteria, ", ")
-			}
-			fmt.Printf("        reference %s contradicts %s of %s: %s\n", id, what, d.Event, trunc(oneLine(r.statementOf(id)), 120))
-		}
-		for _, rb := range r.rollbacks {
-			if rb.Conclusion == id && rb.Target == o.Target {
-				what := "the whole result"
-				if len(rb.Criteria) > 0 {
-					what = strings.Join(rb.Criteria, ", ")
-				}
-				fmt.Printf("        reference %s rolled back %s of %s, outside the conversation: %s\n", id, what, rb.Event, trunc(oneLine(r.statementOf(id)), 120))
-			}
-		}
-	}
-	// The undoings that apply: those that took back a delivery still
-	// standing.
-	for _, e := range a.Events {
-		if !slices.Contains(o.Undone, e.ID) {
-			continue
-		}
-		what := "the whole result"
-		if len(e.Criteria) > 0 {
-			what = strings.Join(e.Criteria, ", ")
-		}
-		fmt.Printf("        undone    %s, by %s: %s\n", what, citesOf(e.Cite), trunc(oneLine(e.Text), 120))
-	}
-	printAccount(r, a, o)
-	if len(o.Corrections) > 0 {
-		fmt.Printf("        person    corrected it at %s\n", strings.Join(o.Corrections, ", "))
-	}
-	for i, w := range a.Rework {
-		label := "rework"
-		if i > 0 {
-			label = ""
-		}
-		state := "finished"
-		if !w.Finished {
-			state = "not finished"
-		}
-		fmt.Printf("        %-9s %s, %s, %s: from %s to %s; %s%s\n", label, w.ID, w.Trigger, strings.ReplaceAll(w.Cause, "_", " "), w.From, w.To, state, readAs(w.Note))
-	}
-	// What the rounds cost, each call once, by how the stages labeled it.
-	if len(o.Rework) > 0 {
-		var parts []string
-		for _, c := range o.Rework {
-			label := strings.ReplaceAll(c.Work, "_", " ")
-			switch c.Cause {
-			case "", sessionjudge.CauseMain:
-			case sessionjudge.CauseUnknown:
-				label += ", cause unknown"
-			default:
-				label += ", by " + c.Cause
-			}
-			parts = append(parts, fmt.Sprintf("%s %s tokens", label, tokensOf(float64(c.Cost.Tokens()))))
-		}
-		fmt.Printf("                  cost: %s\n", strings.Join(parts, "; "))
-	}
-	for i, k := range missing {
-		label := "gap"
-		if i > 0 {
-			label = ""
-		}
-		printCheck(label, k)
-	}
-	cost(o)
-}
-
-// printHistory prints a target's deliveries in recorded order, each with
-// the contradictions of it that no longer apply, since a later delivery
-// replaced it. What stands at the end is printed apart, as what applies.
-func printHistory(a *sessionjudge.Achievement, o *sessionjudge.Outcome) {
-	for i, e := range a.Events {
-		label := "history"
-		if i > 0 {
-			label = ""
-		}
-		line := e.ID + " " + strings.ReplaceAll(e.Kind, "_", " ")
-		switch {
-		case e.Kind == sessionjudge.EventUndone && len(e.Criteria) > 0:
-			line += " " + strings.Join(e.Criteria, ", ")
-		case e.Kind == sessionjudge.EventUndone:
-			line += " the whole result"
-		case len(e.Replaces) > 0:
-			line += ", replacing " + strings.Join(e.Replaces, ", ")
-		}
-		if len(e.Undoes) > 0 {
-			line += " of " + strings.Join(e.Undoes, ", ")
-		}
-		if e.Artifact != "" {
-			line += " (" + e.Artifact + ")"
-		}
-		if len(e.Cite) > 0 {
-			line += " " + citesOf(e.Cite)
-		}
-		if e.Text != "" {
-			line += ": " + trunc(oneLine(e.Text), 100)
-		}
-		fmt.Printf("        %-9s %s\n", label, line)
-		for _, x := range a.Contradictions {
-			if x.Event == e.ID && !slices.Contains(o.Standing, e.ID) {
-				fmt.Printf("                    contradicted %s, by %s: %s; replaced since\n", disproved(x), citesOf(x.Cite), trunc(oneLine(x.Text), 100))
-			}
-		}
-	}
-}
-
-// disproved says what a contradiction shows wrong: the delivered conclusion,
-// or some criteria.
-func disproved(x sessionjudge.Contradiction) string {
-	if x.Conclusion {
-		return "the delivered conclusion"
-	}
-	return strings.Join(x.Criteria, ", ")
-}
-
-// printCheck prints one criterion: its state and reason, asz's when asz
-// changed the state with the evaluator's beside it, then what its steps
-// show.
-func printCheck(label string, k sessionjudge.Check) {
-	state := strings.ReplaceAll(k.State, "_", " ")
-	fmt.Printf("        %-9s %s %s: %s\n", label, k.ID, state, trunc(oneLine(k.Text), 80))
-	if k.GivenReason != "" {
-		fmt.Printf("                    asz: %s; the evaluator read: %s\n", k.Reason, trunc(oneLine(k.GivenReason), 120))
-	} else if k.Reason != "" {
-		fmt.Printf("                    read: %s\n", trunc(oneLine(k.Reason), 140))
-	}
-	for _, ob := range k.Observations {
-		status := ""
-		if ob.Status != "" {
-			status = " " + strings.ReplaceAll(ob.Status, "_", " ")
-		}
-		excerpt := ""
-		if ob.Excerpt != "" {
-			excerpt = fmt.Sprintf(" %q", trunc(oneLine(ob.Excerpt), 80))
-		}
-		fmt.Printf("                    [%s%s]%s%s\n", ob.Node, status, excerpt, readAs(ob.Interpretation))
-	}
-}
-
-// readAs marks text the evaluator wrote, apart from what asz checked.
-func readAs(text string) string {
-	if text == "" {
-		return ""
-	}
-	return " — read: " + trunc(oneLine(text), 120)
-}
-
-func citesOf(cites []sessionjudge.Cite) string {
-	var ids []string
-	for _, c := range cites {
-		ids = append(ids, c.Node)
-	}
-	if len(ids) == 0 {
-		return "nothing cited"
-	}
-	return "[" + strings.Join(ids, " ") + "]"
-}
-
-// printAccount prints what was done for a target, by what it was for: an
-// answer, the files it changed, grouped as the evaluator grouped them with
-// the rest listed apart, and its changes to other systems. A target that
-// delivered files the record names none of says so, rather than nothing.
-func printAccount(r *runReport, a *sessionjudge.Achievement, o *sessionjudge.Outcome) {
-	acc := a.Account
-	var lines []string
-	if acc != nil && acc.Answer != nil {
-		an := acc.Answer
-		lines = append(lines, "answer")
-		lines = append(lines, fmt.Sprintf("  asked      %s %s", trunc(oneLine(an.Asked.Text), 100), citesOf(an.Asked.Cite)))
-		for _, x := range an.Checked {
-			lines = append(lines, fmt.Sprintf("  checked    %s: %s %s%s", trunc(oneLine(x.What), 60), trunc(oneLine(x.Found), 80), citesOf(x.Cite), limitsOf(x.Limits)))
-		}
-		for _, x := range an.RuledOut {
-			lines = append(lines, fmt.Sprintf("  ruled out  %s: %s %s%s", trunc(oneLine(x.What), 60), trunc(oneLine(x.Found), 80), citesOf(x.Cite), limitsOf(x.Limits)))
-		}
-		lines = append(lines, fmt.Sprintf("  answered   %s %s", trunc(oneLine(an.Answered.Text), 100), citesOf(an.Answered.Cite)))
-	}
-	share := map[string]*float64{}
-	for _, s := range o.Operations {
-		share[s.ID] = s.Share
-	}
-	if len(o.Operations) > 0 {
-		lines = append(lines, "files")
-		grouped := map[string]bool{}
-		if acc != nil {
-			for _, g := range acc.Files {
-				lines = append(lines, fmt.Sprintf("  %s, %s: %s", g.Area, g.Category, trunc(oneLine(g.Summary), 100)))
-				lines = append(lines, "    "+r.opsLine(g.Operations, share))
-				for _, id := range g.Operations {
-					grouped[id] = true
-				}
-			}
-		}
-		var rest []string
-		for _, s := range o.Operations {
-			if !grouped[s.ID] {
-				rest = append(rest, s.ID)
-			}
-		}
-		if len(rest) > 0 {
-			label := "  not grouped: "
-			if len(grouped) == 0 {
-				label = "  "
-			}
-			lines = append(lines, label+r.opsLine(rest, share))
-		}
-	}
-	if len(o.Operations) == 0 && slices.ContainsFunc(a.Events, func(e sessionjudge.Event) bool {
-		return e.Artifact == sessionjudge.ArtifactFile || e.Artifact == sessionjudge.ArtifactRevision
-	}) {
-		lines = append(lines, "files", "  none recorded: no change record captured them, and no editing tool's request named them")
-	}
-	if acc != nil && len(acc.Remote) > 0 {
-		lines = append(lines, "remote")
-		for _, x := range acc.Remote {
-			l := fmt.Sprintf("  %s: %s via %s, sent %s", x.System, trunc(oneLine(x.Operation), 80), x.Via, citesOf(x.Request.Cite))
-			if x.Response != nil {
-				l += ", answered " + citesOf(x.Response.Cite)
-			}
-			if x.Confirmed != nil {
-				l += ", confirmed " + citesOf(x.Confirmed.Cite)
-			} else {
-				l += ", not confirmed"
-			}
-			lines = append(lines, l)
-		}
-	}
-	for i, l := range lines {
-		label := "did"
-		if i > 0 {
-			label = ""
-		}
-		fmt.Printf("        %-9s %s\n", label, l)
-	}
-}
-
-// givenText says how much of an absence claim's steps the evaluator was
-// given, beside the claim: what it asked for and was answered, what it saw
-// only named in a list, and what it was not given. It never says the claim
-// holds. A run made before readings were kept has none.
-func givenText(g *sessionjudge.Given, where string) string {
-	switch {
-	case g == nil:
-		return "; what it was given was not recorded"
-	case g.Counts == nil:
-		return "; what it was given is unavailable: " + g.Reason
-	}
-	c := g.Counts
-	text := fmt.Sprintf("; of the %s %s it opened %d, saw %d only in lists and was not given %d", plural(c.Steps, "step"), where, c.Opened, c.Listed, c.None)
-	if c.Unavailable > 0 {
-		text += fmt.Sprintf("; %d hold evidence no one can be given", c.Unavailable)
-	}
-	return text
-}
-
-// causeOf says a finding's cause and the conclusion it is against. A cause
-// that rests on something not happening is the evaluator's judgment, said
-// with how much of its span the evaluator was given.
-func causeOf(f sessionjudge.Finding) string {
-	line := strings.ReplaceAll(f.Cause, "_", " ")
-	if f.Conclusion != "" {
-		line += ", against " + f.Conclusion
-	}
-	if f.Asserted {
-		line += "; the evaluator's judgment, since the record cannot show it was looked for everywhere" +
-			givenText(f.Given, fmt.Sprintf("from %s to %s", f.From, f.At))
-	}
-	return line
-}
-
-func limitsOf(limits string) string {
-	if limits == "" {
-		return ""
-	}
-	return "; holds for: " + trunc(oneLine(limits), 80)
-}
-
-// opsLine prints some operations by path and what happened, at most a dozen,
-// with their ids. A request names an attempt, so it says whether its tool
-// returned; a share says the call was shared.
-func (r *runReport) opsLine(ids []string, share map[string]*float64) string {
-	var parts []string
-	for i, id := range ids {
-		if i == 12 {
-			parts = append(parts, fmt.Sprintf("and %d more", len(ids)-12))
-			break
-		}
-		op, ok := r.ops[id]
-		if !ok {
-			parts = append(parts, id)
-			continue
-		}
-		path := op.Path
-		if path == "" {
-			path = "files not listed"
-		}
-		what := op.Operation
-		switch {
-		case op.Source == sessionjudge.SourceToolRequest:
-			what += ", " + strings.ReplaceAll(op.Status, "_", " ")
-		case op.Added != nil && op.Removed != nil:
-			what += fmt.Sprintf(" +%d -%d", *op.Added, *op.Removed)
-		}
-		if s := share[id]; s != nil {
-			what += fmt.Sprintf(", share %.2g", *s)
-		}
-		parts = append(parts, fmt.Sprintf("%s (%s)", path, what))
-	}
-	return strings.Join(parts, ", ") + " [" + strings.Join(ids, " ") + "]"
-}
-
-// printFindings prints the findings of some targets in the order their
-// steps landed, those whose place is unknown last. An explanation and an
-// improvement are proposals.
-func printFindings(r *runReport, targets []string) {
-	var all []sessionjudge.Finding
-	for _, t := range targets {
-		all = append(all, r.findings[t]...)
-	}
-	if len(all) == 0 {
-		return
-	}
-	sort.SliceStable(all, func(i, j int) bool { return refLess(all[i].Ref, all[j].Ref) })
-	fmt.Println("\n    findings")
-	for _, f := range all {
-		fmt.Printf("      %s at %s, %s: %s\n", f.Target, f.At, f.Source, trunc(oneLine(f.Problem), 120))
-		if f.Cause != "" {
-			fmt.Printf("        cause: %s\n", causeOf(f))
-		}
-		if f.Explanation != "" {
-			fmt.Printf("        why, proposed: %s\n", trunc(oneLine(f.Explanation), 120))
-		}
-		if f.Improvement != "" {
-			fmt.Printf("        improvement, proposed: %s\n", trunc(oneLine(f.Improvement), 120))
-		}
-	}
-}
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func refLess(a, b *sessionjudge.Ref) bool {
 	switch {

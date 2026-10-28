@@ -46,7 +46,7 @@ one `commit`.
 | `reading` | what the evaluator read through the navigation in the stage: `calls`, `bytes` of answers, the `budget` it had, and how many answers were `refused` because the budget ran out |
 | `usage`, `credits` | what the evaluator itself consumed, when it said, every model it used counted. Absent means unknown, never zero |
 | `reported_cost_usd` | what the evaluator itself said the stage cost, in US dollars, when it said, as claude does. It is kept apart from any price asz applies |
-| `summary` | on the close file only: what a list of runs shows. `targets` and the count at each level, `usage` of the conversation with `unknown` and `output_unknown`, the calls it leaves out, `avoidable` usage, the sum of the targets' own, `avoidable_by_subtasks`, the part sub-agents caused, `avoidable_cause_unknown`, the part whose cause the record does not show, and `money`, `currency` and `unpriced` when priced; `score`, with `final`, the mean of the targets' final scores; `goals`, each goal's `goal`, `main`, `worst` class, `first`, the finding recorded first, with `first_order`, `partial` when some of its findings had no recorded place and `none` when none had one, `score_main` and `score_mean`; `unassigned_operations`, the operations no target's calls made; and `judging`, what the run's evaluators consumed as an amount, absent when one of them did not say, its `unknown` counting the requests whose usage was never said; its `unpriced` counts the stages with a model that had no price; `judging_reported_usd`, what the evaluators said the run cost, present only when every stage that ran said; `judging_ms`, the time from the first evaluator stage's start to the last one's end |
+| `summary` | on the close file only: what a list of runs shows. `targets` and the count at each level, `usage` of the conversation with `unknown` and `output_unknown`, the calls it leaves out, `avoidable` usage, the sum of the targets' own, `avoidable_by_subtasks`, the part sub-agents caused, `avoidable_cause_unknown`, the part whose cause the record does not show, and `money`, `currency` and `unpriced` when priced; `score`, with `final`, the mean of the targets' final scores; `unassigned_operations`, the operations no target's calls made; and `judging`, what the run's evaluators consumed as an amount, absent when one of them did not say, its `unknown` counting the requests whose usage was never said; its `unpriced` counts the stages with a model that had no price; `judging_reported_usd`, what the evaluators said the run cost, present only when every stage that ran said; `judging_ms`, the time from the first evaluator stage's start to the last one's end |
 | `score` | `achievement` and `judged`, the targets it is the mean over; `final`, the mean of the targets' final scores; `efficiency`, `reviewed` and `delivered`, each a fraction; `unit`, `money` or `tokens`. A number is absent when nothing could give it |
 
 ### Body frames
@@ -158,15 +158,15 @@ A regroup is made over a closed run from a person's goals, a plain list in their
 a stage of the run: it has a file of its own beside the run's, named by its version,
 `g<version>-regroup-<digest12>.sj`, and the run's files are never changed. Its header has the stage
 `regroup`, `builds_on` the run's targets stage, the evaluator whose one call placed the targets, with
-what it consumed as a stage's header has it, and `labels`: the label file's `file`, its `sha256` and
+what it consumed as a stage's header has it, and `goals`: the goals file's `file`, its `sha256` and
 the regroup's `version`. It is `partial` when parts of the answer were left out, its note saying
-which, and `failed` when the call gave no answer, with only its `label_text`. Its frames, in this
+which, and `failed` when the call gave no answer, with only its `goals_text`. Its frames, in this
 order:
 
 | Frame | Fields |
 | --- | --- |
-| `label_text` | `from` and `text`: the label file as the person gave it, cut as a source's text is, the frames in order the file, so the comparison can be made again after the file changed or was removed |
-| `label_goal` | one of the person's goals, in their order: `id` such as `P1`, `statement`, its words, `members`, the targets that serve it, `main`, `judge`, the goals of the judge its targets are in, `class`, `worked` when the conversation worked on it, `asserted` and `given` (see [Given](#given)) when the class is `absent`, `note`, and `cite`, the person's inputs that asked for it |
+| `goals_text` | `from` and `text`: the goals file as the person gave it, cut as a source's text is, the frames in order the file, so the comparison can be made again after the file changed or was removed |
+| `goal` | one of the person's goals, in their order: `id` such as `P1`, `statement`, its words, `members`, the targets that serve it, `main`, `judge`, the goals of the judge its targets are in, absent when none, `class`, `worked` when the conversation worked on it, `asserted` and `given` (see [Given](#given)) when the class is `absent`, `note`, and `cite`, the person's inputs that asked for it. It is the frame the targets stage writes for the judge's goals, with these fields in place of theirs |
 | `placement` | one per target of the run: `target`, `goal`, the person's goal it serves, absent for none, `unknown` when the answer left it out or nothing shows its goal, `note`, and `cite`, the person's inputs that show its goal |
 | `agreement` | `goals`, how many the person gave; `classes`, the count of each; `extra`, the targets that serve none of them; `unknown`, the targets not placed |
 

@@ -33,7 +33,6 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
-	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
@@ -65,24 +64,6 @@ func TestTheJudgingShareNeedsWholeTotals(t *testing.T) {
 	}
 }
 
-// A stage that had nothing to answer says it made no call, not that what it
-// consumed is unknown.
-func TestAStageSaysWhatItConsumed(t *testing.T) {
-	cli := sessionjudge.Evaluator{Kind: sessionjudge.EvaluatorCLI}
-	for want, h := range map[string]sessionjudge.Header{
-		"computed":                   {Evaluator: sessionjudge.Evaluator{Kind: sessionjudge.EvaluatorComputed}},
-		"no call, nothing to answer": {Evaluator: cli, Usage: &sessiondata.Usage{}},
-		"usage unknown":              {Evaluator: cli, Chunks: 2, Attempts: 2},
-		"in 1, out 2, cache read 3, cache write 4": {Evaluator: cli, Chunks: 1, Attempts: 1, Usage: &sessiondata.Usage{Input: 1, Output: 2, CacheRead: 3, CacheWrite: 4}},
-		"in 1, out 0, cache read 0, cache write 0; 2 requests with usage unknown, not counted": {Evaluator: cli, Chunks: 1, Attempts: 1,
-			Usage: &sessiondata.Usage{Input: 1}, Requests: &sessionjudge.Requests{Count: 3, Unknown: 2}},
-	} {
-		if got := stageUsage(h); got != want {
-			t.Errorf("%q, want %q", got, want)
-		}
-	}
-}
-
 // printed runs f and returns what it wrote to standard output.
 func printed(t *testing.T, f func()) string {
 	t.Helper()
@@ -99,46 +80,32 @@ func TestAReportLargerThanAPipeIsRead(t *testing.T) {
 }
 
 // What a person reads: the share of the conversation's cost only beside whole
-// totals, and a stage with nothing to answer said to have made no call.
+// totals, and as judging only the stages that asked an evaluator.
 func TestWhatARunPrints(t *testing.T) {
 	s := &sessionjudge.Summary{Money: ptr(4), Judging: &sessionjudge.Amount{Money: ptr(1)}, Score: &sessionjudge.Score{}}
-	if out := printed(t, func() { printScore(s, nil) }); !strings.Contains(out, "25% of what the conversation cost") {
-		t.Fatalf("whole totals:\n%s", out)
+	r := &runReport{summary: s}
+	if got := r.usageWords(); !strings.Contains(got, "25% of what the conversation cost") {
+		t.Fatalf("whole totals: %s", got)
 	}
 	s.OutputUnknown = 1
-	if out := printed(t, func() { printScore(s, nil) }); strings.Contains(out, "of what the conversation cost") {
-		t.Fatalf("a share beside a total missing output:\n%s", out)
+	if got := r.usageWords(); strings.Contains(got, "of what the conversation cost") {
+		t.Fatalf("a share beside a total missing output: %s", got)
 	}
-	files := []*sessionjudge.File{{Header: sessionjudge.Header{Stage: "subtasks", Status: sessionjudge.StatusComplete,
-		Evaluator: sessionjudge.Evaluator{Name: "opus", Kind: sessionjudge.EvaluatorCLI}, Usage: &sessiondata.Usage{}}}}
-	if out := printed(t, func() { printRun(storage.JudgmentRun{Run: 1}, files) }); !strings.Contains(out, "subtasks     complete  by opus, no call, nothing to answer") {
-		t.Fatalf("a stage with no call:\n%s", out)
+	// A total that leaves something out says what.
+	s.Judging.Unknown = 1
+	if got := r.usageWords(); !strings.Contains(got, "not counting the output of 1 call that never finished") ||
+		!strings.Contains(got[strings.Index(got, "judging used"):], "not counting 1 model request whose usage is unknown") {
+		t.Fatalf("a partial total said as whole: %s", got)
 	}
-	// What sub-tasks caused is said beside the target's avoidable cost, and
-	// per sub-task, the asking agent's work on its report included.
-	one, zero := 1, int64(0)
-	half := 0.5
-	subs := &sessionjudge.File{Header: sessionjudge.Header{Stage: "subtasks", Coverage: &sessionjudge.Coverage{Subtasks: &one, SubtasksJudged: &one}},
-		Subtasks: []sessionjudge.Subtask{{ID: "stream/a", Outcome: "not_achieved", Report: "inaccurate", Use: "misled", Dispatch: "reasonable"}}}
-	closed := &sessionjudge.File{Header: sessionjudge.Header{Stage: "close", Summary: &sessionjudge.Summary{Score: &sessionjudge.Score{}}},
-		Outcomes: []sessionjudge.Outcome{{Target: "t1", Statement: "push it", Avoidable: &sessionjudge.Amount{Usage: sessiondata.Usage{Input: 300}},
-			AvoidableBySubtasks: &sessionjudge.Amount{Usage: sessiondata.Usage{Input: 200}}, AvoidableCauseUnknown: &sessionjudge.Amount{Usage: sessiondata.Usage{Input: 50}},
-			NotReviewed: &sessionjudge.Amount{}, AvoidableSpan: &zero}},
-		Costs: []sessionjudge.Cost{
-			{Scope: sessionjudge.ScopeWork, Target: "t1", Work: sessionjudge.WorkMisled, Cause: "stream/a", Usage: sessiondata.Usage{Input: 400}, Share: &half},
-			{Scope: sessionjudge.ScopeWork, Target: "t1", Work: sessionjudge.WorkRepeated, Cause: sessionjudge.CauseMain, Usage: sessiondata.Usage{Input: 100}},
-			{Scope: sessionjudge.ScopeWork, Target: "t1", Work: sessionjudge.WorkMisled, Cause: sessionjudge.CauseUnknown, Usage: sessiondata.Usage{Input: 50}}}}
-	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 1}, []*sessionjudge.File{subs, closed}) })
-	for _, want := range []string{"of which sub-tasks caused 200 tokens", "50 tokens of a cause the record does not show", "use misled 1",
-		"stream/a caused 200 of avoidable work"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("no %q in:\n%s", want, out)
-		}
+	cli := sessionjudge.Evaluator{Name: "opus", Kind: sessionjudge.EvaluatorCLI}
+	r.headers = []sessionjudge.Header{
+		{Stage: sessionjudge.StageLedger, Status: sessionjudge.StatusComplete, Evaluator: sessionjudge.Evaluator{Name: "asz", Kind: sessionjudge.EvaluatorComputed}},
+		{Stage: sessionjudge.StageSubtasks, Status: sessionjudge.StatusComplete, Evaluator: cli},
+		{Stage: sessionjudge.StageTargets, Status: sessionjudge.StatusComplete, Evaluator: sessionjudge.Evaluator{Name: "claude", Kind: sessionjudge.EvaluatorCLI,
+			Model: "claude-fable-5-1"}, Attempts: 1},
 	}
-	// The main agent's own avoidable work is no sub-task's, nor is work of
-	// a cause the record does not show.
-	if strings.Contains(out, "main caused") || strings.Contains(out, "unknown caused") {
-		t.Errorf("the main agent listed as a sub-task:\n%s", out)
+	if got := r.stageWords(); got != "every stage completed; judged by claude with claude-fable-5-1" {
+		t.Fatalf("stages: %s", got)
 	}
 }
 
@@ -209,17 +176,22 @@ func TestARunIsListedFromItsCloseFile(t *testing.T) {
 	}
 }
 
-// -show prints the run asked for, and a run that is not there is an error,
-// never another run printed in its place.
+// -show prints the run asked for, or the latest closed one, and a run that is
+// not there is an error, never another run printed in its place.
 func TestShowPrintsTheRunAskedFor(t *testing.T) {
 	z := threeRuns(t)
 	code := 0
-	out := stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 2, false) })
-	if code != 0 || !strings.HasPrefix(out, "run 2  ") || !strings.Contains(out, "close ") || strings.Contains(out, "not closed") {
+	out := stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 2, showOptions{format: formatText}) })
+	if code != 0 || !strings.HasPrefix(out, "run 2 of conversation s1") || !strings.Contains(out, "overall result") || strings.Contains(out, "not closed") {
 		t.Fatalf("exit %d, run 2 printed as:\n%s", code, out)
 	}
-	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 1, false) })
-	if code != 0 || !strings.HasPrefix(out, "run 1  ") || !strings.Contains(out, "not closed") {
+	// With no run named, the latest closed one: run 3 is not closed.
+	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 0, showOptions{format: formatText}) })
+	if code != 0 || !strings.HasPrefix(out, "run 2 of conversation s1") {
+		t.Fatalf("exit %d, the latest closed run printed as:\n%s", code, out)
+	}
+	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 1, showOptions{format: formatText}) })
+	if code != 0 || !strings.HasPrefix(out, "run 1 ") || !strings.Contains(out, "the run is not closed") {
 		t.Fatalf("exit %d, run 1 printed as:\n%s", code, out)
 	}
 	// The run's latest regroup is shown with it, and the report follows the
@@ -234,16 +206,16 @@ func TestShowPrintsTheRunAskedFor(t *testing.T) {
 		}
 		w, err := sessionjudge.NewWriter(sessionjudge.Header{Conversation: "s1", Session: "s1", Run: 2, Stage: sessionjudge.StageRegroup,
 			Head: sessionjudge.Head{Round: 3, Digest: strings.Repeat("a", 64)}, Evaluator: sessionjudge.Evaluator{Name: "stand-in", Kind: sessionjudge.EvaluatorCLI},
-			Labels:  &sessionjudge.LabelFile{File: "goals.yaml", SHA256: strings.Repeat("c", 64), Version: version + 1},
+			Goals:   &sessionjudge.GoalsFile{File: "goals.yaml", SHA256: strings.Repeat("c", 64), Version: version + 1},
 			Started: "2026-10-20T10:00:00Z", Finished: "2026-10-20T10:05:00Z", Status: status})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := w.Write(&sessionjudge.LabelText{From: 1, Text: "goals:\n  - " + statement + "\n"}); err != nil {
+		if err := w.Write(&sessionjudge.GoalsText{From: 1, Text: "goals:\n  - " + statement + "\n"}); err != nil {
 			t.Fatal(err)
 		}
 		if statement != "" {
-			if err := w.Write(&sessionjudge.LabelGoal{ID: "P1", Statement: statement, Members: []string{}, Judge: []string{}, Class: sessionjudge.CompareAbsent,
+			if err := w.Write(&sessionjudge.Goal{ID: "P1", Statement: statement, Members: []string{}, Judge: []string{}, Class: sessionjudge.CompareAbsent,
 				Cite: []sessionjudge.Cite{}}); err != nil {
 				t.Fatal(err)
 			}
@@ -256,14 +228,33 @@ func TestShowPrintsTheRunAskedFor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 2, false) })
-	if code != 0 || !strings.Contains(out, "regroup      complete") || !strings.Contains(out, "regroup      failed") ||
-		!strings.Contains(out, "goal P1  the latest grouping") || strings.Contains(out, "the first grouping") {
+	out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 2, showOptions{format: formatText}) })
+	if code != 0 || !strings.Contains(out, "stages not complete: regroup failed") ||
+		!strings.Contains(out, "goal 1: the latest grouping") || strings.Contains(out, "the first grouping") {
 		t.Fatalf("exit %d, run 2 with its regroups printed as:\n%s", code, out)
 	}
-	said := stderrOf(t, func() { out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 4, false) }) })
+	said := stderrOf(t, func() {
+		out = stdoutOf(t, func() { code = judgeShow(z, "s1", "s1", 4, showOptions{format: formatText}) })
+	})
 	if code != 1 || out != "" || !strings.Contains(said, "s1 has no run 4") {
 		t.Fatalf("exit %d for a run not there, printed %q, said %q", code, out, said)
+	}
+}
+
+// A page over a pulled snapshot reads none of its steps, whether the snapshot
+// was selected or given as the storage root: its evidence is read only
+// through its checks.
+func TestAPageOverASnapshotReadsNoSteps(t *testing.T) {
+	p := pulledSnapshot(t)
+	if pageSteps(p.root, nil) == nil {
+		t.Fatal("a storage root's steps were not read")
+	}
+	if _, err := admitRoot("judge", rootConfig(p.snapshot), p.snapshot); err != nil {
+		t.Fatal(err)
+	}
+	defer releaseAdmission()
+	if pageSteps(p.snapshot, nil) != nil {
+		t.Fatal("a snapshot given as the root was read without its checks")
 	}
 }
 
@@ -401,23 +392,16 @@ func TestTheNavigationServerNeedsItsHead(t *testing.T) {
 }
 
 // The score line counts the targets the score is over, and names a replaced
-// one apart; and a share of a call reads the same in a target's cost as in
-// what is said about its calls.
-func TestTheScoreAndCallsReadAsTheyAdd(t *testing.T) {
+// one apart.
+func TestTheScoreReadsAsItAdds(t *testing.T) {
 	one := 1.0
-	s := &sessionjudge.Summary{Score: &sessionjudge.Score{Judged: 2, Achievement: &one}, Achieved: 2, NotAchieved: 1}
-	outcomes := []sessionjudge.Outcome{
-		{Target: "t1", Status: sessionjudge.TargetReplaced, Level: sessionjudge.LevelNotAchieved},
-		{Target: "t2", Status: sessionjudge.TargetClosed, Level: sessionjudge.LevelAchieved},
-		{Target: "t3", Status: sessionjudge.TargetClosed, Level: sessionjudge.LevelAchieved},
-	}
-	out := printed(t, func() { printScore(s, outcomes) })
-	if !strings.Contains(out, "over 2 targets judged: achieved 2, partly 0, not achieved 0; 0 cannot be verified; 1 cancelled or replaced, not scored") {
-		t.Fatalf("score:\n%s", out)
-	}
-	for f, want := range map[float64]string{60.5: "60.5", 2.5: "2.5", 0.5: "0.5", 61: "61"} {
-		if got := share(f); got != want {
-			t.Errorf("share(%v) = %s, want %s", f, got, want)
-		}
+	r := &runReport{summary: &sessionjudge.Summary{Score: &sessionjudge.Score{Judged: 2, Achievement: &one}}, outcomes: map[string]*sessionjudge.Outcome{
+		"t1": {Target: "t1", Status: sessionjudge.TargetReplaced, Level: sessionjudge.LevelNotAchieved},
+		"t2": {Target: "t2", Status: sessionjudge.TargetClosed, Level: sessionjudge.LevelAchieved},
+		"t3": {Target: "t3", Status: sessionjudge.TargetClosed, Level: sessionjudge.LevelAchieved},
+	}}
+	want := "by the achievement record: 100 of 100 over 2 targets: 2 achieved, 0 partly, 0 not achieved, 0 cannot be verified; 1 cancelled or replaced, not scored"
+	if got := r.assessment()[0]; got != want {
+		t.Fatalf("score: %s", got)
 	}
 }

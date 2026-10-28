@@ -152,18 +152,18 @@ func TestARemoteSelectorIsCheckedFirst(t *testing.T) {
 	cfg := pulledConfig(t, p)
 	name := "prod/" + p.conversation
 	for why, args := range map[string][]string{
-		"both":                   {"-remote-conversation", name, p.conversation},
-		"-pull of a tag":         {"-pull", "-remote-conversation", name + ":" + filepath.Base(p.snapshot)},
-		"-pull with -list":       {"-pull", "-list", "-remote-conversation", name},
-		"-pull with -show":       {"-pull", "-show", "1", "-remote-conversation", name},
-		"-pull with -show 0":     {"-pull", "-show", "0", "-remote-conversation", name},
-		"-pull with -regroup -1": {"-pull", "-regroup", "-1", "-remote-conversation", name},
-		"-pull alone":            {"-pull", p.conversation},
-		"no slash":               {"-remote-conversation", "prod"},
-		"not a tag":              {"-remote-conversation", name + ":yesterday"},
-		"an empty tag":           {"-remote-conversation", name + ":"},
-		"an unsafe remote":       {"-remote-conversation", "../" + p.conversation},
-		"an unsafe session":      {"-remote-conversation", "prod/" + strings.Repeat("x", 300)},
+		"both":                    {"-remote-conversation", name, p.conversation},
+		"-pull of a tag":          {"-pull", "-remote-conversation", name + ":" + filepath.Base(p.snapshot)},
+		"-pull with -list":        {"-pull", "-list", "-remote-conversation", name},
+		"-pull with -show":        {"-pull", "-show", "-remote-conversation", name},
+		"-pull with -show -run 1": {"-pull", "-show", "-run", "1", "-remote-conversation", name},
+		"-pull with -regroup -1":  {"-pull", "-regroup", "-1", "-remote-conversation", name},
+		"-pull alone":             {"-pull", p.conversation},
+		"no slash":                {"-remote-conversation", "prod"},
+		"not a tag":               {"-remote-conversation", name + ":yesterday"},
+		"an empty tag":            {"-remote-conversation", name + ":"},
+		"an unsafe remote":        {"-remote-conversation", "../" + p.conversation},
+		"an unsafe session":       {"-remote-conversation", "prod/" + strings.Repeat("x", 300)},
 	} {
 		var code int
 		_ = stderrOf(t, func() { code = cmdJudge(append([]string{"-config", cfg}, args...)) })
