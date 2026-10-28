@@ -37,11 +37,13 @@ var mcpVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
 // this server can read the conversation and cannot change anything.
 //
 // Every call is logged through onCall, when it is set, so a run can say what
-// its evaluator read.
+// its evaluator read: after its answer was written whole, with the receipt
+// of what the answer gave, since an answer that never reached the evaluator
+// gave it nothing.
 // Once the call's reading budget is spent, every tool says so; after
 // budgetRefusals such answers the server ends, so an evaluator that goes on
 // asking has nothing left to ask and answers with what it read.
-func ServeMCP(r io.Reader, w io.Writer, nav *Nav, onCall func(tool string, args json.RawMessage, bytes int, err error)) error {
+func ServeMCP(r io.Reader, w io.Writer, nav *Nav, onCall func(tool string, args json.RawMessage, bytes int, err error, given Receipt)) error {
 	var mu sync.Mutex
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
@@ -99,7 +101,7 @@ type rpcResponse struct {
 // gives before it ends.
 const budgetRefusals = 3
 
-func answer(line []byte, nav *Nav, send func(any) error, onCall func(string, json.RawMessage, int, error)) error {
+func answer(line []byte, nav *Nav, send func(any) error, onCall func(string, json.RawMessage, int, error, Receipt)) error {
 	var req rpcRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		return send(rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}})
@@ -144,20 +146,26 @@ func answer(line []byte, nav *Nav, send func(any) error, onCall func(string, jso
 		if err := json.Unmarshal(req.Params, &p); err != nil {
 			return send(rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32602, Message: "invalid params"}})
 		}
-		out, err := nav.Call(p.Name, p.Arguments)
+		out, given, err := nav.Answer(p.Name, p.Arguments)
 		if err != nil {
-			if onCall != nil {
-				onCall(p.Name, p.Arguments, 0, err)
-			}
 			// A tool's own failure is an answer the model reads, not a
 			// protocol error, so it can correct the call.
-			return reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": err.Error()}}, "isError": true})
+			if serr := reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": err.Error()}}, "isError": true}); serr != nil {
+				return serr
+			}
+			if onCall != nil {
+				onCall(p.Name, p.Arguments, 0, err, Receipt{})
+			}
+			return nil
 		}
 		b, _ := json.Marshal(out)
-		if onCall != nil {
-			onCall(p.Name, p.Arguments, len(b), nil)
+		if serr := reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(b)}}}); serr != nil {
+			return serr
 		}
-		return reply(map[string]any{"content": []any{map[string]any{"type": "text", "text": string(b)}}})
+		if onCall != nil {
+			onCall(p.Name, p.Arguments, len(b), nil, given)
+		}
+		return nil
 	}
 	return send(rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32601, Message: "method not found: " + req.Method}})
 }

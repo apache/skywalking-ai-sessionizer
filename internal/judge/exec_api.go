@@ -91,6 +91,11 @@ type toolResult struct {
 	Text   string
 	Error  bool
 	masked bool
+	// given is the receipt of what the answer gave, and sent says a request
+	// has carried the result, or never will: it counts once, when it first
+	// reaches the model whole.
+	given Receipt
+	sent  bool
 }
 
 func (a *apiExecutor) Run(ctx context.Context, t Task) (Result, error) {
@@ -135,10 +140,11 @@ func (a *apiExecutor) Run(ctx context.Context, t Task) (Result, error) {
 	unknown := 0
 	result := func(output json.RawMessage) Result {
 		u := sum
-		return Result{Output: output, Usage: &u, Model: a.conf.Model, Requests: requests, UnknownRequests: unknown}
+		return Result{Output: output, Usage: &u, Model: a.conf.Model, Requests: requests, UnknownRequests: unknown, InProcess: true}
 	}
 	for i := 0; i < maxTurns; i++ {
 		maskOld(turns)
+		deliverNew(t.Nav, turns)
 		// Once the reading budget is spent, submitting is all that is left.
 		if _, refused := t.Nav.Spent(); refused > 0 {
 			tools = tools[len(tools)-1:]
@@ -185,8 +191,8 @@ func (a *apiExecutor) Run(ctx context.Context, t Task) (Result, error) {
 			if c.Name == submitTool {
 				return result(c.Args), nil
 			}
-			out, err := t.Nav.Call(c.Name, c.Args)
-			r := toolResult{ID: c.ID}
+			out, given, err := t.Nav.Answer(c.Name, c.Args)
+			r := toolResult{ID: c.ID, given: given}
 			if err != nil {
 				r.Text, r.Error = err.Error(), true
 			} else {
@@ -200,6 +206,24 @@ func (a *apiExecutor) Run(ctx context.Context, t Task) (Result, error) {
 		turns = append(turns, turn{role: "user", results: results})
 	}
 	return result(nil), fmt.Errorf("%s: no answer after %d model calls", a.desc.Name, maxTurns)
+}
+
+// deliverNew counts what the results the next request carries for the first
+// time gave the model. A result shortened before any request carried it
+// whole never reached the model, and gave it nothing.
+func deliverNew(nav *Nav, turns []turn) {
+	for i := range turns {
+		for j := range turns[i].results {
+			r := &turns[i].results[j]
+			if r.sent {
+				continue
+			}
+			r.sent = true
+			if !r.masked {
+				nav.Deliver(r.given)
+			}
+		}
+	}
 }
 
 // maskOld keeps the newest tool results within keptResultBytes and replaces

@@ -52,24 +52,104 @@ asz judge -show 2 -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01  # its stage files
 ```
 
 To compare the run with what a person concluded, such as a ticket or an incident report, give each
-source with `-reference`: a file, an http or https URL, or a source a configured command fetches. The
+source with `-reference`: a file, an http or https URL, or a source a configured command or MCP server
+fetches. The
 run then finds the conclusions each source holds, and compares the conversation with each.
 
 ```sh
 asz judge -reference OPS-4412.md -reference https://example.com/postmortem 0438c73b-2367-4ed5-9de3-13ef9a17ed01
 ```
 
-A source that needs a login goes through a command you configure, given the source as its last
-argument; it writes the content on its standard output and never sees the conversation:
+A source that needs a login goes through a command or a tool of an MCP server you configure. Neither
+sees the conversation. A command is given the source as its last argument and writes the content on its
+standard output:
+
+```yaml
+judge:
+  references:
+    fetch:
+      - prefix: https://tickets.example.com/
+        command: [ticket-export, --markdown]
+        content_type: text/markdown
+```
+
+An MCP server is a remote one at `url`, or a local one asz starts with `command`. asz calls `tool` once
+for each source, with `arguments`. In an argument, `{source}` is the source and `{rest}` what follows the
+prefix. A remote server is sent `headers`, each read from the environment variable it names.
+
+Atlassian's remote server takes an API token, which an organization admin turns on. The variable holds
+the whole header: `Basic` and the base64 of `email:token` for a personal token, or `Bearer` and the key
+for a service account.
 
 ```yaml
 judge:
   references:
     fetch:
       - prefix: https://example.atlassian.net/browse/
-        command: [jira-export, --markdown]
-        content_type: text/markdown
+        mcp:
+          url: https://mcp.atlassian.com/v2/mcp
+          headers:
+            Authorization: ASZ_JIRA_AUTHORIZATION
+          tool: getJiraIssue
+          arguments:
+            cloudId: https://example.atlassian.net
+            issueIdOrKey: "{rest}"
 ```
+
+```sh
+export ASZ_JIRA_AUTHORIZATION="Basic $(printf '%s' 'you@example.com:API_TOKEN' | base64)"
+```
+
+A local server reads its credential from its environment. List each variable that holds one in
+`secret_env`. For [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) on Jira Server or Data
+Center:
+
+```yaml
+judge:
+  references:
+    fetch:
+      - prefix: https://jira.example.com/browse/
+        mcp:
+          command: [uvx, mcp-atlassian]
+          secret_env: [JIRA_PERSONAL_TOKEN]
+          tool: jira_get_issue
+          arguments:
+            issue_key: "{rest}"
+            comment_limit: 100
+            update_history: false
+```
+
+```sh
+export JIRA_URL=https://jira.example.com
+export JIRA_PERSONAL_TOKEN=...
+```
+
+On Jira Cloud it reads `JIRA_USERNAME` and `JIRA_API_TOKEN` instead; list `JIRA_API_TOKEN` in
+`secret_env`.
+
+To choose the tool and its arguments, list the server's tools with the entry's settings, before `tool`
+is set:
+
+```sh
+asz judge -reference-tools https://example.atlassian.net/browse/OPS-1
+```
+
+It prints each tool with its input schema. An argument that holds a secret goes in `arguments_env`, the
+argument and the variable that holds its value; `arguments` are kept as written.
+
+What asz keeps of a source goes with the run when it is exported. A URL is kept without its query and
+fragment, and one with a user or a password is refused. An MCP server is kept as its URL's scheme and
+host, or its program's name; the arguments as sent, an `arguments_env` one as `[env NAME]`. Images and
+other blocks that are not text are left out, and so is the structured content when there is text;
+`-show` says what a copy leaves out.
+
+asz removes the secrets it knows from all it keeps: each header value and its credential, a Basic
+credential's user and token too, each `arguments_env` and `secret_env` value, the session id, and the
+proxy's user and password. It finds them as written, inside JSON strings however they are escaped, and
+in text escaped as JSON with no quotes around it, such as a log line, to four levels of string inside
+string. A secret in another form, such as base64, a URL's percent
+encoding or HTML character references, or deeper than four levels, is not found. A query is still sent
+to its server by an http or a command fetch, and the page can repeat it.
 
 To compare the judge's grouping with your own, list your goals for the conversation in your own words:
 
@@ -99,7 +179,8 @@ evaluator was given, every navigation call it made, and what it answered. For an
 holds the CLI's output. For an API evaluator it holds what the model said on each turn, up to 2,000
 bytes, and what it called. What a tool answered is not kept: the run is pinned to its head, so the
 same call answers the same again. `work/sources/` holds each source as asz saved it: `R1.json`, its
-manifest, `R1.fetched`, the bytes fetched, and `R1.txt`, the text the evaluators read.
+manifest, `R1.fetched`, the bytes fetched or, for an MCP server, the tool's result with its secrets
+removed, and `R1.txt`, the text the evaluators read.
 
 When `export.otlp.endpoint` is set, `asz collect`, `asz server` and `asz push` send each run once it has
 closed. A run of a pulled snapshot is not sent: it stays in the snapshot, and expires with it. See

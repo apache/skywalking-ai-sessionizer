@@ -40,6 +40,11 @@ func TestFetchCommandStandIn(_ *testing.T) {
 		return
 	}
 	src := os.Args[len(os.Args)-1]
+	if strings.Contains(src, "/echo") {
+		// The source as a JSON writer that escapes slashes spells it.
+		fmt.Fprintf(os.Stderr, `{"url":"%s"}`, strings.ReplaceAll(src, "/", `\/`))
+		os.Exit(3)
+	}
 	if strings.HasSuffix(src, "/denied") {
 		fmt.Fprint(os.Stderr, "401 Unauthorized")
 		os.Exit(3)
@@ -51,7 +56,7 @@ func TestFetchCommandStandIn(_ *testing.T) {
 func fetched(t *testing.T, cfg config.References, sources ...string) []savedSource {
 	t.Helper()
 	at := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
-	return fetchSources(context.Background(), sources, cfg, func() time.Time { return at }, "")
+	return fetchSources(context.Background(), sources, cfg, func() time.Time { return at }, "", "test")
 }
 
 // A source is a file, a page fetched over http, or what a configured
@@ -99,7 +104,7 @@ func TestASourceIsSavedWithItsManifest(t *testing.T) {
 		!strings.Contains(ticket.text, "# Ticket https://jira.example/browse/OPS-1") {
 		t.Fatalf("ticket %+v %q", m, ticket.text)
 	}
-	for i, want := range map[int]string{3: "403 Forbidden", 4: "holds no text asz can read", 5: "401 Unauthorized", 6: "no fetch command is configured", 7: "absent.txt"} {
+	for i, want := range map[int]string{3: "403 Forbidden", 4: "holds no text asz can read", 5: "401 Unauthorized", 6: "no fetch is configured", 7: "absent.txt"} {
 		if m := got[i].manifest; m.Outcome != sessionjudge.SourceFailed || !strings.Contains(m.Error, want) || got[i].text != "" {
 			t.Errorf("source %d: %+v, want an error with %q", i+1, m, want)
 		}

@@ -113,6 +113,7 @@ func (r *Runner) navigation(c *view.Conversation, doc *sessionview.Conversation,
 		ledger.Select(sel)
 		nav := NewNav(doc, ledger, read)
 		nav.Prepare(sel, c.Records, decode)
+		_ = nav.MarkResultImages(unchecked(c.Records))
 		return doc, sel, ledger, nav, nil
 	}
 	doc, sel, err := NarrowChecked(doc, window, c.RecordsChecked)
@@ -126,6 +127,9 @@ func (r *Runner) navigation(c *view.Conversation, doc *sessionview.Conversation,
 	ledger.Select(sel)
 	nav := NewNav(doc, ledger, read)
 	if err := nav.PrepareChecked(sel, c.RecordsChecked, decode); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if err := nav.MarkResultImages(c.RecordsChecked); err != nil {
 		return nil, nil, nil, nil, err
 	}
 	nav.Strictly(NewStrict(doc, c.Holds), "")
@@ -230,6 +234,9 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	case len(r.Sources) == 0 && (reads || compares):
 		return nil, fmt.Errorf("judge: the reference and divergence stages need a source to compare with")
 	}
+	if err := CheckReferences(r.Sources); err != nil {
+		return nil, err
+	}
 	timeout, err := r.Config.TimeoutDuration()
 	if err != nil {
 		return nil, err
@@ -259,10 +266,10 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	}
 	// The sources are fetched before any evaluator runs, and kept in the
 	// run's work directory whether or not the stages that read them run.
-	saved := fetchSources(ctx, r.Sources, r.Config.References, r.now, r.Admitted)
+	saved := fetchSources(ctx, r.Sources, r.Config.References, r.now, r.Admitted, r.Version)
 	for _, s := range saved {
 		nav.sources = append(nav.sources, s.manifest)
-		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: s.manifest.ID, Source: s.manifest.Source, Text: s.text})
+		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: s.manifest.ID, Source: s.manifest.Source, Text: s.text, Left: LeftOut(s.manifest)})
 		if s.manifest.Outcome == sessionjudge.SourceFailed {
 			r.logf("source %s could not be saved: %s", s.manifest.Source, s.manifest.Error)
 		}
@@ -671,8 +678,11 @@ func readingOf(nav *Nav, log string, budget int) *sessionjudge.Reading {
 		var c struct {
 			Bytes   int  `json:"bytes"`
 			Refused bool `json:"refused"`
+			// Closing marks the line a server ends its log with, which is
+			// no call.
+			Closing bool `json:"closing"`
 		}
-		if json.Unmarshal(line, &c) != nil {
+		if json.Unmarshal(line, &c) != nil || c.Closing {
 			continue
 		}
 		r.Calls++

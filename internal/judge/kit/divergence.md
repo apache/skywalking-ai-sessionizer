@@ -19,8 +19,10 @@ Then give `findings` for the conclusions the conversation did not reach, or cont
 - `misled_by_subtask`: the agent acted on a sub-task's untrue report. Cite a step of the sub-task, or the step that started it; asz takes it only for a sub-task the sub-task stage found misled the agent, started in the target's work before the step the finding is at.
 - `missing_context`: something the agent needed never reached it. Cite what shows it failed to arrive.
 - `context_not_used`: the agent had what it needed before the decision, and acted against it. Cite both.
-- `clarification_not_sought`: the request was ambiguous, the agent decided under it, and never asked.
-- `unsupported_assumption`: the agent acted on a premise it never checked.
+- `question_not_asked`: the request was ambiguous, the agent decided under it, and never asked. Give in `from` the step where the ambiguity arose.
+- `assumption_not_checked`: the agent acted on an assumption it never checked. Give in `from` the step where the assumption arose.
 - `unavailable`: the record supports none of these.
+
+For these two, `from` is a step in the same stream as `at`, at or before it: asz reports how much of the steps between them you were given. Leave `from` empty for every other cause.
 
 Say the `problem` in one sentence, and in `improvement` what change to the prompt, the tools, the context or how the work was split would have avoided it, and what must hold for that. Never promise a saving.

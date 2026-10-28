@@ -16,6 +16,7 @@
 package judge
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -129,7 +130,7 @@ func report(nav *Nav, l *Ledger, targets []sessionjudge.Target, goals []sessionj
 		sum.Score.Final = ratio(total, float64(len(finals)))
 	}
 	for _, g := range goals {
-		sum.Goals = append(sum.Goals, goalOutcome(nav, g, outcome, found))
+		sum.Goals = append(sum.Goals, goalOutcome(g, outcome, found))
 	}
 	return out
 }
@@ -504,17 +505,56 @@ func mechanicalFindings(nav *Nav, t sessionjudge.Target, a *sessionjudge.Achieve
 	return out
 }
 
+// FirstRecorded is the finding whose step was recorded first: by the record
+// address of its step, and on equal addresses by the order the stages wrote
+// them, asz's last since the close writes them, then in the order given. A
+// finding whose step has no address is not ordered against the others.
+// order is empty when every finding had an address, partial when some had
+// none and first is the first among those with one, and none when none had
+// one and the first given stands. The close and the label view of the
+// report both choose by it, so the two never disagree, and a goal's members
+// can be given in any order.
+func FirstRecorded(found []sessionjudge.Finding) (first *sessionjudge.Finding, order string) {
+	stage := func(f *sessionjudge.Finding) int {
+		if f.Source == sessionjudge.SourceASZ {
+			return slices.Index(sessionjudge.Stages, sessionjudge.StageClose)
+		}
+		return slices.Index(sessionjudge.Stages, f.Source)
+	}
+	missing := 0
+	for i := range found {
+		f := &found[i]
+		if f.Ref == nil {
+			missing++
+			continue
+		}
+		if first == nil || cmp.Or(cmp.Compare(f.Ref.Seq, first.Ref.Seq), cmp.Compare(f.Ref.Row, first.Ref.Row), cmp.Compare(stage(f), stage(first))) < 0 {
+			first = f
+		}
+	}
+	switch {
+	case len(found) == 0:
+		return nil, ""
+	case missing == len(found):
+		return &found[0], sessionjudge.FirstOrderNone
+	case missing > 0:
+		return first, sessionjudge.FirstOrderPartial
+	}
+	return first, ""
+}
+
 // goalOutcome is how one goal did. Its main target stays only while it is
 // still wanted; one cancelled or replaced by the end leaves it
 // undetermined. Its worst class is the most severe of its targets', and its
-// first finding the one whose step came first in recorded order.
-func goalOutcome(nav *Nav, g sessionjudge.Goal, outcome map[string]*sessionjudge.Outcome, found map[string][]sessionjudge.Finding) sessionjudge.GoalOutcome {
+// first finding the one recorded first.
+func goalOutcome(g sessionjudge.Goal, outcome map[string]*sessionjudge.Outcome, found map[string][]sessionjudge.Finding) sessionjudge.GoalOutcome {
 	out := sessionjudge.GoalOutcome{Goal: g.ID}
 	if o := outcome[g.Main]; o != nil && o.Status != sessionjudge.TargetCancelled && o.Status != sessionjudge.TargetReplaced {
 		out.Main, out.ScoreMain = g.Main, o.ScoreFinal
 	}
 	worst := len(sessionjudge.Classes)
 	total, n := 0.0, 0
+	var all []sessionjudge.Finding
 	for _, m := range g.Members {
 		o := outcome[m]
 		if o == nil {
@@ -526,12 +566,11 @@ func goalOutcome(nav *Nav, g sessionjudge.Goal, outcome map[string]*sessionjudge
 		if o.ScoreFinal != nil {
 			total, n = total+*o.ScoreFinal, n+1
 		}
-		for _, f := range found[m] {
-			if out.First == nil || recordedAfter(nav, out.First.At, f.At) {
-				first := f
-				out.First = &first
-			}
-		}
+		all = append(all, found[m]...)
+	}
+	if first, order := FirstRecorded(all); first != nil {
+		f := *first
+		out.First, out.FirstOrder = &f, order
 	}
 	if worst < len(sessionjudge.Classes) {
 		out.Worst = sessionjudge.Classes[worst]

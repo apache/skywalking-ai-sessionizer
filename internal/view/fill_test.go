@@ -59,6 +59,35 @@ func TestAWholeRecordStepSaysAPartWasTooLarge(t *testing.T) {
 	}
 }
 
+// A step on one block reads that block alone. A tool call that shares a
+// record with the agent's prose reads as its arguments, never as the prose,
+// and a queued command kept as data beside unrelated prose reads as its own
+// prompt.
+func TestAStepOnABlockReadsThatBlock(t *testing.T) {
+	args := `{"command":"kubectl logs api-7f9c"}`
+	rec := &sessiondata.Record{Parts: []sessiondata.Part{
+		{Kind: sessiondata.PartText, Text: "I will look at the logs first.", State: model.ContentAvailable},
+		{Kind: sessiondata.PartCall, Name: "Bash", Data: json.RawMessage(args), State: model.ContentAvailable},
+	}}
+	call := 1
+	var s step
+	fill(&s, rec, &call)
+	if s.Text != args {
+		t.Fatalf("the tool call reads %q, want its arguments", s.Text)
+	}
+	queued := &sessiondata.Record{Parts: []sessiondata.Part{
+		{Kind: sessiondata.PartText, Text: "unrelated prose", State: model.ContentAvailable},
+		{Kind: sessiondata.PartData, Data: json.RawMessage(`{"type":"queued_command","prompt":[{"type":"text","text":"restart the worker"}]}`),
+			State: model.ContentAvailable},
+	}}
+	envelope := 1
+	var q step
+	fill(&q, queued, &envelope)
+	if q.Text != "restart the worker" {
+		t.Fatalf("the queued command reads %q, want its own prompt", q.Text)
+	}
+}
+
 // A step on a whole record of several parts that retention removed says so,
 // and removed wins over too large: the skeleton keeps a part's state no more,
 // and every part of it was removed.

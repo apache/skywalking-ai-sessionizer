@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/apache/skywalking-ai-sessionizer/internal/judge"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
@@ -152,7 +153,11 @@ type goalView struct {
 	members                                       []string
 	evolution                                     []sessionjudge.Evolution
 	first                                         *sessionjudge.Finding
-	scoreMain, scoreMean                          *float64
+	firstOrder                                    string
+	// given is how much of the judged work the regroup was given, for a
+	// person's goal it found nothing worked on.
+	given                *sessionjudge.Given
+	scoreMain, scoreMean *float64
 	// worked says the conversation worked on one of the person's goals.
 	worked bool
 }
@@ -165,12 +170,13 @@ func (r *runReport) goalViews() []goalView {
 		for _, g := range r.goals {
 			o := r.goalOut[g.ID]
 			out = append(out, goalView{id: g.ID, statement: g.Statement, main: o.Main, mainReason: g.MainReason, worst: o.Worst,
-				members: g.Members, evolution: g.Evolution, first: o.First, scoreMain: o.ScoreMain, scoreMean: o.ScoreMean})
+				members: g.Members, evolution: g.Evolution, first: o.First, firstOrder: o.FirstOrder, scoreMain: o.ScoreMain,
+				scoreMean: o.ScoreMean})
 		}
 		return out
 	}
 	for _, g := range r.regroup.LabelGoals {
-		v := goalView{id: g.ID, statement: g.Statement, main: g.Main, members: g.Members, class: g.Class, worked: g.Worked}
+		v := goalView{id: g.ID, statement: g.Statement, main: g.Main, members: g.Members, class: g.Class, worked: g.Worked, given: g.Given}
 		worst := len(sessionjudge.Classes)
 		total, n := 0.0, 0
 		var found []sessionjudge.Finding
@@ -195,10 +201,7 @@ func (r *runReport) goalViews() []goalView {
 		if o := r.outcomes[g.Main]; o != nil {
 			v.scoreMain = o.ScoreFinal
 		}
-		sort.SliceStable(found, func(i, j int) bool { return refLess(found[i].Ref, found[j].Ref) })
-		if len(found) > 0 {
-			v.first = &found[0]
-		}
+		v.first, v.firstOrder = judge.FirstRecorded(found)
 		out = append(out, v)
 	}
 	return out
@@ -224,7 +227,7 @@ func printGoals(r *runReport, cost func(*sessionjudge.Outcome)) {
 		case sessionjudge.CompareMissed:
 			fmt.Println("    no target: the conversation worked on it, and the judge found no target for it")
 		case sessionjudge.CompareAbsent:
-			fmt.Println("    no target: nothing in the conversation worked on it")
+			fmt.Printf("    no target: nothing in the conversation worked on it, the evaluator's judgment%s\n", givenText(g.given, "of the judged work"))
 		case sessionjudge.CompareUnknown:
 			if g.worked {
 				fmt.Println("    no target placed: the conversation worked on it, and a target that may serve it could not be placed")
@@ -235,8 +238,21 @@ func printGoals(r *runReport, cost func(*sessionjudge.Outcome)) {
 		if g.worst != "" {
 			fmt.Printf("    worst     %s\n", strings.ReplaceAll(g.worst, "_", " "))
 		}
+		// The finding recorded first in the goal, which says nothing of work
+		// before it that no stage read. One whose cause rests on something
+		// not happening shows how much of its span the evaluator was given.
 		if f := g.first; f != nil {
-			fmt.Printf("    first     %s at %s: %s\n", f.Source, f.At, trunc(oneLine(f.Problem), 120))
+			note := ""
+			switch g.firstOrder {
+			case sessionjudge.FirstOrderPartial:
+				note = " (among the findings with a recorded place)"
+			case sessionjudge.FirstOrderNone:
+				note = " (no finding has a recorded place: the first given)"
+			}
+			fmt.Printf("    first recorded  %s at %s: %s%s\n", f.Source, f.At, trunc(oneLine(f.Problem), 120), note)
+			if f.Asserted {
+				fmt.Printf("      cause: %s\n", causeOf(*f))
+			}
 		}
 		switch {
 		case g.main != "":
@@ -356,9 +372,19 @@ func printReferences(r *runReport) {
 			fmt.Printf("    %s  %s: not saved, %s; its comparison is unavailable\n", s.ID, s.Source, trunc(oneLine(s.Error), 120))
 			continue
 		}
-		line := fmt.Sprintf("    %s  %s: %s, saved %s, %d lines, sha256 %s", s.ID, s.Source, s.Method, s.Captured, s.Lines, s.SHA256[:min(12, len(s.SHA256))])
+		method := s.Method
+		if s.MCP != nil {
+			method = fmt.Sprintf("mcp %s at %s", s.MCP.Tool, s.MCP.Server)
+		}
+		line := fmt.Sprintf("    %s  %s: %s, saved %s, %d lines, sha256 %s", s.ID, s.Source, method, s.Captured, s.Lines, s.SHA256[:min(12, len(s.SHA256))])
+		if s.QueryRemoved {
+			line += ", kept without its query"
+		}
 		if s.Cut {
 			line += ", cut to its start"
+		}
+		if left := judge.LeftOut(s); left != "" {
+			line += "; " + left
 		}
 		fmt.Println(line)
 	}
@@ -375,7 +401,7 @@ func printReferences(r *runReport) {
 			case d.Verdict == sessionjudge.VerdictReached:
 				verdict += " " + citesOf(d.Cite)
 			case d.Asserted:
-				verdict += ", the evaluator's judgment"
+				verdict += ", the evaluator's judgment" + givenText(d.Given, "of the judged work")
 			}
 			if d.Verdict == sessionjudge.VerdictContradicted {
 				verdict += r.unapplied(k.ID, d.Target, d.Event)
@@ -763,6 +789,40 @@ func printAccount(r *runReport, a *sessionjudge.Achievement, o *sessionjudge.Out
 	}
 }
 
+// givenText says how much of an absence claim's steps the evaluator was
+// given, beside the claim: what it asked for and was answered, what it saw
+// only named in a list, and what it was not given. It never says the claim
+// holds. A run made before readings were kept has none.
+func givenText(g *sessionjudge.Given, where string) string {
+	switch {
+	case g == nil:
+		return "; what it was given was not recorded"
+	case g.Counts == nil:
+		return "; what it was given is unavailable: " + g.Reason
+	}
+	c := g.Counts
+	text := fmt.Sprintf("; of the %s %s it opened %d, saw %d only in lists and was not given %d", plural(c.Steps, "step"), where, c.Opened, c.Listed, c.None)
+	if c.Unavailable > 0 {
+		text += fmt.Sprintf("; %d hold evidence no one can be given", c.Unavailable)
+	}
+	return text
+}
+
+// causeOf says a finding's cause and the conclusion it is against. A cause
+// that rests on something not happening is the evaluator's judgment, said
+// with how much of its span the evaluator was given.
+func causeOf(f sessionjudge.Finding) string {
+	line := strings.ReplaceAll(f.Cause, "_", " ")
+	if f.Conclusion != "" {
+		line += ", against " + f.Conclusion
+	}
+	if f.Asserted {
+		line += "; the evaluator's judgment, since the record cannot show it was looked for everywhere" +
+			givenText(f.Given, fmt.Sprintf("from %s to %s", f.From, f.At))
+	}
+	return line
+}
+
 func limitsOf(limits string) string {
 	if limits == "" {
 		return ""
@@ -820,14 +880,7 @@ func printFindings(r *runReport, targets []string) {
 	for _, f := range all {
 		fmt.Printf("      %s at %s, %s: %s\n", f.Target, f.At, f.Source, trunc(oneLine(f.Problem), 120))
 		if f.Cause != "" {
-			line := strings.ReplaceAll(f.Cause, "_", " ")
-			if f.Conclusion != "" {
-				line += ", against " + f.Conclusion
-			}
-			if f.Asserted {
-				line += "; the evaluator's judgment, since the record cannot show it was looked for everywhere"
-			}
-			fmt.Printf("        cause: %s\n", line)
+			fmt.Printf("        cause: %s\n", causeOf(f))
 		}
 		if f.Explanation != "" {
 			fmt.Printf("        why, proposed: %s\n", trunc(oneLine(f.Explanation), 120))

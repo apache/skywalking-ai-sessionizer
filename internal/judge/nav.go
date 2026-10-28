@@ -109,6 +109,13 @@ type Nav struct {
 	// budget bounds the bytes of answers one evaluator call reads, spent
 	// what it has read, and refused the answers refused once it ran out.
 	counts *counts
+	// given holds the receipts of what one evaluator call was given, and
+	// owners the steps each record holds, by which a part read by its
+	// address credits its own step, and imaged the steps whose result
+	// carried an image. See given.go.
+	given  *receipts
+	owners map[[2]uint64][]owner
+	imaged map[string]bool
 
 	// assigned is what the current call answers for, and mine its ids.
 	assigned Assignment
@@ -144,6 +151,10 @@ type Assignment struct {
 	// subtasks tool gives with each row. The task carries them, since an
 	// agent CLI's navigation runs in a process of its own.
 	Decided []*sessionjudge.Subtask `json:"decided,omitempty"`
+	// Attempt names the chunk attempt the call is, as no other attempt is
+	// named: an agent CLI's navigation server writes it on every line of its
+	// log, so the run takes the receipts of this attempt alone.
+	Attempt string `json:"attempt,omitempty"`
 }
 
 // Assign says what the current call answers for.
@@ -166,6 +177,7 @@ func (n *Nav) Assigned() Assignment { return n.assigned }
 func (n *Nav) Fork() *Nav {
 	c := *n
 	c.counts = &counts{}
+	c.given = newReceipts()
 	c.assigned, c.mine = Assignment{}, nil
 	// A fork reads under no attempt's marker until it is given one.
 	c.attempt = nil
@@ -302,6 +314,7 @@ func NewNav(doc *sessionview.Conversation, ledger *Ledger, read RecordReader) *N
 	for i := range doc.Loose {
 		walk(&doc.Loose[i], "")
 	}
+	n.given, n.owners = newReceipts(), ownersOf(n.nodes)
 	n.indexInputs()
 	// What the change records captured needs no decoder; Decode adds what
 	// the requests name.
@@ -542,6 +555,12 @@ func Tools() []Tool {
 // answer carries the head it is about. An error is an answer the evaluator
 // reads, not a failure of the run.
 func (n *Nav) Call(name string, args json.RawMessage) (any, error) {
+	out, _, err := n.answerCall(name, args)
+	return out, err
+}
+
+// answerCall is Call, with the arguments as the call read them.
+func (n *Nav) answerCall(name string, args json.RawMessage) (any, toolArgs, error) {
 	// A spent budget refuses before anything is read: every answer takes
 	// some bytes, so the call could only be refused after its reads.
 	n.counts.mu.Lock()
@@ -549,10 +568,10 @@ func (n *Nav) Call(name string, args json.RawMessage) (any, error) {
 		n.counts.calls++
 		n.counts.refused++
 		n.counts.mu.Unlock()
-		return nil, ErrBudgetSpent
+		return nil, toolArgs{}, ErrBudgetSpent
 	}
 	n.counts.mu.Unlock()
-	out, err := n.call(name, args)
+	out, a, err := n.call(name, args)
 	var b []byte
 	if err == nil {
 		b, _ = json.Marshal(out)
@@ -561,11 +580,11 @@ func (n *Nav) Call(name string, args json.RawMessage) (any, error) {
 	defer n.counts.mu.Unlock()
 	n.counts.calls++
 	if err != nil {
-		return out, err
+		return out, a, err
 	}
 	if n.counts.budget > 0 && n.counts.spent+len(b) > n.counts.budget {
 		n.counts.refused++
-		return nil, ErrBudgetSpent
+		return nil, a, ErrBudgetSpent
 	}
 	n.counts.spent += len(b)
 	// Every answer says what is left, so an evaluator can keep enough for
@@ -580,7 +599,7 @@ func (n *Nav) Call(name string, args json.RawMessage) (any, error) {
 			v["reading_left"] = left
 		}
 	}
-	return out, nil
+	return out, a, nil
 }
 
 // toolArgs are the arguments of every navigation tool; each reads its own.
@@ -602,44 +621,25 @@ type toolArgs struct {
 	From   int      `json:"from"`
 }
 
-func (n *Nav) call(name string, args json.RawMessage) (any, error) {
+func (n *Nav) call(name string, args json.RawMessage) (any, toolArgs, error) {
 	var a toolArgs
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &a); err != nil {
-			return nil, fmt.Errorf("arguments: %w", err)
+			return nil, a, fmt.Errorf("arguments: %w", err)
 		}
 	}
 	if a.Page < 1 {
 		a.Page = 1
 	}
+	out, err := n.dispatch(name, a)
+	return out, a, err
+}
+
+// dispatch answers one tool with its arguments read.
+func (n *Nav) dispatch(name string, a toolArgs) (any, error) {
 	switch name {
 	case "card":
 		return n.card(), nil
-	case "inputs":
-		return n.answer(n.InputRows(nil), a)
-	case "talks":
-		return n.answer(n.talkRows(a.Talks), a)
-	case "subtasks":
-		rows, err := n.subtaskRows(a.Talks, a.Parent)
-		if err != nil {
-			return nil, err
-		}
-		return n.answer(rows, a)
-	case "talk":
-		rows, err := n.outline(a.ID)
-		if err != nil {
-			return nil, err
-		}
-		if a.Only != "" {
-			rows = onlyRows(rows, a.Only)
-		}
-		return n.answer(rows, a)
-	case "targets":
-		rows, err := n.targetRows(a.ID)
-		if err != nil {
-			return nil, err
-		}
-		return n.answer(rows, a)
 	case "step":
 		return n.step(a.ID)
 	case "record":
@@ -647,38 +647,59 @@ func (n *Nav) call(name string, args json.RawMessage) (any, error) {
 			return n.recordPart(a.Seq, a.Row, *a.Part, a.Offset)
 		}
 		return n.record(a.Seq, a.Row, a.Offset)
-	case "search":
-		if a.Node != "" {
-			rows, err := n.searchNode(a.Query, a.Node, a.Skip)
-			if err != nil {
-				return nil, err
-			}
-			return n.answer(rows, a)
+	}
+	rows, ok, err := n.rows(name, a)
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("no tool %q", name)
+	case err != nil:
+		return nil, err
+	}
+	return n.answer(rows, a)
+}
+
+// rows are what a tool that answers in rows lists, before they are cut into
+// pages; ok is false for a tool that answers otherwise. A receipt builds
+// them again to know the row an item answer read.
+func (n *Nav) rows(name string, a toolArgs) (rows []any, ok bool, err error) {
+	switch name {
+	case "inputs":
+		rows = n.InputRows(nil)
+	case "talks":
+		rows = n.talkRows(a.Talks)
+	case "subtasks":
+		rows, err = n.subtaskRows(a.Talks, a.Parent)
+	case "talk":
+		rows, err = n.outline(a.ID)
+		if err == nil && a.Only != "" {
+			rows = onlyRows(rows, a.Only)
 		}
-		return n.answer(n.search(a.Query, a.Talks), a)
+	case "targets":
+		rows, err = n.targetRows(a.ID)
+	case "search":
+		if a.Node == "" {
+			rows = n.search(a.Query, a.Talks)
+		} else {
+			rows, err = n.searchNode(a.Query, a.Node, a.Skip)
+		}
 	case "changes":
-		return n.answer(n.changes(a.Talks), a)
+		rows = n.changes(a.Talks)
 	case "operations":
-		return n.answer(n.operationRows(a.Talks), a)
+		rows = n.operationRows(a.Talks)
 	case "source":
 		if a.ID == "" {
-			return n.answer(n.sourceList(), a)
+			rows = n.sourceList()
+		} else {
+			rows, err = n.sourceRows(a.ID, a.From)
 		}
-		rows, err := n.sourceRows(a.ID, a.From)
-		if err != nil {
-			return nil, err
-		}
-		return n.answer(rows, a)
 	case "conclusions":
-		return n.answer(conclusionRows(n.assigned.Conclusions), a)
+		rows = conclusionRows(n.assigned.Conclusions)
 	case "diff":
-		rows, err := n.diff(a.ID, a.Path)
-		if err != nil {
-			return nil, err
-		}
-		return n.answer(rows, a)
+		rows, err = n.diff(a.ID, a.Path)
+	default:
+		return nil, false, nil
 	}
-	return nil, fmt.Errorf("no tool %q", name)
+	return rows, true, err
 }
 
 // page is one page of rows.
@@ -813,8 +834,10 @@ type talkRow struct {
 	Label string `json:"label,omitempty"`
 	Reply string `json:"reply,omitempty"`
 	// ReplyNode is the agent's last message in the talk, the step to cite
-	// when the reply delivered an answer.
+	// when the reply delivered an answer, and InputNode the talk's first
+	// input from outside the agent, the step Label comes from.
 	ReplyNode string             `json:"reply_node,omitempty"`
+	InputNode string             `json:"input_node,omitempty"`
 	Inputs    int                `json:"inputs"`
 	Tools     int                `json:"tools"`
 	Failed    int                `json:"failed_tools,omitempty"`
@@ -908,6 +931,9 @@ func (n *Nav) talkRows(only []string) []any {
 			case x.Kind == model.KindMessageAssistant:
 				r.ReplyNode = x.ID
 			case x.Kind == model.KindMessageExternal:
+				if r.Inputs == 0 {
+					r.InputNode = x.ID
+				}
 				r.Inputs++
 			case x.Kind == model.KindErrorAPI:
 				r.Errors++
@@ -932,18 +958,20 @@ type subtaskRow struct {
 	Role string `json:"role,omitempty"`
 	// Parent is absent, with Reason, for a stream no step can be shown to
 	// have started.
-	Parent    string            `json:"parent,omitempty"`
-	Reason    string            `json:"reason,omitempty"`
-	Depth     int               `json:"depth,omitempty"`
-	StartedBy string            `json:"started_by,omitempty"`
-	Label     string            `json:"label,omitempty"`
-	Asked     string            `json:"asked,omitempty"`
-	Reported  string            `json:"reported,omitempty"`
-	Talks     []string          `json:"talks"`
-	Nested    int               `json:"nested"`
-	Cost      sessionjudge.Cost `json:"cost"`
-	Window    string            `json:"window,omitempty"`
-	Chunk     string            `json:"chunk,omitempty"`
+	Parent    string `json:"parent,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Depth     int    `json:"depth,omitempty"`
+	StartedBy string `json:"started_by,omitempty"`
+	Label     string `json:"label,omitempty"`
+	Asked     string `json:"asked,omitempty"`
+	Reported  string `json:"reported,omitempty"`
+	// ReportNode is the step Reported comes from.
+	ReportNode string            `json:"report_node,omitempty"`
+	Talks      []string          `json:"talks"`
+	Nested     int               `json:"nested"`
+	Cost       sessionjudge.Cost `json:"cost"`
+	Window     string            `json:"window,omitempty"`
+	Chunk      string            `json:"chunk,omitempty"`
 	// FailedSteps and Repeats point into its own talks, as a talk row's do.
 	FailedSteps  []string   `json:"failed_steps,omitempty"`
 	Repeats      [][]string `json:"repeats,omitempty"`
@@ -1022,6 +1050,9 @@ func (n *Nav) subtaskRow(st *Subtask) subtaskRow {
 	if x := n.nodes[st.StartedBy]; x != nil {
 		r.Asked = clip(x.Text, 600)
 		r.Reported = clip(x.Result, 300)
+		if x.Result != "" {
+			r.ReportNode = x.ID
+		}
 	}
 	for _, tk := range st.Talks {
 		t := n.nodes[tk]
@@ -1033,7 +1064,7 @@ func (n *Nav) subtaskRow(st *Subtask) subtaskRow {
 			case x.Kind == model.KindAgentOutput && x.Text != "":
 				// The sub-task's own report is better than what the parent's
 				// result said of it.
-				r.Reported = clip(x.Text, 300)
+				r.Reported, r.ReportNode = clip(x.Text, 300), x.ID
 			}
 		})
 	}

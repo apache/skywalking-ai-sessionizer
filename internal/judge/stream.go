@@ -19,6 +19,7 @@ package judge
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,8 +217,9 @@ func (c *chunk) add(stage string, it item) {
 //
 // The rows take at most rowsBytes. A chunk holds at least one item, and one
 // item, such as a target with many talks, can be larger than a chunk: its
-// rows past the bound are named by count, and the tools list them.
-func pushText(stage string, part, of int, ch chunk, cat catalogue, stateBytes, rowsBytes int) string {
+// rows past the bound are named by count, and the tools list them. It also
+// says how many of the rows the prompt holds, from the first.
+func pushText(stage string, part, of int, ch chunk, cat catalogue, stateBytes, rowsBytes int) (string, int) {
 	var b strings.Builder
 	if of > 1 {
 		fmt.Fprintf(&b, "\nThis call answers for part %d of %d of this stage. Everything outside it is context.\n", part, of)
@@ -262,8 +264,9 @@ func pushText(stage string, part, of int, ch chunk, cat catalogue, stateBytes, r
 		sessionjudge.StageDivergence:  "conclusions",
 		sessionjudge.StageRegroup:     "targets",
 	}[stage]
-	b.WriteString(boundedLines(lines, rowsBytes, "rows, which the "+tool+" tool lists"))
-	return b.String()
+	text, held := fitLines(lines, rowsBytes, "rows, which the "+tool+" tool lists")
+	b.WriteString(text)
+	return b.String(), held
 }
 
 // merged gathers what the chunks of one stage answered into one stage's
@@ -685,6 +688,10 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 			ch.assign.Goals = nil
 		}
 		ch.assign.Decided = s.nav.decisions()
+		// The attempt's name is no other attempt's, of any run, stage or
+		// chunk: an agent CLI's navigation server writes it on every line of
+		// its log.
+		ch.assign.Attempt = fmt.Sprintf("%s/%s/c%03d/a%d/%s", filepath.Base(s.dir), work, i+1, attempt, rand.Text())
 		// A divergence call reads the sources its conclusions came from, and
 		// names the deliveries its conclusions show wrong.
 		if s.stage == sessionjudge.StageDivergence {
@@ -706,10 +713,13 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 		if s.stage == sessionjudge.StageRegroup {
 			text += personGoalsText(s.personGoals)
 		}
-		prompt, _, err := s.kit.Prompt(s.stage, text+pushText(s.stage, i+1, of, ch, cat, s.runner.Config.StateBytes, s.runner.Config.ChunkBytes))
+		rows, held := pushText(s.stage, i+1, of, ch, cat, s.runner.Config.StateBytes, s.runner.Config.ChunkBytes)
+		prompt, _, err := s.kit.Prompt(s.stage, text+rows)
 		if err != nil {
 			return nil, err
 		}
+		// The rows the prompt holds are given to the evaluator with it.
+		nav.DeliverRows(ch.rows[:held])
 		s.mu.Lock()
 		if len(prompt) > s.used.promptBytes {
 			s.used.promptBytes = len(prompt)
@@ -729,6 +739,12 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 		s.mu.Unlock()
 		writeRequests(filepath.Join(dir, "requests.jsonl"), res.Requests)
 		s.note(res, readingOf(nav, args.Log, s.runner.Config.ReadBytes))
+		// An API evaluator's navigation ran here and delivered its receipts
+		// as its requests carried them; an agent CLI's ran in a server of
+		// its own, whose log holds them.
+		if !res.InProcess {
+			nav.TakeLog(args.Log, ch.assign.Attempt)
+		}
 		if s.nav.strict != nil {
 			// On a pulled snapshot, a read of evidence that failed or did
 			// not finish, here or in a navigation server, fails the run
@@ -867,17 +883,23 @@ func goalLines(goals []sessionjudge.Goal, latest map[string]string, limit int) s
 // boundedLines writes lines, one each, while they fit limit bytes, and then
 // says how many more there are and where to find them.
 func boundedLines(lines []string, limit int, rest string) string {
+	text, _ := fitLines(lines, limit, rest)
+	return text
+}
+
+// fitLines is boundedLines, with how many of the lines it wrote.
+func fitLines(lines []string, limit int, rest string) (string, int) {
 	var b strings.Builder
 	for i, l := range lines {
 		// Room is kept for the line that says what is left.
 		if limit > 0 && b.Len()+len(l)+1 > limit-len(rest)-16 {
 			fmt.Fprintf(&b, "%d more %s.\n", len(lines)-i, rest)
-			break
+			return b.String(), i
 		}
 		b.WriteString(l)
 		b.WriteString("\n")
 	}
-	return b.String()
+	return b.String(), len(lines)
 }
 
 // misledSet names the sub-tasks found to have misled the main agent.

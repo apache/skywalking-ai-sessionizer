@@ -633,6 +633,58 @@ func TestTheJudgeSectionIsRead(t *testing.T) {
 
 // Every judge setting a file sets is taken, a zero among them: read_bytes 0
 // is no bound. A setting a run could not use is refused.
+// An MCP fetch names one server, remote or local, and keeps no secret where
+// provenance is kept: a remote server's URL holds none, a header asz sets
+// itself cannot be replaced, and an argument is either kept as configured
+// or read from the environment, never both.
+func TestAnMCPFetchIsCheckedWhenRead(t *testing.T) {
+	load := func(body string) (*Config, error) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "asz.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(path)
+	}
+	entry := func(body string) string {
+		return "judge:\n  references:\n    fetch:\n      - prefix: https://jira.example/browse/\n        mcp:\n" + body
+	}
+	cfg, err := load(entry("          url: https://mcp.example/v2/mcp\n          headers: {Authorization: ASZ_JIRA_AUTHORIZATION}\n" +
+		"          tool: getJiraIssue\n          arguments: {issueIdOrKey: \"{rest}\", comment_limit: 100, update_history: false}\n" +
+		"          arguments_env: {cloudId: ASZ_CLOUD}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := cfg.Judge.References.Fetch[0].MCP
+	if m == nil || m.URL != "https://mcp.example/v2/mcp" || m.Headers["Authorization"] != "ASZ_JIRA_AUTHORIZATION" || m.Tool != "getJiraIssue" ||
+		m.Arguments["issueIdOrKey"] != "{rest}" || m.Arguments["comment_limit"] != 100 || m.Arguments["update_history"] != false || m.ArgumentsEnv["cloudId"] != "ASZ_CLOUD" {
+		t.Fatalf("mcp %+v", m)
+	}
+	if _, err := load(entry("          url: http://127.0.0.1:8000/mcp\n")); err != nil {
+		t.Fatalf("a loopback server over http: %v", err)
+	}
+	for _, c := range []struct{ name, body, want string }{
+		{"both a url and a command", "          url: https://mcp.example/\n          command: [x]\n", "exactly one of url and command"},
+		{"plain http elsewhere", "          url: http://mcp.example/\n", "https, or http on a loopback address"},
+		{"a user in the url", "          url: https://me:pw@mcp.example/\n", "no user, query or fragment"},
+		{"a query in the url", "          url: https://mcp.example/?key=1\n", "no user, query or fragment"},
+		{"a header asz sets", "          url: https://mcp.example/\n          headers: {mcp-session-id: X}\n", "asz sets mcp-session-id itself"},
+		{"a parameter header", "          url: https://mcp.example/\n          headers: {Mcp-Param-Region: X}\n", "asz sets Mcp-Param-Region itself"},
+		{"a header twice", "          url: https://mcp.example/\n          headers: {X-Key: A, x-key: B}\n", "twice"},
+		{"an argument in both", "          url: https://mcp.example/\n          arguments: {key: a}\n          arguments_env: {key: B}\n", "in both"},
+		{"headers to a local server", "          command: [srv]\n          headers: {X-Key: A}\n", "headers are for a remote server"},
+		{"secret_env to a remote server", "          url: https://mcp.example/\n          secret_env: [A]\n", "secret_env is for a local server"},
+	} {
+		if _, err := load(entry(c.body)); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	both := "judge:\n  references:\n    fetch:\n      - prefix: https://jira.example/browse/\n        command: [x]\n        mcp:\n          url: https://mcp.example/\n"
+	if _, err := load(both); err == nil || !strings.Contains(err.Error(), "exactly one of command and mcp") {
+		t.Errorf("a command and mcp: %v", err)
+	}
+}
+
 func TestEveryJudgeSettingIsTaken(t *testing.T) {
 	load := func(body string) (*Config, error) {
 		t.Helper()

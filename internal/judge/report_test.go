@@ -125,6 +125,21 @@ func workedDecisions() *workedRun {
 func (w *workedRun) closed(t *testing.T) (map[string]*sessionjudge.Outcome, []sessionjudge.Finding, *sessionjudge.Summary) {
 	t.Helper()
 	nav, l := worked()
+	// A stage's finding carries the address of its step, as the checks of
+	// its answer give it one (checkFindings).
+	address := func(f *sessionjudge.Finding) {
+		if n := nav.Node(f.At); n != nil && n.Ref != nil && f.Ref == nil {
+			f.Ref = &sessionjudge.Ref{Seq: n.Ref.Seq, Row: n.Ref.Row, Block: n.Ref.Block}
+		}
+	}
+	for _, a := range w.achievements {
+		for i := range a.Findings {
+			address(&a.Findings[i])
+		}
+	}
+	for _, f := range w.findings {
+		address(f)
+	}
 	frames, sum := closeFrames(l, w.targets, w.inputs, w.achievements, w.labels, w.subtasks, nil)
 	more := report(nav, l, w.targets, w.goals, w.inputs, w.achievements, w.findings, w.labels, w.subtasks, w.refs, frames, sum)
 	outcomes := map[string]*sessionjudge.Outcome{}
@@ -571,5 +586,41 @@ func TestEachOutcomeRuleStandsAlone(t *testing.T) {
 				t.Error(why)
 			}
 		})
+	}
+}
+
+// A goal's first finding is the one whose step was recorded first: by its
+// record address, ties by the order the stages wrote them, then in the order
+// given, so a goal's members can come in any order. A finding with no
+// address is not ordered against the others, and the order says how far the
+// choice rests on recorded places.
+func TestTheFirstRecordedFinding(t *testing.T) {
+	at := func(id string, seq, row uint64) sessionjudge.Finding {
+		f := sessionjudge.Finding{At: id}
+		if seq > 0 {
+			f.Ref = &sessionjudge.Ref{Seq: seq, Row: row}
+		}
+		return f
+	}
+	by := func(f sessionjudge.Finding, source string) sessionjudge.Finding { f.Source = source; return f }
+	for _, c := range []struct {
+		name        string
+		found       []sessionjudge.Finding
+		first, kind string
+	}{
+		{"by address", []sessionjudge.Finding{at("b", 2, 1), at("a", 1, 9), at("c", 2, 0)}, "a", ""},
+		{"a tie in the order given", []sessionjudge.Finding{at("x", 3, 4), at("y", 3, 4)}, "x", ""},
+		{"a tie by the stages' order", []sessionjudge.Finding{by(at("later", 3, 4), sessionjudge.StageDivergence),
+			by(at("asz", 3, 4), sessionjudge.SourceASZ), by(at("sooner", 3, 4), sessionjudge.StageAchievement)}, "sooner", ""},
+		{"some without an address", []sessionjudge.Finding{at("loose", 0, 0), at("late", 5, 1), at("early", 4, 1)}, "early", sessionjudge.FirstOrderPartial},
+		{"none with an address", []sessionjudge.Finding{at("one", 0, 0), at("two", 0, 0)}, "one", sessionjudge.FirstOrderNone},
+	} {
+		first, kind := FirstRecorded(c.found)
+		if first == nil || first.At != c.first || kind != c.kind {
+			t.Errorf("%s: %+v %q", c.name, first, kind)
+		}
+	}
+	if first, kind := FirstRecorded(nil); first != nil || kind != "" {
+		t.Errorf("no findings: %+v %q", first, kind)
 	}
 }

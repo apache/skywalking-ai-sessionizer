@@ -114,6 +114,7 @@
           "at",
           "conclusion",
           "cause",
+          "from",
           "problem",
           "explanation",
           "improvement",
@@ -138,10 +139,14 @@
               "misled_by_subtask",
               "missing_context",
               "context_not_used",
-              "clarification_not_sought",
-              "unsupported_assumption",
+              "question_not_asked",
+              "assumption_not_checked",
               "unavailable"
             ]
+          },
+          "from": {
+            "type": "string",
+            "description": "for question_not_asked and assumption_not_checked, the step where the ambiguity or the assumption arose, in the stream of at and not after it; empty for every other cause"
           },
           "problem": {
             "type": "string"

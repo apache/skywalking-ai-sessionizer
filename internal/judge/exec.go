@@ -87,6 +87,10 @@ type Result struct {
 	// never said, as one whose answer was lost on the way: Usage holds the
 	// others, and says nothing of these.
 	UnknownRequests int
+	// InProcess says the evaluator read through the run's own navigation
+	// and delivered its receipts there, as an API evaluator does; an agent
+	// CLI reads through a server of its own, whose log holds them.
+	InProcess bool
 }
 
 // Executor runs a stage.

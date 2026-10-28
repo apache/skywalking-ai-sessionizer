@@ -70,8 +70,9 @@ func misledIn(nav *Nav, t *sessionjudge.Target, misled []*sessionjudge.Subtask, 
 
 // absent are the causes that rest on something not happening: a question
 // never asked, a check never made. The record cannot show the evaluator read
-// all of where it would have happened, so such a finding is its judgment.
-var absent = []string{sessionjudge.CauseNoClarification, sessionjudge.CauseUnsupported}
+// all of where it would have happened, so such a finding is its judgment,
+// shown with how much of its span the evaluator was given.
+var absent = []string{sessionjudge.CauseQuestionNotAsked, sessionjudge.CauseAssumptionNotChecked}
 
 // checkDivergence checks a divergence answer: how the conversation compares
 // with each conclusion the call was given, the rollbacks a source reports,
@@ -112,6 +113,9 @@ func checkDivergence(nav *Nav, targets []sessionjudge.Target, inputs []*sessionj
 			findingEntry
 			Conclusion string `json:"conclusion"`
 			Cause      string `json:"cause"`
+			// From is where the question or the assumption arose, for a
+			// cause that rests on something not happening.
+			From string `json:"from"`
 		} `json:"findings"`
 	}
 	if err := decodeAnswer(raw, "divergences", &a); err != nil {
@@ -187,7 +191,7 @@ func checkDivergence(nav *Nav, targets []sessionjudge.Target, inputs []*sessionj
 				}
 			}
 		case sessionjudge.VerdictNotObserved:
-			d.Asserted = true
+			d.Asserted, d.Given = true, nav.GivenWindow()
 		case sessionjudge.VerdictUnknown, sessionjudge.VerdictNotApplicable:
 		default:
 			weakened++
@@ -244,7 +248,14 @@ func checkDivergence(nav *Nav, targets []sessionjudge.Target, inputs []*sessionj
 				weakened++
 				f.Cause = sessionjudge.CauseUnavailable
 			case slices.Contains(absent, f.Cause):
+				// What was given of the span the question or the assumption
+				// stands over is measured from a start asz checks: one in
+				// the stream of the finding's step, at or before it.
+				var valid bool
 				f.Asserted = true
+				if f.Given, valid = nav.GivenSpan(x.From, f.At); valid {
+					f.From = x.From
+				}
 			}
 			c.frames = append(c.frames, &f)
 		}

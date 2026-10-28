@@ -265,14 +265,21 @@ func checkRegroup(nav *Nav, goals []string, targets []sessionjudge.Target, judge
 		case rejected[id]:
 			// A target was put in it with nothing that shows it.
 			g.Class = sessionjudge.CompareUnknown
-		case worked[id] && missing == 0:
+		case len(unknown) > 0:
+			// A target the regroup left out or could not place may serve
+			// it, so neither that the judge found no target for it nor that
+			// nothing worked on it is shown.
+			g.Class = sessionjudge.CompareUnknown
+		case worked[id]:
 			g.Class = sessionjudge.CompareMissed
 		case claimed[id]:
-			// Worked on, and a target left out may serve it; or worked on,
-			// the answer says, with nothing that shows it.
+			// Worked on, the answer says, with nothing that shows it.
 			g.Class = sessionjudge.CompareUnknown
 		default:
-			g.Class = sessionjudge.CompareAbsent
+			// Nothing worked on it rests on reading all of where it would
+			// show: the evaluator's judgment, beside how much of the judged
+			// work it was given.
+			g.Class, g.Asserted, g.Given = sessionjudge.CompareAbsent, true, nav.GivenWindow()
 		}
 		g.Main = mainOf(g.Members, status, judgeGoals)
 		agreement.Classes[g.Class]++

@@ -260,13 +260,13 @@ func TestTheCatalogueStaysWithinItsBudget(t *testing.T) {
 	if strings.Contains(bare, `"statement"`) || len(lines(bare)) != 3 {
 		t.Fatalf("bare %s", bare)
 	}
-	if got := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, catalogue{targets: cat}, len(short)-1, 0); !strings.Contains(got, bare) {
+	if got, _ := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, catalogue{targets: cat}, len(short)-1, 0); !strings.Contains(got, bare) {
 		t.Fatalf("the prompt's catalogue %s", got)
 	}
 	// The goals found so far come after the targets, each with the last
 	// input a later relation can follow, and within the same budget.
 	goals := []sessionjudge.Goal{{ID: "g1", Statement: "build it", Members: []string{"t1"}, Main: "t1"}, {ID: "g2", Statement: long, Members: []string{"t2", "t3"}}}
-	got := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, catalogue{targets: cat, goals: goals, latest: map[string]string{"g1": "in/4"}}, 0, 0)
+	got, _ := pushText(sessionjudge.StageTargets, 2, 3, chunk{}, catalogue{targets: cat, goals: goals, latest: map[string]string{"g1": "in/4"}}, 0, 0)
 	if !strings.Contains(got, `{"id":"g1","last_input":"in/4","main":"t1","members":["t1"],"statement":"build it"}`) ||
 		!strings.Contains(got, `{"id":"g2","members":["t2","t3"],"statement":"`) {
 		t.Fatalf("the prompt's goals %s", got)
@@ -274,7 +274,7 @@ func TestTheCatalogueStaysWithinItsBudget(t *testing.T) {
 	if tiny := goalLines(goals, nil, 120); len(tiny) > 120 || !strings.Contains(tiny, "1 more goals; the targets tool lists them") {
 		t.Fatalf("tiny goals %s", tiny)
 	}
-	if got := pushText(sessionjudge.StageTargets, 1, 3, chunk{}, catalogue{}, 0, 0); !strings.Contains(got, "goals found so far by earlier parts of this run: none yet") {
+	if got, _ := pushText(sessionjudge.StageTargets, 1, 3, chunk{}, catalogue{}, 0, 0); !strings.Contains(got, "goals found so far by earlier parts of this run: none yet") {
 		t.Fatalf("no goals yet %s", got)
 	}
 	// Even ids and status alone are bounded: past the budget, a line says
@@ -293,9 +293,15 @@ func TestTheCatalogueStaysWithinItsBudget(t *testing.T) {
 	for i := range 200 {
 		rows = append(rows, map[string]any{"talk": fmt.Sprintf("talk/%d", i), "label": long})
 	}
-	pushed := pushText(sessionjudge.StageAchievement, 1, 1, chunk{rows: rows}, catalogue{}, 0, 8192)
-	if len(pushed) > 8192+200 || !strings.Contains(pushed, "more rows, which the talks tool lists") {
-		t.Fatalf("pushed %d bytes:\n%s", len(pushed), pushed)
+	pushed, held := pushText(sessionjudge.StageAchievement, 1, 1, chunk{rows: rows}, catalogue{}, 0, 8192)
+	if len(pushed) > 8192+200 || !strings.Contains(pushed, fmt.Sprintf("%d more rows, which the talks tool lists", 200-held)) {
+		t.Fatalf("pushed %d bytes, holding %d rows:\n%s", len(pushed), held, pushed)
+	}
+	// It says how many rows the prompt holds, from the first, so only those
+	// count as given.
+	last, _ := json.Marshal(rows[held-1])
+	if held == 0 || held == len(rows) || !strings.Contains(pushed, string(last)) {
+		t.Fatalf("holding %d rows", held)
 	}
 	// And so are the steps the achievement stage cited.
 	var achievements []*sessionjudge.Achievement
