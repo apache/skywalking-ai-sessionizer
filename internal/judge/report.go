@@ -16,7 +16,6 @@
 package judge
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -29,13 +28,12 @@ import (
 // what its rework cost by cause, the person's corrections and its file
 // operations; it returns the conversation's file operations and the
 // findings asz records itself, a frame each; and it adds to the summary the
-// final score, each goal's outcome and the file operations no target made.
-// It reads only what the stages kept, never their prose.
+// final score and the file operations no target made. It reads only what
+// the stages kept, never their prose.
 //
-// frames are the close's frames so far, whose outcomes it amends, and
-// findings the efficiency stage's.
-func report(nav *Nav, l *Ledger, targets []sessionjudge.Target, goals []sessionjudge.Goal, inputs []*sessionjudge.Input,
-	achievements []*sessionjudge.Achievement, findings []*sessionjudge.Finding, labels []*sessionjudge.Label, subtasks map[string]*sessionjudge.Subtask,
+// frames are the close's frames so far, whose outcomes it amends.
+func report(nav *Nav, l *Ledger, targets []sessionjudge.Target, inputs []*sessionjudge.Input,
+	achievements []*sessionjudge.Achievement, labels []*sessionjudge.Label, subtasks map[string]*sessionjudge.Subtask,
 	refs references, frames []any, sum *sessionjudge.Summary) []any {
 	outcome := map[string]*sessionjudge.Outcome{}
 	for _, f := range frames {
@@ -57,23 +55,6 @@ func report(nav *Nav, l *Ledger, targets []sessionjudge.Target, goals []sessionj
 	// How each call was labeled, as the close prices it, so rework is priced
 	// the same way.
 	work := labelCalls(l, targets, who, labels, subtasks)
-
-	// Every finding of a target, the stages' and asz's, for the goals.
-	found := map[string][]sessionjudge.Finding{}
-	for _, a := range achievements {
-		for _, f := range a.Findings {
-			f.Target, f.Source = a.Target, sessionjudge.StageAchievement
-			found[a.Target] = append(found[a.Target], f)
-		}
-	}
-	for _, f := range findings {
-		x := *f
-		x.T = ""
-		if x.Source == "" {
-			x.Source = sessionjudge.StageEfficiency
-		}
-		found[f.Target] = append(found[f.Target], x)
-	}
 
 	opsOf, unassigned := operationsOf(nav, l, claims, who)
 	sum.UnassignedOperations = unassigned
@@ -119,7 +100,6 @@ func report(nav *Nav, l *Ledger, targets []sessionjudge.Target, goals []sessionj
 		mine := mechanicalFindings(nav, t, a, scored, applied, undone, o.Corrections)
 		for i := range mine {
 			out = append(out, &mine[i])
-			found[t.ID] = append(found[t.ID], mine[i])
 		}
 	}
 	if sum.Score != nil && len(finals) > 0 {
@@ -128,9 +108,6 @@ func report(nav *Nav, l *Ledger, targets []sessionjudge.Target, goals []sessionj
 			total += f
 		}
 		sum.Score.Final = ratio(total, float64(len(finals)))
-	}
-	for _, g := range goals {
-		sum.Goals = append(sum.Goals, goalOutcome(g, outcome, found))
 	}
 	return out
 }
@@ -501,82 +478,6 @@ func mechanicalFindings(nav *Nav, t sessionjudge.Target, a *sessionjudge.Achieve
 		if !triggers[in] {
 			add(in, "the person corrected the target", []sessionjudge.Cite{{Node: in}})
 		}
-	}
-	return out
-}
-
-// FirstRecorded is the finding whose step was recorded first: by the record
-// address of its step, and on equal addresses by the order the stages wrote
-// them, asz's last since the close writes them, then in the order given. A
-// finding whose step has no address is not ordered against the others.
-// order is empty when every finding had an address, partial when some had
-// none and first is the first among those with one, and none when none had
-// one and the first given stands. The close and the label view of the
-// report both choose by it, so the two never disagree, and a goal's members
-// can be given in any order.
-func FirstRecorded(found []sessionjudge.Finding) (first *sessionjudge.Finding, order string) {
-	stage := func(f *sessionjudge.Finding) int {
-		if f.Source == sessionjudge.SourceASZ {
-			return slices.Index(sessionjudge.Stages, sessionjudge.StageClose)
-		}
-		return slices.Index(sessionjudge.Stages, f.Source)
-	}
-	missing := 0
-	for i := range found {
-		f := &found[i]
-		if f.Ref == nil {
-			missing++
-			continue
-		}
-		if first == nil || cmp.Or(cmp.Compare(f.Ref.Seq, first.Ref.Seq), cmp.Compare(f.Ref.Row, first.Ref.Row), cmp.Compare(stage(f), stage(first))) < 0 {
-			first = f
-		}
-	}
-	switch {
-	case len(found) == 0:
-		return nil, ""
-	case missing == len(found):
-		return &found[0], sessionjudge.FirstOrderNone
-	case missing > 0:
-		return first, sessionjudge.FirstOrderPartial
-	}
-	return first, ""
-}
-
-// goalOutcome is how one goal did. Its main target stays only while it is
-// still wanted; one cancelled or replaced by the end leaves it
-// undetermined. Its worst class is the most severe of its targets', and its
-// first finding the one recorded first.
-func goalOutcome(g sessionjudge.Goal, outcome map[string]*sessionjudge.Outcome, found map[string][]sessionjudge.Finding) sessionjudge.GoalOutcome {
-	out := sessionjudge.GoalOutcome{Goal: g.ID}
-	if o := outcome[g.Main]; o != nil && o.Status != sessionjudge.TargetCancelled && o.Status != sessionjudge.TargetReplaced {
-		out.Main, out.ScoreMain = g.Main, o.ScoreFinal
-	}
-	worst := len(sessionjudge.Classes)
-	total, n := 0.0, 0
-	var all []sessionjudge.Finding
-	for _, m := range g.Members {
-		o := outcome[m]
-		if o == nil {
-			continue
-		}
-		if i := slices.Index(sessionjudge.Classes, o.Class); i >= 0 && i < worst {
-			worst = i
-		}
-		if o.ScoreFinal != nil {
-			total, n = total+*o.ScoreFinal, n+1
-		}
-		all = append(all, found[m]...)
-	}
-	if first, order := FirstRecorded(all); first != nil {
-		f := *first
-		out.First, out.FirstOrder = &f, order
-	}
-	if worst < len(sessionjudge.Classes) {
-		out.Worst = sessionjudge.Classes[worst]
-	}
-	if n > 0 {
-		out.ScoreMean = ratio(total, float64(n))
 	}
 	return out
 }

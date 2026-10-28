@@ -42,7 +42,7 @@ func serve(t *testing.T, lines ...string) []map[string]any {
 	var calls []string
 	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(tool string, _ json.RawMessage, _ int, _ error, _ Receipt) {
 		calls = append(calls, tool)
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	var replies []map[string]any
@@ -286,7 +286,7 @@ func TestTheServerEndsOnceTheBudgetIsSpent(t *testing.T) {
 	}
 	var out bytes.Buffer
 	answered := 0
-	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(string, json.RawMessage, int, error, Receipt) { answered++ }); err != nil {
+	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(string, json.RawMessage, int, error, Receipt) { answered++ }, nil); err != nil {
 		t.Fatal(err)
 	}
 	if answered != budgetRefusals || !strings.Contains(out.String(), "reading budget of this call is spent") {
@@ -683,7 +683,7 @@ func TestAnAnswerNotWrittenIsNotLogged(t *testing.T) {
 	nav := NewNav(doc(), Compute(doc(), "claude-code/1", nil, nil), nil)
 	logged := 0
 	err := ServeMCP(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"card","arguments":{}}}`+"\n"),
-		failingWriter{}, nav, func(string, json.RawMessage, int, error, Receipt) { logged++ })
+		failingWriter{}, nav, func(string, json.RawMessage, int, error, Receipt) { logged++ }, nil)
 	if err == nil || logged != 0 {
 		t.Fatalf("a failed write: %v, %d logged", err, logged)
 	}

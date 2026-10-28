@@ -72,6 +72,19 @@ func HorizonCommit() string {
 	return ""
 }
 
+// HorizonTheme is Horizon's design tokens and themes as the embedded
+// renderer carries them, without the font faces: a page that is one file
+// cannot load the fonts, and draws with the fallbacks of the font stack.
+func HorizonTheme() string {
+	b, err := renderer.ReadFile("conversation-view/host-shell/horizon-theme.css")
+	if err != nil {
+		return ""
+	}
+	return fontFace.ReplaceAllString(string(b), "")
+}
+
+var fontFace = regexp.MustCompile(`(?s)@font-face\s*\{.*?\}\s*`)
+
 // assets serves the renderer's files.
 //
 // Every page names them with the pin on the end, so the URL changes when the
@@ -135,6 +148,10 @@ var logoSVG []byte
 // brand-blue variant, derived the way Horizon derives it for its own top
 // bar, so the two hosts show the same mark on the same ground.
 var logoBlueSVG = bytes.ReplaceAll(logoSVG, []byte(`fill="#fff"`), []byte(`fill="#1368B3"`))
+
+// Brand is the logo for a dark ground and for a light one, and the icon, as
+// the page shows them, for a page that stands alone to show them the same.
+func Brand() (logo, logoBlue, favicon []byte) { return logoSVG, logoBlueSVG, faviconSVG }
 
 // index lists the conversations. It is the only page that knows there is more
 // than one of them.

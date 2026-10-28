@@ -279,9 +279,9 @@ func TestIdentitiesAreCheckedBeforeAnyPath(t *testing.T) {
 	for _, bad := range []string{"../escape", "a/b", "CON", "x:y", "trailing.", ".tmp-x", "a\\b"} {
 		for name, run := range map[string]func() int{
 			"judge -list": func() int { return cmdJudge([]string{"-config", cfgFile, "-list", bad}) },
-			"judge -show": func() int { return cmdJudge([]string{"-config", cfgFile, "-show", "1", bad}) },
+			"judge -show": func() int { return cmdJudge([]string{"-config", cfgFile, "-show", "-run", "1", bad}) },
 			"judge -regroup": func() int {
-				return cmdJudge([]string{"-config", cfgFile, "-regroup", "1", "-labels", cfgFile, bad})
+				return cmdJudge([]string{"-config", cfgFile, "-regroup", "1", "-goals", cfgFile, bad})
 			},
 			"measure": func() int { return cmdMeasure([]string{"-config", cfgFile, bad}) },
 		} {
@@ -496,10 +496,10 @@ func TestSuppliedFilesFollowTheAdmittedSnapshot(t *testing.T) {
 	if err := os.WriteFile(labels, []byte("goals:\n  - finish\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := judge.ReadLabels(labels, p.snapshot); err != nil {
+	if _, err := judge.ReadGoals(labels, p.snapshot); err != nil {
 		t.Fatalf("labels in the admitted snapshot: %v", err)
 	}
-	if _, err := judge.ReadLabels(labels, ""); !errors.Is(err, storage.ErrProtected) {
+	if _, err := judge.ReadGoals(labels, ""); !errors.Is(err, storage.ErrProtected) {
 		t.Fatalf("labels in a snapshot no lease admits: %v", err)
 	}
 	if _, err := judge.LoadPricing(labels, t.TempDir()); !errors.Is(err, storage.ErrProtected) {
@@ -509,7 +509,7 @@ func TestSuppliedFilesFollowTheAdmittedSnapshot(t *testing.T) {
 	if err := os.WriteFile(lease, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := judge.ReadLabels(lease, p.snapshot); !errors.Is(err, storage.ErrProtected) {
+	if _, err := judge.ReadGoals(lease, p.snapshot); !errors.Is(err, storage.ErrProtected) {
 		t.Fatalf("a lease read as labels: %v", err)
 	}
 }

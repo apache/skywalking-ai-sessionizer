@@ -79,10 +79,8 @@ func cites(ids ...string) []sessionjudge.Cite {
 // question, each a goal of its own.
 type workedRun struct {
 	targets      []sessionjudge.Target
-	goals        []sessionjudge.Goal
 	inputs       []*sessionjudge.Input
 	achievements []*sessionjudge.Achievement
-	findings     []*sessionjudge.Finding
 	labels       []*sessionjudge.Label
 	subtasks     map[string]*sessionjudge.Subtask
 	refs         references
@@ -96,7 +94,6 @@ func workedDecisions() *workedRun {
 			{ID: "t2", Status: sessionjudge.TargetClosed, Talks: []string{"talk/3"}, Criteria: []sessionjudge.Criterion{{ID: "t2.c1", Text: "answered"}},
 				Cite: cites("in/3", "in/2")},
 		},
-		goals: []sessionjudge.Goal{{ID: "g1", Members: []string{"t1"}, Main: "t1"}, {ID: "g2", Members: []string{"t2"}, Main: "t2"}},
 		inputs: []*sessionjudge.Input{
 			{Node: "in/1", Talk: "talk/1", Actions: []sessionjudge.Action{{Target: "t1", Action: sessionjudge.ActionCreate}}},
 			{Node: "in/2", Talk: "talk/2", Actions: []sessionjudge.Action{{Target: "t1", Action: sessionjudge.ActionCorrect}}},
@@ -117,7 +114,6 @@ func workedDecisions() *workedRun {
 				Criteria: []sessionjudge.Check{{ID: "t2.c1", Text: "answered", State: sessionjudge.CheckMet, Cite: cites("r3")}},
 				Events:   []sessionjudge.Event{{ID: "t2.e1", Kind: sessionjudge.EventDelivered, Artifact: sessionjudge.ArtifactAnswer, Cite: cites("r3")}}},
 		},
-		findings: []*sessionjudge.Finding{{T: sessionjudge.FrameFinding, Target: "t2", At: "r3", Problem: "the answer took long"}},
 	}
 }
 
@@ -125,23 +121,8 @@ func workedDecisions() *workedRun {
 func (w *workedRun) closed(t *testing.T) (map[string]*sessionjudge.Outcome, []sessionjudge.Finding, *sessionjudge.Summary) {
 	t.Helper()
 	nav, l := worked()
-	// A stage's finding carries the address of its step, as the checks of
-	// its answer give it one (checkFindings).
-	address := func(f *sessionjudge.Finding) {
-		if n := nav.Node(f.At); n != nil && n.Ref != nil && f.Ref == nil {
-			f.Ref = &sessionjudge.Ref{Seq: n.Ref.Seq, Row: n.Ref.Row, Block: n.Ref.Block}
-		}
-	}
-	for _, a := range w.achievements {
-		for i := range a.Findings {
-			address(&a.Findings[i])
-		}
-	}
-	for _, f := range w.findings {
-		address(f)
-	}
 	frames, sum := closeFrames(l, w.targets, w.inputs, w.achievements, w.labels, w.subtasks, nil)
-	more := report(nav, l, w.targets, w.goals, w.inputs, w.achievements, w.findings, w.labels, w.subtasks, w.refs, frames, sum)
+	more := report(nav, l, w.targets, w.inputs, w.achievements, w.labels, w.subtasks, w.refs, frames, sum)
 	outcomes := map[string]*sessionjudge.Outcome{}
 	for _, f := range frames {
 		if o, ok := f.(*sessionjudge.Outcome); ok {
@@ -215,15 +196,6 @@ func TestTheCloseSaysHowEachTargetEnded(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("findings\n%s", strings.Join(got, "\n"))
 	}
-	// Each goal leads with the finding that happened first in it.
-	g1, g2 := sum.Goals[0], sum.Goals[1]
-	if g1.Goal != "g1" || g1.Main != "t1" || g1.Worst != sessionjudge.ClassContradicted || g1.First == nil || g1.First.At != "r1" ||
-		g1.First.Source != sessionjudge.StageAchievement || fraction(g1.ScoreMain) != "0" || fraction(g1.ScoreMean) != "0" {
-		t.Fatalf("g1 %+v", g1)
-	}
-	if g2.Main != "t2" || g2.Worst != sessionjudge.ClassAchieved || g2.First == nil || g2.First.Source != sessionjudge.StageEfficiency || fraction(g2.ScoreMain) != "1" {
-		t.Fatalf("g2 %+v", g2)
-	}
 }
 
 // Each rule of an outcome on its own, from the decisions of
@@ -291,10 +263,6 @@ func TestEachOutcomeRuleStandsAlone(t *testing.T) {
 				// Its rework is still a problem; what its result missed is not.
 				if len(found) != 1 || !strings.Contains(found[0].Problem, "round t1.r1 of rework") {
 					return fmt.Sprint(found)
-				}
-				// A main target cancelled leaves its goal undetermined.
-				if g := sum.Goals[0]; g.Main != "" || g.ScoreMain != nil || g.Worst != sessionjudge.ClassCancelled {
-					return fmt.Sprintf("g1 %+v", g)
 				}
 				return ""
 			}},
@@ -509,13 +477,6 @@ func TestEachOutcomeRuleStandsAlone(t *testing.T) {
 			}
 			return ""
 		}},
-		{"the first finding is the earliest", func(w *workedRun) { w.achievements[0].Findings[0].At = "s3" },
-			func(_ map[string]*sessionjudge.Outcome, _ []sessionjudge.Finding, sum *sessionjudge.Summary) string {
-				if f := sum.Goals[0].First; f == nil || f.At != "s1" || f.Source != sessionjudge.SourceASZ {
-					return fmt.Sprintf("first %+v", f)
-				}
-				return ""
-			}},
 		{"a talk another target took", func(w *workedRun) {
 			w.inputs[1].Actions = []sessionjudge.Action{{Target: "t2", Action: sessionjudge.ActionCreate}}
 			w.targets[1].Talks = append(w.targets[1].Talks, "talk/2")
@@ -586,41 +547,5 @@ func TestEachOutcomeRuleStandsAlone(t *testing.T) {
 				t.Error(why)
 			}
 		})
-	}
-}
-
-// A goal's first finding is the one whose step was recorded first: by its
-// record address, ties by the order the stages wrote them, then in the order
-// given, so a goal's members can come in any order. A finding with no
-// address is not ordered against the others, and the order says how far the
-// choice rests on recorded places.
-func TestTheFirstRecordedFinding(t *testing.T) {
-	at := func(id string, seq, row uint64) sessionjudge.Finding {
-		f := sessionjudge.Finding{At: id}
-		if seq > 0 {
-			f.Ref = &sessionjudge.Ref{Seq: seq, Row: row}
-		}
-		return f
-	}
-	by := func(f sessionjudge.Finding, source string) sessionjudge.Finding { f.Source = source; return f }
-	for _, c := range []struct {
-		name        string
-		found       []sessionjudge.Finding
-		first, kind string
-	}{
-		{"by address", []sessionjudge.Finding{at("b", 2, 1), at("a", 1, 9), at("c", 2, 0)}, "a", ""},
-		{"a tie in the order given", []sessionjudge.Finding{at("x", 3, 4), at("y", 3, 4)}, "x", ""},
-		{"a tie by the stages' order", []sessionjudge.Finding{by(at("later", 3, 4), sessionjudge.StageDivergence),
-			by(at("asz", 3, 4), sessionjudge.SourceASZ), by(at("sooner", 3, 4), sessionjudge.StageAchievement)}, "sooner", ""},
-		{"some without an address", []sessionjudge.Finding{at("loose", 0, 0), at("late", 5, 1), at("early", 4, 1)}, "early", sessionjudge.FirstOrderPartial},
-		{"none with an address", []sessionjudge.Finding{at("one", 0, 0), at("two", 0, 0)}, "one", sessionjudge.FirstOrderNone},
-	} {
-		first, kind := FirstRecorded(c.found)
-		if first == nil || first.At != c.first || kind != c.kind {
-			t.Errorf("%s: %+v %q", c.name, first, kind)
-		}
-	}
-	if first, kind := FirstRecorded(nil); first != nil || kind != "" {
-		t.Errorf("no findings: %+v %q", first, kind)
 	}
 }

@@ -31,8 +31,7 @@
   achieved, cannot be verified, or cancelled or replaced. It has a record's score and a final score
   that applies the contradictions and undoing of the deliveries standing at the end; what its rework
   cost, priced by how its calls were labeled; the person's corrections; and its file operations. asz records a finding where each
-  problem happened, and each goal says its main target, its worst class, its first recorded finding,
-  and its scores.
+  problem happened.
 - The targets stage groups targets into goals, the targets that serve one result the person asked for,
   since a person often works on unrelated things in one session. It says how each input relates to the
   inputs before it: it starts, goes on with, adjusts or returns to a goal, or is unclear. A goal keeps
@@ -66,11 +65,16 @@
   the four revisions before it. `asz judge -reference-tools SRC` lists the server's tools. A URL is kept
   without its query, a server without its path, and a failure as a class and a detail asz builds. The
   fetch's secrets are removed from everything kept, inside JSON strings however escaped.
-- `asz judge -labels FILE` regroups a run by a person's goals, a plain list in their own words, and
+- `asz judge -goals FILE` regroups a run by a person's goals, a plain list in their own words, and
   `-regroup N` regroups a closed run. One evaluator call places each target in the goal it serves, and
   asz compares the two groupings goal by goal: agree, split, merged, missed, absent or unknown. The
   regroup is a versioned file beside the run, which is never changed. `-show` follows the person's
   goals. A goal is absent only when every target was placed: a target left out may serve it.
+- `asz judge -show` prints the latest closed run, or the one `-run N` names, as a tree, goal by goal:
+  each target's status and why, its score, its criteria, what was done and what it is missing, then
+  the overall assessment and result, with no id or step address. `-format markdown` prints the
+  conclusions alone, and `-format html` a page of the details that opens as a file, drawn with
+  Horizon's design, with the steps its evidence rests on.
 - A claim that something did not happen stays the evaluator's judgment: a verdict of not observed, a
   question never asked, an assumption never checked, and a person's goal nothing worked on. Beside it
   asz reports how much of where it would show the evaluator was given, in steps: those it opened, those

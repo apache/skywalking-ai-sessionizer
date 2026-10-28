@@ -16,6 +16,9 @@
 package main
 
 import (
+	"errors"
+	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -24,6 +27,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
 
 func cited(ids ...string) []sessionjudge.Cite {
@@ -34,8 +38,9 @@ func cited(ids ...string) []sessionjudge.Cite {
 	return out
 }
 
-// reportFiles is a closed run of two goals: g1, a fix whose last delivery
-// is contradicted, and g2, a release note undone. t4 is in no goal.
+// reportFiles is a closed run of two goals: g1, a release note undone, and
+// g2, a fix whose last delivery is contradicted, the more severe outcome
+// in the later goal. t4 is in no goal.
 func reportFiles() []*sessionjudge.File {
 	half, quarter, zero, one, three, two := 0.5, 0.25, 0.0, 1.0, 3, 2
 	minusOne := 1
@@ -43,8 +48,8 @@ func reportFiles() []*sessionjudge.File {
 		Targets: []sessionjudge.Target{{ID: "t1", Statement: "Find why checkout times out"}, {ID: "t2", Statement: "Fix the retry limit"},
 			{ID: "t3", Statement: "Write the release note"}, {ID: "t4", Statement: "Tidy the README"}},
 		Goals: []sessionjudge.Goal{
-			{ID: "g2", Statement: "Release 0.4.0", Members: []string{"t3"}, MainReason: "the person named no priority"},
-			{ID: "g1", Statement: "Find why checkout times out, and fix it", Members: []string{"t2", "t1"}, Main: "t1", MainReason: "the person asked for the cause first",
+			{ID: "g1", Statement: "Release 0.4.0", Members: []string{"t3"}, MainReason: "the person named no priority"},
+			{ID: "g2", Statement: "Find why checkout times out, and fix it", Members: []string{"t2", "t1"}, Main: "t1", MainReason: "the person asked for the cause first",
 				Evolution: []sessionjudge.Evolution{{Input: "in/1", Statement: "find why checkout is slow"}, {Input: "in/2", Statement: "find why it times out"}}},
 		}}
 	achievement := &sessionjudge.File{Header: sessionjudge.Header{Stage: sessionjudge.StageAchievement, Status: sessionjudge.StatusComplete},
@@ -80,11 +85,7 @@ func reportFiles() []*sessionjudge.File {
 	efficiency := &sessionjudge.File{Header: sessionjudge.Header{Stage: sessionjudge.StageEfficiency, Status: sessionjudge.StatusComplete},
 		Findings: []sessionjudge.Finding{{Target: "t2", At: "s7", Ref: &sessionjudge.Ref{Seq: 1, Row: 9}, Problem: "the build ran twice"}}}
 	closeFile := &sessionjudge.File{Header: sessionjudge.Header{Stage: sessionjudge.StageClose, Status: sessionjudge.StatusComplete,
-		Summary: &sessionjudge.Summary{Score: &sessionjudge.Score{Achievement: ptr(0.625), Final: &quarter, Judged: 4},
-			Goals: []sessionjudge.GoalOutcome{
-				{Goal: "g1", Main: "t1", Worst: sessionjudge.ClassContradicted, ScoreMain: &zero, ScoreMean: &half,
-					First: &sessionjudge.Finding{Target: "t1", Source: sessionjudge.SourceASZ, At: "s1", Problem: "criterion t1.c2 was not met: fixed"}},
-				{Goal: "g2", Worst: sessionjudge.ClassReverted, ScoreMean: &zero}}}},
+		Summary: &sessionjudge.Summary{Score: &sessionjudge.Score{Achievement: ptr(0.625), Final: &quarter, Judged: 4}}},
 		Outcomes: []sessionjudge.Outcome{
 			{Target: "t1", Statement: "Find why checkout times out", Status: sessionjudge.TargetClosed, Level: sessionjudge.LevelPartly, Class: sessionjudge.ClassContradicted,
 				Standing: []string{"t1.e3"}, ScoreRecord: &half, ScoreFinal: &zero, Corrections: []string{"in/2"},
@@ -109,84 +110,59 @@ func reportFiles() []*sessionjudge.File {
 	return []*sessionjudge.File{targets, achievement, efficiency, closeFile}
 }
 
-// A goal's first recorded finding whose cause rests on something not
-// happening shows, with it, how much of its span the evaluator was given.
-func TestAGoalsFirstFindingShowsItsReading(t *testing.T) {
-	files := reportFiles()
-	files[3].Header.Summary.Goals[0].First = &sessionjudge.Finding{Target: "t1", Source: sessionjudge.StageDivergence, At: "s1",
-		Cause: sessionjudge.CauseQuestionNotAsked, Asserted: true, From: "in/1", Problem: "it chose a cache without asking",
-		Given: &sessionjudge.Given{Scope: sessionjudge.GivenSpan, Counts: &sessionjudge.GivenCounts{Steps: 5, Opened: 2, Listed: 1, None: 2}}}
-	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, files) })
-	want := "    first recorded  divergence at s1: it chose a cache without asking\n" +
-		"      cause: question not asked; the evaluator's judgment, since the record cannot show it was looked for everywhere; " +
-		"of the 5 steps from in/1 to s1 it opened 2, saw 1 only in lists and was not given 2\n"
-	if !strings.Contains(out, want) {
-		t.Fatalf("the goal's first finding:\n%s", out)
-	}
-}
-
-// The report reads goal by goal, the most severe first: each goal's worst
-// class, first finding and main target; each target's scores, reasons and
-// what its steps show, what was done by what it was for, the person's
-// corrections, its rework and what it still misses; then the findings, and
-// the goal's scores.
+// The report reads goal by goal, in the order of their ids, though the later
+// goal holds the more severe outcome. Each target says its status, score,
+// criteria, what was done and what is missing, in plain words with no id or
+// step address; then come the overall assessment and the overall result. A
+// goal only groups targets: it prints no class, finding or score of its own.
 func TestTheReportReadsGoalByGoal(t *testing.T) {
 	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, reportFiles()) })
 	want := []string{
-		"goal g1  Find why checkout times out, and fix it",
-		`evolved   "find why checkout is slow" (in/1) → "find why it times out" (in/2)`,
-		"worst     contradicted",
-		"first recorded  asz at s1: criterion t1.c2 was not met: fixed",
-		"main      t1: the person asked for the cause first",
-		"t1  Find why checkout times out",
-		"0/100 (50 by the record)",
-		"outcome   contradicted; standing t1.e3; 1 round of rework",
-		"why       t1.c1 met: the cause named",
-		"read: the reply names the clock",
-		`[s3 returned] "FAIL TestCache" — read: the cache test fails`,
-		"claims    supported: the tests pass [s3]",
-		"no evidence: it is faster nothing cited",
-		"history   t1.e1 delivered (answer) [r1]: the cache",
-		"contradicted the delivered conclusion, by [in/2]: the cache was fine; replaced since",
-		"t1.e3 delivered again, replacing t1.e1 (file)\n",
-		"contradicted  t1.c1, by [in/3]: not the clock either",
-		"did       answer",
-		"asked      why it times out [in/1]",
-		"checked    the pool: it has room [s2]; holds for: one hour of metrics",
-		"ruled out  the network: the ping is fast [s1]",
-		"answered   the clock [r2]",
-		"files",
-		"internal/clock, code: the clock fix",
-		"internal/clock/clock.go (modify +3 -1) [o1]",
-		"not grouped: docs/clock.md (write, no result, share 0.5) [o2]",
-		"remote",
-		"GitHub: merge pull request 12 via gh, sent [s5], confirmed [in/4]",
-		"Slack: post the note via api, sent [s6], not confirmed",
-		"person    corrected it at in/2",
-		"rework    t1.r1, person, agent error: from in/2 to s3; finished",
-		"cost: repair own mistake 5.0k tokens; misled by subtask, by stream/a 1.0k tokens; not reviewed 500 tokens",
-		"gap       t1.c2 unknown: fixed",
-		"asz: nothing it cites shows it; the evaluator read: it is fixed",
-		"findings",
-		"t1 at s1, asz: criterion t1.c2 was not met: fixed",
-		"t1 at r1, achievement: it named the cause without reading the log",
-		"why, proposed: it guessed",
-		"improvement, proposed: read the log first",
-		"t2 at s7, efficiency: the build ran twice",
-		"scores    main t1 0/100; all 2 targets 50/100 (75 by the record)",
-		"goal g2  Release 0.4.0",
-		"main      undetermined: the person named no priority",
-		"undone    the whole result, by [s9]: the note was deleted",
-		"did       files",
-		"none recorded: no change record captured them, and no editing tool's request named them",
-		"scores    main undetermined; all 1 target 0/100 (100 by the record)",
+		"goal 1: Release 0.4.0",
+		"└─ target: Write the release note",
+		"   ├─ status: reverted: undone in the conversation, the note was deleted",
+		"   ├─ score: 0 of 100 (100 by the achievement record)",
+		"   │  1. changed files that no change record or editing tool names",
+		// A result undone whole is what it is missing.
+		"      1. the whole result: undone in the conversation, the note was deleted",
+		"goal 2: Find why checkout times out, and fix it",
+		"├─ target: Find why checkout times out (the main one)",
+		// Nothing is said of the criterion's state before it was contradicted.
+		"│  ├─ status: contradicted: 1 criterion contradicted or undone\n",
+		"│  ├─ score: 0 of 100 (50 by the achievement record)",
+		"│  │  1. the cause named: met; later in the conversation, not the clock either",
+		"│  │  2. fixed: unknown",
+		"│  │  1. the pool: it has room",
+		"│  │  2. ruled out the network: the ping is fast",
+		"│  │  3. answered: the clock",
+		"│  │  4. internal/clock, code: the clock fix",
+		"│  │     internal/clock/clock.go (modify +3 -1)",
+		// A request of an editing tool is an attempt, said with what became of it.
+		"│  │  5. files: docs/clock.md (write, requested, the tool never returned)",
+		"│  │  6. merge pull request 12 on GitHub through gh, confirmed",
+		"│  │  7. post the note on Slack through api, not confirmed",
+		// A criterion met and contradicted since is missing too.
+		"│     1. the cause named: met, then later in the conversation, not the clock either",
+		"│     2. fixed: unknown, nothing it cites shows it",
+		"│     3. redone after the person's correction, from the agent's mistake",
+		"│     4. the person corrected it once",
+		"│     5. it named the cause without reading the log",
+		"└─ target: Fix the retry limit",
+		"   ├─ status: achieved",
+		"      1. the build ran twice",
 		"not in a goal",
-		"t4  Tidy the README",
-		"not scored, cancelled",
-		"operations no target's calls made",
-		"scratch.txt (write, returned) [o3]",
-		"achievement  63/100 over 4 targets judged",
-		"final        25/100 over the targets scored, 63 by the record",
+		"└─ target: Tidy the README",
+		"   ├─ status: cancelled: the person no longer wanted it, so it is not scored",
+		"overall assessment",
+		"1. by the achievement record: 63 of 100 over 4 targets: 2 achieved, 1 partly, 0 not achieved, 0 cannot be verified; 1 cancelled or replaced, not scored",
+		"2. final, after what contradicted or undid a result: 25 of 100",
+		// An operation is not a change: it says what became of it.
+		"file operations no target's calls made: scratch.txt (write, requested, the tool returned)",
+		"overall result",
+		"1. 1 of 4 targets achieved: Fix the retry limit",
+		"2. 1 of 4 targets contradicted: Find why checkout times out",
+		"3. 1 of 4 targets reverted: Write the release note",
+		"4. 1 of 4 targets cancelled: Tidy the README",
 	}
 	at := 0
 	for _, w := range want {
@@ -196,24 +172,26 @@ func TestTheReportReadsGoalByGoal(t *testing.T) {
 		}
 		at += i
 	}
-	// A contradiction of an earlier delivery, and an undoing a later delivery
-	// followed, are history, not what stands: each is shown once, in the
-	// history.
-	for _, gone := range []string{"the cache was fine", "t2.e2 undone the whole result [s4]: reverted once"} {
-		if strings.Count(out, gone) != 1 || strings.Contains(out, "contradicted  the delivered conclusion") {
-			t.Fatalf("%q not shown once as history:\n%s", gone, out)
+	if id := regexp.MustCompile(`\b([tg]\d|t\d\.[cer]\d|s\d|in/\d)\b`).FindString(out); id != "" {
+		t.Fatalf("named by an id or an address, %q:\n%s", id, out)
+	}
+	for _, gone := range []string{"worst", "first recorded", "scores "} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("a goal printed %q:\n%s", gone, out)
 		}
 	}
-	// Only a target that delivered files and has none recorded says so.
-	if n := strings.Count(out, "none recorded"); n != 1 {
-		t.Fatalf("%d targets with files unrecorded, of one:\n%s", n, out)
+}
+
+// Among several targets, a goal's main one is marked, unless the person no
+// longer wanted it by the end, as a goal of the person's has none then.
+func TestACancelledMainTargetLeavesItsGoalUndetermined(t *testing.T) {
+	if out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, reportFiles()) }); !strings.Contains(out, "target: Find why checkout times out (the main one)") {
+		t.Fatalf("no main target marked:\n%s", out)
 	}
-	if n := strings.Count(out, "undone    "); n != 1 {
-		t.Fatalf("%d undoings shown, of one standing:\n%s", n, out)
-	}
-	// Within a goal, the most severe target comes first.
-	if strings.Index(out, "t1  Find why") > strings.Index(out, "t2  Fix the retry") {
-		t.Fatalf("t2 before t1:\n%s", out)
+	files := reportFiles()
+	files[3].Outcomes[0].Status, files[3].Outcomes[0].Class = sessionjudge.TargetCancelled, sessionjudge.ClassCancelled
+	if out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, files) }); strings.Contains(out, "(the main one)") {
+		t.Fatalf("a cancelled main target:\n%s", out)
 	}
 }
 
@@ -221,9 +199,9 @@ func TestTheReportReadsGoalByGoal(t *testing.T) {
 // judge's grouping compared.
 func TestTheReportFollowsThePersonsGoals(t *testing.T) {
 	regroup := &sessionjudge.File{Header: sessionjudge.Header{Stage: sessionjudge.StageRegroup, Status: sessionjudge.StatusPartial,
-		Labels: &sessionjudge.LabelFile{File: "goals.yaml", SHA256: "41be12345678abcdef", Version: 2}},
-		LabelGoals: []sessionjudge.LabelGoal{
-			{ID: "P1", Statement: "Fix checkout, release and tidy", Members: []string{"t1", "t2", "t3"}, Main: "t2", Judge: []string{"g1", "g2"},
+		Goals: &sessionjudge.GoalsFile{File: "goals.yaml", SHA256: "41be12345678abcdef", Version: 2}},
+		Goals: []sessionjudge.Goal{
+			{ID: "P1", Statement: "Fix checkout, release and tidy", Members: []string{"t1", "t2", "t3"}, Main: "t2", Judge: []string{"g2", "g1"},
 				Class: sessionjudge.CompareSplit, Worked: true},
 			{ID: "P2", Statement: "Design a logo", Members: []string{}, Judge: []string{}, Class: sessionjudge.CompareMissed, Worked: true},
 			{ID: "P3", Statement: "Write the docs", Members: []string{}, Judge: []string{}, Class: sessionjudge.CompareAbsent},
@@ -233,27 +211,26 @@ func TestTheReportFollowsThePersonsGoals(t *testing.T) {
 		Agreements: []sessionjudge.Agreement{{Goals: 5, Classes: map[string]int{"split": 1, "missed": 1, "absent": 1, "unknown": 2}, Extra: []string{"t4"}}}}
 	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, append(reportFiles(), regroup)) })
 	want := []string{
-		"regroup      partial",
-		"goal P1  Fix checkout, release and tidy",
-		"worst     contradicted",
-		"first recorded  asz at s1: criterion t1.c2 was not met: fixed",
-		"main      t2",
-		"scores    main t2 100/100; all 3 targets 33/100",
-		"goal P2  Design a logo",
-		"no target: the conversation worked on it, and the judge found no target for it",
-		"goal P3  Write the docs",
-		"no target: nothing in the conversation worked on it",
-		"goal P4  Fix the build",
-		"no target placed: the conversation worked on it, and a target that may serve it could not be placed",
-		"goal P5  Update the logo",
-		"no target: the regroup could not tell whether the conversation worked on it",
+		"goal 1: Fix checkout, release and tidy",
+		"├─ target: Find why checkout times out",
+		"├─ target: Write the release note",
+		"└─ target: Fix the retry limit (the main one)",
+		"goal 2: Design a logo",
+		"├─ status: worked on, but the judge found no target for it",
+		"└─ score: none",
+		"goal 3: Write the docs",
+		"├─ status: not worked on, the evaluator's judgment; what it was given was not recorded",
+		"goal 4: Fix the build",
+		"├─ status: worked on, and a target that may serve it could not be placed",
+		"goal 5: Update the logo",
+		"├─ status: the regroup could not tell whether it was worked on",
 		"not in a goal",
-		"t4  Tidy the README",
-		"grouping  by the person's goals, goals.yaml (sha256 41be12345678), regroup 2; the judge agreed on 0 of 5 goals",
-		"P1  split    Fix checkout, release and tidy: t1 in g1, t2 in g1, t3 in g2",
-		"P2  missed   Design a logo\n",
-		"P3  absent   Write the docs\n",
-		"serve none of the person's goals: t4",
+		"└─ target: Tidy the README",
+		"grouping: the judge agreed with 0 of your 5 goals; 1 missed, 1 split, 2 unknown, 1 absent; 1 target serving none of your goals",
+		"stages not complete: regroup partial",
+		"your goal 2 was worked on, but the judge found no target for it",
+		"your goal 3 was not worked on, the evaluator's judgment",
+		"for your goal 4, the regroup could not tell whether it was worked on or served",
 	}
 	at := 0
 	for _, w := range want {
@@ -264,14 +241,16 @@ func TestTheReportFollowsThePersonsGoals(t *testing.T) {
 		at += i
 	}
 	// The judge's own goals are not printed beside the person's.
-	if strings.Contains(out, "goal g1") || strings.Contains(out, "goal g2") {
+	if strings.Contains(out, "goal 1: Release 0.4.0") || strings.Contains(out, "goal 2: Find why") {
 		t.Fatalf("the judge's goals printed:\n%s", out)
 	}
 }
 
-// A run compared with sources says what each was, how it was saved or why
-// it was not, each conclusion with how the conversation compared, and, at
-// the target, what applies to its final score.
+// A run compared with sources says, at the target, what a source shows of
+// its result standing at the end, and of each criterion; a cause resting on
+// something not happening, with how much of its span the evaluator was
+// given; and, in the assessment, a source that could not be saved and how
+// the conversation compared with the conclusions.
 func TestTheReportSaysWhatTheSourcesShowed(t *testing.T) {
 	files := reportFiles()
 	files[3].Outcomes[0].References = []string{"r2"}
@@ -300,34 +279,18 @@ func TestTheReportSaysWhatTheSourcesShowed(t *testing.T) {
 			Given: &sessionjudge.Given{Scope: sessionjudge.GivenSpan, Counts: &sessionjudge.GivenCounts{Steps: 3, Opened: 3}}}}}
 	out := printed(t, func() { printRun(storage.JudgmentRun{Run: 9}, append(files, ref, div)) })
 	want := []string{
-		"reference r2 contradicts the delivered conclusion of t1.e3: max_attempts is never checked",
-		"reference r2 rolled back t1.c2 of t1.e3, outside the conversation: max_attempts is never checked",
-		"t1 at s2, divergence: it trusted the ping",
-		"cause: assumption not checked, against r2; the evaluator's judgment, since the record cannot show it was looked for everywhere; " +
-			"of the 3 steps from s1 to s2 it opened 3, saw 0 only in lists and was not given 0",
-		"references",
-		"R1  OPS-1.md: file, saved 2026-10-23T09:00:00Z, 40 lines, sha256 7a1c2b3d4e5f, cut to its start",
-		"R2  https://jira.example/OPS-2: not saved, the server answered 401; its comparison is unavailable",
-		"R3  https://jira.example/OPS-3: mcp getJiraIssue at https://mcp.example.com, saved 2026-10-23T09:00:00Z, 12 lines, sha256 0123456789ab, " +
-			"kept without its query; 1 content block that is not text left out, the structured content beside the text left out, 2 secrets redacted",
-		"r1  intermediate the queue was full",
-		"reached [s3]",
-		"saved support; about in/1",
-		"r2  final        max_attempts is never checked",
-		"contradicted t1's delivered conclusion, t1.e3\n",
-		"rolled back t1.c2 of t1, t1.e3, outside the conversation\n",
-		"asserted support; about in/1; disagrees with r3",
-		"r3  final        an aside",
-		"not observed, the evaluator's judgment; of the 40 steps of the judged work it opened 12, saw 21 only in lists and was not given 7; " +
-			"2 hold evidence no one can be given",
-		"linked support; about no input, so it changes no score",
-		// What a source shows of a delivery a later one replaced, or that
-		// another conclusion disagrees with, changes no score, and says why.
-		"contradicted t1.c1 of t1, t1.e1; it changes no score, since t1.e1 no longer stands\n",
-		"contradicted t1's delivered conclusion, t1.e3; it changes no score, since another conclusion about t1 disagrees\n",
-		// A conclusion its source corrected later says so, and by which.
-		"contradicted t1's delivered conclusion, t1.e3; it changes no score, since r2 corrects it\n",
-		"linked support; about in/1; superseded by r2\n",
+		"├─ target: Find why checkout times out (the main one)",
+		"│  ├─ status: contradicted: the reference says max_attempts is never checked",
+		"│  │  1. the cause named: met; later in the conversation, not the clock either",
+		"│  │  2. fixed: unknown; undone outside the conversation: max_attempts is never checked",
+		"it trusted the ping",
+		"cause: an assumption not checked, against the reference; the evaluator's judgment; of the 3 steps where it would show, " +
+			"it opened 3, saw 0 only in lists and was not given 0",
+		"reference OPS-1.md: cut to its start",
+		"reference https://jira.example/OPS-2 could not be saved: the server answered 401; nothing was compared with it",
+		"reference https://jira.example/OPS-3: kept without its query; 1 content block that is not text left out, " +
+			"the structured content beside the text left out, 2 secrets redacted",
+		"reference: 6 conclusions; 1 reached, 4 contradicted, 1 not observed; 1 result undone outside the conversation",
 	}
 	at := 0
 	for _, w := range want {
@@ -336,6 +299,78 @@ func TestTheReportSaysWhatTheSourcesShowed(t *testing.T) {
 			t.Fatalf("no %q after what came before, in:\n%s", w, out)
 		}
 		at += i
+	}
+}
+
+// The conclusions read as Markdown: one table of every goal's targets, a
+// cell's bar and tag escaped, and what each target is missing, with no
+// detail. The page opens as a file: Horizon's tokens, a badge per target,
+// its evidence behind its summary, and every cited step the conversation
+// holds shown on the page and linked there; a text that looks like a tag
+// stays text. Steps not read are not linked, and the page says why.
+func TestTheReportIsWrittenAsMarkdownAndAPage(t *testing.T) {
+	files := reportFiles()
+	files[3].Outcomes[1].Statement = "Fix __init__.py | limit <now> &copy; as https://example.com/?a=1&b=2_x|y says, not http://[::1]:8080/__init__.py or https://example.com/\\|y"
+	files[1].Achievements[0].Findings[0].Problem = "- it named the cause without reading the log"
+	doc := buildReport(storage.JudgmentRun{Run: 9}, files)
+	var md strings.Builder
+	if err := writeReport(&md, doc, formatMarkdown, pageAssets{}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"| Goal | Target | Status | Score |",
+		"| Goal 2: Find why checkout times out, and fix it | Fix \\_\\_init\\_\\_.py \\| limit \\<now\\> \\&copy; as `https://example.com/?a=1&b=2_x\\|y` says, not `http://[::1]:8080/__init__.py` or https://example.com/\\\\\\|y | achieved | 100 of 100 |",
+		// A line that starts as a list item stays text.
+		"\\- it named the cause without reading the log",
+		"**Missing: Find why checkout times out**", "## Overall assessment", "## Overall result"} {
+		if !strings.Contains(md.String(), want) {
+			t.Fatalf("no %q in:\n%s", want, md.String())
+		}
+	}
+	if strings.Contains(md.String(), "**Criteria**") || strings.Contains(md.String(), "**Done**") {
+		t.Fatalf("the summary holds the details:\n%s", md.String())
+	}
+	nodes := map[string]sessionview.Node{"s3": {ID: "s3", Kind: "tool", Name: "Bash", At: 1700000000000, Text: `{"command":"go test"}`,
+		Result: "FAIL TestCache <b>"}, "s9": {ID: "s9", Kind: "tool", Name: "Bash", At: 1700000001000, Text: `{"command":"rm notes.md"}`}}
+	var page strings.Builder
+	if err := writeReport(&page, doc, formatHTML, pageAssets{theme: ":root { --sw-ok: green; }", logo: []byte("<svg/>")}, nodes, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{":root { --sw-ok: green; }", `<span class="badge class-contradicted">contradicted</span>`,
+		// The page carries the asz page's header: the logo, held in the page, and the project's name.
+		`<img class="logo-dark" src="data:image/svg&#43;xml;base64,PHN2Zy8&#43;" alt="SkyWalking">`, "<span>AI Sessionizer</span>",
+		// Each target's details are a link away from the table, and a cited step opens in a dialog.
+		`<a class="button" href="#goal-1-target-1">Check details</a>`, `<details class="target" id="goal-1-target-1">`,
+		`<dialog class="step-dialog" id="step-dialog"`, `dialog.showModal()`, `html:has(dialog[open]) { overflow: hidden; }`,
+		`<a class="step" href="#step-1">the step</a>`, `<div class="step-card" id="step-1">`, "tool Bash",
+		"2023-11-14 22:13:20 UTC", "FAIL TestCache &lt;b&gt;", "Fix __init__.py | limit &lt;now&gt;",
+		// The step that undid a result is shown and linked from the status it decides.
+		`undone in the conversation, the note was deleted <a class="step" href="#step-`, "rm notes.md"} {
+		if !strings.Contains(page.String(), want) {
+			t.Fatalf("no %q in:\n%s", want, page.String())
+		}
+	}
+	if strings.Contains(page.String(), "<now>") || strings.Contains(page.String(), "<b>") {
+		t.Fatalf("a text read as a tag:\n%s", page.String())
+	}
+	page.Reset()
+	if err := writeReport(&page, doc, formatHTML, pageAssets{}, nil, errors.New("round 1 of the conversation is now x")); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(page.String(), `href="#step-`) || strings.Contains(page.String(), "<dialog") || !strings.Contains(page.String(), "The steps the evidence rests on are not shown: round 1 of the conversation is now x") {
+		t.Fatalf("steps not read:\n%s", page.String())
+	}
+	if err := writeReport(io.Discard, doc, "pdf", pageAssets{}, nil, nil); err == nil {
+		t.Fatal("a form asz does not know was written")
+	}
+	// A pulled conversation is named inside the page, escaped, and nothing
+	// comes before the page's doctype.
+	doc.snapshot = "prod/review&copy;:20261028"
+	page.Reset()
+	if err := writeReport(&page, doc, formatHTML, pageAssets{}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(page.String(), "<!doctype html>") || !strings.Contains(page.String(), "prod/review&amp;copy;:20261028") {
+		t.Fatalf("the snapshot's name:\n%s", page.String())
 	}
 }
 
@@ -371,9 +406,9 @@ func TestAReadingStandsBesideItsClaim(t *testing.T) {
 		{&sessionjudge.Given{Scope: sessionjudge.GivenWindow, Reason: "the navigation log has no closing line"},
 			"; what it was given is unavailable: the navigation log has no closing line"},
 		{&sessionjudge.Given{Scope: sessionjudge.GivenWindow, Counts: &sessionjudge.GivenCounts{Steps: 1, Listed: 1}},
-			"; of the 1 step of the judged work it opened 0, saw 1 only in lists and was not given 0"},
+			"; of the 1 step of the judged work, it opened 0, saw 1 only in lists and was not given 0"},
 	} {
-		if got := givenText(c.given, "of the judged work"); got != c.want {
+		if got := givenWords(c.given); got != c.want {
 			t.Errorf("%q, want %q", got, c.want)
 		}
 	}

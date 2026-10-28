@@ -34,17 +34,17 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 )
 
-// labelBytes bounds a label file, and goalBytes one goal in it: a goal is a
+// goalsFileBytes bounds a goals file, and goalBytes one goal in it: a goal is a
 // sentence or two, and the regroup call is given every one.
 const (
-	labelBytes = 64 << 10
-	goalBytes  = 2000
+	goalsFileBytes = 64 << 10
+	goalBytes      = 2000
 )
 
-// Labels are a person's goals for a conversation, in their own words, in the
-// order the file gives them. A person knows what they wanted; which inputs
+// GoalsFile is a person's goals for a conversation, in their own words, in
+// the order the file gives them. A person knows what they wanted; which inputs
 // or steps it took is for the regroup call to find.
-type Labels struct {
+type GoalsFile struct {
 	File   string
 	SHA256 string
 	goals  []string
@@ -52,7 +52,7 @@ type Labels struct {
 	text string
 }
 
-// ReadLabels reads a label file:
+// ReadGoals reads a goals file:
 //
 //	goals:
 //	  - Finish the post-vote steps of the 0.4.0 release
@@ -63,15 +63,15 @@ type Labels struct {
 //
 // The file is a path a person gave: it is checked and opened as one, and
 // admitted is the pulled snapshot a held lease lets it lie in, or empty.
-func ReadLabels(path, admitted string) (*Labels, error) {
-	data, err := readSupplied(path, admitted, labelBytes)
+func ReadGoals(path, admitted string) (*GoalsFile, error) {
+	data, err := readSupplied(path, admitted, goalsFileBytes)
 	if err != nil {
 		return nil, err
 	}
 	// A regroup keeps the file as text, so it must be text, and small.
 	switch {
-	case len(data) > labelBytes:
-		return nil, fmt.Errorf("%s is larger than %d KiB", path, labelBytes>>10)
+	case len(data) > goalsFileBytes:
+		return nil, fmt.Errorf("%s is larger than %d KiB", path, goalsFileBytes>>10)
 	case !utf8.Valid(data):
 		return nil, fmt.Errorf("%s is not UTF-8 text", path)
 	}
@@ -85,10 +85,10 @@ func ReadLabels(path, admitted string) (*Labels, error) {
 		return nil, fmt.Errorf("%s lists no goal under goals", path)
 	}
 	sum := sha256.Sum256(data)
-	l := &Labels{File: filepath.Base(path), SHA256: hex.EncodeToString(sum[:]), text: string(data)}
+	file := &GoalsFile{File: filepath.Base(path), SHA256: hex.EncodeToString(sum[:]), text: string(data)}
 	for i, g := range f.Goals {
 		g = strings.TrimSpace(g)
-		switch at := slices.Index(l.goals, g); {
+		switch at := slices.Index(file.goals, g); {
 		case g == "":
 			return nil, fmt.Errorf("%s: goal %d is empty", path, i+1)
 		case len(g) > goalBytes:
@@ -96,9 +96,9 @@ func ReadLabels(path, admitted string) (*Labels, error) {
 		case at >= 0:
 			return nil, fmt.Errorf("%s: goal %d is goal %d again", path, i+1, at+1)
 		}
-		l.goals = append(l.goals, g)
+		file.goals = append(file.goals, g)
 	}
-	return l, nil
+	return file, nil
 }
 
 // goalID is the id of the person's goal at index i: P1 for the first.
@@ -239,7 +239,7 @@ func checkRegroup(nav *Nav, goals []string, targets []sessionjudge.Target, judge
 	unanswered := 0
 	for i, statement := range goals {
 		id := goalID(i)
-		g := &sessionjudge.LabelGoal{ID: id, Statement: statement, Members: []string{}, Judge: []string{}, Note: notes[id], Cite: []sessionjudge.Cite{}}
+		g := &sessionjudge.Goal{ID: id, Statement: statement, Members: []string{}, Judge: []string{}, Note: notes[id], Cite: []sessionjudge.Cite{}}
 		g.Members = append(g.Members, members[id]...)
 		g.Cite = append(g.Cite, cites[id]...)
 		g.Worked = worked[id] || len(g.Members) > 0
@@ -360,10 +360,10 @@ func windowOf(h *sessionjudge.Window) (Window, error) {
 // of evaluator places each of the run's targets in the goal it serves,
 // reading the conversation as the run did: at its head, through its window.
 // It is not shown the judge's goals, so the comparison measures them. The
-// file keeps the label file's text first, so the comparison can be made
+// file keeps the goals file's text first, so the comparison can be made
 // again from it alone; a regroup whose call failed is kept too, failed, with
 // what the call consumed.
-func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.JudgmentRun, labels *Labels, evaluator string) (string, *sessionjudge.Agreement, error) {
+func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.JudgmentRun, file *GoalsFile, evaluator string) (string, *sessionjudge.Agreement, error) {
 	if !run.Closed() {
 		return "", nil, fmt.Errorf("run %d is not closed", run.Run)
 	}
@@ -375,12 +375,12 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 		if f.Stage != sessionjudge.StageLedger && f.Stage != sessionjudge.StageTargets {
 			continue
 		}
-		file, err := os.Open(f.Path)
+		in, err := os.Open(f.Path)
 		if err != nil {
 			return "", nil, err
 		}
-		sj, err := sessionjudge.Read(file)
-		file.Close()
+		sj, err := sessionjudge.Read(in)
+		in.Close()
 		if err != nil {
 			return "", nil, fmt.Errorf("%s: %w", f.Path, err)
 		}
@@ -468,7 +468,7 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	r.logf("  regroup %d of run %d by %s, %d calls ...", version, run.Run, evaluator, len(chunks))
 	started := r.now()
 	sr := &stageRun{runner: r, kit: kit, ex: ex, nav: nav, stage: sessionjudge.StageRegroup, work: fmt.Sprintf("g%d-regroup", version),
-		session: t.Session, dir: run.Dir, schema: schema, targets: targets.Targets, goals: targets.Goals, inputs: inputs, personGoals: labels.goals,
+		session: t.Session, dir: run.Dir, schema: schema, targets: targets.Targets, goals: targets.Goals, inputs: inputs, personGoals: file.goals,
 		timeout: timeout, mcp: MCPArgs{Conversation: conversation, Head: t.Head, Ledger: ledgerPath, Window: window, ReadBytes: r.Config.ReadBytes}}
 	m, _, used, err := sr.run(ctx, chunks)
 	if err != nil {
@@ -477,7 +477,7 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	h := sessionjudge.Header{Conversation: t.Conversation, Session: t.Session, Run: t.Run, Stage: sessionjudge.StageRegroup, Head: t.Head,
 		Parser: t.Parser, Policy: t.Policy, Window: t.Window, BuildsOn: []sessionjudge.Dependency{{Stage: sessionjudge.StageTargets, Digest: targets.Commit.Digest}},
 		Evaluator: ex.Describe(), Kit: &sessionjudge.Kit{Version: kit.Version(), Prompt: promptDigest},
-		Labels: &sessionjudge.LabelFile{File: labels.File, SHA256: labels.SHA256, Version: version}, Mode: mode, Chunks: len(chunks),
+		Goals: &sessionjudge.GoalsFile{File: file.File, SHA256: file.SHA256, Version: version}, Mode: mode, Chunks: len(chunks),
 		Started: stamp(started), Finished: stamp(r.now())}
 	h.Usage, h.ReportedCostUSD, h.Reading, h.Attempts = used.usage, used.costUSD, used.reading, used.attempts
 	if used.attempts > 0 {
@@ -490,8 +490,8 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	cov := m.coverage
 	h.Coverage = &cov
 	var frames []any
-	for _, piece := range textRuns(labels.text) {
-		frames = append(frames, &sessionjudge.LabelText{From: piece.from, Text: piece.text})
+	for _, piece := range textRuns(file.text) {
+		frames = append(frames, &sessionjudge.GoalsText{From: piece.from, Text: piece.text})
 	}
 	var agreement *sessionjudge.Agreement
 	if m.failed == len(chunks) {

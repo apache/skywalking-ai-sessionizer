@@ -355,9 +355,6 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	// judgingFrom and judgingTo bound the time the evaluator stages took.
 	var judgingFrom, judgingTo time.Time
 	var achievements []*sessionjudge.Achievement
-	// findings are the efficiency and divergence stages', each naming its
-	// target; the achievement stage's are inside its achievements.
-	var findings []*sessionjudge.Finding
 	// divergences and rollbacks are how the conversation compares with the
 	// conclusions of its sources.
 	var divergences []*sessionjudge.Divergence
@@ -575,19 +572,13 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 					divergences = append(divergences, f)
 				case *sessionjudge.Rollback:
 					rollbacks = append(rollbacks, f)
-				case *sessionjudge.Finding:
-					findings = append(findings, f)
 				}
 			}
 		case sessionjudge.StageEfficiency:
 			labels = []*sessionjudge.Label{}
-			// The stage's findings are frames of their own beside its labels.
 			for _, f := range chk.frames {
-				switch f := f.(type) {
-				case *sessionjudge.Label:
-					labels = append(labels, f)
-				case *sessionjudge.Finding:
-					findings = append(findings, f)
+				if l, ok := f.(*sessionjudge.Label); ok {
+					labels = append(labels, l)
 				}
 			}
 		}
@@ -604,7 +595,7 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		reportedCost = &reported
 	}
 	more, summary := closeFrames(ledger, targets, inputs, achievements, labels, subtasks, judging)
-	more = append(more, report(nav, ledger, targets, goals, inputs, achievements, findings, labels, subtasks, references{conclusions: nav.conclusions,
+	more = append(more, report(nav, ledger, targets, inputs, achievements, labels, subtasks, references{conclusions: nav.conclusions,
 		divergences: divergences, rollbacks: rollbacks}, more, summary)...)
 	summary.JudgingReportedUSD = reportedCost
 	if !judgingFrom.IsZero() {

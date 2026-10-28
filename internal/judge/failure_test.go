@@ -338,7 +338,7 @@ func TestAnIndependentServerStopsAtDamage(t *testing.T) {
 	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"record","arguments":{"seq":1,"row":1}}}` + "\n" +
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"card","arguments":{}}}` + "\n")
 	var out strings.Builder
-	err := ServeMCP(in, &out, n, nil)
+	err := ServeMCP(in, &out, n, nil, nil)
 	if !errors.Is(err, view.ErrEvidence) {
 		t.Fatalf("the server ended with %v", err)
 	}
