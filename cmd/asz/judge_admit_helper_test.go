@@ -25,10 +25,10 @@ import (
 
 // reserveRun admits a run as asz judge does, with nothing for it to
 // judge, and lets its activity lock go: the run is left stopped, with its
-// directory and admission.json, for a test to fill.
+// directory and run.json, for a test to fill.
 func reserveRun(z *storage.Zone, session string) (int, string, error) {
-	active, err := storage.AdmitRun(context.Background(), z, session, func() (storage.RunAdmission, error) {
-		return storage.RunAdmission{Trigger: storage.TriggerCommand}, nil
+	active, err := storage.AdmitRun(context.Background(), z, session, func(int) (storage.RunRecord, error) {
+		return storage.RunRecord{Trigger: storage.TriggerCommand}, nil
 	})
 	if err != nil {
 		return 0, "", err

@@ -42,7 +42,7 @@ session.
       index.state                        how far the index reaches
     judgments/                           the judge runs of the session's conversation
       j000001/                           one run, see Session Judgment
-        admission.json                   why the run was admitted
+        run.json                         why the run was admitted
         .active                          its activity lock, held while it or a regroup of it works
         s1-ledger-<digest12>.sj · … · s9-close-<digest12>.sj
         work/                            what each evaluator was given and said; never sent
@@ -74,6 +74,10 @@ session.
     unreadable/                          requests set aside, each with why
     open.json                            the runs remembered, and the conversation of each
     .lock                                one LangSmith collector per root
+  _judge/                                when asz server judges, see Judge in asz server
+    since                                when the policy was first turned on
+    runs/<conversation>/NNNNNN.json      one record per automatic run, admitted or refused for its size
+    automatic.lock                       held while an automatic run works
   _retired/                              the retired sessions
     <session-id>                         an empty file: the session is never collected again
   _removed/                              what a removal of a scenario session, or a retirement,
@@ -92,6 +96,14 @@ what `push.state` records. `_scenario/` exists only in a root a scenario build w
 retirement. [Retention](#retention) says what each is for. A session's `judgments/` holds the
 [judge runs](session-judgment.md) of its conversation. They sit in the session's directory rather
 than the chain's, which is removed to parse a conversation again, so they go where the session goes.
+
+`_judge/` is what asz server keeps when it judges. `_judge/runs/` holds one record of every automatic
+run: one admitted, or one refused for being larger than `judge.max_steps`. A record is written,
+read-only and synced, before an admitted run's directory is reserved, so no automatic run exists
+without one. It names the session's highest landed sequence, the head and the interpretation, each
+talk selected with its view digest, and for an admitted run the run's number. A run counts only
+through the directory whose `run.json` names the record back. The records are numbered per
+conversation and never removed.
 
 Every command that writes collected data or its rounds holds `_root/.lock` for one pass: `asz collect`
 and `asz server` for each pass, `asz parse`, `asz push` and `asz repack` for their run, and `asz

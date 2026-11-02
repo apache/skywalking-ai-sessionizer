@@ -238,12 +238,18 @@ func TestAHalfWrittenFileWaitsAndIsCalledUnreadableOnlyLater(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.now = time.Now()
-	if st := f.pass(all); st.Unreadable != 0 || st.SourcesLanded != 0 {
+	st := f.pass(all)
+	if st.Unreadable != 0 || st.SourcesLanded != 0 {
 		t.Fatalf("a file written a moment ago was judged: %+v", st)
 	}
+	// It is still being written, for a session known only once it is read
+	// whole: no session's collection is complete.
+	if !st.Outcomes.Unattributed {
+		t.Fatalf("a body still being written names no session: %+v", st.Outcomes)
+	}
 	f.now = time.Now().Add(claudecodeprovider.Settle + time.Minute)
-	if st := f.pass(all); st.Unreadable != 1 {
-		t.Fatalf("unreadable %d after the settle time, want 1", st.Unreadable)
+	if st := f.pass(all); st.Unreadable != 1 || st.Outcomes.Unattributed {
+		t.Fatalf("unreadable %d after the settle time, want 1; outcomes %+v", st.Unreadable, st.Outcomes)
 	}
 }
 
@@ -320,13 +326,20 @@ func TestAFileChangedAfterLandingIsAConflict(t *testing.T) {
 		if st.Conflicts != 1 || st.SourcesLanded != 0 || st.Complete() {
 			t.Fatalf("pass %d over a changed body: %+v", pass, st)
 		}
+		if o, _ := st.Outcomes.Of(sessionA); o != storage.OutcomeIncomplete {
+			t.Fatalf("pass %d leaves the session %s", pass, o)
+		}
 	}
-	// Putting the bytes back ends it.
+	// Putting the bytes back ends it, and says the session is whole again.
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if st := f.pass(all); st.Conflicts != 0 || !st.Complete() {
+	st := f.pass(all)
+	if st.Conflicts != 0 || !st.Complete() {
 		t.Fatalf("the body put back still conflicts: %+v", st)
+	}
+	if o, ok := st.Outcomes.Of(sessionA); !ok || o != storage.OutcomeComplete {
+		t.Fatalf("the body put back leaves the session %s, %v", o, ok)
 	}
 }
 
@@ -769,5 +782,35 @@ func TestARebuiltTablePassesOverPullTrees(t *testing.T) {
 	}
 	if st.SourcesLanded == 0 {
 		t.Fatal("a rebuilt table took a pull's copy for the root's own landed body")
+	}
+}
+
+// A retirement marker that cannot be read leaves the body's session
+// incomplete that pass, and once it reads again the landed body, unchanged,
+// says the session is whole.
+func TestABodyCheckedAgainSaysItsSessionIsWhole(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a file where a directory should be reads as not there")
+	}
+	f := newFixture(t)
+	f.request(sessionA, "", 2)
+	f.pass(all)
+	marker := filepath.Join(f.zone.Root(), storage.RetiredDir)
+	if err := os.WriteFile(marker, nil, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	st, err := f.col.CollectAll(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o, _ := st.Outcomes.Of(sessionA); o != storage.OutcomeIncomplete {
+		t.Fatalf("with its marker not readable: %s", o)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	st = f.pass(all)
+	if o, ok := st.Outcomes.Of(sessionA); !ok || o != storage.OutcomeComplete {
+		t.Fatalf("once the marker reads: %s, %v", o, ok)
 	}
 }

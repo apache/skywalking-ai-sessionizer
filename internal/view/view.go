@@ -58,8 +58,9 @@ type Server struct {
 	mu     sync.Mutex
 	loaded map[string]*Conversation
 
-	statusMu sync.Mutex
-	status   Status
+	statusMu    sync.Mutex
+	status      Status
+	judgeStatus func() any
 
 	// glossaries hold each runtime's words, by dialect. A root can carry
 	// conversations from more than one, so which to serve is decided from

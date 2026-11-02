@@ -515,3 +515,35 @@ func TestARecordWithNoTimeIsNotTakenForLate(t *testing.T) {
 		t.Fatal("the step is not shown")
 	}
 }
+
+// A change or execution record of the selected work is kept out of its
+// stream's span, so the window's end takes it in: an execution record of a
+// talk's last tool, written after the talk's span ends, is shown, and one of
+// a context talk written later still is not.
+func TestTheWindowsEndTakesInItsOwnRecords(t *testing.T) {
+	d := threeTalks()
+	d.ToolExecutions = []sessionview.ToolExecution{{Step: "s3", Ref: sessionflow.Ref{Seq: 9, Row: 70}, Record: execution.Record{ID: "ex3"}}}
+	d.WorkspaceChanges = []sessionview.WorkspaceChange{{Step: "s1", Ref: sessionflow.Ref{Seq: 9, Row: 71}, Record: changes.Record{ID: "ch1"}}}
+	times := map[uint64]int64{70: 1500, 71: 2000}
+	read := func(refs []sessionflow.Ref) map[[2]uint64]*sessiondata.Record {
+		out := map[[2]uint64]*sessiondata.Record{}
+		for _, r := range refs {
+			at, ok := times[r.Row]
+			if !ok {
+				at = 1000
+			}
+			out[[2]uint64{r.Seq, r.Row}] = &sessiondata.Record{Time: time.UnixMilli(at).UTC().Format(time.RFC3339Nano)}
+		}
+		return out
+	}
+	doc, sel, err := Narrow(d, Window{FromTalk: "talk/main/3", ToTalk: "talk/main/3"}, read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.End != 1500 {
+		t.Fatalf("the end %d", sel.End)
+	}
+	if len(doc.ToolExecutions) != 1 || doc.ToolExecutions[0].ID != "ex3" || len(doc.WorkspaceChanges) != 0 {
+		t.Fatalf("executions %+v changes %+v", doc.ToolExecutions, doc.WorkspaceChanges)
+	}
+}

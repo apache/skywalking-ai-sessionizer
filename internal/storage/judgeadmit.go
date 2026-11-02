@@ -37,10 +37,10 @@ import (
 // the session, so a run never reads a file a removal replaced under it.
 const ActiveFile = ".active"
 
-// AdmissionFile says why a run was admitted. It is written once, read-only,
+// RunFile says why a run was admitted. It is written once, read-only,
 // before the run's first stage, so a run without it was made before
 // admissions, or reserved just before a crash.
-const AdmissionFile = "admission.json"
+const RunFile = "run.json"
 
 // The triggers of a run: a person's asz judge, or asz server's policy.
 const (
@@ -48,8 +48,8 @@ const (
 	TriggerServer  = "server"
 )
 
-// RunAdmission is what a run's admission.json holds.
-type RunAdmission struct {
+// RunRecord is what a run's run.json holds.
+type RunRecord struct {
 	ID           string `json:"id"`
 	Conversation string `json:"conversation"`
 	Session      string `json:"session"`
@@ -65,21 +65,27 @@ type RunAdmission struct {
 	// evaluators were never shown.
 	Hide     []string `json:"hide"`
 	Admitted string   `json:"admitted"`
+	// Receipt, Landed and Target are an automatic run's: the number of the
+	// receipt that reserved it, the session's highest landed sequence at
+	// admission, and the window's end in unix milliseconds.
+	Receipt int    `json:"receipt,omitempty"`
+	Landed  uint64 `json:"landed,omitempty"`
+	Target  int64  `json:"target,omitempty"`
 }
 
-// ReadAdmission reads a run's admission.json; nil, with no error, when the
+// ReadRunRecord reads a run's run.json; nil, with no error, when the
 // run has none.
-func ReadAdmission(runDir string) (*RunAdmission, error) {
-	data, err := os.ReadFile(filepath.Join(runDir, AdmissionFile))
+func ReadRunRecord(runDir string) (*RunRecord, error) {
+	data, err := os.ReadFile(filepath.Join(runDir, RunFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var a RunAdmission
+	var a RunRecord
 	if err := json.Unmarshal(data, &a); err != nil {
-		return nil, fmt.Errorf("storage: %s: %w", filepath.Join(runDir, AdmissionFile), err)
+		return nil, fmt.Errorf("storage: %s: %w", filepath.Join(runDir, RunFile), err)
 	}
 	return &a, nil
 }
@@ -165,21 +171,17 @@ func refuseJudging(z *Zone, session string) error {
 
 // AdmitRun admits a run of a session's conversation in one decision, under
 // the root lock, waited for until ctx ends. decide runs while the lock is
-// held, and never takes it: it gives what the run judges, which admission.json
-// records. The run's directory is then reserved, its activity lock taken and
-// admission.json written before the root lock is released, so the run is
+// held, and never takes it: told the number the run will have, it gives what
+// the run judges, which run.json records. The run's directory is then reserved, its activity lock taken and
+// run.json written before the root lock is released, so the run is
 // active from the moment it can be seen.
-func AdmitRun(ctx context.Context, z *Zone, session string, decide func() (RunAdmission, error)) (*Active, error) {
+func AdmitRun(ctx context.Context, z *Zone, session string, decide func(next int) (RunRecord, error)) (*Active, error) {
 	l, err := LockRootContext(ctx, z.Root())
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = l.Unlock() }()
 	if err := refuseJudging(z, session); err != nil {
-		return nil, err
-	}
-	adm, err := decide()
-	if err != nil {
 		return nil, err
 	}
 	runs, err := JudgmentRuns(z, session)
@@ -189,6 +191,10 @@ func AdmitRun(ctx context.Context, z *Zone, session string, decide func() (RunAd
 	next := 1
 	if len(runs) > 0 {
 		next = runs[len(runs)-1].Run + 1
+	}
+	adm, err := decide(next)
+	if err != nil {
+		return nil, err
 	}
 	parent := filepath.Join(z.SessionDir(session), JudgmentsDir)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -214,7 +220,7 @@ func AdmitRun(ctx context.Context, z *Zone, session string, decide func() (RunAd
 	adm.Admitted = time.Now().UTC().Format(time.RFC3339)
 	data, err := json.Marshal(adm)
 	if err == nil {
-		err = WriteAtomic(filepath.Join(dir, AdmissionFile), 0o444, func(w io.Writer) error {
+		err = WriteAtomic(filepath.Join(dir, RunFile), 0o444, func(w io.Writer) error {
 			_, err := w.Write(append(data, '\n'))
 			return err
 		})
@@ -265,10 +271,10 @@ const (
 	RunClosed RunState = "closed"
 	// RunRunning holds its activity lock and has no close file.
 	RunRunning RunState = "running"
-	// RunStopped has admission.json, no close file and a free lock: it
+	// RunStopped has run.json, no close file and a free lock: it
 	// stopped before it closed, and nothing resumes or closes it.
 	RunStopped RunState = "stopped"
-	// RunUnknown has neither admission.json nor a close file: made before
+	// RunUnknown has neither run.json nor a close file: made before
 	// admissions, or reserved just before a crash.
 	RunUnknown RunState = "unknown"
 )
@@ -293,7 +299,7 @@ func StateOf(run *JudgmentRun) (RunState, bool, error) {
 	case held:
 		return RunRunning, true, nil
 	}
-	if _, err := os.Lstat(filepath.Join(run.Dir, AdmissionFile)); err == nil {
+	if _, err := os.Lstat(filepath.Join(run.Dir, RunFile)); err == nil {
 		return RunStopped, false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", false, err
