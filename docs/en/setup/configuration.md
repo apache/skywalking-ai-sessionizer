@@ -122,6 +122,7 @@ export:
     max_bytes_per_minute: 0
     logs: true
     metrics: true
+    judgments: false
 ```
 
 | Key | Default | Meaning |
@@ -137,6 +138,7 @@ export:
 | `max_bytes_per_minute` | `0` | A limit on bytes sent per minute. `0` is no limit. |
 | `logs` | `true` | Send the collected files and rounds. |
 | `metrics` | `true` | Send the metrics. `logs` or `metrics` must be on. |
+| `judgments` | `false` | Send the closed [judge runs](judge.md), with the logs and only while `logs` is on. A run not sent while it is off is sent once it is on. |
 
 ## view
 
@@ -176,6 +178,8 @@ judge`.
 | `pricing` | `""` | The price file. Empty prices nothing, and the tokens still count. |
 | `hide` | `[]` | The flags whose records the evaluators are never shown: `system_prompt`, `tool_schemas`. |
 | `timeout` | `30m` | How long one evaluator call may take. A stage cut into calls runs several, and a call that fails, a timeout included, is tried once more. |
+| `run_timeout` | `0` | How long one whole run may take, all its stages together, such as `2h`. Past it the run keeps the stages that finished and closes, within two minutes. `-run-timeout` sets it for one command. `0` is no bound |
+| `max_steps` | `0` | The most steps one run judges, the sub-tasks its main talks started included. A larger window is refused before anything is made or any model is called. `-max-steps` sets it for one command. `0` is no bound |
 | `evaluators` | `claude`, `codex` and `kiro` | The evaluators a stage can be given to, by name. Each has `kind` (`cli` or `api`) and `program` (`claude`, `codex` or `kiro-cli`; `anthropic`, `openai` or `bedrock`), and as it needs `command`, `args`, `model`, `endpoint`, `api_key_env`, `region`, `profile`, `max_turns` and `max_tokens`. See [Evaluators](judge.md#evaluators). |
 | `read_bytes` | `131072` | What one evaluator call may read through the navigation, in bytes of answers. An answer that would read past it is refused whole, the evaluator is told to answer with what it read, and the stage records it. `0` is no bound |
 | `mode` | `auto` | How a stage is given to its evaluator: `single`, one call; `stream`, cut into calls; `auto`, one call when the rows it is given fit `single_bytes`, calls of `chunk_bytes` beyond |
@@ -273,3 +277,8 @@ Its session filters match the workspace paths in each session's `session.json`, 
 name. A filter ending in `/**` matches that path and everything beneath it; any other filter is a
 glob over the whole path. A session is left out only when every one of its paths is. Kiro records
 the real path, so on macOS a session started in `/tmp` is under `/private/tmp`.
+
+Whatever the filters say, a session with any workspace path inside the storage root is never
+collected: it is a judge evaluator's, which `kiro-cli` keeps while it works in a stage directory. Links
+are followed on both sides, and a path that no longer exists is resolved through the part that does.
+A session whose path cannot be resolved is left for the next pass, and a pass says how many it left.

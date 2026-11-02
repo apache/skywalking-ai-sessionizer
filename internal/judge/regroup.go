@@ -367,6 +367,44 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	if !run.Closed() {
 		return "", nil, fmt.Errorf("run %d is not closed", run.Run)
 	}
+	conf, ok := r.Config.Evaluators[evaluator]
+	if !ok {
+		return "", nil, fmt.Errorf("judge: the regroup names evaluator %q, which judge.evaluators does not list", evaluator)
+	}
+	newExec := NewExecutor
+	if r.Executor != nil {
+		newExec = r.Executor
+	}
+	ex, err := newExec(evaluator, conf)
+	if err != nil {
+		return "", nil, err
+	}
+	timeout, err := r.Config.TimeoutDuration()
+	if err != nil {
+		return "", nil, err
+	}
+	kit, err := LoadKit()
+	if err != nil {
+		return "", nil, err
+	}
+	_, promptDigest, err := kit.Prompt(sessionjudge.StageRegroup, "")
+	if err != nil {
+		return "", nil, err
+	}
+	schema, err := kit.Schema(sessionjudge.StageRegroup)
+	if err != nil {
+		return "", nil, err
+	}
+	// The regroup is admitted, and holds the run's activity lock, before it
+	// reads any stored file of the run: a run is in <session>/judgments/.
+	session := filepath.Base(filepath.Dir(filepath.Dir(run.Dir)))
+	version, active, err := storage.AdmitRegroup(ctx, r.Zone, session, run.Dir)
+	if err != nil {
+		return "", nil, err
+	}
+	defer func() { _ = active.Release() }()
+	pub, endPub := cleanup(ctx)
+	defer endPub()
 	// The targets stage and the ledger, whose rates price the calls as the
 	// run priced them.
 	var targets, ledgerFile *sessionjudge.File
@@ -402,34 +440,6 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	if err != nil {
 		return "", nil, err
 	}
-	conf, ok := r.Config.Evaluators[evaluator]
-	if !ok {
-		return "", nil, fmt.Errorf("judge: the regroup names evaluator %q, which judge.evaluators does not list", evaluator)
-	}
-	newExec := NewExecutor
-	if r.Executor != nil {
-		newExec = r.Executor
-	}
-	ex, err := newExec(evaluator, conf)
-	if err != nil {
-		return "", nil, err
-	}
-	timeout, err := r.Config.TimeoutDuration()
-	if err != nil {
-		return "", nil, err
-	}
-	kit, err := LoadKit()
-	if err != nil {
-		return "", nil, err
-	}
-	_, promptDigest, err := kit.Prompt(sessionjudge.StageRegroup, "")
-	if err != nil {
-		return "", nil, err
-	}
-	schema, err := kit.Schema(sessionjudge.StageRegroup)
-	if err != nil {
-		return "", nil, err
-	}
 
 	// The conversation as the run read it.
 	t := targets.Header
@@ -460,16 +470,15 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	// of what the person wanted.
 	nav.TargetsFound(inputs)
 
-	version, err := storage.ReserveRegroup(r.Zone, t.Session, run.Dir)
-	if err != nil {
-		return "", nil, err
+	if t.Session != session {
+		return "", nil, fmt.Errorf("judge: run %d names session %s, not %s, whose directory holds it", run.Run, t.Session, session)
 	}
 	mode, chunks := planChunks(sessionjudge.StageRegroup, r.Config.Mode, r.Config.SingleBytes, r.Config.ChunkBytes, r.Config.ReadBytes, nav, targets.Targets)
 	r.logf("  regroup %d of run %d by %s, %d calls ...", version, run.Run, evaluator, len(chunks))
 	started := r.now()
 	sr := &stageRun{runner: r, kit: kit, ex: ex, nav: nav, stage: sessionjudge.StageRegroup, work: fmt.Sprintf("g%d-regroup", version),
 		session: t.Session, dir: run.Dir, schema: schema, targets: targets.Targets, goals: targets.Goals, inputs: inputs, personGoals: file.goals,
-		timeout: timeout, mcp: MCPArgs{Conversation: conversation, Head: t.Head, Ledger: ledgerPath, Window: window, ReadBytes: r.Config.ReadBytes}}
+		pub: pub, timeout: timeout, mcp: MCPArgs{Conversation: conversation, Head: t.Head, Ledger: ledgerPath, Window: window, ReadBytes: r.Config.ReadBytes}}
 	m, _, used, err := sr.run(ctx, chunks)
 	if err != nil {
 		return "", nil, err
@@ -522,7 +531,7 @@ func (r *Runner) Regroup(ctx context.Context, conversation string, run storage.J
 	if err != nil {
 		return "", nil, err
 	}
-	path, err := storage.PublishRegroup(r.Zone, t.Session, run.Dir, version, digest, data)
+	path, err := storage.PublishRegroup(pub, r.Zone, t.Session, run.Dir, version, digest, data)
 	if err != nil {
 		return "", nil, err
 	}

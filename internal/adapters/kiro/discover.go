@@ -78,11 +78,18 @@ type Skipped struct {
 	Schemas map[string]int
 	// Unreadable counts V3 session headers that could not be read as JSON.
 	Unreadable int
+	// Own counts sessions with a workspace inside the storage root: a judge
+	// evaluator's, which are never collected.
+	Own int
+	// Unresolved counts sessions with a workspace path that could not be
+	// resolved, so whether it lies inside the storage root is not known.
+	// They are tried again on every pass.
+	Unresolved int
 }
 
 // Total is everything discovery did not collect.
 func (s Skipped) Total() int {
-	n := s.V2 + s.Unreadable
+	n := s.V2 + s.Unreadable + s.Own + s.Unresolved
 	for _, c := range s.Schemas {
 		n += c
 	}

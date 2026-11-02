@@ -203,6 +203,7 @@ func newPusher(cfg *config.Config, zoneRoot string) (*otlp.Pusher, func(), error
 		MaxBytesPerMinute: o.MaxBytesPerMinute,
 		NoLogs:            !o.SendLogs(),
 		NoMetrics:         !o.SendMetrics(),
+		Judgments:         o.SendJudgments(),
 		// The metrics spool concerns Claude Code: everything in it is derived
 		// from Claude Code's landed files.
 		MetricsService: claudecode.RuntimeName,

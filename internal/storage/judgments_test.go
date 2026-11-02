@@ -18,6 +18,7 @@
 package storage_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -69,18 +70,18 @@ func TestOnlyRunDirectoriesAreListed(t *testing.T) {
 // digest cannot name one, so it is refused and nothing is written.
 func TestAStageWithAShortDigestIsRefused(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	_, runDir, err := storage.ReserveRun(z, "s1")
+	_, runDir, err := reserveRun(z, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path, err := storage.PublishStage(z, "s1", runDir, 1, "ledger", "0123456789a", []byte("{}\n")); err == nil ||
+	if path, err := storage.PublishStage(context.Background(), z, "s1", runDir, 1, "ledger", "0123456789a", []byte("{}\n")); err == nil ||
 		!strings.Contains(err.Error(), `digest "0123456789a" is too short`) || path != "" {
 		t.Fatalf("published at %q: %v", path, err)
 	}
-	if items, err := os.ReadDir(runDir); err != nil || len(items) != 0 {
+	if items, err := written(runDir); err != nil || len(items) != 0 {
 		t.Fatalf("the run holds %v, %v", items, err)
 	}
-	path, err := storage.PublishStage(z, "s1", runDir, 1, "ledger", "0123456789ab", []byte("{}\n"))
+	path, err := storage.PublishStage(context.Background(), z, "s1", runDir, 1, "ledger", "0123456789ab", []byte("{}\n"))
 	if err != nil || filepath.Base(path) != "s1-ledger-0123456789ab.sj" {
 		t.Fatalf("a digest of 12 characters: %q, %v", path, err)
 	}
@@ -122,7 +123,7 @@ func TestNothingOfARetiredSessionIsWritten(t *testing.T) {
 			root := t.TempDir()
 			z := storage.NewZone(root)
 			tc.retire(t, root)
-			if _, _, err := storage.ReserveRun(z, "s1"); !tc.want(err) {
+			if _, _, err := reserveRun(z, "s1"); !tc.want(err) {
 				t.Errorf("a run was reserved: %v", err)
 			}
 			if _, err := os.Stat(z.SessionDir("s1")); !errors.Is(err, fs.ErrNotExist) {
@@ -132,21 +133,21 @@ func TestNothingOfARetiredSessionIsWritten(t *testing.T) {
 			// A run reserved before the session was retired.
 			root = t.TempDir()
 			z = storage.NewZone(root)
-			_, dir, err := storage.ReserveRun(z, "s1")
+			_, dir, err := reserveRun(z, "s1")
 			if err != nil {
 				t.Fatal(err)
 			}
 			tc.retire(t, root)
-			if _, err := storage.MakeWorkDir(z, "s1", dir, "w"); !tc.want(err) {
+			if _, err := storage.MakeWorkDir(context.Background(), z, "s1", dir, "w"); !tc.want(err) {
 				t.Errorf("a work directory was made: %v", err)
 			}
-			if err := storage.WriteWorkFiles(z, "s1", dir, "w", []storage.WorkFile{{Name: "a", Data: []byte("x")}}); !tc.want(err) {
+			if err := storage.WriteWorkFiles(context.Background(), z, "s1", dir, "w", []storage.WorkFile{{Name: "a", Data: []byte("x")}}); !tc.want(err) {
 				t.Errorf("work files were written: %v", err)
 			}
-			if _, err := storage.PublishStage(z, "s1", dir, 1, "ledger", strings.Repeat("a", 64), []byte("x\n")); !tc.want(err) {
+			if _, err := storage.PublishStage(context.Background(), z, "s1", dir, 1, "ledger", strings.Repeat("a", 64), []byte("x\n")); !tc.want(err) {
 				t.Errorf("a stage was published: %v", err)
 			}
-			if items, err := os.ReadDir(dir); err != nil || len(items) != 0 {
+			if items, err := written(dir); err != nil || len(items) != 0 {
 				t.Errorf("the run holds %v, %v", items, err)
 			}
 		})
@@ -157,17 +158,17 @@ func TestNothingOfARetiredSessionIsWritten(t *testing.T) {
 // make the run again, with none of its stages.
 func TestAWorkDirectoryNeedsItsRun(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	_, dir, err := storage.ReserveRun(z, "s1")
+	_, dir, err := reserveRun(z, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(dir); err != nil {
+	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.MakeWorkDir(z, "s1", dir, "w"); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := storage.MakeWorkDir(context.Background(), z, "s1", dir, "w"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a work directory for a run that is gone: %v", err)
 	}
-	if err := storage.WriteWorkFiles(z, "s1", dir, "w", []storage.WorkFile{{Name: "a", Data: []byte("x")}}); !errors.Is(err, fs.ErrNotExist) {
+	if err := storage.WriteWorkFiles(context.Background(), z, "s1", dir, "w", []storage.WorkFile{{Name: "a", Data: []byte("x")}}); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("work files for a run that is gone: %v", err)
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
@@ -180,12 +181,12 @@ func TestAWorkDirectoryNeedsItsRun(t *testing.T) {
 // retired session gets none.
 func TestARegroupVersionIsReservedOnce(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	_, dir, err := storage.ReserveRun(z, "s1")
+	_, dir, err := reserveRun(z, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for want := 1; want <= 2; want++ {
-		v, err := storage.ReserveRegroup(z, "s1", dir)
+		v, err := reserveRegroup(z, "s1", dir)
 		if err != nil || v != want {
 			t.Fatalf("reserved %d, %v; want %d", v, err, want)
 		}
@@ -193,10 +194,10 @@ func TestARegroupVersionIsReservedOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := storage.PublishRegroup(z, "s1", dir, 5, strings.Repeat("a", 64), []byte("x\n")); err != nil {
+	if _, err := storage.PublishRegroup(context.Background(), z, "s1", dir, 5, strings.Repeat("a", 64), []byte("x\n")); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := storage.ReserveRegroup(z, "s1", dir); err != nil || v != 6 {
+	if v, err := reserveRegroup(z, "s1", dir); err != nil || v != 6 {
 		t.Fatalf("after version 5 written: %d, %v", v, err)
 	}
 	if err := os.MkdirAll(filepath.Join(z.Root(), storage.RetiredDir), 0o755); err != nil {
@@ -205,7 +206,7 @@ func TestARegroupVersionIsReservedOnce(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(z.Root(), storage.RetiredDir, "s1"), nil, 0o444); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.ReserveRegroup(z, "s1", dir); !errors.Is(err, storage.ErrRetiredSession) {
+	if _, err := reserveRegroup(z, "s1", dir); !errors.Is(err, storage.ErrRetiredSession) {
 		t.Fatalf("a retired session: %v", err)
 	}
 }
@@ -213,11 +214,11 @@ func TestARegroupVersionIsReservedOnce(t *testing.T) {
 // Work files are written into the run's work directory, each read-only.
 func TestWorkFilesAreWrittenOnce(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	_, dir, err := storage.ReserveRun(z, "s1")
+	_, dir, err := reserveRun(z, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storage.WriteWorkFiles(z, "s1", dir, "sources", []storage.WorkFile{{Name: "R1.json", Data: []byte("{}\n")}, {Name: "R1.txt", Data: []byte("text")}}); err != nil {
+	if err := storage.WriteWorkFiles(context.Background(), z, "s1", dir, "sources", []storage.WorkFile{{Name: "R1.json", Data: []byte("{}\n")}, {Name: "R1.txt", Data: []byte("text")}}); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{"R1.json": "{}\n", "R1.txt": "text"} {
@@ -228,4 +229,20 @@ func TestWorkFilesAreWrittenOnce(t *testing.T) {
 			t.Errorf("%s: %q %v %v", name, b, err, info.Mode())
 		}
 	}
+}
+
+// written lists what a run's directory holds besides what its admission
+// made: its activity lock and admission.json.
+func written(runDir string) ([]string, error) {
+	items, err := os.ReadDir(runDir)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, it := range items {
+		if it.Name() != storage.ActiveFile && it.Name() != storage.AdmissionFile {
+			out = append(out, it.Name())
+		}
+	}
+	return out, nil
 }

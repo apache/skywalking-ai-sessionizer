@@ -156,8 +156,8 @@ fails the build. See [Scenarios](../guides/scenario.md).
 
 ## Judge runs
 
-A [judge run](session-judgment.md) is sent once it has closed: each stage file is one record, in run
-order, its body the file as written. A run that never closed is not sent, and neither is a run whose
+A [judge run](session-judgment.md) is sent only when `export.otlp.judgments` is on, with the logs,
+and once it has closed: each stage file is one record, in run order, its body the file as written. A run that never closed is not sent, and neither is a run whose
 files do not all read, or whose close file does not list one of them. The close file goes only once
 every other stage of its run is recorded as sent, so a receiver never holds a close without what it
 closes. The stage files go under the session they belong to, with the same owner as its other files. A stage file

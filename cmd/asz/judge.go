@@ -47,7 +47,11 @@ const judgeUsage = `Usage:
       judge a conversation at its current head, or at round N of its chain: the
       ledger, then each stage of the plan given to its evaluator, then the close
       file. The plan is judge.plan, every stage given to -evaluator, or -plan,
-      such as targets=claude,achievement=codex,efficiency=claude
+      such as targets=claude,achievement=codex,efficiency=claude.
+      -max-steps N refuses a run that would judge more steps, and -run-timeout D
+      ends a run's work after D; each sets judge.max_steps or judge.run_timeout
+      for this command, 0 for no bound. A conversation has one run or regroup
+      at a time
   asz judge [-config FILE] -reference SRC ... CONVERSATION
       judge it as above, and compare it with what each source concludes: a
       file, an http or https URL, or a source judge.references.fetch names
@@ -63,7 +67,8 @@ const judgeUsage = `Usage:
       it: one call of the evaluator, or of the plan's targets stage, places
       each target in the goal it serves
   asz judge [-config FILE] -list CONVERSATION
-      list the conversation's runs
+      list the conversation's runs, each closed, running, stopped or unknown,
+      and who started it
   asz judge [-config FILE] -show [-run N] [-json | -format text|markdown|html] CONVERSATION
       print the latest closed run, or run N as -list numbers it: goal by goal, each target's status, score out of 100,
       criteria, what was done and what is missing, then the overall
@@ -102,6 +107,8 @@ func cmdJudge(args []string) int {
 	fromID := fs.String("from-id", "", "judge the main talks from this talk id on")
 	toID := fs.String("to-id", "", "judge the main talks up to this talk id")
 	mode := fs.String("mode", "", "auto, single or stream: how each stage is given to its evaluator")
+	maxSteps := fs.Int("max-steps", 0, "refuse a run that would judge more steps than this; sets judge.max_steps, 0 for no bound")
+	runTimeout := fs.String("run-timeout", "", "end a run's work after this long, such as 2h; sets judge.run_timeout, 0 for no bound")
 	var references repeated
 	fs.Var(&references, "reference", "a source to compare the run with: a file, a URL, or one a configured command or MCP server fetches; repeat for several")
 	referenceTools := fs.String("reference-tools", "", "list the tools of the MCP server configured for this source")
@@ -277,6 +284,18 @@ func cmdJudge(args []string) int {
 	default:
 		return fail(fmt.Errorf("-mode %q: give auto, single or stream", *mode))
 	}
+	if given["max-steps"] {
+		if *maxSteps < 0 {
+			return usage("-max-steps takes a number of steps, 0 for no bound")
+		}
+		cfg.Judge.MaxSteps = *maxSteps
+	}
+	if given["run-timeout"] {
+		cfg.Judge.RunTimeout = *runTimeout
+		if _, err := cfg.Judge.RunTimeoutDuration(); err != nil {
+			return usage(fmt.Sprintf("-run-timeout %q: give a duration such as 2h, or 0 for no bound", *runTimeout))
+		}
+	}
 	pricing, err := judge.LoadPricing(cfg.Judge.Pricing, admittedRoot())
 	if err != nil {
 		return fail(err)
@@ -328,7 +347,9 @@ func cmdJudge(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if admitted != nil {
-		r.Reserved = func(number int) error { return admitted.BindRun(ctx, fmt.Sprintf("j%06d", number)) }
+		r.Reserved = func(ctx context.Context, number int) error {
+			return admitted.BindRun(ctx, fmt.Sprintf("j%06d", number))
+		}
 		r.Failures = func() string { return leaseRandom(admitted.Lease()) }
 		if r.Snapshot, err = snapshotView(nil); err != nil {
 			return fail(err)
@@ -479,18 +500,35 @@ func judgeList(zone *storage.Zone, session, id string, named bool) int {
 	return 0
 }
 
-// runLine is what a listing says of a run after its name.
+// runLine is what a listing says of a run after its name: its state, who
+// started it when its admission says, and for a closed run what it found.
 func runLine(run storage.JudgmentRun) string {
+	state, held, err := storage.StateOf(&run)
+	if err != nil {
+		return fmt.Sprintf("state not known: %v", err)
+	}
+	by := ""
+	if a, err := storage.ReadAdmission(run.Dir); err != nil {
+		by = fmt.Sprintf("  its admission does not read: %v", err)
+	} else if a != nil {
+		by = " by " + a.Trigger
+	}
+	if state != storage.RunClosed {
+		return fmt.Sprintf("%s%s, %d stage files", state, by, len(run.Files))
+	}
 	closeFile, ok := readClose(run)
 	if !ok {
-		return fmt.Sprintf("unfinished, %d stage files", len(run.Files))
+		return fmt.Sprintf("closed%s, but its close file does not read", by)
 	}
 	h := closeFile.Header
 	s := h.Summary
-	line := fmt.Sprintf("round %d  %s  %s  targets %d: achieved %d, partly %d, not %d, cannot verify %d",
-		h.Head.Round, h.Finished, h.Status, s.Targets, s.Achieved, s.Partly, s.NotAchieved, s.CannotVerify)
+	line := fmt.Sprintf("closed%s  round %d  %s  %s  targets %d: achieved %d, partly %d, not %d, cannot verify %d",
+		by, h.Head.Round, h.Finished, h.Status, s.Targets, s.Achieved, s.Partly, s.NotAchieved, s.CannotVerify)
 	if s.Score != nil && s.Score.Final != nil {
 		line += "  score " + scoreOf(s.Score.Final)
+	}
+	if held {
+		line += "  a regroup of it is running"
 	}
 	return line
 }
@@ -663,6 +701,7 @@ func cmdJudgeMCP(args []string) int {
 	fromID := fs.String("from-id", "", "the window's first main talk")
 	toID := fs.String("to-id", "", "the window's last main talk")
 	readBytes := fs.Int("read-bytes", 0, "the reading budget of the call, in bytes of answers; 0 is no bound")
+	maxCalls := fs.Int("max-calls", 0, "the tool calls the call may make, for an agent CLI that cannot bound its own turns; 0 is no bound")
 	taskPath := fs.String("task", "", "the file that says what the call answers for")
 	cfgPath := fs.String("config", "", "configuration file, for a server admitted on its own to a pulled snapshot")
 	parentLease := fs.String("parent-lease", "", "the run lease of the judge run that started this server, on a pulled snapshot")
@@ -739,6 +778,7 @@ func cmdJudgeMCP(args []string) int {
 		return fail(err)
 	}
 	nav.ResetBudget(*readBytes)
+	nav.LimitCalls(*maxCalls)
 	if *taskPath != "" {
 		f, err := storage.OpenSuppliedRead(*taskPath, admittedRoot())
 		if err != nil {
@@ -777,7 +817,7 @@ func cmdJudgeMCP(args []string) int {
 				return
 			}
 			line, _ := json.Marshal(map[string]any{"attempt": attempt, "tool": tool, "args": args, "bytes": size, "error": err != nil,
-				"refused": errors.Is(err, judge.ErrBudgetSpent), "opened": given.Opened, "listed": given.Listed})
+				"refused": errors.Is(err, judge.ErrBudgetSpent) || errors.Is(err, judge.ErrCallsSpent), "opened": given.Opened, "listed": given.Listed})
 			if _, werr := f.Write(append(line, '\n')); werr != nil {
 				failed = true
 				return

@@ -77,14 +77,14 @@ func TestARemoteConversationSelectsItsSnapshot(t *testing.T) {
 // controls fails the listing.
 func TestARemoteListNamesEachRunBySnapshot(t *testing.T) {
 	p := pulledSnapshot(t)
-	if _, _, err := storage.ReserveRun(storage.NewZone(p.snapshot), p.session); err != nil {
+	if _, _, err := reserveRun(storage.NewZone(p.snapshot), p.session); err != nil {
 		t.Fatal(err)
 	}
 	var code int
 	out := stdoutOf(t, func() {
 		code = cmdJudge([]string{"-config", pulledConfig(t, p), "-list", "-remote-conversation", "prod/" + p.conversation})
 	})
-	want := "prod/" + p.conversation + ":" + filepath.Base(p.snapshot) + " run 1  unfinished"
+	want := "prod/" + p.conversation + ":" + filepath.Base(p.snapshot) + " run 1  stopped by command, 0 stage files"
 	if code != 0 || !strings.HasPrefix(strings.TrimSpace(out), want) {
 		t.Fatalf("%d %q, want %q", code, out, want)
 	}
@@ -269,7 +269,7 @@ func TestAPullFirstJudgesWhatItPulled(t *testing.T) {
 // every snapshot says the damaged one and goes on.
 func TestADamagedNewestTagIsNeverPassedOver(t *testing.T) {
 	p := pulledSnapshot(t)
-	if _, _, err := storage.ReserveRun(storage.NewZone(p.snapshot), p.session); err != nil {
+	if _, _, err := reserveRun(storage.NewZone(p.snapshot), p.session); err != nil {
 		t.Fatal(err)
 	}
 	newer := storage.Stamp(time.Now().UTC().Add(time.Second))

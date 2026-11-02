@@ -200,6 +200,11 @@ func (n *Nav) chunkOf(id string, of []string) string {
 // spent.
 var ErrBudgetSpent = errors.New("the reading budget of this call is spent: answer now with what you have read, and say unknown for what you could not read")
 
+// ErrCallsSpent is what every tool answers once a call has made as many tool
+// calls as its evaluator's max_turns, for an agent CLI that has no option of
+// its own to bound its turns.
+var ErrCallsSpent = errors.New("this call has made as many tool calls as it may: answer now with what you have read, and say unknown for what you could not read")
+
 // ResetBudget starts a new evaluator call with a reading budget, in bytes of
 // answers; zero is no bound. A call that would read past it is refused
 // rather than cut, so the evaluator never holds half an answer.
@@ -209,12 +214,22 @@ func (n *Nav) ResetBudget(bytes int) {
 	n.counts.budget, n.counts.spent, n.counts.refused, n.counts.calls = bytes, 0, 0, 0
 }
 
+// LimitCalls bounds the tool calls the current evaluator call may make; zero
+// is no bound. A call past it is refused before anything is read.
+func (n *Nav) LimitCalls(most int) {
+	n.counts.mu.Lock()
+	defer n.counts.mu.Unlock()
+	n.counts.most = most
+}
+
 // counts are what one evaluator call has read. A progress line reads them
 // while the call runs, so they are kept behind a lock, and a fork gets its
 // own.
 type counts struct {
 	mu                            sync.Mutex
 	budget, spent, refused, calls int
+	// most bounds calls; zero is no bound.
+	most int
 }
 
 // Spent says what the current call has read, in bytes of answers, and how
@@ -569,6 +584,12 @@ func (n *Nav) answerCall(name string, args json.RawMessage) (any, toolArgs, erro
 		n.counts.refused++
 		n.counts.mu.Unlock()
 		return nil, toolArgs{}, ErrBudgetSpent
+	}
+	if n.counts.most > 0 && n.counts.calls >= n.counts.most {
+		n.counts.calls++
+		n.counts.refused++
+		n.counts.mu.Unlock()
+		return nil, toolArgs{}, ErrCallsSpent
 	}
 	n.counts.mu.Unlock()
 	out, a, err := n.call(name, args)

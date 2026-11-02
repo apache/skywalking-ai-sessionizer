@@ -338,6 +338,9 @@ type stageRun struct {
 	subtaskStage bool
 	timeout      time.Duration
 	mcp          MCPArgs
+	// pub is the context the stage writes to storage under: the run's
+	// cleanup context, so a write is not cancelled with the work.
+	pub context.Context
 	// work names the stage's work directory, the stage's order and name
 	// when empty; a regroup, which a run can have many of, its version.
 	work string
@@ -551,7 +554,14 @@ func (s *stageRun) run(ctx context.Context, chunks []chunk) (merged, catalogue, 
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			sem <- struct{}{}
+			// A queued chunk looks at the work before it takes a slot, so
+			// one waiting when the work ends never starts a call.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				errs[i] = fmt.Errorf("not started: %w", ctx.Err())
+				return
+			}
 			defer func() { <-sem }()
 			results[i], errs[i] = s.chunk(ctx, i, len(chunks), chunks[i], catalogue{})
 		}(i)
@@ -658,13 +668,28 @@ func (s *stageRun) chunk(ctx context.Context, i, of int, ch chunk, cat catalogue
 	// pulled snapshot, which are checked before any answer is accepted.
 	var issued []string
 	for attempt := 1; attempt <= 2; attempt++ {
+		// No attempt starts once the work has ended, a second one included.
+		if err := ctx.Err(); err != nil {
+			if last != nil {
+				return nil, last
+			}
+			return nil, fmt.Errorf("not started: %w", err)
+		}
 		work := s.work
 		if work == "" {
 			work = fmt.Sprintf("%d-%s", s.order, s.stage)
 		}
-		dir, err := storage.MakeWorkDir(s.runner.Zone, s.session, s.dir, fmt.Sprintf("%s/c%03d/a%d", work, i+1, attempt))
+		dir, err := storage.MakeWorkDir(s.pub, s.runner.Zone, s.session, s.dir, fmt.Sprintf("%s/c%03d/a%d", work, i+1, attempt))
 		if err != nil {
 			return nil, errStorage{err}
+		}
+		// Making the directory can wait for the root, and the work can end
+		// meanwhile.
+		if err := ctx.Err(); err != nil {
+			if last != nil {
+				return nil, last
+			}
+			return nil, fmt.Errorf("not started: %w", err)
 		}
 		nav := s.nav.Fork()
 		var marker string

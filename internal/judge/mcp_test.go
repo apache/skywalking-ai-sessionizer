@@ -275,6 +275,39 @@ func TestABudgetRefusesWhatWouldCrossIt(t *testing.T) {
 	}
 }
 
+// An agent CLI with no option to bound its turns is bounded by its tool
+// calls: past the limit every call is refused before anything is read, and
+// the server ends as it does once the budget is spent.
+func TestACallLimitRefusesTheCallsPastIt(t *testing.T) {
+	nav := NewNav(doc(), Compute(doc(), "claude-code/1", nil, nil), nil)
+	nav.ResetBudget(0)
+	nav.LimitCalls(2)
+	for i := 0; i < 2; i++ {
+		if _, err := nav.Call("card", nil); err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+	}
+	if _, err := nav.Call("card", nil); !errors.Is(err, ErrCallsSpent) {
+		t.Fatalf("a call past the limit: %v", err)
+	}
+	if _, refused := nav.Spent(); refused != 1 {
+		t.Fatalf("refused %d", refused)
+	}
+	var lines []string
+	for i := 1; i <= 8; i++ {
+		lines = append(lines, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"tools/call","params":{"name":"card","arguments":{}}}`, i))
+	}
+	nav.ResetBudget(0)
+	var out bytes.Buffer
+	answered := 0
+	if err := ServeMCP(strings.NewReader(strings.Join(lines, "\n")+"\n"), &out, nav, func(string, json.RawMessage, int, error, Receipt) { answered++ }, nil); err != nil {
+		t.Fatal(err)
+	}
+	if answered != 2+budgetRefusals || !strings.Contains(out.String(), "as many tool calls as it may") {
+		t.Fatalf("answered %d: %s", answered, out.String())
+	}
+}
+
 // Once the budget is spent the server answers that it is, a few times, and
 // then ends, so an evaluator that keeps asking has nothing left to ask.
 func TestTheServerEndsOnceTheBudgetIsSpent(t *testing.T) {

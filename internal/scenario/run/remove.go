@@ -182,7 +182,7 @@ func (c *removalCase) remover() *remove.Remover {
 // receiver in push.state, as the pipeline's pusher does.
 func (c *removalCase) push() (*otlp.Stats, error) {
 	p := &otlp.Pusher{Zone: c.zone, Client: c.client, Endpoint: c.endpoint, Version: "check",
-		ServiceName: "Scenario Check", InstanceID: "scenario-check", Layer: "AI_AGENT", Now: checkNow}
+		ServiceName: "Scenario Check", InstanceID: "scenario-check", Layer: "AI_AGENT", Judgments: true, Now: checkNow}
 	return p.Pass()
 }
 
@@ -218,7 +218,7 @@ func (c *removalCase) send() (*otlp.Stats, error) {
 // removeNow is the last act of a pass. An error the removal reports is a
 // problem of the property, so the other cases still run.
 func (c *removalCase) removeNow(endpoint string) *remove.Result {
-	res := c.rm.Pass(remove.Input{Endpoint: endpoint, SendLogs: true, SendMetrics: true})
+	res := c.rm.Pass(remove.Input{Endpoint: endpoint, SendLogs: true, SendMetrics: true, SendJudgments: true})
 	for _, err := range res.Errors {
 		c.bad("the removal reported %v", err)
 	}

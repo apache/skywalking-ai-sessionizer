@@ -120,6 +120,9 @@ type Input struct {
 	Endpoint    string
 	SendLogs    bool
 	SendMetrics bool
+	// SendJudgments says the pipeline sends closed judge runs. A session
+	// with a judge run is removed only then, once they are sent.
+	SendJudgments bool
 	// Busy holds the pipeline's sessions to parse again: another process
 	// held them this pass, or their parse failed. None of them is removed.
 	Busy map[string]bool
@@ -291,8 +294,12 @@ func (r *Remover) Pass(in Input) *Result {
 		var v verdict
 		if c.m.State == scenario.MarkerRemoving {
 			// Decided by an earlier pass, which proved everything then. Only
-			// the locks are needed to go on.
-			v = p.lock(s)
+			// the locks are needed to go on, and no judge run or regroup at
+			// work in the session: one admitted since then reads its files
+			// and writes into it.
+			if v = p.lock(s); v.reason == "" {
+				v = p.notJudged(s)
+			}
 		} else {
 			v = p.decide(s)
 		}
@@ -913,6 +920,20 @@ func (p *pass) sentAll(files []sentFile, notYet string) verdict {
 	return wait
 }
 
+// notJudged waits while a judge run or regroup of the session is active. The
+// pipeline holds the root lock, under which every run is admitted, so none
+// starts between this answer and the removal.
+func (p *pass) notJudged(s *session) verdict {
+	active, err := storage.JudgeActive(storage.NewZone(p.root), s.id)
+	switch {
+	case err != nil:
+		return blocked("probing its judge runs: %v", err)
+	case active:
+		return waiting("a judge run or regroup of it is active")
+	}
+	return verdict{}
+}
+
 // judgmentsSent checks that every judge run of the session went to the
 // receiver whole, since the removal takes the runs with the session. A run
 // not closed may still write a stage, and the pusher sends none of it, so it
@@ -927,6 +948,15 @@ func (p *pass) judgmentsSent(s *session) verdict {
 	for _, run := range runs {
 		if !run.Closed() {
 			return waiting("judge run %d is not closed", run.Run)
+		}
+		// A regroup of a closed run reads the session, and writes into it.
+		if held, err := storage.ProbeFileLock(filepath.Join(run.Dir, storage.ActiveFile)); err != nil {
+			return blocked("%v", err)
+		} else if held {
+			return waiting("a regroup of judge run %d is running", run.Run)
+		}
+		if !p.in.SendJudgments {
+			return blocked("export.otlp.judgments is off; its judge runs are never sent")
 		}
 		for _, f := range run.Files {
 			digest, err := storage.FileDigest(f.Path)

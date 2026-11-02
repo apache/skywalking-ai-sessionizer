@@ -522,7 +522,7 @@ func TestARetiredSessionIsNotJudged(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(z.Root(), "_retired", id), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := storage.ReserveRun(z, id); !errors.Is(err, storage.ErrRetiredSession) {
+	if _, _, err := reserveRun(z, id); !errors.Is(err, storage.ErrRetiredSession) {
 		t.Fatalf("a retired session got a run: %v", err)
 	}
 }
@@ -535,7 +535,7 @@ func TestAClosedRunIsSentAndAnOpenOneWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A second run that stopped before its close file.
-	_, dir, err := storage.ReserveRun(z, id)
+	_, dir, err := reserveRun(z, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestAClosedRunIsSentAndAnOpenOneWaits(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	p := &otlp.Pusher{Zone: z, Client: client, Version: "test", ServiceName: "Claude Code", InstanceID: "me", NoMetrics: true}
+	p := &otlp.Pusher{Zone: z, Client: client, Version: "test", ServiceName: "Claude Code", InstanceID: "me", NoMetrics: true, Judgments: true}
 	st, err := p.Pass()
 	if err != nil || len(st.Errors) > 0 {
 		t.Fatalf("pass %+v %v", st, err)
@@ -640,14 +640,14 @@ func TestABadPlanReservesNothing(t *testing.T) {
 // refused, whatever its digest.
 func TestAStageIsWrittenOnce(t *testing.T) {
 	z, id := builtFixture(t)
-	_, dir, err := storage.ReserveRun(z, id)
+	_, dir, err := reserveRun(z, id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.PublishStage(z, id, dir, 3, "achievement", strings.Repeat("a", 64), []byte("x\n")); err != nil {
+	if _, err := storage.PublishStage(context.Background(), z, id, dir, 3, "achievement", strings.Repeat("a", 64), []byte("x\n")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.PublishStage(z, id, dir, 3, "achievement", strings.Repeat("b", 64), []byte("y\n")); err == nil {
+	if _, err := storage.PublishStage(context.Background(), z, id, dir, 3, "achievement", strings.Repeat("b", 64), []byte("y\n")); err == nil {
 		t.Fatal("a second achievement stage was written")
 	}
 }
@@ -656,7 +656,7 @@ func TestAStageIsWrittenOnce(t *testing.T) {
 // that outlives a retirement does not make the session again.
 func TestAWorkDirectoryIsNotMadeForARetiredSession(t *testing.T) {
 	z, id := builtFixture(t)
-	_, dir, err := storage.ReserveRun(z, id)
+	_, dir, err := reserveRun(z, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,7 +667,7 @@ func TestAWorkDirectoryIsNotMadeForARetiredSession(t *testing.T) {
 	if err := os.RemoveAll(z.SessionDir(id)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.MakeWorkDir(z, id, dir, "2-targets"); !errors.Is(err, storage.ErrRetiredSession) {
+	if _, err := storage.MakeWorkDir(context.Background(), z, id, dir, "2-targets"); !errors.Is(err, storage.ErrRetiredSession) {
 		t.Fatalf("made for a retired session: %v", err)
 	}
 	if _, err := os.Stat(z.SessionDir(id)); !os.IsNotExist(err) {
@@ -709,7 +709,7 @@ func TestACloseWaitsForItsStages(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	p := &otlp.Pusher{Zone: z, Client: &failLedgerOnce{Client: client}, Version: "test", ServiceName: "Claude Code",
+	p := &otlp.Pusher{Zone: z, Client: &failLedgerOnce{Client: client}, Version: "test", ServiceName: "Claude Code", Judgments: true,
 		InstanceID: "me", NoMetrics: true, BatchBytes: 1}
 	stages := func() []string {
 		var out []string
@@ -750,7 +750,7 @@ func judgedAndPushed(t *testing.T) (*storage.Zone, string, *otlptest.Receiver, *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	return z, id, rcv, &otlp.Pusher{Zone: z, Client: client, Version: "test", ServiceName: "Claude Code", InstanceID: "me", NoMetrics: true}
+	return z, id, rcv, &otlp.Pusher{Zone: z, Client: client, Version: "test", ServiceName: "Claude Code", InstanceID: "me", NoMetrics: true, Judgments: true}
 }
 
 func sentStages(rcv *otlptest.Receiver) []string {
@@ -1214,7 +1214,7 @@ func TestARunIsRegroupedByThePersonsGoals(t *testing.T) {
 		t.Fatalf("version %d", v)
 	}
 	// A version is written once.
-	if _, err := storage.PublishRegroup(z, id, runs[0].Dir, 2, strings.Repeat("a", 64), []byte("x")); err == nil {
+	if _, err := storage.PublishRegroup(context.Background(), z, id, runs[0].Dir, 2, strings.Repeat("a", 64), []byte("x")); err == nil {
 		t.Fatal("a regroup was written over")
 	}
 	// A regroup whose call failed is kept, failed, with the goals file.

@@ -21,6 +21,18 @@ if the receiver needs one. [Configuration](configuration.md#export) lists every 
 `asz collect` and `asz server` then send what is new after every collection. `asz push` sends
 everything not sent yet, and exits. Each file is sent once.
 
+## Judge runs
+
+Closed [judge runs](judge.md) are sent only when asked, with the logs:
+
+```yaml
+export:
+  otlp:
+    judgments: true
+```
+
+A run is sent once it closes. Runs that closed while `judgments` was off are sent once it is on.
+
 ## Metrics
 
 asz derives these metrics from what it collects, and sends them with the files:

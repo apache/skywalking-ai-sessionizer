@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -136,7 +137,7 @@ func publishStage(t *testing.T, z *storage.Zone, runDir string, run, order int, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.PublishStage(z, "s1", runDir, order, stage, digest, data); err != nil {
+	if _, err := storage.PublishStage(context.Background(), z, "s1", runDir, order, stage, digest, data); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -148,7 +149,7 @@ func threeRuns(t *testing.T) *storage.Zone {
 	z := storage.NewZone(t.TempDir())
 	var dirs []string
 	for range 3 {
-		_, dir, err := storage.ReserveRun(z, "s1")
+		_, dir, err := reserveRun(z, "s1")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,16 +162,16 @@ func threeRuns(t *testing.T) *storage.Zone {
 	return z
 }
 
-// A run is listed from its close file. A run with no close file yet is
-// unfinished, whatever other stages it has, and another stage's header is
-// never read as a close.
+// A run is listed from its close file. A run with no close file is stopped
+// once its activity lock is free, whatever other stages it has, and another
+// stage's header is never read as a close.
 func TestARunIsListedFromItsCloseFile(t *testing.T) {
 	z := threeRuns(t)
 	code := 0
 	out := stdoutOf(t, func() { code = judgeList(z, "s1", "s1", false) })
-	want := "run 1  unfinished, 1 stage files\n" +
-		"run 2  round 3  2026-10-20T10:05:00Z  complete  targets 2: achieved 1, partly 0, not 1, cannot verify 0  score 50/100\n" +
-		"run 3  unfinished, 0 stage files\n"
+	want := "run 1  stopped by command, 1 stage files\n" +
+		"run 2  closed by command  round 3  2026-10-20T10:05:00Z  complete  targets 2: achieved 1, partly 0, not 1, cannot verify 0  score 50/100\n" +
+		"run 3  stopped by command, 0 stage files\n"
 	if code != 0 || out != want {
 		t.Fatalf("exit %d, listed:\n%s\nwant:\n%s", code, out, want)
 	}
@@ -224,7 +225,7 @@ func TestShowPrintsTheRunAskedFor(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := storage.PublishRegroup(z, "s1", runs[1].Dir, version+1, digest, data); err != nil {
+		if _, err := storage.PublishRegroup(context.Background(), z, "s1", runs[1].Dir, version+1, digest, data); err != nil {
 			t.Fatal(err)
 		}
 	}

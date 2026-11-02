@@ -172,7 +172,15 @@ func (r *Remover) Recover() Result {
 	}
 	r.exported(&res, func(sent *otlp.Sent) {
 		for _, id := range ids {
-			n, err := r.locked(id, func() (int, error) { return r.finish(id, intents[id], sent) })
+			n, err := r.locked(id, func() (int, error) {
+				if err := judging(r.Zone, id); err != nil {
+					return 0, err
+				}
+				return r.finish(id, intents[id], sent)
+			})
+			if errors.Is(err, errJudging) {
+				continue
+			}
 			if err != nil {
 				res.Errors = append(res.Errors, fmt.Errorf("%s: finishing the removal: %w", id, err))
 				continue
@@ -245,6 +253,9 @@ func (r *Remover) Pass(in Input) Result {
 				continue
 			}
 			n, err := r.locked(id, func() (int, error) {
+				if err := judging(r.Zone, id); err != nil {
+					return 0, err
+				}
 				if err := r.tidy(id, sent, requests); err != nil {
 					return 0, err
 				}
@@ -273,6 +284,26 @@ func (r *Remover) Pass(in Input) Result {
 // errBusy is a session another process holds a lock of. It is tried again
 // on the next pass.
 var errBusy = errors.New("retention: the session is busy")
+
+// errJudging is a session a judge run or regroup is reading. It is tried
+// again on the next pass, as a busy one is.
+var errJudging = fmt.Errorf("%w: a judge run or regroup of it is active", errBusy)
+
+// judging refuses to remove anything of a session while a judge run or
+// regroup of it is active: the run reads its landed files and writes into
+// its directory. The pass holds the root lock, under which every run is
+// admitted, so none starts between this answer and the removal. A probe
+// that fails defers the removal too, with its error.
+func judging(z *storage.Zone, id string) error {
+	active, err := storage.JudgeActive(z, id)
+	if err != nil {
+		return fmt.Errorf("probing its judge runs: %w", err)
+	}
+	if active {
+		return errJudging
+	}
+	return nil
+}
 
 // exported runs fn under the export lock, with push.state read once. The
 // pipeline holds the root lock, so no pusher changes push.state meanwhile,
