@@ -79,6 +79,31 @@ func (s *Selection) Header(w Window) *sessionjudge.Window {
 	return h
 }
 
+// Steps counts the steps a run judges in a document Narrow made for its
+// window: those of the selected main talks and of the sub-tasks they
+// started, at any depth. With no window it is every step of the
+// conversation.
+func Steps(doc *sessionview.Conversation, sel *Selection) int {
+	if sel == nil {
+		return doc.Summary.Steps
+	}
+	judged := set(sel.Talks)
+	started := map[string]bool{}
+	for _, st := range Compute(doc, "", nil, nil).Subtasks {
+		if judged[st.Main] {
+			started[st.Name] = true
+		}
+	}
+	n := 0
+	for i := range doc.Talks {
+		t := &doc.Talks[i]
+		if t.Stream == "main" && judged[t.ID] || started[t.Stream] {
+			n += t.Steps
+		}
+	}
+	return n
+}
+
 // Narrow returns a copy of a document that holds only what a window shows:
 // the main talks before the window and those in it, with the sub-tasks they
 // started, and nothing recorded after the selected work ends. Loose work and

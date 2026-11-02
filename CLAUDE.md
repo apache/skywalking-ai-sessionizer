@@ -244,15 +244,24 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   in place.
 - **Locks are taken in one order:** the server lifetime owner, `_scenario`, a local
   conversation's `_pull` or a server worker's in-process slot then build-owner lock, external
-  `_admit` or server `_pull/.lock`, `_root`, `_export`, `_metrics`, `_provider`, `_langsmith`, a
-  session's, then a chain's. This is the order for every acquisition that can wait. A probe of
-  capacity, another build owner, a lease or active work never waits. If a group of probes cannot
+  `_admit` or server `_pull/.lock`, the root's in-process gate, `_root`, `_export`, `_metrics`,
+  `_provider`, `_langsmith`, a session's, then a chain's. This is the order for every acquisition
+  that can wait. A probe of capacity, another build owner, a lease or active work never waits; a judge
+  run's `.active` is taken under `_root` without waiting and probed the same way. If a group of probes cannot
   finish, release its new locks and try later outside the transition lock. Holding a worker or
   lifetime lock does not forbid reentering the transition lock. Its holder is never waited for
   there. No holder of `_root` waits for `_admit` or the server lock. Release a judge's `_root`
   before releasing its lease. Capacity waits, expensive verification and network writes happen
   outside transition locks. A new lock takes its place in this order, or two commands can wait on
   each other for ever.
+- **A judge run is admitted in one decision, and holds `.active` until it has ended.** Under `_root`:
+  refuse a retired session, a removal intent, and another active run or regroup of the conversation;
+  run the caller's selection; reserve the directory, take `.active`, write `admission.json`. Retention
+  probes `.active` before it removes anything at either level. After the work ends no evaluator call
+  starts, and what finished is published under a cleanup context bounded to two minutes.
+- **asz never collects its own evaluators' sessions.** `kiro-local` leaves out any session with a
+  workspace inside the storage root, links resolved and unknown never taken for outside; an agent CLI
+  runs without `OTEL_LOG_RAW_API_BODIES`. A new evaluator that keeps a session needs its own guard.
 - **A session is sent to one owner**, the endpoint, the configured service name and the instance it
   was first sent under. `push.state` records the owner, and saves it, before the first request
   carrying anything of the session goes out, because a receiver holds a session whole. Never the

@@ -133,6 +133,8 @@ detects a truncated file.
 ```text
 <session>/judgments/
   j000001/                          one run
+    admission.json                  why the run was admitted, written before its first stage
+    .active                         its activity lock, held while the run or a regroup of it works
     s1-ledger-<digest12>.sj
     s2-targets-<digest12>.sj
     s3-achievement-<digest12>.sj
@@ -151,6 +153,35 @@ rebuilt from landed files. In the session's directory a run goes wherever the se
 new run. `metadata_only_after` leaves runs as they are. A stage file is written once and made
 read-only, as a landed file is. Its name ends in `.sj`, never in a landed file's `-NNNNNN.sd`, so
 nothing that reads landed files takes it for one.
+
+### Admission
+
+A run is admitted in one decision, under the root lock: it is refused for a retired session, for one
+whose files a removal has not finished with, and while another run or regroup of the conversation is
+active. Its directory is then made, its activity lock taken and `admission.json` written, read-only,
+before the lock is released:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | the admission's own identifier |
+| `conversation`, `session` | as in the header |
+| `trigger` | `command` for `asz judge`, `server` for asz server |
+| `round`, `digest` | the head the run judges, as its header's `head` |
+| `window` | the window as the header carries it, absent for the whole conversation |
+| `hide` | the flags whose records the evaluators were never shown, `judge.hide` |
+| `admitted` | when, RFC 3339 |
+
+`.active` is an empty file. Its holder keeps it locked for the whole life of the run, and of a regroup
+over the closed run, until every worker has returned and the cleanup has ended. Its contents are never
+read. Retention probes it, without waiting and without making it, and removes nothing of a session
+while one is held. A run is in one of four states:
+
+| State | What the directory holds |
+| --- | --- |
+| `closed` | the close file |
+| `running` | no close file, and `.active` held |
+| `stopped` | no close file, `admission.json`, and `.active` free: the run ended before it closed, and nothing resumes or closes it |
+| `unknown` | neither the close file nor `admission.json`: a run with no record of its admission |
 
 ## A regroup
 

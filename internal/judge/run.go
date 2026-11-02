@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,7 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionjudge"
 	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionview"
 )
@@ -68,7 +70,7 @@ type Runner struct {
 	// reserved, before any stage is written or any evaluator runs. On a
 	// pulled snapshot it binds the reader's lease to the run, which alone
 	// lets an evaluator work there; an error stops the run.
-	Reserved func(number int) error
+	Reserved func(ctx context.Context, number int) error
 	// Admitted is the pulled snapshot the run reads, under a lease, or
 	// empty. A file the run is given may lie inside it, and nowhere else in
 	// a tree pull owns.
@@ -81,6 +83,49 @@ type Runner struct {
 	// the run holds, which names each chunk attempt's failure marker and
 	// its chunk's gate. It is read once the lease is bound.
 	Failures func() string
+	// Trigger says who started the run, as its admission.json records it:
+	// storage.TriggerCommand when empty.
+	Trigger string
+	// Select, when set, runs inside the run's admission, under the root
+	// lock, and refuses the run with an error. It must not take the root
+	// lock. asz server's policy checks there that a conversation is due.
+	Select func() error
+}
+
+// cleanupBound is how long a run or a regroup may take, once its work has
+// ended, to publish what finished and close. It is fixed: an interrupt, a
+// shutdown or a time limit must end a run soon, whatever it was doing.
+const cleanupBound = 2 * time.Minute
+
+// cleanup is the context a run publishes under: not ended by the end of its
+// work, which may be what made it publish, but ended cleanupBound after it.
+// Its storage writes are never cancelled with the work, and never wait
+// longer than the bound once the work has ended. end releases it.
+func cleanup(work context.Context) (pub context.Context, end func()) {
+	pub, cancel := context.WithCancel(context.WithoutCancel(work))
+	go func() {
+		select {
+		case <-work.Done():
+		case <-pub.Done():
+			return
+		}
+		t := time.NewTimer(cleanupBound)
+		defer t.Stop()
+		select {
+		case <-t.C:
+			cancel()
+		case <-pub.Done():
+		}
+	}()
+	return pub, cancel
+}
+
+// interruption says in words why a run's work ended.
+func interruption(work context.Context) string {
+	if errors.Is(work.Err(), context.DeadlineExceeded) {
+		return "the run passed judge.run_timeout"
+	}
+	return "the run was interrupted"
 }
 
 // server is the view the run reads the conversation through.
@@ -241,10 +286,17 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	if err != nil {
 		return nil, err
 	}
+	runTimeout, err := r.Config.RunTimeoutDuration()
+	if err != nil {
+		return nil, err
+	}
 	kit, err := LoadKit()
 	if err != nil {
 		return nil, err
 	}
+	// The round is resolved, and the window's steps counted, before the run
+	// is admitted, so a run refused for its size reserves nothing and calls
+	// no model.
 	srv := r.server()
 	var c *view.Conversation
 	if round == 0 {
@@ -260,36 +312,97 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		return nil, err
 	}
 	head := sessionjudge.Head{Round: doc.Head.Round, Digest: doc.Head.Digest}
-	doc, sel, ledger, nav, err := r.navigation(c, doc, r.Window, r.Pricing)
+	shown, sel, err := Narrow(doc, r.Window, nil)
 	if err != nil {
 		return nil, err
+	}
+	if limit := r.Config.MaxSteps; limit > 0 {
+		if n := Steps(shown, sel); n > limit {
+			return nil, fmt.Errorf("judge: the run would judge %d steps, more than judge.max_steps %d; judge a smaller window with -from-id and -to-id, or set -max-steps", n, limit)
+		}
+	}
+	var window json.RawMessage
+	if sel != nil {
+		if window, err = json.Marshal(sel.Header(r.Window)); err != nil {
+			return nil, err
+		}
 	}
 	// The sources are fetched before any evaluator runs, and kept in the
 	// run's work directory whether or not the stages that read them run.
 	saved := fetchSources(ctx, r.Sources, r.Config.References, r.now, r.Admitted, r.Version)
 	for _, s := range saved {
-		nav.sources = append(nav.sources, s.manifest)
-		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: s.manifest.ID, Source: s.manifest.Source, Text: s.text, Left: LeftOut(s.manifest)})
 		if s.manifest.Outcome == sessionjudge.SourceFailed {
 			r.logf("source %s could not be saved: %s", s.manifest.Source, s.manifest.Error)
 		}
 	}
-
-	number, dir, err := storage.ReserveRun(r.Zone, c.Session)
+	trigger := r.Trigger
+	if trigger == "" {
+		trigger = storage.TriggerCommand
+	}
+	active, err := storage.AdmitRun(ctx, r.Zone, c.Session, func() (storage.RunAdmission, error) {
+		if err := r.chainHolds(conversation, head); err != nil {
+			return storage.RunAdmission{}, err
+		}
+		if r.Select != nil {
+			if err := r.Select(); err != nil {
+				return storage.RunAdmission{}, err
+			}
+		}
+		return storage.RunAdmission{Conversation: conversation, Trigger: trigger, Round: head.Round, Digest: head.Digest,
+			Window: window, Hide: r.Config.Hide}, nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	// The activity lock goes only once every worker of the run has returned
+	// and its cleanup has ended: every path out of the run comes after them.
+	defer func() { _ = active.Release() }()
+	number, dir := active.Number, active.Dir
+	// The work ends at an interrupt, a shutdown or the run's time limit,
+	// counted from the admission. What finished is then published under a
+	// context of its own, bounded, and no evaluator call starts.
+	work := ctx
+	if runTimeout > 0 {
+		var cancel context.CancelFunc
+		work, cancel = context.WithTimeout(ctx, runTimeout)
+		defer cancel()
+	}
+	pub, endPub := cleanup(work)
+	defer endPub()
 	if r.Reserved != nil {
-		if err := r.Reserved(number); err != nil {
+		if err := r.Reserved(work, number); err != nil {
 			return nil, err
 		}
 	}
+	// The run reads the conversation at exactly the round its admission
+	// bound, loaded again now that nothing can remove a file of it.
+	if c, err = srv.LoadAt(conversation, head.Round); err != nil {
+		return nil, err
+	}
+	if doc, err = c.BuildWithheld(r.Config.Hide); err != nil {
+		return nil, err
+	}
+	if doc.Head.Digest != head.Digest {
+		return nil, fmt.Errorf("judge: round %d of %s is not the round the run was admitted at", head.Round, conversation)
+	}
+	doc, sel, ledger, nav, err := r.navigation(c, doc, r.Window, r.Pricing)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range saved {
+		nav.sources = append(nav.sources, s.manifest)
+		nav.sourceDocs = append(nav.sourceDocs, SourceDoc{ID: s.manifest.ID, Source: s.manifest.Source, Text: s.text, Left: LeftOut(s.manifest)})
+	}
+	stopSaid := context.AfterFunc(work, func() {
+		r.logf("run %d stopping: %s; publishing what finished, within %s", number, interruption(work), cleanupBound)
+	})
+	defer stopSaid()
 	run := &Run{Number: number, Dir: dir, Head: head, Status: sessionjudge.StatusComplete}
 	r.logf("run %d of %s at round %d", number, conversation, head.Round)
 	if len(saved) > 0 {
 		files, err := sourceFiles(saved)
 		if err == nil {
-			err = storage.WriteWorkFiles(r.Zone, c.Session, dir, "sources", files)
+			err = storage.WriteWorkFiles(pub, r.Zone, c.Session, dir, "sources", files)
 		}
 		if err != nil {
 			return nil, err
@@ -320,7 +433,7 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		if err != nil {
 			return nil, err
 		}
-		path, err := storage.PublishStage(r.Zone, c.Session, dir, stageOrder[h.Stage], h.Stage, digest, data)
+		path, err := storage.PublishStage(pub, r.Zone, c.Session, dir, stageOrder[h.Stage], h.Stage, digest, data)
 		if err != nil {
 			return nil, err
 		}
@@ -376,7 +489,9 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		subtasks = map[string]*sessionjudge.Subtask{}
 	}
 	for _, p := range plan {
-		if p.Stage != sessionjudge.StageTargets && targetsDigest == "" {
+		// Once the work has ended a stage is published failed, not skipped,
+		// whatever came before it.
+		if p.Stage != sessionjudge.StageTargets && targetsDigest == "" && work.Err() == nil {
 			r.logf("  %s skipped: the run has no targets", p.Stage)
 			run.Status = sessionjudge.StatusPartial
 			continue
@@ -394,7 +509,9 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		h.Stage, h.Evaluator = p.Stage, ex.Describe()
 		h.Kit = &sessionjudge.Kit{Version: kit.Version(), Prompt: promptDigest}
 		h.BuildsOn = []sessionjudge.Dependency{{Stage: sessionjudge.StageLedger, Digest: ledgerDigest}}
-		if p.Stage != sessionjudge.StageTargets {
+		// A stage published after the work ended builds on no targets stage
+		// when that stage did not answer.
+		if p.Stage != sessionjudge.StageTargets && targetsDigest != "" {
 			h.BuildsOn = append(h.BuildsOn, sessionjudge.Dependency{Stage: sessionjudge.StageTargets, Digest: targetsDigest})
 		}
 		mode, chunks := planChunks(p.Stage, r.Config.Mode, r.Config.SingleBytes, r.Config.ChunkBytes, r.Config.ReadBytes, nav, targets)
@@ -404,11 +521,37 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		if p.Stage == sessionjudge.StageAchievement {
 			nav.Own(targets, inputs)
 		}
+		// Once the work has ended no evaluator call starts: the stage is
+		// published failed, with every call it planned unjudged.
+		if work.Err() != nil {
+			h.Status, h.Note = sessionjudge.StatusFailed, "not started: "+interruption(work)
+			cov := unjudged(p.Stage, chunk{}, nil)
+			if len(chunks) > 0 {
+				cov = sessionjudge.Coverage{}
+				for _, ch := range chunks {
+					cov = addCoverage(cov, unjudged(p.Stage, ch, targets))
+				}
+			}
+			if p.Stage == sessionjudge.StageTargets {
+				all, none := len(nav.Inputs()), 0
+				cov.Inputs, cov.InputsRead = &all, &none
+			}
+			h.Coverage = &cov
+			h.Started, h.Finished = stamp(stageStart), stamp(r.now())
+			stage, err := publish(h, nil)
+			if err != nil {
+				return nil, err
+			}
+			r.logf("  %s %s%s", p.Stage, h.Status, noteSuffix(h.Note))
+			run.Status = sessionjudge.StatusPartial
+			stages = append(stages, stage)
+			continue
+		}
 		sr := &stageRun{runner: r, kit: kit, ex: ex, nav: nav, stage: p.Stage, order: stageOrder[p.Stage], session: c.Session,
 			dir: dir, schema: schema, targets: targets, goals: goals, inputs: inputs, achievements: achievements, misled: misledOf(subtasks, ledger),
-			subtaskStage: ran[sessionjudge.StageSubtasks],
-			timeout:      timeout, mcp: MCPArgs{Conversation: conversation, Head: head, Ledger: ledgerPath, Window: r.Window, ReadBytes: r.Config.ReadBytes}}
-		m, cat, used, err := sr.run(ctx, chunks)
+			subtaskStage: ran[sessionjudge.StageSubtasks], pub: pub,
+			timeout: timeout, mcp: MCPArgs{Conversation: conversation, Head: head, Ledger: ledgerPath, Window: r.Window, ReadBytes: r.Config.ReadBytes}}
+		m, cat, used, err := sr.run(work, chunks)
 		if err != nil {
 			return nil, err
 		}
@@ -616,6 +759,23 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 }
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+// chainHolds says whether the conversation's chain still holds the head a
+// run was loaded at. A chain parsed again from scratch holds other rounds,
+// and a run admitted at a round it no longer has would cite a fold no reader
+// can make.
+func (r *Runner) chainHolds(conversation string, head sessionjudge.Head) error {
+	files, err := sessionflow.OpenChain(r.Zone.Root(), conversation).List()
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if f.Round == head.Round && strings.HasPrefix(head.Digest, f.Digest) {
+			return nil
+		}
+	}
+	return fmt.Errorf("judge: the chain of %s no longer holds round %d, which the run was loaded at", conversation, head.Round)
+}
 
 func noteSuffix(note string) string {
 	if note == "" {

@@ -137,7 +137,7 @@ func TestLockRootInCopyTakesACopy(t *testing.T) {
 func TestReserveRunInACopy(t *testing.T) {
 	root := markedCopyRoot(t)
 	z := storage.NewZone(root)
-	run, dir, err := storage.ReserveRun(z, "s1")
+	run, dir, err := reserveRun(z, "s1")
 	if err != nil {
 		t.Fatal(err)
 	}

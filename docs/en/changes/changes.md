@@ -20,8 +20,21 @@
 - Evaluators read through a read-only navigation, from an overview down to one record, every answer cut
   at 16 KiB and pinned to the run's head. An agent CLI gets it as an MCP server, `asz judge mcp`.
 - Each stage is one [Session Judgment](../formats/session-judgment.md) file, written once in the
-  session's `judgments/` directory. A closed run is sent over OTLP, one record per stage file. See
-  [Judge runs](../formats/otlp.md#judge-runs).
+  session's `judgments/` directory. A closed run is sent over OTLP, one record per stage file, when
+  `export.otlp.judgments` is on; it is off by default. See [Judge runs](../formats/otlp.md#judge-runs).
+- A run is admitted in one decision, under the root lock, and recorded in `admission.json`: who
+  started it, the head and window it judges, and `judge.hide`. A conversation has one run or regroup at
+  a time. Each run holds an activity lock, `.active`, while it or a regroup of it works, and retention
+  removes nothing of the session meanwhile. `asz judge -list` says whether each run is closed, running,
+  stopped or unknown, and who started it.
+- `judge.max_steps` refuses a run that would judge more steps before anything is made, and
+  `judge.run_timeout` ends a run's work after that long; `-max-steps` and `-run-timeout` set them for
+  one command. Both are off by default. Once a run's work ends, at its limit or an interrupt, no
+  evaluator call starts, and the run keeps what finished and closes within two minutes.
+- asz never collects its own evaluators' sessions: `kiro-local` leaves out every session with a
+  workspace inside the storage root, and an agent CLI runs without `OTEL_LOG_RAW_API_BODIES`. An
+  evaluator's `max_turns` bounds the tool calls of `codex` and `kiro-cli`, which have no option of their
+  own, through their navigation server.
 - `asz judge -round N` judges a conversation as it was at round N of its chain.
 - `asz judge -from T -to T` and `-from-id ID -to-id ID` judge a window: whole main talks, each with every
   sub-task it started. The talks before the window are context, and nothing after it is shown.

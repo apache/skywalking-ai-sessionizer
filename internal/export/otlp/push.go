@@ -97,6 +97,9 @@ type Pusher struct {
 	// receiver that takes only the other.
 	NoLogs    bool
 	NoMetrics bool
+	// Judgments sends the closed judge runs, with the logs. Off, a run is
+	// left unsent, so turning it on later sends it.
+	Judgments bool
 	// MetricsService is the service the metrics spool is attributed to: the
 	// derived requests concern the runtime whose landed files they came from,
 	// and they leave under its name. Empty means ServiceName.
@@ -362,7 +365,9 @@ func (p *Pusher) Pass() (*Stats, error) {
 			}
 		}
 		b.addRounds(s.id)
-		b.addJudgments(s.id)
+		if p.Judgments {
+			b.addJudgments(s.id)
+		}
 		sent[s.id] = true
 	}
 	// A conversation that is not a session of this root, such as one

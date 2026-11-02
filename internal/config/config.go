@@ -69,6 +69,14 @@ type Judge struct {
 	// Timeout bounds one evaluator call, as a duration such as 30m. A stage
 	// cut into calls runs several, and a failed call is tried once more.
 	Timeout string `yaml:"timeout"`
+	// RunTimeout bounds one whole run, all its stages together, as a
+	// duration such as 2h. Past it the run stops its work, publishes what
+	// finished and closes. Empty or 0 is no bound.
+	RunTimeout string `yaml:"run_timeout"`
+	// MaxSteps bounds the steps one run judges, the sub-tasks its main
+	// talks started included. asz judge refuses a larger window. Zero is no
+	// bound.
+	MaxSteps int `yaml:"max_steps"`
 	// ReadBytes bounds what one evaluator call reads through the
 	// navigation, in bytes of answers. Zero is no bound.
 	ReadBytes int `yaml:"read_bytes"`
@@ -277,7 +285,8 @@ func (j Judge) check() error {
 	if j.Concurrency < 1 {
 		return fmt.Errorf("config: judge.concurrency %d must be at least 1", j.Concurrency)
 	}
-	for name, n := range map[string]int{"read_bytes": j.ReadBytes, "single_bytes": j.SingleBytes, "chunk_bytes": j.ChunkBytes, "state_bytes": j.StateBytes} {
+	for name, n := range map[string]int{"read_bytes": j.ReadBytes, "single_bytes": j.SingleBytes, "chunk_bytes": j.ChunkBytes, "state_bytes": j.StateBytes,
+		"max_steps": j.MaxSteps} {
 		if n < 0 {
 			return fmt.Errorf("config: judge.%s %d must not be negative", name, n)
 		}
@@ -286,6 +295,9 @@ func (j Judge) check() error {
 		if d, err := time.ParseDuration(j.Progress); err != nil || d < 0 {
 			return fmt.Errorf("config: judge.progress %q is not a duration", j.Progress)
 		}
+	}
+	if _, err := j.RunTimeoutDuration(); err != nil {
+		return err
 	}
 	r := j.References
 	if r.MaxBytes < 0 {
@@ -312,6 +324,19 @@ func (j Judge) check() error {
 		}
 	}
 	return nil
+}
+
+// RunTimeoutDuration is the time limit of one whole run: zero, no bound, when
+// empty or 0.
+func (j Judge) RunTimeoutDuration() (time.Duration, error) {
+	if j.RunTimeout == "" || j.RunTimeout == "0" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(j.RunTimeout)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("config: judge.run_timeout %q is not a duration such as 2h, or 0 for no bound", j.RunTimeout)
+	}
+	return d, nil
 }
 
 // TimeoutDuration is the timeout of one evaluator call: 30m when unset.
@@ -427,6 +452,11 @@ type OTLP struct {
 	// sent what it takes. A push with both off is refused.
 	Logs    *bool `yaml:"logs"`
 	Metrics *bool `yaml:"metrics"`
+	// Judgments sends the closed judge runs, with the logs and only while
+	// they are on. It is off unless set true: what a run's evaluators wrote
+	// about a conversation goes to the receiver only when asked. A run not
+	// sent while it is off is sent once it is turned on.
+	Judgments *bool `yaml:"judgments"`
 }
 
 // SendLogs says whether a push sends the landed files and rounds.
@@ -434,6 +464,10 @@ func (o OTLP) SendLogs() bool { return o.Logs == nil || *o.Logs }
 
 // SendMetrics says whether a push sends the metrics spool.
 func (o OTLP) SendMetrics() bool { return o.Metrics == nil || *o.Metrics }
+
+// SendJudgments says whether a push sends the closed judge runs: only when
+// export.otlp.judgments is true and the logs are sent.
+func (o OTLP) SendJudgments() bool { return o.Judgments != nil && *o.Judgments && o.SendLogs() }
 
 // MetricsSent says whether derived metrics have somewhere to go: an endpoint
 // is set and export.otlp.metrics is on. A pipeline derives only then. Every
@@ -707,6 +741,7 @@ func Default() *Config {
 		Judge: Judge{
 			Hide:        []string{},
 			Timeout:     "30m",
+			RunTimeout:  "0",
 			ReadBytes:   131072,
 			Mode:        "auto",
 			SingleBytes: 32768,
@@ -794,6 +829,7 @@ func Default() *Config {
 			BatchBytes: 8 << 20,
 			Logs:       boolPtr(true),
 			Metrics:    boolPtr(true),
+			Judgments:  boolPtr(false),
 		}},
 		View:              View{Hide: []string{}},
 		RemoteSnapshotTTL: DefaultRemoteSnapshotTTL,
@@ -865,6 +901,7 @@ func Load(path string) (*Config, error) {
 			ChunkBytes  *int `yaml:"chunk_bytes"`
 			Concurrency *int `yaml:"concurrency"`
 			StateBytes  *int `yaml:"state_bytes"`
+			MaxSteps    *int `yaml:"max_steps"`
 			References  struct {
 				MaxBytes *int `yaml:"max_bytes"`
 			} `yaml:"references"`
@@ -937,6 +974,9 @@ func Load(path string) (*Config, error) {
 	if o.Metrics != nil {
 		cfg.Export.OTLP.Metrics = o.Metrics
 	}
+	if o.Judgments != nil {
+		cfg.Export.OTLP.Judgments = o.Judgments
+	}
 	if len(loaded.View.Hide) > 0 {
 		// hide is a set, and a name written twice is withheld once.
 		cfg.View.Hide = slices.Compact(slices.Sorted(slices.Values(loaded.View.Hide)))
@@ -952,6 +992,9 @@ func Load(path string) (*Config, error) {
 	if j.Timeout != "" {
 		cfg.Judge.Timeout = j.Timeout
 	}
+	if j.RunTimeout != "" {
+		cfg.Judge.RunTimeout = j.RunTimeout
+	}
 	if j.Mode != "" {
 		cfg.Judge.Mode = j.Mode
 	}
@@ -963,7 +1006,7 @@ func Load(path string) (*Config, error) {
 		to   *int
 	}{{set.Judge.ReadBytes, &cfg.Judge.ReadBytes}, {set.Judge.SingleBytes, &cfg.Judge.SingleBytes},
 		{set.Judge.ChunkBytes, &cfg.Judge.ChunkBytes}, {set.Judge.Concurrency, &cfg.Judge.Concurrency},
-		{set.Judge.StateBytes, &cfg.Judge.StateBytes}} {
+		{set.Judge.StateBytes, &cfg.Judge.StateBytes}, {set.Judge.MaxSteps, &cfg.Judge.MaxSteps}} {
 		if n.from != nil {
 			*n.to = *n.from
 		}

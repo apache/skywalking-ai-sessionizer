@@ -18,10 +18,12 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -36,7 +38,12 @@ var ErrSessionBusy = errors.New("storage: session is locked by another collector
 // monotonic across every stream in it. Two collectors sharing a storage root
 // would otherwise allocate the same sequence numbers to different content, and
 // the assembler's single watermark would skip whichever it reached second.
-type SessionLock struct{ f *os.File }
+type SessionLock struct {
+	f *os.File
+	// gate is the root gate this lock holds beside its file, released after
+	// the file is.
+	gate chan struct{}
+}
 
 // ErrRemovalInProgress means a removal of the session's files has not
 // finished. It is ErrSessionBusy to a collector: nothing lands into the
@@ -182,12 +189,82 @@ func LockRoot(root string) (*SessionLock, error) {
 // LockRootInCopy is LockRoot for the two commands that may write to a root
 // holding copies: the pull, which writes them, and the judge, which adds its
 // runs to a snapshot. On any other root it is LockRoot.
+//
+// It takes the root's gate in this process first. A holder in this process
+// makes it busy, as a holder in another process does, so it never waits.
 func LockRootInCopy(root string) (*SessionLock, error) {
-	l, err := lockDir(filepath.Join(root, RootLockDir))
-	if errors.Is(err, ErrSessionBusy) {
+	gate := rootGate(root)
+	select {
+	case gate <- struct{}{}:
+	default:
 		return nil, ErrRootBusy
 	}
-	return l, err
+	l, err := lockDir(filepath.Join(root, RootLockDir))
+	if err != nil {
+		<-gate
+		if errors.Is(err, ErrSessionBusy) {
+			return nil, ErrRootBusy
+		}
+		return nil, err
+	}
+	l.gate = gate
+	return l, nil
+}
+
+// LockRootContext is LockRootInCopy, waiting for the root's gate and then for
+// its file until ctx ends. A judge run and its admission wait this way: a
+// pass holds the root for as long as it takes, sending included, and a fixed
+// wait made a stage that had finished fail to publish. The gate is one per
+// root in this process, so asz server, which judges in the process that runs
+// its passes, makes its waiters take turns there rather than poll the file.
+func LockRootContext(ctx context.Context, root string) (*SessionLock, error) {
+	// A select that finds the gate free and the context ended picks either,
+	// so the context is looked at before the wait and again once the lock is
+	// taken: a wait that ended takes nothing, a cleanup past its bound
+	// included.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	gate := rootGate(root)
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	for {
+		l, err := lockDir(filepath.Join(root, RootLockDir))
+		if err == nil {
+			l.gate = gate
+			if err := ctx.Err(); err != nil {
+				_ = l.Unlock()
+				return nil, err
+			}
+			return l, nil
+		}
+		if !errors.Is(err, ErrSessionBusy) {
+			<-gate
+			return nil, err
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			<-gate
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+// rootGates are the gates of the roots this process has locked, one per
+// root, by its cleaned path.
+var rootGates sync.Map
+
+// rootGate is the gate of root in this process: a channel that holds one
+// value while a holder in the process has the root's lock.
+func rootGate(root string) chan struct{} {
+	gate, _ := rootGates.LoadOrStore(filepath.Clean(root), make(chan struct{}, 1))
+	return gate.(chan struct{})
 }
 
 // LockRootWait is LockRoot, waiting up to timeout. A command asked to do its
@@ -288,5 +365,9 @@ func (l *SessionLock) Unlock() error {
 		err = cerr
 	}
 	l.f = nil
+	if l.gate != nil {
+		<-l.gate
+		l.gate = nil
+	}
 	return err
 }

@@ -324,6 +324,9 @@ export:
     # one and not the other is sent what it takes; both off is refused.
     logs: true
     metrics: true
+    # The closed judge runs, sent with the logs and only while they are on.
+    # Off, a run stays unsent, and turning it on later sends it.
+    judgments: false
 
 # What asz view and asz server serve. asz knows nothing about who is
 # reading: these settings apply to every reader of this instance. Two
@@ -361,6 +364,15 @@ judge:
   # How long one evaluator call may take. A stage cut into calls runs several,
   # and a call that fails, a timeout included, is tried once more.
   timeout: 30m
+  # How long one whole run may take, all its stages together. Past it the
+  # run stops its work, keeps the stages that finished and closes, within
+  # two minutes. asz judge -run-timeout sets it for one command. 0 is no
+  # bound.
+  run_timeout: 0
+  # The most steps one run judges, the sub-tasks its main talks started
+  # included. asz judge refuses a larger window before anything is made or
+  # any model is called; -max-steps sets it for one command. 0 is no bound.
+  max_steps: 0
   # What one evaluator call may read through the navigation, in bytes of
   # answers. Past it, every tool tells the evaluator to answer with what it
   # read. 0 is no bound.

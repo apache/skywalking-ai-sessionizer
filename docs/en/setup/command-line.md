@@ -141,8 +141,10 @@ the ledger as one object: `total`, every `owners` cost, every `main_talks` cost 
 
 Judges one conversation at its current head, or at round `-round N`: the targets the person set,
 whether each was achieved, how each sub-task went, and what each piece of work was, each stage given to
-an evaluator. `-from` and `-to`, or `-from-id` and `-to-id`, judge a window of whole main talks. `-list`
-lists a conversation's runs and `-show N` prints one. See [Judge a Conversation](judge.md).
+an evaluator. `-from` and `-to`, or `-from-id` and `-to-id`, judge a window of whole main talks.
+`-max-steps N` refuses a run that would judge more steps, and `-run-timeout D` ends its work after `D`.
+A conversation has one run or regroup at a time. `-list` lists a conversation's runs, each closed,
+running, stopped or unknown, and `-show N` prints one. See [Judge a Conversation](judge.md).
 
 `-remote-conversation REMOTE/ID` judges a conversation `asz pull` copied here, in place of `ID`: the
 snapshot with `:TAG`, or the newest unexpired one without a tag or with `:latest`. `-pull` pulls its

@@ -19,6 +19,7 @@ package remove_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -195,7 +196,7 @@ func (r *root) push(endpoint string) *otlp.Stats {
 		r.t.Fatal(err)
 	}
 	defer client.Close()
-	p := &otlp.Pusher{Zone: r.zone, Client: client, Endpoint: endpoint, Version: "test",
+	p := &otlp.Pusher{Zone: r.zone, Client: client, Endpoint: endpoint, Version: "test", Judgments: true,
 		ServiceName: "Remove Test", InstanceID: "remove-test", Layer: "AI_AGENT", MetricsService: "Remove Test"}
 	if err := p.Prepare(); err != nil {
 		r.t.Fatal(err)
@@ -225,7 +226,7 @@ func (r *root) remover() *remove.Remover {
 }
 
 func (r *root) input() remove.Input {
-	return remove.Input{Endpoint: r.endpoint, SendLogs: true, SendMetrics: true}
+	return remove.Input{Endpoint: r.endpoint, SendLogs: true, SendMetrics: true, SendJudgments: true}
 }
 
 func marker(t *testing.T, b *scenario.Built) *scenario.Marker {
@@ -400,7 +401,7 @@ func TestAJudgeRunGoesOnlyOnceSent(t *testing.T) {
 	rm := r.remover()
 
 	// A run that stopped before its close file.
-	if _, _, err := storage.ReserveRun(r.zone, b.Session); err != nil {
+	if _, _, err := reserveRun(r.zone, b.Session); err != nil {
 		t.Fatal(err)
 	}
 	res := rm.Pass(r.input())
@@ -426,11 +427,53 @@ func TestAJudgeRunGoesOnlyOnceSent(t *testing.T) {
 	}
 }
 
+// A removal an earlier pass decided is carried on only once no judge run
+// or regroup of the session is active: one admitted after the decision reads
+// the session's files and writes into its directory.
+func TestARemovalWaitsForAnActiveJudgeRun(t *testing.T) {
+	r := newRoot(t)
+	b := r.build(load(t, everyKind), "", scenario.Options{})
+	r.pipeline()
+	r.push(r.endpoint)
+	rm := r.remover()
+	// The pass decides, marks the session removing and stops there.
+	rm.Hook = func(p remove.Point) error {
+		if p.Step == 0 {
+			return errors.New("stopped after the decision")
+		}
+		return nil
+	}
+	if res := rm.Pass(r.input()); len(res.Removed) != 0 {
+		t.Fatalf("the stopped pass removed %v", res.Removed)
+	}
+	if m := marker(t, b); m.State != scenario.MarkerRemoving {
+		t.Fatalf("the marker says %s", m.State)
+	}
+	rm.Hook = nil
+	active, err := storage.AdmitRun(context.Background(), r.zone, b.Session, func() (storage.RunAdmission, error) {
+		return storage.RunAdmission{Trigger: storage.TriggerCommand}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := rm.Pass(r.input())
+	noErrors(t, res)
+	if len(res.Removed) != 0 || !waitingFor(res, b.Session, "judge run or regroup of it is active") {
+		t.Fatalf("with a run active: removed %v, waiting %v", res.Removed, res.Waiting)
+	}
+	if err := active.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if res := rm.Pass(r.input()); len(res.Removed) != 1 {
+		t.Fatalf("once the run ended: removed %v, kept %v, waiting %v", res.Removed, res.Kept, res.Waiting)
+	}
+}
+
 // judged adds a closed judge run to a session, as asz judge writes one: a
 // ledger stage, and the close file that lists it.
 func judged(t *testing.T, z *storage.Zone, session string) {
 	t.Helper()
-	run, dir, err := storage.ReserveRun(z, session)
+	run, dir, err := reserveRun(z, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +496,7 @@ func judged(t *testing.T, z *storage.Zone, session string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		path, err := storage.PublishStage(z, session, dir, order, stage, digest, data)
+		path, err := storage.PublishStage(context.Background(), z, session, dir, order, stage, digest, data)
 		if err != nil {
 			t.Fatal(err)
 		}

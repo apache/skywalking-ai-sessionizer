@@ -157,8 +157,9 @@ the judge that holds the same targets: the person's words that made it main were
 alone. The goals change only how the report groups targets. A target's scores, and the run's, are the
 same in both views. A run whose targets stage found no target is regrouped too, and a goal the
 conversation worked on is then missed. A decision the answer leaves out is none it made: a target with
-no goal given, or a goal with no answer to whether it was worked on, is not answered. Each regroup
-reserves its version with its work directory, so two made at once never share one. A regroup whose
+no goal given, or a goal with no answer to whether it was worked on, is not answered. A regroup holds
+its run's activity lock while it works, so a conversation has one run or regroup at a time, and it
+reserves its version with its work directory. A regroup whose
 call failed is kept, failed, with what the call consumed, and the report follows the latest regroup
 that compared anything.
 

@@ -101,6 +101,22 @@ func TestStorageImportsNoSessionflow(t *testing.T) {
 	}
 }
 
+// Storage is shared by both sides, and owns the judge's admission and the
+// activity lock retention probes, so it imports no server package: retention,
+// on the collector side, calls it.
+func TestStorageImportsNoServerPackage(t *testing.T) {
+	root := filepath.Join("..", "..", "internal", "storage")
+	for pkg, imports := range importsUnder(t, root) {
+		for _, imp := range imports {
+			for _, side := range serverSide {
+				if strings.HasPrefix(imp+"/", module+side) {
+					t.Errorf("%s imports %s; storage may not import a server package", pkg, imp)
+				}
+			}
+		}
+	}
+}
+
 const module = "github.com/apache/skywalking-ai-sessionizer/"
 
 var (

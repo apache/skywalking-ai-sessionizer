@@ -115,7 +115,22 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	// A directory that could not be read hides sessions, so the pass must
 	// not look complete.
 	st.Errors = append(st.Errors, warnings...)
+	// No setting collects a session that worked inside the storage root:
+	// it is a judge evaluator's. The root is made before any collector runs.
+	root, err := ownRoot(c.Zone.Root())
+	if err != nil {
+		return nil, fmt.Errorf("kiro: resolving the storage root, which no session collected may work in: %w", err)
+	}
 	for _, s := range sessions {
+		switch originOf(s, root) {
+		case originInside:
+			st.Skipped.Own++
+			continue
+		case originUnknown:
+			// Tried again on the next pass; never taken for outside.
+			st.Skipped.Unresolved++
+			continue
+		}
 		if filter != nil && !filter(s) {
 			continue
 		}

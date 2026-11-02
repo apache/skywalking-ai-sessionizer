@@ -305,6 +305,11 @@ func (r *Remover) retireOne(id string, sent *otlp.Sent, requests []storage.Spool
 		return false, err
 	}
 	defer func() { unlock(&chainLock) }()
+	// A retirement, begun or carried on, waits for a judge run or regroup of
+	// the session to end: it deletes what the run reads and writes.
+	if err := judging(r.Zone, id); err != nil {
+		return false, err
+	}
 	// The conversation directory named by the session's id is its chain
 	// only when its rounds name the session, as the push reads them. One
 	// whose rounds name another session is that session's chain, and stays.

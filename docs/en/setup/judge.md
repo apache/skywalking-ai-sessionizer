@@ -41,7 +41,24 @@ and the page name them.
 `judge.mode`, is `auto`.
 
 Run it again whenever you want another judgment: later, as the conversation grows, or now, with
-another evaluator. Each run is kept.
+another evaluator. Each run is kept. A conversation has one run at a time: a run or a regroup started
+while another is going is refused until that one ends.
+
+Two limits bound a whole run. Both are off by default:
+
+```yaml
+judge:
+  run_timeout: 2h
+  max_steps: 3000
+```
+
+`max_steps` refuses a run that would judge more steps, the sub-tasks its main talks started included,
+before anything is made or any model is called. `run_timeout` ends a run's work once it has run that
+long. `-max-steps N` and `-run-timeout D` set them for one command; 0 is no bound.
+
+When a run's work ends, at its time limit or at Ctrl-C, it starts no other evaluator call. It keeps the
+stages that finished and closes within two minutes; the stages it did not reach are written as failed,
+`not started`.
 
 ## Read the results
 
@@ -53,6 +70,10 @@ asz judge -show -format markdown 0438c73b-2367-4ed5-9de3-13ef9a17ed01 > run.md  
 asz judge -show -format html 0438c73b-2367-4ed5-9de3-13ef9a17ed01 > run.html       # its details, as one page
 asz judge -show -json 0438c73b-2367-4ed5-9de3-13ef9a17ed01                         # its stage files
 ```
+
+`-list` says of each run whether it is closed, running, stopped or unknown, and who started it. A
+stopped run ended before it closed, and nothing resumes it. An unknown run has no record of its
+admission.
 
 To compare the run with what a person concluded, such as a ticket or an incident report, give each
 source with `-reference`: a file, an http or https URL, or a source a configured command or MCP server
@@ -196,8 +217,8 @@ same call answers the same again. `work/sources/` holds each source as asz saved
 manifest, `R1.fetched`, the bytes fetched or, for an MCP server, the tool's result with its secrets
 removed, and `R1.txt`, the text the evaluators read.
 
-When `export.otlp.endpoint` is set, `asz collect`, `asz server` and `asz push` send each run once it has
-closed. A run of a pulled snapshot is not sent: it stays in the snapshot, and expires with it. See
+When `export.otlp.endpoint` is set and `export.otlp.judgments` is on, `asz collect`, `asz server` and
+`asz push` send each run once it has closed. A run of a pulled snapshot is not sent: it stays in the snapshot, and expires with it. See
 [Export over OpenTelemetry](export-otlp.md).
 
 ## Evaluators
@@ -227,21 +248,12 @@ An agent CLI must be installed and logged in. asz gives it the conversation thro
 its only tools. `claude` runs with its built-in tools, other MCP servers, and user and project settings
 switched off, so their hooks and plugins do not run; settings an organization enforces still apply.
 `codex` runs without the user's configuration, its shell, image and browser tools off. `model` picks
-the CLI's model; empty leaves its default. `command` is its path when it is not on `PATH`.
+the CLI's model; empty leaves its default. `command` is its path when it is not on `PATH`. An agent CLI
+runs without `OTEL_LOG_RAW_API_BODIES`, so it writes no provider bodies.
 
 `kiro-cli` keeps every session it runs in Kiro's history, by directory, so a `kiro-cli` stage leaves its
-session there. `kiro-local` collects the sessions of Kiro's V3 engine. When `kiro-cli` runs that engine,
-exclude the storage root, where a stage runs, so asz does not collect its own judge sessions. A file that
-lists one or more `adapters` replaces the whole default list, so keep the others you use:
-
-```yaml
-adapters:
-  - name: kiro-local
-    enabled: true
-    exclude:
-      - /private/tmp/**
-      - /absolute/path/to/the/storage/root/**
-```
+session there. `kiro-local` never collects a session that worked inside the storage root, where a stage
+runs, whatever its include and exclude settings, so asz does not collect its own judge sessions.
 
 An API evaluator is called by asz itself:
 
@@ -282,8 +294,10 @@ judge:
   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, or else with those the AWS CLI
   gives for `profile`. Run `aws login` first when the profile uses a login.
 
-`max_turns` bounds the model calls an API evaluator makes in one evaluator call, 40 when unset, and
-`max_tokens` what one model call may answer: 8000 when unset for `anthropic` and `bedrock`, and the
+`max_turns` bounds the turns of one evaluator call: `claude`'s own turns, and the model calls of an API
+evaluator, 40 when unset. `codex` and `kiro-cli` have no such option, so for them it bounds the tool
+calls, no bound when unset: past it, every tool asks for the answer. `max_tokens` bounds what one model
+call may answer: 8000 when unset for `anthropic` and `bedrock`, and the
 server's own limit when unset for `openai`, since OpenAI's reasoning models refuse the field.
 `judge.timeout` bounds one evaluator call of any evaluator. A stage cut into calls runs several, and a
 call that fails, a timeout included, is tried once more. When the timeout passes, the CLI is stopped,

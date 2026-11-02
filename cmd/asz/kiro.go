@@ -104,5 +104,11 @@ func notCollected(s kiro.Skipped) []string {
 	if s.Unreadable > 0 {
 		out = append(out, fmt.Sprintf("%d V3 session(s) whose session.json is not valid JSON", s.Unreadable))
 	}
+	if s.Own > 0 {
+		out = append(out, fmt.Sprintf("%d session(s) that worked inside the storage root: a judge evaluator's, never collected", s.Own))
+	}
+	if s.Unresolved > 0 {
+		out = append(out, fmt.Sprintf("%d session(s) with a workspace path that cannot be resolved, so whether it is inside the storage root is not known; tried again on the next pass", s.Unresolved))
+	}
 	return out
 }

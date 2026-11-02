@@ -552,6 +552,50 @@ func copyCancelled(t *testing.T, transcript string) (string, string) {
 	return src, messages
 }
 
+// A session that worked inside the storage root is a judge evaluator's:
+// kiro-cli keeps it in Kiro's history while it works in a stage directory.
+// It is never collected, whatever the include and exclude settings, and a
+// pass says so; the same session working elsewhere is collected.
+func TestAnEvaluatorsSessionIsNeverCollected(t *testing.T) {
+	src, messages := copyCancelled(t, "")
+	original, err := os.ReadFile(filepath.Join(fixtures, "sessions", "98613594c3327868", cancelled, "messages.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkfile(t, messages, string(original))
+	header := filepath.Join(filepath.Dir(messages), "session.json")
+	var h map[string]any
+	b, err := os.ReadFile(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &h); err != nil {
+		t.Fatal(err)
+	}
+	r := newRoot(t, src)
+	stage := filepath.Join(r.zone.Root(), "s1", "judgments", "j000001", "work", "2-targets", "c001", "a1")
+	h["workspacePaths"] = []string{t.TempDir(), stage}
+	b, _ = json.Marshal(h)
+	mkfile(t, header, string(b))
+	everything := func(kiro.Session) bool { return true }
+	st, err := r.col.CollectAll(everything)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Skipped.Own != 1 || st.Sessions != 0 || st.SourcesLanded != 0 {
+		t.Fatalf("an evaluator's session was collected: %+v", st)
+	}
+	if _, err := os.Stat(r.zone.SessionDir(cancelled)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("its directory was made: %v", err)
+	}
+	h["workspacePaths"] = []string{t.TempDir()}
+	b, _ = json.Marshal(h)
+	mkfile(t, header, string(b))
+	if st := r.collect(); st.Skipped.Own != 0 || st.SourcesLanded == 0 {
+		t.Fatalf("the session working elsewhere: %+v", st)
+	}
+}
+
 // promptIsInItsTurn fails unless the session's one prompt is inside its run.
 func promptIsInItsTurn(t *testing.T, r *root) {
 	t.Helper()

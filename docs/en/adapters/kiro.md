@@ -57,7 +57,9 @@ before it uses them: 30 of the 86 held nothing else.
 The engine writes under the home directory and does not read `KIRO_HOME`, so the default source
 root is `~/.kiro`. The workspace key in the path is a digest of the session's workspace paths. The
 paths themselves are in the header, and the [session filters](../setup/configuration.md#the-kiro-adapter)
-match them.
+match them. A session with any workspace path inside the storage root is never collected, whatever the
+filters say: `kiro-cli`, run as a [judge](../setup/judge.md#evaluators) evaluator, works in a stage
+directory there and keeps its session in this history.
 
 ## The mapping
 

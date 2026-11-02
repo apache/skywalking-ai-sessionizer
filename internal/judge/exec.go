@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -153,6 +154,21 @@ func makeKiroAgentDir(stage string) (string, error) {
 	return agentDir, nil
 }
 
+// rawBodiesVar makes Claude Code write every request and response body it
+// exchanges into the directory it names, which claude-code-provider lands.
+const rawBodiesVar = "OTEL_LOG_RAW_API_BODIES"
+
+// evaluatorEnv is the environment an agent CLI evaluator runs in: the one
+// asz runs in, less the variable that would make Claude Code write its
+// provider bodies. An evaluator's bodies are no conversation of the
+// person's, and one written anyway would wait for a session never landed.
+func evaluatorEnv(env []string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return strings.EqualFold(name, rawBodiesVar)
+	})
+}
+
 func (c *cliExecutor) Run(ctx context.Context, t Task) (Result, error) {
 	prog := c.conf.Command
 	if prog == "" {
@@ -168,6 +184,13 @@ func (c *cliExecutor) Run(ctx context.Context, t Task) (Result, error) {
 	var args, last []string
 	var stdin []byte
 	answerPath := filepath.Join(t.Dir, "answer.json")
+	// claude bounds its own turns. codex and kiro-cli have no such option,
+	// so their navigation server counts the tool calls of the call instead,
+	// and past max_turns answers every one by asking for the answer.
+	mcp := t.MCP
+	if c.conf.Program != "claude" && c.conf.MaxTurns > 0 {
+		mcp = append(slices.Clone(t.MCP), "-max-calls", fmt.Sprint(c.conf.MaxTurns))
+	}
 	switch c.conf.Program {
 	case "claude":
 		cfg, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{MCPServerName: map[string]any{
@@ -197,7 +220,7 @@ func (c *cliExecutor) Run(ctx context.Context, t Task) (Result, error) {
 	case "codex":
 		quote := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 		var mcpArgs []string
-		for _, a := range t.MCP[1:] {
+		for _, a := range mcp[1:] {
 			mcpArgs = append(mcpArgs, quote(a))
 		}
 		// The shell and every other built-in tool off, the user's own
@@ -208,7 +231,7 @@ func (c *cliExecutor) Run(ctx context.Context, t Task) (Result, error) {
 			"--disable", "browser_use", "--disable", "computer_use", "--disable", "view_image",
 			"--disable", "image_generation",
 			"-c", `web_search="disabled"`, "-c", `approval_policy="never"`,
-			"-c", "mcp_servers." + MCPServerName + ".command=" + quote(t.MCP[0]),
+			"-c", "mcp_servers." + MCPServerName + ".command=" + quote(mcp[0]),
 			"-c", "mcp_servers." + MCPServerName + ".args=[" + strings.Join(mcpArgs, ",") + "]",
 			"--output-schema", schemaPath, "-o", answerPath, "--json", "--color", "never"}
 		if c.conf.Model != "" {
@@ -225,7 +248,7 @@ func (c *cliExecutor) Run(ctx context.Context, t Task) (Result, error) {
 		// allowedTools and no permissions.
 		agent := map[string]any{
 			"name": "asz-judge", "description": "Reads one conversation through asz and judges it.",
-			"prompt": nil, "mcpServers": map[string]any{MCPServerName: map[string]any{"command": t.MCP[0], "args": t.MCP[1:]}},
+			"prompt": nil, "mcpServers": map[string]any{MCPServerName: map[string]any{"command": mcp[0], "args": mcp[1:]}},
 			"tools": []string{"@" + MCPServerName}, "allowedTools": []string{"@" + MCPServerName}, "useLegacyMcpJson": false,
 			"permissions": map[string]any{"rules": []any{
 				map[string]any{"capability": "mcp", "match": []string{MCPServerName + "/*"}, "effect": "allow"},
@@ -255,6 +278,7 @@ func (c *cliExecutor) Run(ctx context.Context, t Task) (Result, error) {
 	// run.
 	cmd.WaitDelay = pipeWait
 	cmd.Dir = t.Dir
+	cmd.Env = evaluatorEnv(os.Environ())
 	cmd.Stdin = bytes.NewReader(stdin)
 	stdout := &lineWriter{}
 	var requests []Request

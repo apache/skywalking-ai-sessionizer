@@ -404,6 +404,7 @@ func (r *refresher) removeInput() remove.Input {
 	in := remove.Input{Busy: busy}
 	if r.pusher != nil {
 		in.Endpoint, in.SendLogs, in.SendMetrics = r.pusher.Endpoint, !r.pusher.NoLogs, !r.pusher.NoMetrics
+		in.SendJudgments = r.pusher.Judgments
 	}
 	return in
 }

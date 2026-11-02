@@ -343,6 +343,62 @@ func TestConfiguredArgumentsComeBeforeThePrompt(t *testing.T) {
 	}
 }
 
+// An evaluator never writes provider bodies: the variable that would make
+// Claude Code write them is left out of its environment, and the rest is
+// kept. codex and kiro-cli, which have no option to bound their turns, get
+// max_turns as their navigation server's call limit; claude gets its own
+// option.
+func TestAnEvaluatorWritesNoBodiesAndKeepsItsTurnLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in CLI is a shell script")
+	}
+	dir := t.TempDir()
+	t.Setenv(rawBodiesVar, filepath.Join(dir, "bodies"))
+	t.Setenv("ASZ_TEST_KEPT", "yes")
+	script := filepath.Join(dir, "cli")
+	record, env := filepath.Join(dir, "args.txt"), filepath.Join(dir, "env.txt")
+	_ = os.WriteFile(script, []byte("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > "+record+"\nenv > "+env+"\nexit 1\n"), 0o700)
+	for _, program := range []string{"claude", "codex", "kiro-cli"} {
+		ex, err := NewExecutor(program, config.Evaluator{Kind: "cli", Program: program, Command: script, MaxTurns: 7})
+		if err != nil {
+			t.Fatal(err)
+		}
+		work := filepath.Join(dir, program)
+		_ = os.Mkdir(work, 0o700)
+		_, _ = ex.Run(context.Background(), Task{Stage: "targets", Prompt: "judge it", Schema: json.RawMessage(`{}`), Dir: work, MCP: []string{"asz", "judge", "mcp"}})
+		e, err := os.ReadFile(env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(e), rawBodiesVar) || !strings.Contains(string(e), "ASZ_TEST_KEPT=yes") {
+			t.Fatalf("%s ran with the environment %s", program, e)
+		}
+		args, err := os.ReadFile(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mcp string
+		switch program {
+		case "claude":
+			if !strings.Contains(string(args), "--max-turns\n7\n") || strings.Contains(string(args), "-max-calls") {
+				t.Fatalf("claude's arguments: %s", args)
+			}
+			continue
+		case "codex":
+			mcp = string(args)
+		case "kiro-cli":
+			b, err := os.ReadFile(filepath.Join(work, ".kiro", "agents", "asz-judge.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mcp = string(b)
+		}
+		if !strings.Contains(mcp, `"-max-calls"`) || !strings.Contains(mcp, `"7"`) {
+			t.Fatalf("%s's navigation server has no call limit: %s", program, mcp)
+		}
+	}
+}
+
 // claude counts only its main model in its usage field, and runs a small
 // model for its own chores beside it. Every model is counted, the one that
 // cost the most is named, and the cost claude reports is kept.

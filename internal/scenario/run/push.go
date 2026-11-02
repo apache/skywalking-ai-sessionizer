@@ -90,7 +90,7 @@ func pushOver(protocol, out, session string, f scenario.Format, want *expect.Pus
 	newPusher := func() *otlp.Pusher {
 		return &otlp.Pusher{
 			Zone: storage.NewZone(out), Client: client, Version: "check",
-			ServiceName: "Scenario Check", InstanceID: "scenario-check", Layer: "AI_AGENT",
+			ServiceName: "Scenario Check", InstanceID: "scenario-check", Layer: "AI_AGENT", Judgments: true,
 			// One byte: every file is larger than the budget, so every file
 			// travels alone, in its own request.
 			BatchBytes: 1,

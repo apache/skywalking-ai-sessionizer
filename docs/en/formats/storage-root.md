@@ -42,6 +42,8 @@ session.
       index.state                        how far the index reaches
     judgments/                           the judge runs of the session's conversation
       j000001/                           one run, see Session Judgment
+        admission.json                   why the run was admitted
+        .active                          its activity lock, held while it or a regroup of it works
         s1-ledger-<digest12>.sj · … · s9-close-<digest12>.sj
         work/                            what each evaluator was given and said; never sent
   _conversations/
@@ -98,8 +100,12 @@ watching pipeline by doing nothing that period, so two of them never write the s
 `asz pull` writes only under `_remote/`, each conversation under its own `_pull`, and a server
 answering pulls writes only under `_pull/`, under the locks [Served pulls](#served-pulls) names;
 either runs beside a command that holds `_root/.lock`. `asz
-judge` holds it only while it reserves a run and while it writes each stage file, never while an
-evaluator works, which can take minutes. `asz view`, `asz index` and `asz measure` only read, and
+judge` holds it only while it admits a run and while it writes each stage file, never while an
+evaluator works, which can take minutes. It waits for the lock for as long as a pass holds it. A
+run's `.active` is taken under `_root` and never waited for, and retention probes it under `_root`
+without waiting, so it has no place in the order below, as with other probes of active work. Within
+one process, each root has one gate, taken just before `_root/.lock`: a holder in the process makes a
+lock that does not wait busy, and a judge waits there for its turn. `asz view`, `asz index` and `asz measure` only read, and
 take no lock on the root, though each takes a lease on a pulled snapshot it reads. `asz view` and
 `asz server` answering pulls keep their own records under `_pull/`, under the locks
 [Served pulls](#served-pulls) names. The LangSmith receiver is the one writer outside
