@@ -83,13 +83,17 @@ type Runner struct {
 	// the run holds, which names each chunk attempt's failure marker and
 	// its chunk's gate. It is read once the lease is bound.
 	Failures func() string
-	// Trigger says who started the run, as its admission.json records it:
+	// Trigger says who started the run, as its run.json records it:
 	// storage.TriggerCommand when empty.
 	Trigger string
+	// Stage, when set, is told each stage as it starts.
+	Stage func(stage string)
 	// Select, when set, runs inside the run's admission, under the root
-	// lock, and refuses the run with an error. It must not take the root
-	// lock. asz server's policy checks there that a conversation is due.
-	Select func() error
+	// lock, told the number the run will have, and refuses the run with an
+	// error. It must not take the root lock. asz server's policy checks there
+	// that a conversation is due and writes its receipt; what it gives back
+	// of Receipt, Landed and Target goes into run.json.
+	Select func(next int) (storage.RunRecord, error)
 }
 
 // cleanupBound is how long a run or a regroup may take, once its work has
@@ -312,7 +316,15 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		return nil, err
 	}
 	head := sessionjudge.Head{Round: doc.Head.Round, Digest: doc.Head.Digest}
-	shown, sel, err := Narrow(doc, r.Window, nil)
+	// The window is narrowed with its records, as the run will narrow it,
+	// so run.json holds the end the stage headers will.
+	var shown *sessionview.Conversation
+	var sel *Selection
+	if r.Snapshot == nil {
+		shown, sel, err = Narrow(doc, r.Window, c.Records)
+	} else {
+		shown, sel, err = NarrowChecked(doc, r.Window, c.RecordsChecked)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -339,17 +351,20 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 	if trigger == "" {
 		trigger = storage.TriggerCommand
 	}
-	active, err := storage.AdmitRun(ctx, r.Zone, c.Session, func() (storage.RunAdmission, error) {
+	active, err := storage.AdmitRun(ctx, r.Zone, c.Session, func(next int) (storage.RunRecord, error) {
 		if err := r.chainHolds(conversation, head); err != nil {
-			return storage.RunAdmission{}, err
+			return storage.RunRecord{}, err
 		}
+		adm := storage.RunRecord{Conversation: conversation, Trigger: trigger, Round: head.Round, Digest: head.Digest,
+			Window: window, Hide: r.Config.Hide}
 		if r.Select != nil {
-			if err := r.Select(); err != nil {
-				return storage.RunAdmission{}, err
+			extra, err := r.Select(next)
+			if err != nil {
+				return storage.RunRecord{}, err
 			}
+			adm.Receipt, adm.Landed, adm.Target = extra.Receipt, extra.Landed, extra.Target
 		}
-		return storage.RunAdmission{Conversation: conversation, Trigger: trigger, Round: head.Round, Digest: head.Digest,
-			Window: window, Hide: r.Config.Hide}, nil
+		return adm, nil
 	})
 	if err != nil {
 		return nil, err
@@ -518,6 +533,9 @@ func (r *Runner) Run(ctx context.Context, conversation string, round uint64, pla
 		h.Mode, h.Chunks = mode, len(chunks)
 		r.logf("  %s by %s, %s, %d calls ...", p.Stage, p.Evaluator, mode, len(chunks))
 		stageStart := r.now()
+		if r.Stage != nil {
+			r.Stage(p.Stage)
+		}
 		if p.Stage == sessionjudge.StageAchievement {
 			nav.Own(targets, inputs)
 		}

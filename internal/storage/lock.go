@@ -256,6 +256,46 @@ func LockRootContext(ctx context.Context, root string) (*SessionLock, error) {
 	}
 }
 
+// LockRootAfterGate is LockRoot for a watching pass in a process that also
+// judges: it waits for the root's gate, held in this process only while a
+// run is admitted or writes a stage, and then takes the file without
+// waiting, so a pass is not skipped for a write of a few milliseconds, and a
+// holder in another process still makes it busy.
+func LockRootAfterGate(ctx context.Context, root string) (*SessionLock, error) {
+	if err := RefuseCopy(root); err != nil {
+		return nil, err
+	}
+	// As in LockRootContext, a wait that ended takes nothing, even when the
+	// gate was free at the same moment.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	gate := rootGate(root)
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	l, err := lockDir(filepath.Join(root, RootLockDir))
+	if err != nil {
+		<-gate
+		if errors.Is(err, ErrSessionBusy) {
+			return nil, ErrRootBusy
+		}
+		return nil, err
+	}
+	l.gate = gate
+	if err := ctx.Err(); err != nil {
+		_ = l.Unlock()
+		return nil, err
+	}
+	if err := RefuseCopy(root); err != nil {
+		_ = l.Unlock()
+		return nil, err
+	}
+	return l, nil
+}
+
 // rootGates are the gates of the roots this process has locked, one per
 // root, by its cleaned path.
 var rootGates sync.Map

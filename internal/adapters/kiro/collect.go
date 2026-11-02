@@ -52,6 +52,9 @@ type pass struct {
 	state *storage.SessionState
 	st    *Stats
 	now   time.Time
+	// unfinished says a source of the session ends in a line not finished
+	// yet, which a later pass lands.
+	unfinished bool
 }
 
 // maxDrainRounds bounds how many windows one source may land in a single pass,
@@ -90,6 +93,11 @@ type Stats struct {
 	Retired []string
 	// Changed lists the sessions whose landed data or index moved this pass.
 	Changed []string
+	// Outcomes say, for every session the pass read, unchanged ones
+	// included, whether every source of it was read to its end. A prompt
+	// held for its turn leaves the session incomplete, though the pass is
+	// complete: the prompt lands on a later pass.
+	Outcomes storage.Outcomes
 }
 
 // Complete reports whether the pass collected everything available.
@@ -115,6 +123,7 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	// A directory that could not be read hides sessions, so the pass must
 	// not look complete.
 	st.Errors = append(st.Errors, warnings...)
+	st.Outcomes.Unattributed = len(warnings) > 0
 	// No setting collects a session that worked inside the storage root:
 	// it is a judge evaluator's. The root is made before any collector runs.
 	root, err := ownRoot(c.Zone.Root())
@@ -124,11 +133,15 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	for _, s := range sessions {
 		switch originOf(s, root) {
 		case originInside:
+			// An outcome the session had from before it worked here no
+			// longer holds.
 			st.Skipped.Own++
+			st.Outcomes.Leave(s.ID)
 			continue
 		case originUnknown:
 			// Tried again on the next pass; never taken for outside.
 			st.Skipped.Unresolved++
+			st.Outcomes.Leave(s.ID)
 			continue
 		}
 		if filter != nil && !filter(s) {
@@ -145,8 +158,10 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 			continue
 		}
 		st.Sessions++
+		st.Outcomes.Saw(s.ID)
 		if err := c.collectSession(s, st); err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+			st.Outcomes.Leave(s.ID)
 		}
 	}
 	return st, nil
@@ -159,6 +174,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	if err != nil {
 		if errors.Is(err, storage.ErrSessionBusy) {
 			st.Busy++
+			st.Outcomes.Leave(s.ID)
 			return nil
 		}
 		return err
@@ -204,6 +220,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 
 	p := &pass{ix: ix, state: state, st: st, now: c.Now()}
 	changed := false
+	held, conflicts := st.Held, st.Conflicts
 	for _, src := range s.Sources {
 		st.SourcesSeen++
 		// Drain a source rather than land one window per pass, so a single
@@ -213,6 +230,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			landed, more, err := c.collectSource(src, p)
 			if err != nil {
 				st.Errors = append(st.Errors, err)
+				st.Outcomes.Leave(s.ID)
 				break
 			}
 			landedAny = landedAny || landed
@@ -221,6 +239,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			}
 			if round >= maxDrainRounds {
 				st.Pending++
+				st.Outcomes.Leave(s.ID)
 				break
 			}
 		}
@@ -228,6 +247,9 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			changed = true
 			st.SourcesLanded++
 		}
+	}
+	if st.Held > held || st.Conflicts > conflicts || p.unfinished {
+		st.Outcomes.Leave(s.ID)
 	}
 
 	// A recovered index is saved even when nothing landed, or the rebuild
@@ -322,6 +344,9 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		return false, false, err
 	}
 	if len(chunk.Lines) == 0 {
+		if int64(chunk.NewOffset) < chunk.Size {
+			p.unfinished = true
+		}
 		if chunk.Moved {
 			// The same bytes under a new identity. Record it now, or every
 			// later pass verifies the tail window again.
@@ -386,6 +411,8 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		// Counted once, by the call that lands the last line before what is
 		// held, not by every call a cut makes on the way.
 		st.Held++
+	case !more && int64(newOffset) < chunk.Size:
+		p.unfinished = true
 	}
 	var written int64
 	var staged index.Staged

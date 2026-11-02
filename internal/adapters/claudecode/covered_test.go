@@ -208,3 +208,71 @@ func TestCoveredTakesAMoveForNoNewData(t *testing.T) {
 		t.Fatalf("the same bytes under a new inode: covered=%v reason=%q err=%v", ok, reason, err)
 	}
 }
+
+// A pass says of every session it read whether all of it was read to its
+// end: a line still being written, or a session another collector holds,
+// leaves it incomplete, and an unchanged session read again is complete.
+func TestAPassSaysWhetherASessionWasReadToItsEnd(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	mk(t, main, "{\"uuid\":\"m1\"}\n")
+	z := storage.NewZone(zone)
+	col := claudecode.New(src, z, 0)
+	outcome := func() storage.Outcome {
+		t.Helper()
+		st, err := col.CollectAll(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o, ok := st.Outcomes.Of(tSess)
+		if !ok {
+			t.Fatalf("no outcome for the session: %+v", st.Outcomes)
+		}
+		return o
+	}
+	if o := outcome(); o != storage.OutcomeComplete {
+		t.Fatalf("a session read to its end: %s", o)
+	}
+	if o := outcome(); o != storage.OutcomeComplete {
+		t.Fatalf("an unchanged session read again: %s", o)
+	}
+	appendText(t, main, "{\"uuid\":\"m2\"")
+	if o := outcome(); o != storage.OutcomeIncomplete {
+		t.Fatalf("a line still being written: %s", o)
+	}
+	appendText(t, main, "}\n")
+	if o := outcome(); o != storage.OutcomeComplete {
+		t.Fatalf("once the line is finished: %s", o)
+	}
+	held, err := storage.LockSession(z.SessionDir(tSess))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := outcome(); o != storage.OutcomeIncomplete {
+		t.Fatalf("a session another collector holds: %s", o)
+	}
+	_ = held.Unlock()
+}
+
+// A source in conflict stays so on every pass without an error, and its
+// session stays incomplete on every one.
+func TestAConflictLeavesTheSessionIncomplete(t *testing.T) {
+	src, zone := t.TempDir(), t.TempDir()
+	main := filepath.Join(src, "-proj-a", tSess+".jsonl")
+	mk(t, main, "{\"uuid\":\"m1\"}\n{\"uuid\":\"m2\"}\n")
+	col := claudecode.New(src, storage.NewZone(zone), 0)
+	if _, err := col.CollectAll(nil); err != nil {
+		t.Fatal(err)
+	}
+	// The source is cut below what was landed: other bytes than those read.
+	mk(t, main, "{\"uuid\":\"x\"}\n")
+	for pass := 1; pass <= 2; pass++ {
+		st, err := col.CollectAll(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if o, _ := st.Outcomes.Of(tSess); st.Conflicts == 0 || o != storage.OutcomeIncomplete {
+			t.Fatalf("pass %d: conflicts %d, outcome %s", pass, st.Conflicts, o)
+		}
+	}
+}

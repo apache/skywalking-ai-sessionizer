@@ -191,6 +191,10 @@ judge`.
 | `plan` | `targets`, `achievement`, `subtasks` and `efficiency`, each by `claude` | The stages `asz judge` runs when it is not told a plan, in order, each with its `stage` and `evaluator`. The first is `targets`. A run given `-reference` adds `reference` and `divergence` when the plan lists neither. |
 | `references.max_bytes` | `1048576` | The bytes a saved copy of a source may take. A larger source is saved cut, and says so |
 | `references.timeout` | `1m` | How long fetching one source may take |
+| `server.enabled` | `false` | Judge in `asz server`, after its passes. See [Judge in asz server](judge.md#judge-in-asz-server). It needs `run_timeout` and `max_steps` set |
+| `server.since` | `""` | Judge only talks with work recorded at or after this time, RFC 3339 or a date. Empty is the moment the policy was first turned on for the root, kept in it |
+| `server.idle_after` | `2h` | How long nothing must have been collected for a conversation before it is judged. At least `10m` |
+| `server.runs_per_day` | `10` | The automatic runs admitted in any 24 hours, failed and stopped ones included |
 | `references.fetch` | `[]` | How the sources a login guards, such as tickets, are fetched, the first entry whose `prefix` the source starts with taking it. Each has either a `command` given the source as its last argument, which writes the content on its standard output, with the `content_type` it writes, `text/plain` when empty; or `mcp`, one tool of an MCP server. Neither sees the conversation. `mcp` has a remote server's `url`, https or http on a loopback address, with no user, query or fragment, and `headers`, each a header name and the environment variable that holds its value; or a local server's `command`, with `secret_env`, the variables it reads a credential from. Then `tool`, `arguments`, kept as written, where `{source}` is the source and `{rest}` what follows the prefix, both without a query, and `arguments_env`, each an argument and the variable that holds its value. See [Judge a conversation](judge.md) |
 
 ## remote_snapshot_ttl

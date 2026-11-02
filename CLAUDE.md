@@ -256,9 +256,12 @@ Every source file carries the Apache-2.0 header; `make license-fix` inserts miss
   each other for ever.
 - **A judge run is admitted in one decision, and holds `.active` until it has ended.** Under `_root`:
   refuse a retired session, a removal intent, and another active run or regroup of the conversation;
-  run the caller's selection; reserve the directory, take `.active`, write `admission.json`. Retention
+  run the caller's selection; reserve the directory, take `.active`, write `run.json`. Retention
   probes `.active` before it removes anything at either level. After the work ends no evaluator call
-  starts, and what finished is published under a cleanup context bounded to two minutes.
+  starts, and what finished is published under a cleanup context bounded to two minutes. asz server's
+  policy writes `_judge/` only under `_root`: a record in `_judge/runs/` before the run's reservation,
+  which the run's `run.json` names back, and `automatic.lock` taken without waiting. What is due is decided by
+  each talk's view digest, never by a rule about which evidence affects which talk.
 - **asz never collects its own evaluators' sessions.** `kiro-local` leaves out any session with a
   workspace inside the storage root, links resolved and unknown never taken for outside; an agent CLI
   runs without `OTEL_LOG_RAW_API_BODIES`. A new evaluator that keeps a session needs its own guard.

@@ -311,20 +311,7 @@ func cmdJudge(args []string) int {
 		Decoder: decoderOf,
 		Sources: references,
 		MCP: func(a judge.MCPArgs) []string {
-			cmd := []string{self, "judge", "mcp", "-root", root, "-conversation", a.Conversation,
-				"-round", fmt.Sprint(a.Head.Round), "-digest", a.Head.Digest, "-log", a.Log}
-			if len(cfg.Judge.Hide) > 0 {
-				cmd = append(cmd, "-hide", strings.Join(cfg.Judge.Hide, ","))
-			}
-			if a.Ledger != "" {
-				cmd = append(cmd, "-ledger", a.Ledger)
-			}
-			if a.ReadBytes > 0 {
-				cmd = append(cmd, "-read-bytes", fmt.Sprint(a.ReadBytes))
-			}
-			if a.Task != "" {
-				cmd = append(cmd, "-task", a.Task)
-			}
+			cmd := navigationCommand(self, root, cfg.Judge.Hide, a)
 			if admitted != nil {
 				// The child is admitted by the run's lease, which binds it
 				// to this run alone. Its log is made here, before it starts,
@@ -369,6 +356,26 @@ func cmdJudge(args []string) int {
 		}
 	}
 	return judgeShow(zone, session, display, run.Number, showOptions{format: formatText})
+}
+
+// navigationCommand is the command line that starts a stage's navigation
+// server, before what a pulled snapshot adds and the window's flags.
+func navigationCommand(self, root string, hide []string, a judge.MCPArgs) []string {
+	cmd := []string{self, "judge", "mcp", "-root", root, "-conversation", a.Conversation,
+		"-round", fmt.Sprint(a.Head.Round), "-digest", a.Head.Digest, "-log", a.Log}
+	if len(hide) > 0 {
+		cmd = append(cmd, "-hide", strings.Join(hide, ","))
+	}
+	if a.Ledger != "" {
+		cmd = append(cmd, "-ledger", a.Ledger)
+	}
+	if a.ReadBytes > 0 {
+		cmd = append(cmd, "-read-bytes", fmt.Sprint(a.ReadBytes))
+	}
+	if a.Task != "" {
+		cmd = append(cmd, "-task", a.Task)
+	}
+	return cmd
 }
 
 // judgeRegroup regroups a closed run by a person's goals and says how the
@@ -501,17 +508,17 @@ func judgeList(zone *storage.Zone, session, id string, named bool) int {
 }
 
 // runLine is what a listing says of a run after its name: its state, who
-// started it when its admission says, and for a closed run what it found.
+// started it when its run record says, and for a closed run what it found.
 func runLine(run storage.JudgmentRun) string {
 	state, held, err := storage.StateOf(&run)
 	if err != nil {
 		return fmt.Sprintf("state not known: %v", err)
 	}
 	by := ""
-	if a, err := storage.ReadAdmission(run.Dir); err != nil {
-		by = fmt.Sprintf("  its admission does not read: %v", err)
+	if a, err := storage.ReadRunRecord(run.Dir); err != nil {
+		by = fmt.Sprintf("  its run record does not read: %v", err)
 	} else if a != nil {
-		by = " by " + a.Trigger
+		by = " by " + a.Trigger + windowWords(a)
 	}
 	if state != storage.RunClosed {
 		return fmt.Sprintf("%s%s, %d stage files", state, by, len(run.Files))
@@ -531,6 +538,29 @@ func runLine(run storage.JudgmentRun) string {
 		line += "  a regroup of it is running"
 	}
 	return line
+}
+
+// windowWords says what part of the conversation a run judged, and up to
+// when: its target time, the last record time it was shown.
+func windowWords(a *storage.RunRecord) string {
+	if len(a.Window) == 0 {
+		return ""
+	}
+	var w sessionjudge.Window
+	if json.Unmarshal(a.Window, &w) != nil {
+		return ""
+	}
+	out := fmt.Sprintf(", %s", plural(len(w.Talks), "talk"))
+	// An automatic run's target is its window's end with the records of
+	// its work, as the receipt took it.
+	end := w.End
+	if a.Target > 0 {
+		end = a.Target
+	}
+	if end > 0 {
+		out += " to " + time.UnixMilli(end).UTC().Format(time.RFC3339)
+	}
+	return out
 }
 
 func readClose(run storage.JudgmentRun) (*sessionjudge.File, bool) {

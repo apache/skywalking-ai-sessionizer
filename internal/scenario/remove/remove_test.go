@@ -450,8 +450,8 @@ func TestARemovalWaitsForAnActiveJudgeRun(t *testing.T) {
 		t.Fatalf("the marker says %s", m.State)
 	}
 	rm.Hook = nil
-	active, err := storage.AdmitRun(context.Background(), r.zone, b.Session, func() (storage.RunAdmission, error) {
-		return storage.RunAdmission{Trigger: storage.TriggerCommand}, nil
+	active, err := storage.AdmitRun(context.Background(), r.zone, b.Session, func(int) (storage.RunRecord, error) {
+		return storage.RunRecord{Trigger: storage.TriggerCommand}, nil
 	})
 	if err != nil {
 		t.Fatal(err)

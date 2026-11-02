@@ -221,6 +221,50 @@ When `export.otlp.endpoint` is set and `export.otlp.judgments` is on, `asz colle
 `asz push` send each run once it has closed. A run of a pulled snapshot is not sent: it stays in the snapshot, and expires with it. See
 [Export over OpenTelemetry](export-otlp.md).
 
+## Judge in asz server
+
+`asz server` can judge on its own, after its passes. Turn it on, and set both limits, since nobody
+watches a run it starts:
+
+```yaml
+judge:
+  run_timeout: 2h
+  max_steps: 3000
+  server:
+    enabled: true
+    idle_after: 2h
+    runs_per_day: 10
+```
+
+A conversation is judged once nothing has been collected for it for `idle_after`, at least 10 minutes,
+and the server's last pass collected and parsed all of it. It is judged again each time it goes on and
+goes quiet. A run judges the main talks a run would now be shown differently from what the last
+automatic run that judged them was shown, from the first such talk to the last, with the talks before
+them as context. A window larger than `max_steps` is judged in parts, one run each. A single talk larger
+than it is skipped, and the status lists it; judge it with `asz judge -from-id T -to-id T`.
+
+Only talks with work recorded at or after `since` are judged. Empty, it is the moment the policy was
+first turned on for the root, so turning it on never judges history. One automatic run goes at a time,
+and at most `runs_per_day` are admitted in any 24 hours, failed and stopped ones included. A run that did
+not close `complete` is judged again only after something new is collected for its conversation.
+
+The server judges what `claude-code-local` and `kiro-local` collect, with `judge.plan`. It does not
+start when `idle_after` is under 10 minutes, when `max_steps` or `run_timeout` is 0, when the plan has a
+`reference` or `divergence` stage or gives a stage to `kiro-cli`, or over a scenario root. A server that
+makes one pass judges nothing on its own.
+
+The status line of the page says how many conversations are due and which one is being judged.
+`/api/status` holds the details under `judge`, including how many conversations are not due and why.
+`asz judge -list` shows a run the server started as `by server`, with how many talks it judged and the
+last record time it was shown.
+
+A run started with `asz judge` is never taken as judging a conversation, and while one is going the
+server does not judge that conversation. Automatic runs judge only main talks and what they started; a
+run of the whole conversation with `asz judge` also judges the steps outside them.
+
+Ctrl-C stops admitting runs. The run going keeps the stages that finished and closes within two minutes,
+and a pass that is running finishes. Ctrl-C again stops at once.
+
 ## Evaluators
 
 `judge.evaluators` names the evaluators a stage can be given to. The defaults are three agents'

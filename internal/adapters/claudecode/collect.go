@@ -61,6 +61,9 @@ type pass struct {
 	state *storage.SessionState
 	st    *Stats
 	now   time.Time
+	// unfinished says a source of the session ends in a line not finished
+	// yet, which a later pass lands.
+	unfinished bool
 }
 
 // maxDrainRounds bounds how many windows one source may land in a single pass,
@@ -99,6 +102,9 @@ type Stats struct {
 	// every session again measured 3.3 s on a 43-session corpus with nothing
 	// new, which is most of a 5 s watch interval.
 	Changed []string
+	// Outcomes say, for every session the pass read, unchanged ones
+	// included, whether every source of it was read to its end.
+	Outcomes storage.Outcomes
 }
 
 // Complete reports whether the pass collected everything available.
@@ -124,6 +130,7 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	// An unreadable source directory hides sources; recording it as an error
 	// keeps the pass from reporting a clean, complete-looking result.
 	st.Errors = append(st.Errors, warnings...)
+	st.Outcomes.Unattributed = len(warnings) > 0
 	found := make(map[string]bool, len(sessions))
 	for _, s := range sessions {
 		found[s.ID] = true
@@ -143,8 +150,10 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 			continue
 		}
 		st.Sessions++
+		st.Outcomes.Saw(s.ID)
 		if err := c.collectSession(s, st); err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+			st.Outcomes.Leave(s.ID)
 		}
 	}
 	// An unreadable project directory hides files the way pruning does. A
@@ -155,6 +164,7 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	if len(warnings) == 0 {
 		if err := c.markLostSessions(found, filter, st); err != nil {
 			st.Errors = append(st.Errors, err)
+			st.Outcomes.Unattributed = true
 		}
 	}
 	return st, nil
@@ -175,6 +185,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	if err != nil {
 		if errors.Is(err, storage.ErrSessionBusy) {
 			st.Busy++
+			st.Outcomes.Leave(s.ID)
 			return nil
 		}
 		return err
@@ -230,6 +241,8 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	now := p.now
 	changed := false
 
+	conflicts := st.Conflicts
+
 	// Two distinct sources must never share a landing directory. A session's
 	// files are spread across several source directories, so in principle the
 	// same agent id or workflow run id could appear under two of them; landing
@@ -244,6 +257,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 		_, cursorPath, _ := c.cursorPaths(src)
 		if prev, dup := claimed[cursorPath]; dup && prev != src.Rel {
 			st.Conflicts++
+			st.Outcomes.Leave(s.ID)
 			st.Errors = append(st.Errors, fmt.Errorf(
 				"claudecode: %s and %s both map to %s; refusing to interleave them",
 				prev, src.Rel, cursorPath))
@@ -260,6 +274,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			landed, more, err := c.collectSource(src, p)
 			if err != nil {
 				st.Errors = append(st.Errors, err)
+				st.Outcomes.Leave(s.ID)
 				break
 			}
 			landedAny = landedAny || landed
@@ -268,6 +283,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			}
 			if round >= maxDrainRounds {
 				st.Pending++
+				st.Outcomes.Leave(s.ID)
 				break
 			}
 		}
@@ -283,6 +299,12 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	// touched.
 	if err := c.markPruned(s.ID, claimed, st, now); err != nil {
 		st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+		st.Outcomes.Leave(s.ID)
+	}
+	// A conflict is sticky, met again on every pass without an error, so
+	// it is counted.
+	if p.unfinished || st.Conflicts > conflicts {
+		st.Outcomes.Leave(s.ID)
 	}
 
 	// A recovered index must be persisted even when no source landed this pass;
@@ -392,6 +414,11 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		return false, false, err
 	}
 	if len(chunk.Lines) == 0 {
+		// Bytes past the cursor with no line end are a line still being
+		// written.
+		if int64(chunk.NewOffset) < chunk.Size {
+			p.unfinished = true
+		}
 		if chunk.Moved {
 			// The same bytes under a new identity. Record it now, or the next
 			// pass re-reads the tail window of this source to verify it again,
@@ -434,6 +461,9 @@ func (c *Collector) landAppend(src Source, cur *storage.Cursor, cursorPath, dir,
 		recs = append(recs, rec)
 	}
 	chunk.Keep(len(recs), cur.LastUUID)
+	if !chunk.More && int64(chunk.NewOffset) < chunk.Size {
+		p.unfinished = true
+	}
 
 	var written int64
 	var staged index.Staged

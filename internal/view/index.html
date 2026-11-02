@@ -140,7 +140,7 @@ tbody tr:hover td { background: var(--sw-accent-soft); }
 <body>
 <header class="compact-header">
   <a class="compact-brand" href="/" aria-label="SkyWalking AI Sessionizer"><img class="compact-logo logo-dark" src="/logo.svg" alt="SkyWalking"><img class="compact-logo logo-light" src="/logo-blue.svg" alt="SkyWalking"><small>AI Sessionizer</small></a>
-  <div class="compact-status"><span id="totals" class="totals"></span><span id="refresh" class="refresh" hidden></span>
+  <div class="compact-status"><span id="totals" class="totals"></span><span id="refresh" class="refresh" hidden></span><span id="judge" class="refresh" hidden></span>
     <label class="theme-pick">Theme<select id="theme" aria-label="Theme"></select></label></div>
 </header>
 
@@ -274,6 +274,16 @@ function poll() {
         + (s.next_refresh ? `<span>next <strong>${clock(s.next_refresh)}</strong></span>` : "")
         + (s.last_error ? `<span class="warn">last pass had errors</span>` : "")
         + (s.retention_warning ? `<span class="warn">retention warning</span>` : "");
+    }
+    const j = $("judge"), p = s.judge;
+    j.hidden = !p;
+    if (p) {
+      j.title = p.last_error || "";
+      j.innerHTML = (p.running
+        ? `<i class="dot busy"></i><span>judging <strong>${p.running.conversation.slice(0, 8)}</strong> since ${clock(p.running.started)}</span>`
+        : `<span>judge <strong>${p.due}</strong> due</span>`)
+        + `<span><strong>${p.admitted_24h}</strong> in 24 h</span>`
+        + (p.last_error ? `<span class="warn">judge error</span>` : "");
     }
     if (seenRefresh >= 0 && s.last_refresh !== seenRefresh) load();
     seenRefresh = s.last_refresh;

@@ -517,9 +517,18 @@ func TestPromptWaitsForItsTurn(t *testing.T) {
 	if st.Held != 1 || st.Records != 1 {
 		t.Fatalf("first pass: %+v, want the header landed and the prompt held", st)
 	}
+	// The pass is complete, and the session is not: its prompt lands on a
+	// later pass, so nothing judges it meanwhile.
+	if o, ok := st.Outcomes.Of(cancelled); !ok || o != storage.OutcomeIncomplete {
+		t.Fatalf("a held prompt leaves the session %s, %v", o, ok)
+	}
 	mkfile(t, messages, strings.Join(lines, "\n")+"\n")
-	if st := r.collect(); st.Held != 0 || st.Records != len(lines) {
+	st = r.collect()
+	if st.Held != 0 || st.Records != len(lines) {
 		t.Fatalf("second pass: %+v", st)
+	}
+	if o, _ := st.Outcomes.Of(cancelled); o != storage.OutcomeComplete {
+		t.Fatalf("once the turn landed the session is %s", o)
 	}
 	r.parse(cancelled)
 	d := r.doc(cancelled)
@@ -585,6 +594,10 @@ func TestAnEvaluatorsSessionIsNeverCollected(t *testing.T) {
 	if st.Skipped.Own != 1 || st.Sessions != 0 || st.SourcesLanded != 0 {
 		t.Fatalf("an evaluator's session was collected: %+v", st)
 	}
+	// What a pass said of it before no longer holds.
+	if o, ok := st.Outcomes.Of(cancelled); !ok || o != storage.OutcomeIncomplete {
+		t.Fatalf("an evaluator's session is %s, %v", o, ok)
+	}
 	if _, err := os.Stat(r.zone.SessionDir(cancelled)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("its directory was made: %v", err)
 	}
@@ -593,6 +606,61 @@ func TestAnEvaluatorsSessionIsNeverCollected(t *testing.T) {
 	mkfile(t, header, string(b))
 	if st := r.collect(); st.Skipped.Own != 0 || st.SourcesLanded == 0 {
 		t.Fatalf("the session working elsewhere: %+v", st)
+	}
+}
+
+// A session's origin is read from its landed header when its source is
+// gone: one landed before the guard whose workspace is inside the storage
+// root is an evaluator's, and never judged.
+func TestTheLandedHeaderSaysWhereASessionWorked(t *testing.T) {
+	src, _ := copyCancelled(t, strings.Join(fixtureLines(t, cancelled), "\n")+"\n")
+	r := newRoot(t, src)
+	other := t.TempDir()
+	header := filepath.Join(src, "sessions", "98613594c3327868", cancelled, "session.json")
+	b, err := os.ReadFile(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var h map[string]any
+	if err := json.Unmarshal(b, &h); err != nil {
+		t.Fatal(err)
+	}
+	h["workspacePaths"] = []string{filepath.Join(other, "s1", "judgments", "j000001", "work")}
+	b, _ = json.Marshal(h)
+	mkfile(t, header, string(b))
+	r.collect()
+	if o, err := kiro.LandedOrigin(r.zone, cancelled); err != nil || o != kiro.OriginOutside {
+		t.Fatalf("in the root it landed in: %s, %v", o, err)
+	}
+	// The same landed session in the root its workspace lies in, as an
+	// evaluator's collected before the guard.
+	if err := os.CopyFS(filepath.Join(other, cancelled), os.DirFS(r.zone.SessionDir(cancelled))); err != nil {
+		t.Fatal(err)
+	}
+	if o, err := kiro.LandedOrigin(storage.NewZone(other), cancelled); err != nil || o != kiro.OriginInside {
+		t.Fatalf("in the root its workspace is in: %s, %v", o, err)
+	}
+	if o, err := kiro.LandedOrigin(r.zone, "no-such-session"); o != kiro.OriginUnknown {
+		t.Fatalf("a session with nothing landed: %s, %v", o, err)
+	}
+}
+
+// The live source answers first when a run is admitted: a session it holds
+// is read whatever discovery would leave out, a header that does not read is
+// no answer, and only a session it surely lacks falls back to what landed.
+func TestTheLiveSourceSaysWhereASessionWorks(t *testing.T) {
+	src, _ := copyCancelled(t, strings.Join(fixtureLines(t, cancelled), "\n")+"\n")
+	r := newRoot(t, src)
+	if o, found, err := kiro.SourceOrigin(src, r.zone, cancelled); err != nil || !found || o != kiro.OriginOutside {
+		t.Fatalf("a session the source holds: %s %v %v", o, found, err)
+	}
+	if o, found, err := kiro.SourceOrigin(src, r.zone, "sess_not-there"); err != nil || found {
+		t.Fatalf("a session the source lacks: %s %v %v", o, found, err)
+	}
+	header := filepath.Join(src, "sessions", "98613594c3327868", cancelled, "session.json")
+	mkfile(t, header, "{ not json")
+	if o, found, _ := kiro.SourceOrigin(src, r.zone, cancelled); !found || o != kiro.OriginUnknown {
+		t.Fatalf("a header that does not read: %s %v", o, found)
 	}
 }
 
