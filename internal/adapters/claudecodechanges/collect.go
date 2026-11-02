@@ -62,6 +62,9 @@ type Stats struct {
 	Retired []string
 	// Changed lists the sessions whose landed data or index moved this pass.
 	Changed []string
+	// Outcomes say, for every session the pass read, unchanged ones
+	// included, whether every change file of it was read to its end.
+	Outcomes storage.Outcomes
 }
 
 // Complete reports whether the pass collected everything available.
@@ -88,6 +91,7 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 	}
 	st := &Stats{}
 	st.Errors = append(st.Errors, warnings...)
+	st.Outcomes.Unattributed = len(warnings) > 0
 	for _, s := range sessions {
 		if filter != nil && !filter(s) {
 			continue
@@ -103,8 +107,10 @@ func (c *Collector) CollectAll(filter func(Session) bool) (*Stats, error) {
 			continue
 		}
 		st.Sessions++
+		st.Outcomes.Saw(s.ID)
 		if err := c.collectSession(s, st); err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", s.ID, err))
+			st.Outcomes.Leave(s.ID)
 		}
 	}
 	return st, nil
@@ -120,6 +126,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 	if err != nil {
 		if errors.Is(err, storage.ErrSessionBusy) {
 			st.Busy++
+			st.Outcomes.Leave(s.ID)
 			return nil
 		}
 		return err
@@ -166,13 +173,15 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 
 	now := c.Now()
 	changed := false
+	conflicts, unfinished := st.Conflicts, false
 	for _, src := range s.Sources {
 		st.SourcesSeen++
 		var landedAny bool
 		for round := 0; ; round++ {
-			landed, more, err := c.collectSource(src, ix, state, st, now)
+			landed, more, err := c.collectSource(src, ix, state, st, now, &unfinished)
 			if err != nil {
 				st.Errors = append(st.Errors, err)
+				st.Outcomes.Leave(s.ID)
 				break
 			}
 			landedAny = landedAny || landed
@@ -181,6 +190,7 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			}
 			if round >= maxDrainRounds {
 				st.Pending++
+				st.Outcomes.Leave(s.ID)
 				break
 			}
 		}
@@ -188,6 +198,9 @@ func (c *Collector) collectSession(s Session, st *Stats) error {
 			changed = true
 			st.SourcesLanded++
 		}
+	}
+	if unfinished || st.Conflicts > conflicts {
+		st.Outcomes.Leave(s.ID)
 	}
 	if changed || reindexed {
 		st.Changed = append(st.Changed, s.ID)
@@ -388,7 +401,9 @@ func (c *Collector) origin() string {
 }
 
 // collectSource lands one window of one file, and says whether more waits.
-func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.SessionState, st *Stats, now time.Time) (landed, more bool, err error) {
+//
+// unfinished is set when the source ends in a line still being written.
+func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.SessionState, st *Stats, now time.Time, unfinished *bool) (landed, more bool, err error) {
 	dir := c.Zone.StreamDir(src.Session, src.Stream)
 	cursorPath, err := cursorFor(dir, c.origin(), src)
 	if err != nil {
@@ -426,6 +441,9 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		return false, false, err
 	}
 	if len(chunk.Lines) == 0 {
+		if int64(chunk.NewOffset) < chunk.Size {
+			*unfinished = true
+		}
 		if chunk.Moved {
 			cur.Dev, cur.Ino = chunk.Dev, chunk.Ino
 			cur.Size, cur.MTime = chunk.Size, chunk.MTime
@@ -471,6 +489,9 @@ func (c *Collector) collectSource(src Source, ix *index.Index, state *storage.Se
 		recs = append(recs, rec)
 	}
 	chunk.Keep(len(recs), cur.LastUUID)
+	if !chunk.More && int64(chunk.NewOffset) < chunk.Size {
+		*unfinished = true
+	}
 	var written int64
 	var staged index.Staged
 	err = storage.WriteAtomic(filepath.Join(dir, name), storage.PermLanded, func(w io.Writer) error {

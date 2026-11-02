@@ -87,21 +87,64 @@ func Steps(doc *sessionview.Conversation, sel *Selection) int {
 	if sel == nil {
 		return doc.Summary.Steps
 	}
+	n := 0
+	for _, c := range TalkSteps(doc) {
+		if slices.Contains(sel.Talks, c.Talk) {
+			n += c.Steps
+		}
+	}
+	return n
+}
+
+// TalkWork is what one main talk holds: its steps and those of the
+// sub-tasks it started, at any depth.
+type TalkWork struct {
+	Talk  string
+	Steps int
+}
+
+// TalkSteps counts each main talk's work, in the conversation's order.
+func TalkSteps(doc *sessionview.Conversation) []TalkWork {
+	l := Compute(doc, "", nil, nil)
+	owner := map[string]string{}
+	for _, st := range l.Subtasks {
+		owner[st.Name] = st.Main
+	}
+	steps := map[string]int{}
+	for i := range doc.Talks {
+		t := &doc.Talks[i]
+		switch {
+		case t.Stream == "main":
+			steps[t.ID] += t.Steps
+		case owner[t.Stream] != "":
+			steps[owner[t.Stream]] += t.Steps
+		}
+	}
+	out := make([]TalkWork, 0, len(l.Main))
+	for _, id := range l.Main {
+		out = append(out, TalkWork{Talk: id, Steps: steps[id]})
+	}
+	return out
+}
+
+// judgedSteps are the ids of every node of the selected main talks and of
+// the sub-tasks they started, at any depth.
+func judgedSteps(doc *sessionview.Conversation, l *Ledger, sel *Selection) map[string]bool {
 	judged := set(sel.Talks)
 	started := map[string]bool{}
-	for _, st := range Compute(doc, "", nil, nil).Subtasks {
+	for _, st := range l.Subtasks {
 		if judged[st.Main] {
 			started[st.Name] = true
 		}
 	}
-	n := 0
+	ids := map[string]bool{}
 	for i := range doc.Talks {
 		t := &doc.Talks[i]
 		if t.Stream == "main" && judged[t.ID] || started[t.Stream] {
-			n += t.Steps
+			index(t, ids)
 		}
 	}
-	return n
+	return ids
 }
 
 // Narrow returns a copy of a document that holds only what a window shows:
@@ -172,6 +215,36 @@ func NarrowChecked(doc *sessionview.Conversation, w Window, read RecordsReaderCh
 	for _, id := range sel.Talks {
 		if c, ok := l.Inclusive(id); ok && c.To > sel.End {
 			sel.End = c.To
+		}
+	}
+	// A change or execution record is kept out of its stream's time range,
+	// so a talk's span can end before the record of its last call. The end
+	// takes in those joined to the selected work, or the trim below would
+	// take them out of the very talks the run judges.
+	if read != nil {
+		steps := judgedSteps(doc, l, sel)
+		var refs []sessionflow.Ref
+		for _, c := range doc.WorkspaceChanges {
+			if steps[c.Step] {
+				refs = append(refs, c.Ref)
+			}
+		}
+		for _, e := range doc.ToolExecutions {
+			if steps[e.Step] {
+				refs = append(refs, e.Ref)
+			}
+		}
+		recs, err := read(refs)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, rec := range recs {
+			if rec == nil || rec.Time == "" {
+				continue
+			}
+			if at, err := time.Parse(time.RFC3339Nano, rec.Time); err == nil && at.UnixMilli() > sel.End {
+				sel.End = at.UnixMilli()
+			}
 		}
 	}
 	// The streams shown: the main one, and those of the sub-tasks the shown

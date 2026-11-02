@@ -232,7 +232,7 @@ func TestWorkFilesAreWrittenOnce(t *testing.T) {
 }
 
 // written lists what a run's directory holds besides what its admission
-// made: its activity lock and admission.json.
+// made: its activity lock and run.json.
 func written(runDir string) ([]string, error) {
 	items, err := os.ReadDir(runDir)
 	if err != nil {
@@ -240,7 +240,7 @@ func written(runDir string) ([]string, error) {
 	}
 	var out []string
 	for _, it := range items {
-		if it.Name() != storage.ActiveFile && it.Name() != storage.AdmissionFile {
+		if it.Name() != storage.ActiveFile && it.Name() != storage.RunFile {
 			out = append(out, it.Name())
 		}
 	}

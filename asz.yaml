@@ -468,6 +468,25 @@ judge:
     # How long one fetch may take.
     timeout: 1m
     fetch: []
+  # asz server judges in the background, after its passes, with the plan,
+  # the evaluators and the limits above. It needs run_timeout and max_steps
+  # set, since nobody watches a run it starts.
+  server:
+    # Off by default: a run costs model money.
+    enabled: false
+    # Automatic runs start at the first main talk with work recorded at or
+    # after this time, RFC 3339 or a date. Empty is the moment the policy
+    # was first turned on for this root, kept in it, so turning it on never
+    # judges history.
+    since: ""
+    # A conversation is due once nothing has been collected for it for this
+    # long. At least 10m. Every quiet period can start a run, so a longer
+    # time gives fewer and larger runs; each run pays again for its prompts
+    # and for the context it reads.
+    idle_after: 2h
+    # Automatic runs admitted in any 24 hours, failed and stopped ones
+    # included.
+    runs_per_day: 10
 
 # How long a snapshot asz pull made stays on this machine, counted from when
 # it was published, with every judge run in it. The newest snapshot expires

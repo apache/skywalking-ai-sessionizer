@@ -313,13 +313,17 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 		return err
 	}
 	ref.retain(metadataOnly, retire)
-	if once || ref.base.Mode == config.ModeOnce {
+	single := once || ref.base.Mode == config.ModeOnce
+	if single {
 		// One pass and no loop after it, exactly as asz collect -once has:
 		// what another process was holding is reported, not deferred.
 		ref.last = true
 		if pusher != nil {
 			pusher.WaitForExport = exportWait
 		}
+	}
+	if err := startJudgePolicy(cfg, ref, srv, zone, single); err != nil {
+		return err
 	}
 
 	ids, err := srv.List()
@@ -340,14 +344,21 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 
 	// The page is up before the first pass so a large backfill does not
 	// look like a hung command; the page shows the pass running.
+	pipeline := make(chan struct{})
 	go func() {
+		defer close(pipeline)
 		// The page reports what a pass did, errors included, so a failure
 		// here is shown rather than ending the process that serves it.
 		_ = ref.pass()
 		if ref.base.Mode == config.ModeWatch {
+			ref.judge()
 			ref.loop()
 		}
 	}()
+	var stops *stopsInOrder
+	if ref.policy != nil {
+		stops = &stopsInOrder{ref: ref, pipeline: pipeline}
+	}
 	pulls, err := guard.pullServer(cfg, zoneRoot)
 	if err != nil {
 		return err
@@ -359,9 +370,19 @@ func cmdServer(cfg *config.Config, ads []config.Adapter, once bool) error {
 	go watchPulled(srv, pollInterval(cfg), pulled)
 	page := pulled.handler(srv.Handler())
 	if pulls != nil {
-		return guard.serveWithPulls(ln, page, pulls)
+		err = guard.serveWithPulls(ln, page, pulls)
+	} else {
+		if stops != nil {
+			go stops.onSignal(closeClient)
+		}
+		err = guard.serve(guard.server(guard.handler(page, nil)), ln)
 	}
-	return guard.serve(guard.server(guard.handler(page, nil)), ln)
+	// Serving pulls ends at a signal on its own, and serving can fail: a
+	// judge run going still gets its cleanup before the process ends.
+	if stops != nil {
+		stops.stop()
+	}
+	return err
 }
 
 // printWithholding says what the page withholds, and whether a request may

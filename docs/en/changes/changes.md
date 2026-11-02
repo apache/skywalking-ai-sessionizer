@@ -22,7 +22,7 @@
 - Each stage is one [Session Judgment](../formats/session-judgment.md) file, written once in the
   session's `judgments/` directory. A closed run is sent over OTLP, one record per stage file, when
   `export.otlp.judgments` is on; it is off by default. See [Judge runs](../formats/otlp.md#judge-runs).
-- A run is admitted in one decision, under the root lock, and recorded in `admission.json`: who
+- A run is admitted in one decision, under the root lock, and recorded in `run.json`: who
   started it, the head and window it judges, and `judge.hide`. A conversation has one run or regroup at
   a time. Each run holds an activity lock, `.active`, while it or a regroup of it works, and retention
   removes nothing of the session meanwhile. `asz judge -list` says whether each run is closed, running,
@@ -35,6 +35,15 @@
   workspace inside the storage root, and an agent CLI runs without `OTEL_LOG_RAW_API_BODIES`. An
   evaluator's `max_turns` bounds the tool calls of `codex` and `kiro-cli`, which have no option of their
   own, through their navigation server.
+- `asz server` judges on its own when `judge.server.enabled` is on: after a pass, one conversation at a
+  time that nothing was collected for in `judge.server.idle_after` and whose collection and parse were
+  complete, at most `judge.server.runs_per_day` in 24 hours. A conversation is judged again each time it
+  goes on and goes quiet: a run takes the main talks whose view changed since the last automatic run
+  that judged them, judged in parts when larger than `judge.max_steps`. Each automatic run, one admitted
+  or one refused for its size, leaves a record in `_judge/runs/`, written before an admitted run is
+  reserved. See [Judge in asz server](../setup/judge.md#judge-in-asz-server).
+- A window's end takes in the change and execution records of the work it selects, which a talk's span
+  leaves out, so they are shown to the run.
 - `asz judge -round N` judges a conversation as it was at round N of its chain.
 - `asz judge -from T -to T` and `-from-id ID -to-id ID` judge a window: whole main talks, each with every
   sub-task it started. The talks before the window are context, and nothing after it is shown.

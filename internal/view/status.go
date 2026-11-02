@@ -52,6 +52,17 @@ type Status struct {
 	Records int   `json:"records"`
 	Rounds  int   `json:"rounds"`
 	TookMS  int64 `json:"took_ms"`
+	// Judge is what asz server's judge policy says of itself, absent when
+	// it is off. It is kept apart from the refresh: a pass never writes it.
+	Judge any `json:"judge,omitempty"`
+}
+
+// SetJudgeStatus names what the page reports of the judge policy, read on
+// every request for the status.
+func (s *Server) SetJudgeStatus(f func() any) {
+	s.statusMu.Lock()
+	s.judgeStatus = f
+	s.statusMu.Unlock()
 }
 
 // SetStatus records the state of whatever keeps the zone current. The last
@@ -79,5 +90,12 @@ func (s *Server) Status() Status {
 }
 
 func (s *Server) apiStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, s.Status())
+	st := s.Status()
+	s.statusMu.Lock()
+	f := s.judgeStatus
+	s.statusMu.Unlock()
+	if f != nil {
+		st.Judge = f()
+	}
+	writeJSON(w, st)
 }

@@ -18,6 +18,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,6 +26,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/claudecode"
@@ -34,11 +36,13 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/adapters/langsmith"
 	"github.com/apache/skywalking-ai-sessionizer/internal/config"
 	"github.com/apache/skywalking-ai-sessionizer/internal/export/otlp"
+	"github.com/apache/skywalking-ai-sessionizer/internal/judge"
 	"github.com/apache/skywalking-ai-sessionizer/internal/metrics"
 	"github.com/apache/skywalking-ai-sessionizer/internal/retention"
 	"github.com/apache/skywalking-ai-sessionizer/internal/scenario/remove"
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 	"github.com/apache/skywalking-ai-sessionizer/internal/view"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessionflow"
 )
 
 // changesSource is one recorder directory the changes adapter reads: its
@@ -195,6 +199,128 @@ type refresher struct {
 	// pass. It is independent of removal: a completed real session can
 	// still be waiting for its last file's grace while another stays busy.
 	deferred map[string]bool
+
+	// facts are what the passes established of each session, for the judge
+	// policy: the last collection outcome, from the last pass that read the
+	// session, and the parse identity. family names the adapter whose
+	// sources a session's outcome came from.
+	factsMu sync.Mutex
+	facts   map[string]judge.Facts
+	family  map[string]string
+	// perSource keeps, per session, the last outcome each source gave.
+	perSource map[string]map[string]storage.Outcome
+	// policy judges after each watching pass, when judge.server is on.
+	policy *judge.Policy
+	// ctx ends when the server stops: no pass starts after it, and the
+	// policy's run is stopped.
+	ctx  context.Context
+	stop context.CancelFunc
+}
+
+// The families of sources a session's outcome comes from.
+const (
+	familyClaudeCode = "claude-code"
+	familyKiro       = "kiro"
+)
+
+// sourceOutcomes are what one source of sessions established this pass.
+type sourceOutcomes struct {
+	// name tells the source apart, family the kind of session it feeds,
+	// and primary says it is the source of the session's transcripts.
+	name, family string
+	primary      bool
+	o            *storage.Outcomes
+}
+
+// noteOutcomes keeps what this pass established of each session. Each source
+// keeps the last outcome it gave of a session, so one that is not read this
+// pass, as transcripts Claude Code pruned, still counts with what it gave
+// last, and a source that recovers counts as recovered. A session's outcome
+// joins its sources'. A failure that names no session makes every session of
+// its family unknown for this pass, and only this one. A session no source
+// of its transcripts ever read is unknown.
+func (r *refresher) noteOutcomes(sources []sourceOutcomes) {
+	r.factsMu.Lock()
+	defer r.factsMu.Unlock()
+	if r.facts == nil {
+		r.facts, r.family = map[string]judge.Facts{}, map[string]string{}
+	}
+	if r.perSource == nil {
+		r.perSource = map[string]map[string]storage.Outcome{}
+	}
+	unattributed := map[string]bool{}
+	primary := map[string]string{}
+	for _, s := range sources {
+		if s.primary {
+			primary[s.family] = s.name
+		}
+		if s.o == nil {
+			continue
+		}
+		if s.o.Unattributed {
+			unattributed[s.family] = true
+		}
+		for id := range s.o.Seen {
+			o := storage.OutcomeComplete
+			if s.o.Left[id] {
+				o = storage.OutcomeIncomplete
+			}
+			if r.perSource[id] == nil {
+				r.perSource[id] = map[string]storage.Outcome{}
+			}
+			r.perSource[id][s.name] = o
+			if s.primary || r.family[id] == "" {
+				r.family[id] = s.family
+			}
+		}
+	}
+	for id, bySource := range r.perSource {
+		family := r.family[id]
+		o := storage.OutcomeUnknown
+		if _, read := bySource[primary[family]]; read && !unattributed[family] {
+			outs := make([]storage.Outcome, 0, len(bySource))
+			for _, so := range bySource {
+				outs = append(outs, so)
+			}
+			o = storage.Combine(outs...)
+		}
+		f := r.facts[id]
+		f.Outcome = o
+		r.facts[id] = f
+	}
+}
+
+// noteParse keeps a session's parse identity: the head its chain reached
+// and the highest landed sequence then, or nothing when the parse did not
+// reach the end.
+func (r *refresher) noteParse(id string, complete bool) {
+	f := judge.Facts{}
+	if complete {
+		files, err := sessionflow.OpenChain(r.zone.Root(), id).List()
+		_, landed, cerr := storage.Collected(r.zone, id)
+		if err == nil && cerr == nil && len(files) > 0 {
+			last := files[len(files)-1]
+			f.Round, f.Digest, f.Landed = last.Round, last.Digest, landed
+		}
+	}
+	r.factsMu.Lock()
+	defer r.factsMu.Unlock()
+	if r.facts == nil {
+		r.facts, r.family = map[string]judge.Facts{}, map[string]string{}
+	}
+	f.Outcome = r.facts[id].Outcome
+	r.facts[id] = f
+}
+
+// judgeFacts is a copy of the facts, for the policy.
+func (r *refresher) judgeFacts() map[string]judge.Facts {
+	r.factsMu.Lock()
+	defer r.factsMu.Unlock()
+	out := make(map[string]judge.Facts, len(r.facts))
+	for id, f := range r.facts {
+		out[id] = f
+	}
+	return out
 }
 
 // newRefresher wires the local adapters into one pipeline, or returns nil
@@ -487,7 +613,7 @@ func (r *refresher) holdRoot() (*storage.SessionLock, error) {
 		}
 		return lock, err
 	}
-	lock, err := storage.LockRoot(root)
+	lock, err := r.lockForPass(root)
 	if errors.Is(err, storage.ErrRootBusy) {
 		if !r.rootWaitingSaid {
 			msg := fmt.Sprintf("another command holds %s; this pass does nothing until it is released", lockPath)
@@ -568,10 +694,15 @@ func (r *refresher) pass() error {
 	// it waits for a source to be there.
 	collected := false
 	colHere := false
+	var sources []sourceOutcomes
+	note := func(name, family string, primary bool, o *storage.Outcomes) {
+		sources = append(sources, sourceOutcomes{name: name, family: family, primary: primary, o: o})
+	}
 	if r.col != nil {
 		var cerr error
 		if colHere, cerr = present(r.colSource, false); cerr != nil {
 			errs = append(errs, cerr)
+			note(config.AdapterClaudeCodeLocal, familyClaudeCode, true, &storage.Outcomes{Unattributed: true})
 		}
 	}
 	if colHere {
@@ -580,8 +711,9 @@ func (r *refresher) pass() error {
 		cs, err = r.col.CollectAll(r.match)
 		if err != nil {
 			errs = append(errs, err)
-			cs = &claudecode.Stats{}
+			cs = &claudecode.Stats{Outcomes: storage.Outcomes{Unattributed: true}}
 		}
+		note(config.AdapterClaudeCodeLocal, familyClaudeCode, true, &cs.Outcomes)
 		errs = append(errs, cs.Errors...)
 		landed, records, sessionsSeen = cs.SourcesLanded, cs.Records, cs.Sessions
 		pending += cs.Pending
@@ -598,6 +730,7 @@ func (r *refresher) pass() error {
 		changesHere, cherr := present(cs.src, true)
 		if cherr != nil {
 			errs = append(errs, cherr)
+			note(config.AdapterChanges+":"+cs.src, familyClaudeCode, false, &storage.Outcomes{Unattributed: true})
 		}
 		if !changesHere {
 			continue
@@ -606,8 +739,9 @@ func (r *refresher) pass() error {
 		ch, err := cs.col.CollectAll(cs.match)
 		if err != nil {
 			errs = append(errs, err)
-			ch = &claudecodechanges.Stats{}
+			ch = &claudecodechanges.Stats{Outcomes: storage.Outcomes{Unattributed: true}}
 		}
+		note(config.AdapterChanges+":"+cs.src, familyClaudeCode, false, &ch.Outcomes)
 		errs = append(errs, ch.Errors...)
 		landed += ch.SourcesLanded
 		records += ch.Records
@@ -628,6 +762,7 @@ func (r *refresher) pass() error {
 		var kerr error
 		if kiroHere, kerr = present(r.kiroSource, true); kerr != nil {
 			errs = append(errs, kerr)
+			note(config.AdapterKiroLocal, familyKiro, true, &storage.Outcomes{Unattributed: true})
 		}
 	}
 	if kiroHere {
@@ -635,8 +770,9 @@ func (r *refresher) pass() error {
 		ks, err := r.kiroCol.CollectAll(r.kiroMatch)
 		if err != nil {
 			errs = append(errs, err)
-			ks = &kiro.Stats{}
+			ks = &kiro.Stats{Outcomes: storage.Outcomes{Unattributed: true}}
 		}
+		note(config.AdapterKiroLocal, familyKiro, true, &ks.Outcomes)
 		errs = append(errs, ks.Errors...)
 		landed += ks.SourcesLanded
 		records += ks.Records
@@ -665,6 +801,7 @@ func (r *refresher) pass() error {
 		var perr error
 		if providerHere, perr = present(r.providerSource, true); perr != nil {
 			errs = append(errs, perr)
+			note(config.AdapterClaudeCodeProvider, familyClaudeCode, false, &storage.Outcomes{Unattributed: true})
 		}
 	}
 	if providerHere {
@@ -676,8 +813,9 @@ func (r *refresher) pass() error {
 		ps, err := r.provider.CollectAll(providerFilter(r.providerAd, projects, r.zone))
 		if err != nil {
 			errs = append(errs, err)
-			ps = &claudecodeprovider.Stats{}
+			ps = &claudecodeprovider.Stats{Outcomes: storage.Outcomes{Unattributed: true}}
 		}
+		note(config.AdapterClaudeCodeProvider, familyClaudeCode, false, &ps.Outcomes)
 		errs = append(errs, ps.Errors...)
 		landed += ps.SourcesLanded
 		records += ps.Records
@@ -708,11 +846,27 @@ func (r *refresher) pass() error {
 		retired = append(retired, landedRuns.Retired...)
 	}
 	r.sayRetired(retired)
+	// The sources of each family are named even when nothing of them ran,
+	// so a session is known by the source of its transcripts.
+	note(config.AdapterClaudeCodeLocal, familyClaudeCode, true, nil)
+	note(config.AdapterKiroLocal, familyKiro, true, nil)
+	r.noteOutcomes(sources)
 
 	// What this pass landed, plus whatever an earlier pass could not take
 	// the lock for or failed to parse.
 	for id := range r.retry {
 		changed[id] = true
+	}
+	// Another process can land a session's files and stop before it parses
+	// them; nothing local moves, and the session would wait for ever. With
+	// the judge policy on, a session whose newest landed file is not the
+	// one its last parse reached is parsed again.
+	if r.policy != nil {
+		for id, f := range r.judgeFacts() {
+			if _, landed, err := storage.Collected(r.zone, id); err == nil && landed != f.Landed {
+				changed[id] = true
+			}
+		}
 	}
 	for id := range r.unparsed {
 		changed[id] = true
@@ -769,13 +923,16 @@ func (r *refresher) pass() error {
 			if errors.Is(perr, storage.ErrChainBusy) || errors.Is(perr, storage.ErrSessionBusy) {
 				busy++
 				r.retry[id] = true
+				r.noteParse(id, false)
 				continue
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", id, perr))
 			r.unparsed[id] = true
+			r.noteParse(id, false)
 			continue
 		}
 		delete(r.unparsed, id)
+		r.noteParse(id, !res.More)
 		if res.Changed() || written > 0 {
 			rounds += written
 			// The server caches a folded conversation. A new round has to
@@ -980,9 +1137,36 @@ func deriveScope(groups ...map[string]bool) []string {
 // reported by the pass itself and the next one tries again.
 func (r *refresher) loop() {
 	for {
-		time.Sleep(r.interval)
+		if r.ctx != nil {
+			select {
+			case <-time.After(r.interval):
+			case <-r.ctx.Done():
+				return
+			}
+		} else {
+			time.Sleep(r.interval)
+		}
 		_ = r.pass()
+		r.judge()
 	}
+}
+
+// judge gives the policy its turn after a watching pass.
+func (r *refresher) judge() {
+	if r.policy == nil || r.ctx == nil || r.ctx.Err() != nil {
+		return
+	}
+	r.policy.Tick(r.ctx)
+}
+
+// lockForPass takes the root lock for a watching pass. With the judge policy
+// on, a run in this process holds the root while it writes a stage, and the
+// pass waits that out rather than skip its period.
+func (r *refresher) lockForPass(root string) (*storage.SessionLock, error) {
+	if r.policy == nil || r.ctx == nil {
+		return storage.LockRoot(root)
+	}
+	return storage.LockRootAfterGate(r.ctx, root)
 }
 
 // sayUnread says, for each session, how many distinct execution observations

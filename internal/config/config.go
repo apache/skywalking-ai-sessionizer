@@ -102,6 +102,51 @@ type Judge struct {
 	Plan []JudgeStage `yaml:"plan"`
 	// References are how the sources a run is judged against are fetched.
 	References References `yaml:"references"`
+	// Server makes asz server judge in the background, after its passes.
+	Server JudgeServer `yaml:"server"`
+}
+
+// JudgeServer is what makes asz server judge on its own. Everything a run
+// uses, the evaluators, the plan and the limits, is the judge section's.
+type JudgeServer struct {
+	// Enabled is off by default: a run costs model money.
+	Enabled bool `yaml:"enabled"`
+	// Since starts automatic runs at the first main talk with work recorded
+	// at or after it, RFC 3339 or a date. Empty is the moment the policy was
+	// first turned on for the root, kept in the root, so turning it on never
+	// judges history.
+	Since string `yaml:"since"`
+	// IdleAfter is how long nothing must have been collected for a
+	// conversation before it is judged, at least 10m.
+	IdleAfter string `yaml:"idle_after"`
+	// RunsPerDay bounds the automatic runs admitted in any 24 hours, failed
+	// and stopped ones included.
+	RunsPerDay int `yaml:"runs_per_day"`
+}
+
+// MinIdleAfter is the shortest idle_after the policy takes.
+const MinIdleAfter = 10 * time.Minute
+
+// IdleAfterDuration is idle_after as a duration.
+func (s JudgeServer) IdleAfterDuration() (time.Duration, error) {
+	d, err := time.ParseDuration(s.IdleAfter)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("config: judge.server.idle_after %q is not a duration such as 2h", s.IdleAfter)
+	}
+	return d, nil
+}
+
+// SinceTime is since as a time; zero when it is empty.
+func (s JudgeServer) SinceTime() (time.Time, error) {
+	if s.Since == "" {
+		return time.Time{}, nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, s.Since, time.Local); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("config: judge.server.since %q is not RFC 3339 or a date", s.Since)
 }
 
 // References are how asz fetches a source a run is judged against. A file
@@ -298,6 +343,15 @@ func (j Judge) check() error {
 	}
 	if _, err := j.RunTimeoutDuration(); err != nil {
 		return err
+	}
+	if _, err := j.Server.IdleAfterDuration(); err != nil {
+		return err
+	}
+	if _, err := j.Server.SinceTime(); err != nil {
+		return err
+	}
+	if j.Server.RunsPerDay < 1 {
+		return fmt.Errorf("config: judge.server.runs_per_day %d must be at least 1", j.Server.RunsPerDay)
 	}
 	r := j.References
 	if r.MaxBytes < 0 {
@@ -749,6 +803,7 @@ func Default() *Config {
 			Concurrency: 4,
 			StateBytes:  16384,
 			Progress:    "30s",
+			Server:      JudgeServer{IdleAfter: "2h", RunsPerDay: 10},
 			Evaluators: map[string]Evaluator{
 				"claude": {Kind: "cli", Program: "claude", Args: []string{}, MaxTurns: 60},
 				"codex":  {Kind: "cli", Program: "codex", Args: []string{}},
@@ -902,7 +957,10 @@ func Load(path string) (*Config, error) {
 			Concurrency *int `yaml:"concurrency"`
 			StateBytes  *int `yaml:"state_bytes"`
 			MaxSteps    *int `yaml:"max_steps"`
-			References  struct {
+			Server      struct {
+				RunsPerDay *int `yaml:"runs_per_day"`
+			} `yaml:"server"`
+			References struct {
 				MaxBytes *int `yaml:"max_bytes"`
 			} `yaml:"references"`
 		} `yaml:"judge"`
@@ -994,6 +1052,16 @@ func Load(path string) (*Config, error) {
 	}
 	if j.RunTimeout != "" {
 		cfg.Judge.RunTimeout = j.RunTimeout
+	}
+	cfg.Judge.Server.Enabled = j.Server.Enabled
+	if j.Server.Since != "" {
+		cfg.Judge.Server.Since = j.Server.Since
+	}
+	if j.Server.IdleAfter != "" {
+		cfg.Judge.Server.IdleAfter = j.Server.IdleAfter
+	}
+	if set.Judge.Server.RunsPerDay != nil {
+		cfg.Judge.Server.RunsPerDay = *set.Judge.Server.RunsPerDay
 	}
 	if j.Mode != "" {
 		cfg.Judge.Mode = j.Mode

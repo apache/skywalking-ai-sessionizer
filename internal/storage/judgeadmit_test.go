@@ -30,8 +30,8 @@ import (
 	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
 )
 
-func admit(z *storage.Zone, session string, a storage.RunAdmission) (*storage.Active, error) {
-	return storage.AdmitRun(context.Background(), z, session, func() (storage.RunAdmission, error) { return a, nil })
+func admit(z *storage.Zone, session string, a storage.RunRecord) (*storage.Active, error) {
+	return storage.AdmitRun(context.Background(), z, session, func(int) (storage.RunRecord, error) { return a, nil })
 }
 
 // A conversation has one run or regroup at a time: a second admission is
@@ -39,11 +39,11 @@ func admit(z *storage.Zone, session string, a storage.RunAdmission) (*storage.Ac
 // too, and both are admitted once it lets the lock go.
 func TestAConversationHasOneRunAtATime(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	first, err := admit(z, "s1", storage.RunAdmission{Trigger: storage.TriggerCommand})
+	first, err := admit(z, "s1", storage.RunRecord{Trigger: storage.TriggerCommand})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admit(z, "s1", storage.RunAdmission{}); !errors.Is(err, storage.ErrJudgeActive) {
+	if _, err := admit(z, "s1", storage.RunRecord{}); !errors.Is(err, storage.ErrJudgeActive) {
 		t.Fatalf("a second run while the first is active: %v", err)
 	}
 	if active, err := storage.JudgeActive(z, "s1"); err != nil || !active {
@@ -55,7 +55,7 @@ func TestAConversationHasOneRunAtATime(t *testing.T) {
 	if active, err := storage.JudgeActive(z, "s1"); err != nil || active {
 		t.Fatalf("after the release the probe says active %v, %v", active, err)
 	}
-	second, err := admit(z, "s1", storage.RunAdmission{})
+	second, err := admit(z, "s1", storage.RunRecord{})
 	if err != nil || second.Number != 2 {
 		t.Fatalf("the next run: %+v, %v", second, err)
 	}
@@ -69,7 +69,7 @@ func TestAConversationHasOneRunAtATime(t *testing.T) {
 	if err != nil || version != 1 {
 		t.Fatalf("a regroup once nothing is active: %d, %v", version, err)
 	}
-	if _, err := admit(z, "s1", storage.RunAdmission{}); !errors.Is(err, storage.ErrJudgeActive) {
+	if _, err := admit(z, "s1", storage.RunRecord{}); !errors.Is(err, storage.ErrJudgeActive) {
 		t.Fatalf("a run while a regroup is active: %v", err)
 	}
 	if err := regroup.Release(); err != nil {
@@ -88,7 +88,7 @@ func TestAdmissionWaitsForARemovalToFinish(t *testing.T) {
 	if err := storage.SaveRemoving(z.RemovingPath("s1"), &storage.Removing{Generation: 1, Through: 3, Phase: storage.RemovingSkeletons}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := admit(z, "s1", storage.RunAdmission{}); !errors.Is(err, storage.ErrRemovalPending) {
+	if _, err := admit(z, "s1", storage.RunRecord{}); !errors.Is(err, storage.ErrRemovalPending) {
 		t.Fatalf("a run during a removal: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(z.SessionDir("s1"), storage.JudgmentsDir)); !errors.Is(err, fs.ErrNotExist) {
@@ -97,12 +97,12 @@ func TestAdmissionWaitsForARemovalToFinish(t *testing.T) {
 }
 
 // The selection function's refusal reserves nothing, and what it gives is
-// what admission.json records, read-only, beside the run's activity lock.
+// what run.json records, read-only, beside the run's activity lock.
 func TestAdmissionRecordsWhatTheRunJudges(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
 	refused := errors.New("not due")
-	if _, err := storage.AdmitRun(context.Background(), z, "s1", func() (storage.RunAdmission, error) {
-		return storage.RunAdmission{}, refused
+	if _, err := storage.AdmitRun(context.Background(), z, "s1", func(int) (storage.RunRecord, error) {
+		return storage.RunRecord{}, refused
 	}); !errors.Is(err, refused) {
 		t.Fatalf("a refusal: %v", err)
 	}
@@ -110,32 +110,32 @@ func TestAdmissionRecordsWhatTheRunJudges(t *testing.T) {
 		t.Fatalf("a refused run left %v, %v", runs, err)
 	}
 	window := json.RawMessage(`{"from_talk":"t2","to_talk":"t3","talks":["t2","t3"],"before":1,"end":1000}`)
-	active, err := admit(z, "s1", storage.RunAdmission{Conversation: "c1", Trigger: storage.TriggerServer, Round: 7,
+	active, err := admit(z, "s1", storage.RunRecord{Conversation: "c1", Trigger: storage.TriggerServer, Round: 7,
 		Digest: "abc", Window: window, Hide: []string{"system_prompt"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = active.Release() }()
-	a, err := storage.ReadAdmission(active.Dir)
+	a, err := storage.ReadRunRecord(active.Dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.ID == "" || a.Session != "s1" || a.Conversation != "c1" || a.Trigger != storage.TriggerServer || a.Round != 7 ||
 		a.Digest != "abc" || string(a.Window) != string(window) || len(a.Hide) != 1 || a.Admitted == "" {
-		t.Fatalf("admission.json holds %+v", a)
+		t.Fatalf("run.json holds %+v", a)
 	}
-	info, err := os.Stat(filepath.Join(active.Dir, storage.AdmissionFile))
+	info, err := os.Stat(filepath.Join(active.Dir, storage.RunFile))
 	if err != nil || info.Mode().Perm()&0o222 != 0 {
-		t.Fatalf("admission.json is writable: %v, %v", info.Mode(), err)
+		t.Fatalf("run.json is writable: %v, %v", info.Mode(), err)
 	}
 }
 
 // A run is closed with its close file, running while its lock is held,
-// stopped with admission.json and a free lock, and unknown without
-// admission.json, as a run made before admissions. The probe makes nothing.
+// stopped with run.json and a free lock, and unknown without
+// run.json, as a run made before admissions. The probe makes nothing.
 func TestARunsState(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	running, err := admit(z, "s1", storage.RunAdmission{})
+	running, err := admit(z, "s1", storage.RunRecord{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestARunsState(t *testing.T) {
 		t.Fatal(err)
 	}
 	if s, _ := state(2); s != storage.RunUnknown {
-		t.Fatalf("a run without admission.json is %s", s)
+		t.Fatalf("a run without run.json is %s", s)
 	}
 	if _, err := os.Stat(filepath.Join(old, storage.ActiveFile)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("the probe made the lock file: %v", err)
@@ -210,12 +210,12 @@ func TestAJudgeWaitsForTheRootUntilItsContextEnds(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	if _, err := storage.AdmitRun(ctx, z, "s1", func() (storage.RunAdmission, error) { return storage.RunAdmission{}, nil }); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := storage.AdmitRun(ctx, z, "s1", func(int) (storage.RunRecord, error) { return storage.RunRecord{}, nil }); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("an admission while the root is held: %v", err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		a, err := admit(z, "s1", storage.RunAdmission{})
+		a, err := admit(z, "s1", storage.RunRecord{})
 		if err == nil {
 			err = a.Release()
 		}
@@ -249,6 +249,14 @@ func TestAnEndedWaitNeverTakesTheRoot(t *testing.T) {
 			t.Fatalf("attempt %d with an ended context: %v", i+1, err)
 		}
 	}
+	for i := 0; i < 200; i++ {
+		if l, err := storage.LockRootAfterGate(ctx, z.Root()); !errors.Is(err, context.Canceled) {
+			if l != nil {
+				_ = l.Unlock()
+			}
+			t.Fatalf("a pass's attempt %d with an ended context: %v", i+1, err)
+		}
+	}
 	l, err := storage.LockRootInCopy(z.Root())
 	if err != nil {
 		t.Fatalf("the root after the ended waits: %v", err)
@@ -260,7 +268,7 @@ func TestAnEndedWaitNeverTakesTheRoot(t *testing.T) {
 // a run that closed in between is closed, never stopped.
 func TestARunListedBeforeItClosedIsClosed(t *testing.T) {
 	z := storage.NewZone(t.TempDir())
-	active, err := admit(z, "s1", storage.RunAdmission{})
+	active, err := admit(z, "s1", storage.RunRecord{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -99,6 +99,10 @@ type Stats struct {
 	// Retired names the retired sessions bodies were found for. None of
 	// them lands.
 	Retired []string
+	// Outcomes say, for every session the pass landed bodies into, whether
+	// it left any. A body is read before its session is known, so a failure
+	// to read one names no session.
+	Outcomes storage.Outcomes
 }
 
 // Complete reports whether the pass collected everything it could.
@@ -143,6 +147,7 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 	if err != nil {
 		if errors.Is(err, storage.ErrProviderBusy) {
 			st.Busy++
+			st.Outcomes.Unattributed = true
 			return st, nil
 		}
 		return nil, err
@@ -180,6 +185,7 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 				// Not gone between the listing and the stat: unreachable, and
 				// a pass that skipped it must not look complete.
 				st.Errors = append(st.Errors, fmt.Errorf("claudecodeprovider: %s: %w", it.Name(), err))
+				st.Outcomes.Unattributed = true
 			}
 			continue
 		}
@@ -198,6 +204,7 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 				}
 				continue
 			case unknown:
+				st.Outcomes.Leave(f.e.session)
 				continue
 			}
 		}
@@ -205,12 +212,20 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 			switch f.e.state {
 			case stateLanded:
 				if c.sessionHolds(f.e.session) {
+					// Read and found as it landed: its session has nothing
+					// left of it, whatever an earlier pass found.
+					st.Outcomes.Saw(f.e.session)
 					continue
 				}
 			case stateConflict, stateChanged:
 				// Counted on every pass it stays, so a single pass keeps
 				// failing until a person looks.
 				st.Conflicts++
+				if f.e.session != "" {
+					st.Outcomes.Leave(f.e.session)
+				} else {
+					st.Outcomes.Unattributed = true
+				}
 				continue
 			case stateUnreadable:
 				st.Unreadable++
@@ -219,6 +234,7 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 		}
 		if err := c.read(f, sn, now, st); err != nil {
 			st.Errors = append(st.Errors, err)
+			st.Outcomes.Unattributed = true
 			continue
 		}
 		if f.body != nil {
@@ -228,6 +244,9 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 
 	bySession := c.attribute(fresh, sn, filter, st)
 	st.Errors = append(st.Errors, sn.damaged...)
+	if len(sn.damaged) > 0 {
+		st.Outcomes.Unattributed = true
+	}
 	// A pass that stopped after landing and before saving an index, or whose
 	// session was busy when the gap was to be closed, left an index behind
 	// what is landed. No new body of that session need ever come to close
@@ -249,8 +268,14 @@ func (c *Collector) CollectAll(filter Filter) (*Stats, error) {
 	sort.Strings(ids)
 	for _, id := range ids {
 		st.Sessions++
+		st.Outcomes.Saw(id)
+		busy, pending, conflicts := st.Busy, st.Pending, st.Conflicts
 		if err := c.collectSession(id, bySession[id], sn, st, now); err != nil {
 			st.Errors = append(st.Errors, fmt.Errorf("session %s: %w", id, err))
+			st.Outcomes.Leave(id)
+		}
+		if st.Busy > busy || st.Pending > pending || st.Conflicts > conflicts {
+			st.Outcomes.Leave(id)
 		}
 	}
 	if sn.dirty {
@@ -336,17 +361,22 @@ func (c *Collector) read(f *file, sn *seen, now time.Time, st *Stats) error {
 	if f.e != nil && (f.e.state == stateLanded || f.e.state == stateChanged) && c.sessionHolds(f.e.session) {
 		if f.e.sha == sum {
 			// The bytes that landed: a table rebuilt from landed records, a
-			// file touched, or a changed file put back.
+			// file touched, or a changed file put back. A body put back no
+			// longer leaves its session incomplete.
 			f.e.state, f.e.size, f.e.mtime = stateLanded, int64(len(body)), f.mtime
 			sn.dirty = true
+			st.Outcomes.Saw(f.e.session)
 			return nil
 		}
 		first := f.e.state == stateLanded
 		f.e.state, f.e.size, f.e.mtime = stateChanged, f.size, f.mtime
 		sn.dirty = true
 		st.Conflicts++
+		st.Outcomes.Leave(f.e.session)
+		// Said once, the pass it is found; the error names its session, so
+		// it is the pass's error and no failure of the whole pass.
 		if first {
-			return fmt.Errorf("claudecodeprovider: %s changed after it landed", f.name)
+			st.Errors = append(st.Errors, fmt.Errorf("claudecodeprovider: %s changed after it landed", f.name))
 		}
 		return nil
 	}
@@ -355,6 +385,11 @@ func (c *Collector) read(f *file, sn *seen, now time.Time, st *Stats) error {
 			f.e.size, f.e.mtime = f.size, f.mtime
 			sn.dirty = true
 			st.Conflicts++
+			if f.e.session != "" {
+				st.Outcomes.Leave(f.e.session)
+			} else {
+				st.Outcomes.Unattributed = true
+			}
 			return nil
 		}
 		// Other bytes than the ones in conflict: read as new.
@@ -364,7 +399,10 @@ func (c *Collector) read(f *file, sn *seen, now time.Time, st *Stats) error {
 	}
 	if !json.Valid(body) {
 		if now.Sub(time.Unix(0, f.mtime)) < Settle {
-			return nil // still being written
+			// Still being written, and for a session not known until it
+			// is read whole.
+			st.Outcomes.Unattributed = true
+			return nil
 		}
 		sn.entries[f.name] = &entry{name: f.name, size: f.size, mtime: f.mtime, sha: sum, state: stateUnreadable}
 		sn.dirty = true

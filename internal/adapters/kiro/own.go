@@ -18,12 +18,17 @@
 package kiro
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/apache/skywalking-ai-sessionizer/internal/storage"
+	"github.com/apache/skywalking-ai-sessionizer/pkg/sessiondata"
 )
 
 // Where a session worked, against the storage root.
@@ -108,6 +113,125 @@ func within(root, p string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// The answers LandedOrigin gives.
+const (
+	OriginOutside = "outside"
+	OriginInside  = "inside"
+	OriginUnknown = "unknown"
+)
+
+// LandedOrigin says, for a session this adapter landed, whether it worked
+// inside the storage root, from the workspace paths of its newest landed
+// header: the session's source may be gone, and what landed is the record of
+// it. asz server asks it before judging a conversation, so a judge evaluator's
+// session collected before the guard is never judged. A session with no
+// readable landed header, or one a skeleton replaced, is unknown.
+func LandedOrigin(z *storage.Zone, session string) (string, error) {
+	files, err := storage.LandedFiles(z, session)
+	if err != nil {
+		return OriginUnknown, err
+	}
+	main := z.StreamDir(session, storage.StreamMain)
+	var newest *storage.LandedFile
+	for i := range files {
+		f := &files[i]
+		if filepath.Dir(f.Path) == main && strings.HasPrefix(filepath.Base(f.Path), "meta-") && (newest == nil || f.Seq > newest.Seq) {
+			newest = f
+		}
+	}
+	if newest == nil || newest.Skeleton {
+		return OriginUnknown, nil
+	}
+	in, err := os.Open(newest.Path)
+	if err != nil {
+		return OriginUnknown, err
+	}
+	defer in.Close()
+	r, err := sessiondata.NewReader(in)
+	if err != nil {
+		return OriginUnknown, err
+	}
+	var h header
+	found := false
+	for {
+		rec, err := r.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return OriginUnknown, err
+		}
+		for _, part := range rec.Parts {
+			if part.Kind == sessiondata.PartData && json.Unmarshal(part.Data, &h) == nil {
+				found = true
+			}
+		}
+	}
+	if !found {
+		return OriginUnknown, nil
+	}
+	root, err := ownRoot(z.Root())
+	if err != nil {
+		return OriginUnknown, err
+	}
+	switch originOf(Session{ID: session, Workspaces: h.WorkspacePaths}, root) {
+	case originInside:
+		return OriginInside, nil
+	case originOutside:
+		return OriginOutside, nil
+	}
+	return OriginUnknown, nil
+}
+
+// SourceOrigin says, from the live source, whether a session works inside
+// the storage root, and false only when the source surely holds no such
+// session. asz server asks it when it admits a run, since a session's
+// workspace can change after it was collected. The session's directory is
+// looked for by its name, and its header read, whatever discovery would
+// leave out of a pass: a directory that cannot be read, or a header that
+// does not read, is no answer, never an absence.
+func SourceOrigin(sourceRoot string, z *storage.Zone, session string) (string, bool, error) {
+	base := filepath.Join(sourceRoot, "sessions")
+	keys, err := os.ReadDir(base)
+	if errors.Is(err, fs.ErrNotExist) {
+		return OriginUnknown, false, nil
+	}
+	if err != nil {
+		return OriginUnknown, true, err
+	}
+	for _, k := range keys {
+		if !k.IsDir() {
+			continue
+		}
+		dir := filepath.Join(base, k.Name(), session)
+		if _, err := os.Lstat(dir); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return OriginUnknown, true, err
+		}
+		data, err := os.ReadFile(filepath.Join(dir, headerFile))
+		if err != nil {
+			return OriginUnknown, true, err
+		}
+		var h header
+		if err := json.Unmarshal(data, &h); err != nil {
+			return OriginUnknown, true, nil
+		}
+		root, err := ownRoot(z.Root())
+		if err != nil {
+			return OriginUnknown, true, err
+		}
+		switch originOf(Session{ID: session, Workspaces: h.WorkspacePaths}, root) {
+		case originInside:
+			return OriginInside, true, nil
+		case originOutside:
+			return OriginOutside, true, nil
+		}
+		return OriginUnknown, true, nil
+	}
+	return OriginUnknown, false, nil
 }
 
 // ownRoot is the storage root, resolved: it exists once a command that

@@ -194,8 +194,8 @@ func TestRetentionWaitsForAnActiveRun(t *testing.T) {
 	z, id := builtFixture(t)
 	// A scenario root is never retired, so the root is made an ordinary one.
 	_ = os.RemoveAll(filepath.Join(z.Root(), storage.ScenarioDir))
-	active, err := storage.AdmitRun(context.Background(), z, id, func() (storage.RunAdmission, error) {
-		return storage.RunAdmission{Trigger: storage.TriggerCommand}, nil
+	active, err := storage.AdmitRun(context.Background(), z, id, func(int) (storage.RunRecord, error) {
+		return storage.RunRecord{Trigger: storage.TriggerCommand}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -298,8 +298,8 @@ func TestTheTimeLimitBoundsTheLeaseBinding(t *testing.T) {
 func TestARemovalsRecoveryWaitsForAnActiveRun(t *testing.T) {
 	z, id := builtFixture(t)
 	_ = os.RemoveAll(filepath.Join(z.Root(), storage.ScenarioDir))
-	active, err := storage.AdmitRun(context.Background(), z, id, func() (storage.RunAdmission, error) {
-		return storage.RunAdmission{Trigger: storage.TriggerCommand}, nil
+	active, err := storage.AdmitRun(context.Background(), z, id, func(int) (storage.RunRecord, error) {
+		return storage.RunRecord{Trigger: storage.TriggerCommand}, nil
 	})
 	if err != nil {
 		t.Fatal(err)
