@@ -61,8 +61,8 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -84,8 +84,8 @@ jobs:
       matrix:
         os: [ubuntu-26.04, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -115,7 +115,7 @@ jobs:
       # The tests of which project a traced run belongs to need LangChain's
       # own tracer, and skip without it, so it is installed at the versions
       # the capture harness measured.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: LangChain shim tests
@@ -156,8 +156,8 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -179,8 +179,8 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -199,8 +199,8 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -218,11 +218,11 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10, the commit on the ASF allow-list
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0, the commit on the ASF allow-list
         with:
           version: 10.33.2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Build the renderer from the pinned Horizon commit and compare
@@ -240,7 +240,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Check the requested tag
@@ -252,7 +252,7 @@ jobs:
             echo "Select the same tag as the workflow ref and the tag input."
             exit 1
           }
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -283,7 +283,7 @@ jobs:
           else
             echo "::notice::this tree has no Claude Code plugin, so no plugin binary was run"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ steps.v.outputs.version }}
           path: |
@@ -322,10 +322,10 @@ jobs:
     steps:
       # The script and the scenarios it runs come from the tree, at the ref
       # the binaries job built. Nothing is built here.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: binaries-${{ needs.binaries.outputs.version }}
           path: dist
@@ -411,14 +411,14 @@ jobs:
           - { platform: windows-amd64, runner: windows-latest, ext: zip }
           - { platform: windows-arm64, runner: windows-11-arm, ext: zip }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: binaries-${{ needs.binaries.outputs.version }}
           path: dist
@@ -459,8 +459,8 @@ jobs:
     if: github.event_name != 'release'
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
@@ -476,15 +476,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       # tools/release/package-check.sh reads the Debian packages with Go.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.27'
           cache: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: binaries-${{ needs.binaries.outputs.version }}
           path: dist
@@ -509,7 +509,7 @@ jobs:
     env:
       IMAGE: ghcr.io/${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Bind the build to the run's commit, even if a tag moves later.
           ref: ${{ github.sha }}

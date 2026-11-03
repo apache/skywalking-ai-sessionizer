@@ -145,6 +145,10 @@
 
 ## Release
 
+- The binaries build with golang.org/x/net 0.62.0, golang.org/x/sys 0.49.0 and golang.org/x/text
+  0.43.0, up from 0.58.0, 0.47.0 and 0.41.0, so the release packages no longer carry the x/net
+  versions OSV lists for GO-2026-6603, GO-2026-6610, GO-2026-6611, GO-2026-6612, GO-2026-6617,
+  GO-2026-6860 and GO-2026-6866. govulncheck finds none of them reachable from asz.
 - The release guide no longer has steps for Scoop and winget. No version was submitted to either,
   and none is planned. `publish` no longer prints them as a next step, and `--remove-old` no longer
   waits for a Scoop bucket. A package manager the project is not in yet still needs the PMC's
